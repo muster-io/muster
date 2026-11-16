@@ -1,229 +1,293 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright The Muster Authors
-
 {
-  $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: ["config:best-practices"],
-  rangeStrategy: "pin",
-  postUpdateOptions: ["gomodTidy"],
-  // Updates of what ships are committed as `build(deps): …`, which release-please lists under "Dependencies" instead of
-  // "Bug Fixes". config:best-practices types every update `chore` and the runtime dependencies `fix` through package
-  // rules, which a top-level semanticCommitType cannot override: the rules at the end of packageRules replace them with
-  // `build` for what ships, and the other updates stay `chore`, outside the changelog. A grouped update takes the
-  // highest type of its members.
-  semanticCommits: "enabled",
-  semanticCommitScope: "deps",
-  // config:best-practices ignores every test/ directory; test/ holds the end-to-end tests, whose image pins below are
-  // the only dependencies there. The rest of its list stays.
-  ignorePaths: [
-    "**/node_modules/**",
-    "**/bower_components/**",
-    "**/vendor/**",
-    "**/examples/**",
-    "**/__tests__/**",
-    "**/tests/**",
-    "**/__fixtures__/**",
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:best-practices',
   ],
-  dependencyDashboard: true,
-  // Version policy: routine updates arrive once a week, grouped per ecosystem, and merge themselves when every
-  // required check passes. Major updates never open a pull request on their own: they wait in the Dependency
-  // Dashboard until a maintainer ticks them, because the stack's major versions (Go, Node LTS, PostgreSQL,
-  // msw and others) are decisions recorded in the ADRs. Security fixes are not held by the schedule.
-  schedule: ["before 6am on Monday"],
-  minimumReleaseAge: "3 days",
+  rangeStrategy: 'pin',
+  postUpdateOptions: [
+    'gomodTidy',
+  ],
+  semanticCommits: 'enabled',
+  semanticCommitScope: 'deps',
+  ignorePaths: [
+    '**/node_modules/**',
+    '**/bower_components/**',
+    '**/vendor/**',
+    '**/examples/**',
+    '**/__tests__/**',
+    '**/tests/**',
+    '**/__fixtures__/**',
+  ],
+  dependencyDashboard: {
+    enabled: true,
+  },
+  schedule: [
+    'before 6am on Monday',
+  ],
+  minimumReleaseAge: '3 days',
   prConcurrentLimit: 4,
   prHourlyLimit: 2,
-  // A version pinned on the line under a `# renovate:` comment: `NAME_VERSION := v1.2.3` in the Makefile,
-  // `NAME_VERSION: v1.2.3` in a workflow's env.
   customManagers: [
     {
-      customType: "regex",
-      managerFilePatterns: ["/^Makefile$/", "/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^Makefile$/',
+        '/^\\.github/workflows/[^/]+\\.ya?ml$/',
+      ],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+_VERSION(?: :=|:) (?<currentValue>\\S+)",
+        '# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+_VERSION(?: :=|:) (?<currentValue>\\S+)',
       ],
     },
-    // An image pinned by digest on the line under a `// renovate:` comment in the end-to-end tests:
-    // `const name = "image:tag@sha256:…"`.
     {
-      customType: "regex",
-      managerFilePatterns: ["/^test/e2e/[^/]+\\.go$/"],
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^test/e2e/[^/]+\\.go$/',
+      ],
       matchStrings: [
-        "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*const \\w+ = \"[^\":]+:(?<currentValue>[^\"@]+)@(?<currentDigest>sha256:[0-9a-f]{64})\"",
+        '// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*const \\w+ = "[^":]+:(?<currentValue>[^"@]+)@(?<currentDigest>sha256:[0-9a-f]{64})"',
       ],
     },
-    // The Playwright image of make docs-screenshots, pinned by digest, whose tag must name the version of
-    // @playwright/test in web/package.json: the group "Playwright" below updates both in one pull request.
     {
-      customType: "regex",
-      managerFilePatterns: ["/^Makefile$/"],
-      matchStrings: [
-        "PLAYWRIGHT_IMAGE\\s*[:?]?=\\s*mcr\\.microsoft\\.com/playwright:(?<currentValue>v[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^Makefile$/',
       ],
-      datasourceTemplate: "docker",
-      depNameTemplate: "mcr.microsoft.com/playwright",
-      versioningTemplate: "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<compatibility>noble)$",
+      matchStrings: [
+        'PLAYWRIGHT_IMAGE\\s*[:?]?=\\s*mcr\\.microsoft\\.com/playwright:(?<currentValue>v[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})',
+      ],
+      datasourceTemplate: 'docker',
+      depNameTemplate: 'mcr.microsoft.com/playwright',
+      versioningTemplate: 'regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<compatibility>noble)$',
     },
   ],
   packageRules: [
     {
-      matchUpdateTypes: ["major"],
+      matchUpdateTypes: [
+        'major',
+      ],
       dependencyDashboardApproval: true,
     },
     {
-      matchUpdateTypes: ["minor", "patch", "pin", "pinDigest", "digest"],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'pin',
+        'pinDigest',
+        'digest',
+      ],
       automerge: true,
-      automergeType: "pr",
+      automergeType: 'pr',
       platformAutomerge: true,
     },
     {
-      matchDatasources: ["github-actions"],
-      groupName: "GitHub Actions",
+      matchDatasources: [
+        'github-actions',
+      ],
+      groupName: 'GitHub Actions',
     },
     {
-      matchDatasources: ["docker"],
-      matchUpdateTypes: ["minor", "patch", "digest", "pinDigest"],
-      groupName: "Container images (non-major)",
+      matchDatasources: [
+        'docker',
+      ],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+        'digest',
+        'pinDigest',
+      ],
+      groupName: 'Container images (non-major)',
     },
     {
-      matchDatasources: ["go"],
-      matchUpdateTypes: ["minor", "patch"],
-      groupName: "Go modules (non-major)",
+      matchDatasources: [
+        'go',
+      ],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+      ],
+      groupName: 'Go modules (non-major)',
     },
     {
-      matchDatasources: ["npm"],
-      matchUpdateTypes: ["minor", "patch"],
-      groupName: "npm (non-major)",
+      matchDatasources: [
+        'npm',
+      ],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+      ],
+      groupName: 'npm (non-major)',
     },
     {
-      matchPackageNames: ["/^@tanstack\\//"],
-      groupName: "TanStack",
-    },
-    // react and react-dom fail at run time when their versions differ; the types follow them.
-    {
-      matchPackageNames: ["react", "react-dom", "@types/react", "@types/react-dom"],
-      groupName: "React",
+      matchPackageNames: [
+        '/^@tanstack\\//',
+      ],
+      groupName: 'TanStack',
     },
     {
-      matchPackageNames: ["oxlint", "oxfmt"],
-      groupName: "oxlint/oxfmt",
+      matchPackageNames: [
+        'react',
+        'react-dom',
+        '@types/react',
+        '@types/react-dom',
+      ],
+      groupName: 'React',
     },
-    // The Playwright image of make docs-screenshots refuses to run unless its tag is the version of @playwright/test,
-    // so the three move together; this rule follows the ecosystem groups above, so that it wins.
     {
-      matchPackageNames: ["@playwright/test", "playwright", "mcr.microsoft.com/playwright"],
-      groupName: "Playwright",
+      matchPackageNames: [
+        'oxlint',
+        'oxfmt',
+      ],
+      groupName: 'oxlint/oxfmt',
     },
     {
-      matchPackageNames: ["/oapi-codegen/", "/orval/"],
-      matchDatasources: ["npm", "go"],
-      prBodyNotes:
-        "Generated code must be regenerated with `make generate` and committed.",
+      matchPackageNames: [
+        '@playwright/test',
+        'playwright',
+        'mcr.microsoft.com/playwright',
+      ],
+      groupName: 'Playwright',
     },
-    // `.node-version` pins Node.js; the `engines` floor in web/package.json is raised by hand, never pinned.
     {
-      matchDepTypes: ["engines"],
+      matchPackageNames: [
+        '/oapi-codegen/',
+        '/orval/',
+      ],
+      matchDatasources: [
+        'npm',
+        'go',
+      ],
+      prBodyNotes: 'Generated code must be regenerated with `make generate` and committed.',
+    },
+    {
+      matchDepTypes: [
+        'engines',
+      ],
       enabled: false,
     },
-    // The example bridge that the end-to-end tests run (ADR-0017): a pull request of its own, so that a red run names
-    // the image that broke. GitHub Container Registry reports no release date, which minimumReleaseAge would wait for
-    // forever.
     {
-      matchDatasources: ["docker"],
-      matchPackageNames: ["ghcr.io/muster-io/muster-example-bridge"],
-      groupName: "example bridge image",
-      minimumReleaseAge: "0 days",
+      matchDatasources: [
+        'docker',
+      ],
+      matchPackageNames: [
+        'ghcr.io/muster-io/muster-example-bridge',
+      ],
+      groupName: 'example bridge image',
+      minimumReleaseAge: '0 days',
     },
-    // release-please sets the Muster image tag in the compose example on every release.
     {
-      matchManagers: ["docker-compose"],
-      matchPackageNames: ["ghcr.io/muster-io/muster"],
+      matchManagers: [
+        'docker-compose',
+      ],
+      matchPackageNames: [
+        'ghcr.io/muster-io/muster',
+      ],
       enabled: false,
     },
-    // What ships: the Go modules the binary requires and the Go toolchain with its standard library, the SPA's
-    // production dependencies and the base image of the Muster image.
     {
-      matchManagers: ["gomod"],
-      matchDepTypes: ["require", "toolchain"],
-      semanticCommitType: "build",
-    },
-    // The two lists below are checked against go.mod and `go list -deps ./cmd/muster` by internal/tools/renovatecheck
-    // (`make lint`). Direct requires that are not in the binary: test, lint and build tooling.
-    {
-      matchManagers: ["gomod"],
-      matchPackageNames: [
-        // renovatecheck:begin not-shipped
-        "github.com/VictoriaMetrics/metricsql",
-        "github.com/pganalyze/pg_query_go/v6",
-        "github.com/testcontainers/testcontainers-go",
-        "github.com/testcontainers/testcontainers-go/modules/postgres",
-        "github.com/wasilibs/go-pgquery",
-        "go.yaml.in/yaml/v3",
-        "golang.org/x/tools",
-        "google.golang.org/protobuf",
-        // renovatecheck:end
+      matchManagers: [
+        'gomod',
       ],
-      semanticCommitType: "chore",
-    },
-    // Indirect requires are updated only to fix a vulnerability; such a fix of a module linked into the binary ships.
-    {
-      matchManagers: ["gomod"],
-      matchDepTypes: ["indirect"],
-      matchJsonata: ["isVulnerabilityAlert = true"],
-      matchPackageNames: [
-        // renovatecheck:begin indirect-shipped
-        "dario.cat/mergo",
-        "github.com/apapsch/go-jsonmerge/v2",
-        "github.com/gabriel-vasile/mimetype",
-        "github.com/go-openapi/jsonpointer",
-        "github.com/go-playground/locales",
-        "github.com/go-playground/universal-translator",
-        "github.com/google/uuid",
-        "github.com/gorilla/mux",
-        "github.com/jackc/pgpassfile",
-        "github.com/jackc/pgservicefile",
-        "github.com/jackc/puddle/v2",
-        "github.com/leodido/go-urn",
-        "github.com/oasdiff/yaml",
-        "github.com/oasdiff/yaml3",
-        "github.com/santhosh-tekuri/jsonschema/v6",
-        "github.com/spf13/cast",
-        "github.com/valyala/fastrand",
-        "github.com/valyala/histogram",
-        "golang.org/x/sync",
-        "golang.org/x/sys",
-        "golang.org/x/text",
-        // renovatecheck:end
+      matchDepTypes: [
+        'require',
+        'toolchain',
       ],
-      semanticCommitType: "build",
+      semanticCommitType: 'build',
     },
     {
-      matchManagers: ["npm"],
-      matchFileNames: ["web/package.json"],
-      matchDepTypes: ["dependencies"],
-      semanticCommitType: "build",
+      matchManagers: [
+        'gomod',
+      ],
+      matchPackageNames: [
+        'github.com/VictoriaMetrics/metricsql',
+        'github.com/pganalyze/pg_query_go/v6',
+        'github.com/testcontainers/testcontainers-go',
+        'github.com/testcontainers/testcontainers-go/modules/postgres',
+        'github.com/wasilibs/go-pgquery',
+        'go.yaml.in/yaml/v3',
+        'golang.org/x/tools',
+        'google.golang.org/protobuf',
+      ],
+      semanticCommitType: 'chore',
     },
     {
-      matchManagers: ["dockerfile"],
-      matchFileNames: ["Dockerfile"],
-      semanticCommitType: "build",
+      matchManagers: [
+        'gomod',
+      ],
+      matchDepTypes: [
+        'indirect',
+      ],
+      matchJsonata: [
+        'isVulnerabilityAlert = true',
+      ],
+      matchPackageNames: [
+        'dario.cat/mergo',
+        'github.com/apapsch/go-jsonmerge/v2',
+        'github.com/gabriel-vasile/mimetype',
+        'github.com/go-openapi/jsonpointer',
+        'github.com/go-playground/locales',
+        'github.com/go-playground/universal-translator',
+        'github.com/google/uuid',
+        'github.com/gorilla/mux',
+        'github.com/jackc/pgpassfile',
+        'github.com/jackc/pgservicefile',
+        'github.com/jackc/puddle/v2',
+        'github.com/leodido/go-urn',
+        'github.com/oasdiff/yaml',
+        'github.com/oasdiff/yaml3',
+        'github.com/santhosh-tekuri/jsonschema/v6',
+        'github.com/spf13/cast',
+        'github.com/valyala/fastrand',
+        'github.com/valyala/histogram',
+        'golang.org/x/sync',
+        'golang.org/x/sys',
+        'golang.org/x/text',
+      ],
+      semanticCommitType: 'build',
     },
-    // The go.mod files of the architecture lint fixtures are test data, not the binary's modules.
     {
-      matchFileNames: ["internal/archlint/testdata/**"],
-      semanticCommitType: "chore",
+      matchManagers: [
+        'npm',
+      ],
+      matchFileNames: [
+        'web/package.json',
+      ],
+      matchDepTypes: [
+        'dependencies',
+      ],
+      semanticCommitType: 'build',
     },
     {
-      matchJsonata: ["isLockfileUpdate = true"],
-      semanticCommitType: "chore",
+      matchManagers: [
+        'dockerfile',
+      ],
+      matchFileNames: [
+        'Dockerfile',
+      ],
+      semanticCommitType: 'build',
+    },
+    {
+      matchFileNames: [
+        'internal/archlint/testdata/**',
+      ],
+      semanticCommitType: 'chore',
+    },
+    {
+      matchJsonata: [
+        'isLockfileUpdate = true',
+      ],
+      semanticCommitType: 'chore',
     },
   ],
   lockFileMaintenance: {
     enabled: true,
-    schedule: ["before 3am on Monday"],
+    schedule: [
+      'before 3am on Monday',
+    ],
   },
   vulnerabilityAlerts: {
     enabled: true,
-    labels: ["security"],
+    labels: [
+      'security',
+    ],
   },
 }
