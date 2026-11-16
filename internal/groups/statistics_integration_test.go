@@ -549,8 +549,9 @@ func TestIntegrationStatisticsPlans(t *testing.T) {
 // oracle: two Routes, two Integrations, the Teams payments, search and the deleted old, Alert Groups acknowledged
 // first by Alice, Bob, Carol and nobody known, resolved by Users, terraform and the system, with Reopen counts 0 and 1,
 // one started exactly at from (in) and one exactly at to (out). Every filter value, without and with a Matcher =~ that
-// Go applies and two Alert Groups fail, gives the counts and times to acknowledge of the oracle By route, By
-// integration, By team and By people, every excluded Alert Group having had activity. Alice is in both Teams of the
+// Go applies and two Alert Groups fail, gives the oracle's numbers of Alert Groups and of those acknowledged
+// (time_to_acknowledge.count) By route, By integration and By team, and of acknowledged first and resolved By people,
+// every excluded Alert Group having had activity. Alice is in both Teams of the
 // Alert Group they share, so team=mine counts it once By route, By integration and By people, and once under each
 // Team By team.
 func TestIntegrationStatisticsFilters(t *testing.T) {
