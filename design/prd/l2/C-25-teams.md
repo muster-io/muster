@@ -84,6 +84,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   the reason. Mentioning a Team in a Destination whose Connection has no Team mention for it mentions nobody; it never
   mentions the Team's On-call instead (C-28.FR-3). Saving a Team mention for a Connection that cannot carry one is
   refused with `422` and the code `group_mentions_unsupported`.
+  _Revised for L2 (2026-11-16, #561):_ a Team mention that the Team already has, sent again unchanged, is kept even when
+  its Connection can no longer carry it; only a new or changed Team mention is refused with `group_mentions_unsupported`.
 - **C-25.FR-9** Working hours are days of the week, a start and an end on the 24-hour clock, and a time zone. The
   Organization's (`organization.working_hours`) start at `organization.workday_start`, the start of the working day that
   the Snooze presets use (C-10.FR-17); a Team uses them unless it sets its own (`team.working_hours`). The end is later
