@@ -8,7 +8,9 @@
 // Integration "prod-eu", five minutes of the development clock apart, two of them to the Route "payments": HighErrorRate
 // stays firing with a Note, KubePodCrashLooping is acknowledged in the web UI, DiskAlmostFull snoozed until tomorrow
 // 09:00, CertificateExpiring resolved with a Note, and KubeJobFailed acknowledged and then resolved by Alertmanager, so
-// that the Statistics have times to acknowledge and to resolve. After each move of the clock the Admin signs in again.
+// that the Statistics have times to acknowledge and to resolve. Last come four Alert Groups of the product "shop" that
+// alice and bob acknowledge, bob and the Service account terraform resolve, and that the Teams payments and search
+// share: the images of By team and By people filter by that label. After each move of the clock the Admin signs in again.
 // The times the images show keep their distance from the business time at the start, so that the real time the steps
 // take does not move them; the ends of the Snooze presets are shown for that fixed start, a Wednesday 09:40.
 
@@ -17,13 +19,17 @@ import { expect, request, test, type APIRequestContext, type Page } from "@playw
 import {
   adminApi,
   advance,
+  Api,
   APP,
   createRoute,
   devClockOffset,
+  ensureLocalUser,
+  ensureTeam,
   fakeIntegration,
   fam,
   notify,
   signInAdmin,
+  TEAM_SPEC_PASSWORD,
 } from "../support";
 import { capture, cardOf, nav, scrollToTop, type CaptureOptions } from "./capture";
 
@@ -117,6 +123,23 @@ async function send(name: Name, status: "firing" | "resolved" = "firing"): Promi
   await notify(integrationId, name, {
     reason: status === "firing" ? "first notification" : "some alerts resolved",
   });
+}
+
+/** An Alert Group of the product "shop" that C-09's people and Teams act on, with the extra labels. */
+function shop(alertname: string, extra: Record<string, string>) {
+  return {
+    labels: { alertname, product: "shop", severity: "warning", cluster: "prod", ...extra },
+    annotations: { summary: alertname },
+  };
+}
+
+/** Runs a command of the Alert Group as a person. */
+async function run(who: Api | undefined, id: string, command: string): Promise<void> {
+  await who?.call(
+    "POST",
+    `/api/v1/alert-groups/${id}/${command}`,
+    command === "resolve" ? {} : undefined,
+  );
 }
 
 /** Moves the development clock and signs the Admin in again, as a move can end the session. */
@@ -327,4 +350,109 @@ test("Alert Groups in each status, their commands, the list and the Statistics",
   await expect(days.getByTestId("day-count")).toHaveText("2");
   await scrollToTop(days);
   await shoot(page, GROUPS, "07-statistics-days", { locator: days, padding: 16 });
+
+  // By team and By people: the people and Teams of C-09's examples, over four Alert Groups of the product "shop".
+  const admin = await adminApi();
+  let alice: Api | undefined;
+  let bob: Api | undefined;
+  let terraformToken = "";
+  try {
+    const aliceId = await ensureLocalUser(admin, "alice", "responder");
+    await ensureLocalUser(admin, "bob", "responder");
+    await ensureTeam(
+      admin,
+      "payments",
+      [aliceId],
+      [{ label: "namespace", op: "=", value: "payments" }],
+    );
+    await ensureTeam(admin, "search", [], [{ label: "service", op: "=", value: "search" }]);
+    const sa = await admin.call<{ id: string }>("POST", "/api/v1/service-accounts", {
+      name: "terraform",
+      role: "responder",
+    });
+    const token = await admin.call<{ value: string }>(
+      "POST",
+      `/api/v1/service-accounts/${sa.id}/tokens`,
+      { name: "docs" },
+    );
+    terraformToken = token.value;
+    alice = await Api.signIn("alice", TEAM_SPEC_PASSWORD);
+    bob = await Api.signIn("bob", TEAM_SPEC_PASSWORD);
+  } finally {
+    await admin.dispose();
+  }
+  const shopAlerts = {
+    latency: shop("CheckoutLatencyHigh", { namespace: "payments" }),
+    queue: shop("PaymentsQueueDeep", { namespace: "payments" }),
+    lag: shop("SearchIndexLag", { service: "search" }),
+    gateway: shop("GatewayErrors", { namespace: "payments", service: "search" }),
+  } as const;
+  const shopSend = async (key: keyof typeof shopAlerts, state: "firing" | "resolved") => {
+    await fam("PUT", `/groups/${key}`, {
+      receiver: INTEGRATION,
+      route: "{}",
+      labels: { alertname: shopAlerts[key].labels.alertname },
+    });
+    await fam("PUT", `/groups/${key}/alerts/a`, { ...shopAlerts[key], status: state });
+    await notify(integrationId, key, {
+      reason: state === "firing" ? "first notification" : "some alerts resolved",
+    });
+  };
+  const shopGroup = async (key: keyof typeof shopAlerts): Promise<string> => {
+    const label = encodeURIComponent(`alertname="${shopAlerts[key].labels.alertname}"`);
+    const body = await get<{ items: { alert_group?: { id: string } }[] }>(
+      `/api/v1/integrations/${integrationId}/alerts?label=${label}`,
+    );
+    return body.items[0]?.alert_group?.id ?? "";
+  };
+  try {
+    const ids: Record<string, string> = {};
+    await shopSend("latency", "firing");
+    ids.latency = await shopGroup("latency");
+    await advance(120);
+    await run(alice, ids.latency, "acknowledge");
+    await shopSend("queue", "firing");
+    ids.queue = await shopGroup("queue");
+    await advance(240);
+    await run(alice, ids.queue, "acknowledge");
+    await shopSend("lag", "firing");
+    ids.lag = await shopGroup("lag");
+    await advance(1800);
+    await run(alice, ids.lag, "acknowledge");
+    await shopSend("gateway", "firing");
+    ids.gateway = await shopGroup("gateway");
+    await advance(600);
+    await run(bob, ids.gateway, "acknowledge");
+    await run(bob, ids.latency, "resolve");
+    await run(bob, ids.queue, "resolve");
+    const res = await fetch(`${APP}/api/v1/alert-groups/${ids.gateway}/resolve`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${terraformToken}`, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(res.ok, `terraform resolves: ${res.status}`).toBe(true);
+    await shopSend("lag", "resolved");
+  } finally {
+    await alice?.dispose();
+    await bob?.dispose();
+  }
+  await move(page, 1);
+
+  const shopFilter = encodeURIComponent(JSON.stringify(['product="shop"']));
+  await page.goto(`/statistics?by=team&label=${shopFilter}`);
+  const teamRow = (name: string) =>
+    page
+      .getByTestId("statistics-row")
+      .filter({ has: page.getByTestId("statistics-name").getByText(name, { exact: true }) });
+  await expect(teamRow("payments").getByTestId("statistics-count")).toHaveText("3");
+  await expect(teamRow("search").getByTestId("statistics-count")).toHaveText("2");
+  await shoot(page, GROUPS, "08-statistics-by-team", { waitFor: teamRow("payments") });
+
+  await page.goto(`/statistics?by=people&label=${shopFilter}`);
+  const people = page.getByTestId("statistics-people-row");
+  await expect(
+    people.filter({ hasText: "terraform" }).getByTestId("people-service-account"),
+  ).toHaveText("Service account");
+  await expect(people.getByTestId("people-name")).toHaveText(["alice", "bob", "terraform"]);
+  await shoot(page, GROUPS, "09-statistics-by-people", { waitFor: people.first() });
 });
