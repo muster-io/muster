@@ -72,6 +72,7 @@ function TeamsTable() {
 function TeamsPage() {
   const { t } = useTranslation();
   const canWrite = useCan("teams:write");
+  const canSchedules = useCan("schedules:read");
   return (
     <RequirePermission permission="teams:read">
       <div className="flex flex-col gap-6">
@@ -80,11 +81,18 @@ function TeamsPage() {
             <PageTitle docs="page.teams">{t("teams.title")}</PageTitle>
             <p className="text-muted-foreground">{t("teams.hint")}</p>
           </div>
-          {canWrite && (
-            <Link to="/teams/new" className={buttonVariants()}>
-              {t("teams.create.start")}
-            </Link>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {canSchedules && (
+              <Link to="/schedules" className={buttonVariants({ variant: "outline" })}>
+                {t("teams.schedules.all")}
+              </Link>
+            )}
+            {canWrite && (
+              <Link to="/teams/new" className={buttonVariants()}>
+                {t("teams.create.start")}
+              </Link>
+            )}
+          </div>
         </div>
         <TeamLabelLine />
         <TeamsTable />

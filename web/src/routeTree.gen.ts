@@ -35,6 +35,9 @@ import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
 import { Route as RoutesIndexRouteImport } from './routes/routes.index'
 import { Route as RoutesRouteIdRouteImport } from './routes/routes.$routeId'
 import { Route as RoutesNewRouteImport } from './routes/routes.new'
+import { Route as SchedulesIndexRouteImport } from './routes/schedules.index'
+import { Route as SchedulesScheduleIdRouteImport } from './routes/schedules.$scheduleId'
+import { Route as SchedulesNewRouteImport } from './routes/schedules.new'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
 import { Route as TeamsIndexRouteImport } from './routes/teams.index'
 import { Route as TeamsTeamIdRouteImport } from './routes/teams.$teamId'
@@ -191,6 +194,21 @@ const RoutesRouteIdRoute = RoutesRouteIdRouteImport.update({
 const RoutesNewRoute = RoutesNewRouteImport.update({
   id: '/routes/new',
   path: '/routes/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SchedulesIndexRoute = SchedulesIndexRouteImport.update({
+  id: '/schedules/',
+  path: '/schedules/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SchedulesScheduleIdRoute = SchedulesScheduleIdRouteImport.update({
+  id: '/schedules/$scheduleId',
+  path: '/schedules/$scheduleId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SchedulesNewRoute = SchedulesNewRouteImport.update({
+  id: '/schedules/new',
+  path: '/schedules/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInTotpRoute = SignInTotpRouteImport.update({
@@ -365,6 +383,8 @@ export interface FileRoutesByFullPath {
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
+  '/schedules/$scheduleId': typeof SchedulesScheduleIdRoute
+  '/schedules/new': typeof SchedulesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/teams/$teamId': typeof TeamsTeamIdRoute
   '/teams/new': typeof TeamsNewRoute
@@ -373,6 +393,7 @@ export interface FileRoutesByFullPath {
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/schedules/': typeof SchedulesIndexRoute
   '/teams/': typeof TeamsIndexRoute
   '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
   '/admin/organization/general': typeof AdminOrganizationGeneralRoute
@@ -416,6 +437,8 @@ export interface FileRoutesByTo {
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
+  '/schedules/$scheduleId': typeof SchedulesScheduleIdRoute
+  '/schedules/new': typeof SchedulesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/teams/$teamId': typeof TeamsTeamIdRoute
   '/teams/new': typeof TeamsNewRoute
@@ -424,6 +447,7 @@ export interface FileRoutesByTo {
   '/destinations': typeof DestinationsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
+  '/schedules': typeof SchedulesIndexRoute
   '/teams': typeof TeamsIndexRoute
   '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
   '/admin/organization/general': typeof AdminOrganizationGeneralRoute
@@ -471,6 +495,8 @@ export interface FileRoutesById {
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
+  '/schedules/$scheduleId': typeof SchedulesScheduleIdRoute
+  '/schedules/new': typeof SchedulesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/teams/$teamId': typeof TeamsTeamIdRoute
   '/teams/new': typeof TeamsNewRoute
@@ -479,6 +505,7 @@ export interface FileRoutesById {
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/schedules/': typeof SchedulesIndexRoute
   '/teams/': typeof TeamsIndexRoute
   '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
   '/admin/organization/general': typeof AdminOrganizationGeneralRoute
@@ -527,6 +554,8 @@ export interface FileRouteTypes {
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
+    | '/schedules/$scheduleId'
+    | '/schedules/new'
     | '/sign-in/totp'
     | '/teams/$teamId'
     | '/teams/new'
@@ -535,6 +564,7 @@ export interface FileRouteTypes {
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/schedules/'
     | '/teams/'
     | '/admin/organization/alert-handling'
     | '/admin/organization/general'
@@ -578,6 +608,8 @@ export interface FileRouteTypes {
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
+    | '/schedules/$scheduleId'
+    | '/schedules/new'
     | '/sign-in/totp'
     | '/teams/$teamId'
     | '/teams/new'
@@ -586,6 +618,7 @@ export interface FileRouteTypes {
     | '/destinations'
     | '/integrations'
     | '/routes'
+    | '/schedules'
     | '/teams'
     | '/admin/organization/alert-handling'
     | '/admin/organization/general'
@@ -632,6 +665,8 @@ export interface FileRouteTypes {
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
+    | '/schedules/$scheduleId'
+    | '/schedules/new'
     | '/sign-in/totp'
     | '/teams/$teamId'
     | '/teams/new'
@@ -640,6 +675,7 @@ export interface FileRouteTypes {
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/schedules/'
     | '/teams/'
     | '/admin/organization/alert-handling'
     | '/admin/organization/general'
@@ -687,6 +723,8 @@ export interface RootRouteChildren {
   IntegrationsNewRoute: typeof IntegrationsNewRoute
   RoutesRouteIdRoute: typeof RoutesRouteIdRoute
   RoutesNewRoute: typeof RoutesNewRoute
+  SchedulesScheduleIdRoute: typeof SchedulesScheduleIdRoute
+  SchedulesNewRoute: typeof SchedulesNewRoute
   TeamsTeamIdRoute: typeof TeamsTeamIdRoute
   TeamsNewRoute: typeof TeamsNewRoute
   AlertGroupsIndexRoute: typeof AlertGroupsIndexRoute
@@ -694,6 +732,7 @@ export interface RootRouteChildren {
   DestinationsIndexRoute: typeof DestinationsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
+  SchedulesIndexRoute: typeof SchedulesIndexRoute
   TeamsIndexRoute: typeof TeamsIndexRoute
   IntegrationsIntegrationIdEditRoute: typeof IntegrationsIntegrationIdEditRoute
   IntegrationsIntegrationIdIndexRoute: typeof IntegrationsIntegrationIdIndexRoute
@@ -882,6 +921,27 @@ declare module '@tanstack/react-router' {
       path: '/routes/new'
       fullPath: '/routes/new'
       preLoaderRoute: typeof RoutesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/schedules/': {
+      id: '/schedules/'
+      path: '/schedules'
+      fullPath: '/schedules/'
+      preLoaderRoute: typeof SchedulesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/schedules/$scheduleId': {
+      id: '/schedules/$scheduleId'
+      path: '/schedules/$scheduleId'
+      fullPath: '/schedules/$scheduleId'
+      preLoaderRoute: typeof SchedulesScheduleIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/schedules/new': {
+      id: '/schedules/new'
+      path: '/schedules/new'
+      fullPath: '/schedules/new'
+      preLoaderRoute: typeof SchedulesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in/totp': {
@@ -1173,6 +1233,8 @@ const rootRouteChildren: RootRouteChildren = {
   IntegrationsNewRoute: IntegrationsNewRoute,
   RoutesRouteIdRoute: RoutesRouteIdRoute,
   RoutesNewRoute: RoutesNewRoute,
+  SchedulesScheduleIdRoute: SchedulesScheduleIdRoute,
+  SchedulesNewRoute: SchedulesNewRoute,
   TeamsTeamIdRoute: TeamsTeamIdRoute,
   TeamsNewRoute: TeamsNewRoute,
   AlertGroupsIndexRoute: AlertGroupsIndexRoute,
@@ -1180,6 +1242,7 @@ const rootRouteChildren: RootRouteChildren = {
   DestinationsIndexRoute: DestinationsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
+  SchedulesIndexRoute: SchedulesIndexRoute,
   TeamsIndexRoute: TeamsIndexRoute,
   IntegrationsIntegrationIdEditRoute: IntegrationsIntegrationIdEditRoute,
   IntegrationsIntegrationIdIndexRoute: IntegrationsIntegrationIdIndexRoute,

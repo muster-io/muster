@@ -17,11 +17,13 @@ import {
   type Api,
   adminApi,
   advance,
+  ensureTeam,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
   removeIntegration,
+  removeTeamsBySlug,
   signIn,
   signInAdmin,
   watchCsp,
@@ -698,6 +700,56 @@ test("the Buttons sections of a Destination and of Alert handling link to the bu
     );
   }
   expect(csp).toEqual([]);
+});
+
+test("a Schedule page links to Schedules, Overrides and the gap alert", async ({ page }) => {
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  let scheduleId = "";
+  const slug = "dlf-schedule-team";
+  try {
+    await removeTeamsBySlug(admin, [slug]);
+    const me = await admin.call<{ user: { id: string } }>("GET", "/api/v1/me");
+    const teamId = await ensureTeam(admin, slug, [me.user.id]);
+    scheduleId = (
+      await admin.call<{ id: string }>("POST", "/api/v1/schedules", {
+        team_id: teamId,
+        name: "dlf-schedule",
+        time_zone: "Europe/Berlin",
+        rotation_layers: [
+          {
+            name: "Around the clock",
+            user_ids: [me.user.id],
+            shift_length: "week",
+            handover_time: "10:00",
+            handover_day: "monday",
+            start_date: "2026-01-05",
+            limits: null,
+          },
+        ],
+      })
+    ).id;
+    await signInAdmin(page);
+    await page.goto(`/schedules/${scheduleId}`);
+    await expectTarget(docsLink(page, "Guide", "Schedules"), "concepts/schedules/");
+    await expectTarget(
+      docsLink(page, "Learn more", "Overrides"),
+      "concepts/schedules/",
+      "#overrides",
+    );
+    await expectTarget(
+      docsLink(page, "Learn more", "Gap alert"),
+      "concepts/schedules/",
+      "#gaps-and-the-internal-alert",
+    );
+    expect(csp).toEqual([]);
+  } finally {
+    if (scheduleId !== "") {
+      await admin.call("DELETE", `/api/v1/schedules/${scheduleId}`);
+    }
+    await removeTeamsBySlug(admin, [slug]);
+    await admin.dispose();
+  }
 });
 
 test("the links read «Подробнее» and «Как исправить» in Russian", async ({ browser }) => {
