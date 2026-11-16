@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/oapi-codegen/nullable"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/escalation"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/organization"
@@ -164,9 +166,17 @@ func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsReq
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]string, len(page.Groups))
+	for i, v := range page.Groups {
+		ids[i] = v.PublicID
+	}
+	chains, err := s.groupChains(ctx, ids...)
+	if err != nil {
+		return nil, err
+	}
 	out := gen.AlertGroupList{Items: make([]gen.AlertGroup, 0, len(page.Groups))}
 	for _, v := range page.Groups {
-		out.Items = append(out.Items, alertGroupOf(v, c))
+		out.Items = append(out.Items, alertGroupOf(v, c, chains[v.PublicID]))
 	}
 	if page.Next != nil {
 		out.NextCursor.Set(encodeCursor(list, alertGroupKey{At: page.Next.At, ID: page.Next.ID}))
@@ -359,12 +369,16 @@ func (s *Server) GetAlertGroup(ctx context.Context, req gen.GetAlertGroupRequest
 	if err != nil {
 		return nil, err
 	}
-	return gen.GetAlertGroup200JSONResponse(alertGroupOf(v, c)), nil
+	chains, err := s.groupChains(ctx, v.PublicID)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetAlertGroup200JSONResponse(alertGroupOf(v, c, chains[v.PublicID])), nil
 }
 
-// alertGroupOf is the API form of an Alert Group for the caller c, of its page or of a list item; a list item leaves
-// out the labels, the notices and the links.
-func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
+// alertGroupOf is the API form of an Alert Group for the caller c, with the runs of the current start of its
+// Escalation chains, of its page or of a list item; a list item leaves out the labels, the notices and the links.
+func alertGroupOf(v groups.View, c groups.Caller, chains []escalation.GroupChain) gen.AlertGroup {
 	out := gen.AlertGroup{
 		Id: v.PublicID, Number: int(v.Number), Title: v.Title, Summary: nullableString(v.Summary),
 		Status: gen.AlertGroupStatus(v.Status), SeverityLevel: gen.SeverityLevel(v.Severity), Urgent: v.Urgent,
@@ -374,7 +388,7 @@ func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
 		ResolvedAlertCount: int(v.ResolvedCount), AllowedCommands: []gen.CommandName{},
 		Links: linksOf(v.Links), DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
 		Owner: userRefOf(v.Owner), DeliveryProblem: v.DeliveryProblem, Unclaimed: v.Unclaimed,
-		Teams: alertGroupTeamsOf(v.Teams),
+		Teams: alertGroupTeamsOf(v.Teams), EscalationChains: alertGroupChainsOf(chains),
 	}
 	if v.NextNotice != nil {
 		out.NextNotice = &gen.NextNotice{Kind: gen.NextNoticeKind(v.NextNotice.Kind), At: v.NextNotice.At}
@@ -723,11 +737,16 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		} else {
 			v.Gateway.SetNull()
 		}
-		if e.Reason != nil {
+		v.Reason.SetNull()
+		v.SkipReason.SetNull()
+		switch {
+		case e.Reason == nil:
+		case e.Event == string(groups.EventEscalationStepSkipped):
+			v.SkipReason.Set(gen.EscalationSkipReason(*e.Reason))
+		default:
 			v.Reason.Set(gen.PageNotDeliveredReason(*e.Reason))
-		} else {
-			v.Reason.SetNull()
 		}
+		v.Chain, v.ChainName, v.Step = timelineChainOf(e)
 		err = out.FromTimelineEscalationEntry(v)
 	default:
 		v := gen.TimelineSystemEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineSystemEntryKindSystem, Actor: actor,
@@ -861,4 +880,30 @@ func alertGroupTeamsOf(ts []groups.GroupTeam) []gen.AlertGroupTeam {
 		out[i] = gen.AlertGroupTeam{Team: m.Team, Rule: m.Rule, Matcher: m.Matcher, JoinedAt: t.JoinedAt}
 	}
 	return out
+}
+
+// timelineChainOf is the chain, its name when its run started and the step of an escalation entry, null for an
+// event of no chain.
+func timelineChainOf(e groups.TimelineEntry) (nullable.Nullable[gen.EscalationChainRef], nullable.Nullable[string],
+	nullable.Nullable[int]) {
+	var chain nullable.Nullable[gen.EscalationChainRef]
+	var name nullable.Nullable[string]
+	var step nullable.Nullable[int]
+	chain.SetNull()
+	name.SetNull()
+	step.SetNull()
+	if e.Step == nil {
+		return chain, name, step
+	}
+	step.Set(*e.Step)
+	name.Set(e.ChainName)
+	if c := e.Chain; c != nil {
+		ref := gen.EscalationChainRef{Id: c.PublicID, Name: c.Name}
+		ref.OwningTeam.SetNull()
+		if t := c.OwningTeam; t != nil {
+			ref.OwningTeam.Set(gen.TeamRef{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Deleted: t.Deleted})
+		}
+		chain.Set(ref)
+	}
+	return chain, name, step
 }

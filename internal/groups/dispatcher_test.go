@@ -119,6 +119,8 @@ type fakeDB struct {
 	following []int64
 	// retired are the deliveries being retired, by Alert Group and Destination.
 	retired map[[2]int64]bool
+	// runSteps are the steps of the runs of Escalation chains, by Alert Group (retention_test.go).
+	runSteps map[int64]int
 	// teams are the Teams of the Alerts and of the Alert Groups (teams_test.go).
 	teams fakeTeams
 	// reach is what the reach of an Alert Group is computed from (events_test.go).
@@ -463,6 +465,17 @@ func (f *fakeDB) SaveGroup(_ context.Context, a dbgen.SaveGroupParams) error {
 		a.AckTimeoutNoticesSent
 	g.Unclaimed, g.RemindersSent, g.RemindersUnanswered = a.Unclaimed, a.RemindersSent, a.RemindersUnanswered
 	g.LastReminderAt, g.OwnerAnsweredAt = a.LastReminderAt, a.OwnerAnsweredAt
+	g.ChainGeneration = a.ChainGeneration
+	return nil
+}
+
+func (f *fakeDB) SetChainGeneration(_ context.Context, a dbgen.SetChainGenerationParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("SetChainGeneration"); err != nil || a.OrgID != orgID {
+		return err
+	}
+	f.groups[a.ID].ChainGeneration = a.ChainGeneration
 	return nil
 }
 
@@ -888,7 +901,8 @@ func (f *fakeDB) timeline(group int64, kinds []string, at pgtype.Timestamptz, so
 			ReplacedLabel: e.ReplacedLabel, LabelConflicts: e.LabelConflicts, PeriodFrom: e.PeriodFrom,
 			PeriodTo: e.PeriodTo, Detail: e.Detail, TeamID: e.TeamID, TeamRule: e.TeamRule,
 			TeamMatcher: e.TeamMatcher, TeamValue: e.TeamValue, DestinationID: e.DestinationID,
-			PagedUserIds: e.PagedUserIds, GatewayConnectionID: e.GatewayConnectionID})
+			PagedUserIds: e.PagedUserIds, GatewayConnectionID: e.GatewayConnectionID,
+			EscalationRunID: e.EscalationRunID, EscalationChainID: e.EscalationChainID, StepNumber: e.StepNumber})
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListTimelineDescRow) int {
 		c := cmp.Or(a.At.Compare(b.At), cmp.Compare(a.ID, b.ID))

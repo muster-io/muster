@@ -48,7 +48,7 @@ An Alert Group changed status: group is its #N, route the public_id of its Route
 
 INFO · fields: `details`, `summaries` · C-09
 
-The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).
+The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago and the steps of the runs of the Escalation chains of Alert Groups resolved then (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).
 
 ### `alerts_stale`
 
@@ -235,6 +235,30 @@ Development mode only: this process runs on the development clock, offset_second
 WARN · fields: `started_at`, `ended_at`, `duration_seconds` · C-02
 
 Muster was unavailable: no Leader wrote the alive mark and no replica refreshed its record for the period between started_at and ended_at. The new Leader recorded it and opened the recovery window (recovery.banner_duration).
+
+### `escalation_run_ran_out`
+
+INFO · fields: `group`, `chain`, `run` · C-32
+
+A run of an Escalation chain passed its last step without an acknowledgement: group is the public_id of the Alert Group, chain that of the chain, empty once it was deleted, and run that of the run.
+
+### `escalation_run_started`
+
+INFO · fields: `group`, `chain`, `run` · C-32
+
+A run of an Escalation chain started on an Alert Group at its first step, at its first Publication, at its creation without a Destination that reaches it, when it became firing again, or for a rise or a Team that joined: group is the public_id of the Alert Group, chain that of the chain and run that of the run.
+
+### `escalation_run_step_limit`
+
+WARN · fields: `group`, `chain`, `run`, `steps` · C-32
+
+A run of an Escalation chain made the most steps a run makes, escalation.MaxStepsPerRun, as repeats nested without a wait between them can, and ran out there as after its last step, so that its Alert Group becomes Unclaimed: group is the public_id of the Alert Group, chain that of the chain, empty once it was deleted, run that of the run and steps how many steps it made and skipped. Review the repeats of the chain.
+
+### `escalation_run_stopped`
+
+INFO · fields: `group`, `chain`, `run`, `command` · C-32
+
+A run of an Escalation chain stopped before its last step: group is the public_id of the Alert Group, chain that of the chain, empty once it was deleted, run that of the run and command acknowledge, snooze, resolve or started_over.
 
 ### `fallback_template_used`
 

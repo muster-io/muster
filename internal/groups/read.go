@@ -49,6 +49,7 @@ type readQueries interface {
 		[]dbgen.ListTimelineDestinationsRow, error)
 	ListTimelineGateways(ctx context.Context, arg dbgen.ListTimelineGatewaysParams) (
 		[]dbgen.ListTimelineGatewaysRow, error)
+	ListTimelineChains(ctx context.Context, arg dbgen.ListTimelineChainsParams) ([]dbgen.ListTimelineChainsRow, error)
 }
 
 // The notices of the Alert Group page (AlertGroupNotice).
@@ -555,12 +556,26 @@ type TimelineEntry struct {
 	// Transport gateway came from (C-30.FR-6).
 	PagedUsers []*ActorRef
 	Gateway    *Ref
-	position   TimelinePosition
+	// Chain and Step are the Escalation chain and the number of the step of an event of a chain, such as
+	// escalation_step_skipped, whose reason is Reason (C-32.FR-14); Chain is nil once the chain was deleted, and
+	// ChainName is the name it had when the run started.
+	Chain     *ChainRef
+	ChainName string
+	Step      *int
+	position  TimelinePosition
 	// teamID is the id of Team, which entryTeams names, destinationID the id of Destination, which entryDestinations
 	// names, and gatewayID the id of Gateway, which entryGateways names.
 	teamID        int64
 	destinationID int64
 	gatewayID     int64
+	runID         int64
+}
+
+// ChainRef is an Escalation chain as a Timeline entry names it, with its owning Team, nil when none.
+type ChainRef struct {
+	PublicID   string
+	Name       string
+	OwningTeam *TeamRef
 }
 
 // TimelineDestination is the Destination of a Timeline entry with its type and health, deleted or not.
@@ -653,6 +668,9 @@ func (s *Service) Timeline(ctx context.Context, publicID string, f TimelineFilte
 	if err := s.entryGateways(ctx, out.Entries); err != nil {
 		return TimelinePage{}, err
 	}
+	if err := s.entryChains(ctx, out.Entries); err != nil {
+		return TimelinePage{}, err
+	}
 	return out, nil
 }
 
@@ -695,7 +713,11 @@ func (s *Service) entries(ctx context.Context, gid int64, asc bool, kinds []stri
 			MissedCount: int8Of(r.MissedCount), PeriodFrom: timeOf(r.PeriodFrom), PeriodTo: timeOf(r.PeriodTo),
 			Detail: textOf(r.Detail), position: TimelinePosition{At: r.At.UTC(), Source: sourceEntries, ID: r.ID},
 			TeamRule: textOf(r.TeamRule), TeamMatcher: textOf(r.TeamMatcher), TeamValue: textOf(r.TeamValue),
-			teamID: r.TeamID.Int64, destinationID: r.DestinationID.Int64, gatewayID: r.GatewayConnectionID.Int64}
+			teamID: r.TeamID.Int64, destinationID: r.DestinationID.Int64, gatewayID: r.GatewayConnectionID.Int64,
+			runID: r.EscalationRunID.Int64}
+		if r.StepNumber.Valid {
+			e.Step = ptr(int(r.StepNumber.Int32))
+		}
 		if r.Event.Valid {
 			e.Mentions = orEmpty(r.Mentions)
 		}
@@ -930,6 +952,47 @@ func (s *Service) entryGateways(ctx context.Context, entries []TimelineEntry) er
 		if ref, ok := refs[entries[i].gatewayID]; ok {
 			entries[i].Gateway = &ref
 		}
+	}
+	return nil
+}
+
+// entryChains names the Escalation chains of the entries of chains by their runs, with the name each had when its run
+// started (C-32.FR-14).
+func (s *Service) entryChains(ctx context.Context, entries []TimelineEntry) error {
+	var ids []int64
+	for _, e := range entries {
+		if e.runID != 0 {
+			ids = append(ids, e.runID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	slices.Sort(ids)
+	rows, err := s.store.ListTimelineChains(ctx, dbgen.ListTimelineChainsParams{OrgID: s.orgID,
+		Ids: slices.Compact(ids)})
+	if err != nil {
+		return fmt.Errorf("read the escalation chains of the timeline: %w", err)
+	}
+	byRun := make(map[int64]dbgen.ListTimelineChainsRow, len(rows))
+	for _, r := range rows {
+		byRun[r.RunID] = r
+	}
+	for i := range entries {
+		r, ok := byRun[entries[i].runID]
+		if !ok {
+			continue
+		}
+		entries[i].ChainName = r.ChainName
+		if !r.ChainPublicID.Valid {
+			continue
+		}
+		ref := &ChainRef{PublicID: r.ChainPublicID.String, Name: r.ChainNameNow.String}
+		if r.TeamPublicID.Valid {
+			ref.OwningTeam = &TeamRef{PublicID: r.TeamPublicID.String, Name: r.TeamName.String, Slug: r.TeamSlug.String,
+				Deleted: r.TeamDeleted}
+		}
+		entries[i].Chain = ref
 	}
 	return nil
 }

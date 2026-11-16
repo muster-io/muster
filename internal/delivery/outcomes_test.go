@@ -949,14 +949,16 @@ type publishedCall struct {
 	group int64
 	at    time.Time
 	inTx  bool
+	// loud is whether the Publication starts the Escalation chains (startsChains).
+	loud bool
 }
 
 // recordPublished records the calls of Worker.Published, which marks the Alert Group published unless it fails with
 // the errors of fail in turn.
 func (e *env) recordPublished(fail ...error) *[]publishedCall {
 	var calls []publishedCall
-	e.w.Published = func(_ context.Context, id int64, at time.Time) error {
-		calls = append(calls, publishedCall{id, at, e.begin.open > 0})
+	e.w.Published = func(_ context.Context, id int64, at time.Time, loud bool) error {
+		calls = append(calls, publishedCall{id, at, e.begin.open > 0, loud})
 		if len(fail) > 0 {
 			err := fail[0]
 			fail = fail[1:]
@@ -985,7 +987,7 @@ func TestMarkPublishedAfterCommit(t *testing.T) {
 	e.business.Advance(delivery.TransientFirstStep)
 	publishedAt := e.business.Now()
 	e.round(t)
-	if len(*calls) != 1 || (*calls)[0] != (publishedCall{groupID, publishedAt, false}) || d.publishedAt == nil ||
+	if len(*calls) != 1 || (*calls)[0] != (publishedCall{groupID, publishedAt, false, true}) || d.publishedAt == nil ||
 		!d.publishedAt.Equal(publishedAt) {
 		t.Fatalf("calls %+v, published at %v", *calls, d.publishedAt)
 	}
@@ -997,7 +999,7 @@ func TestMarkPublishedAfterCommit(t *testing.T) {
 	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), person, groups.Recorded{Seq: 2,
 		Event: groups.EventAcknowledged, Loudness: groups.Quiet})
 	e.round(t)
-	if len(*calls) != 2 || (*calls)[1] != (publishedCall{groupID, publishedAt, false}) {
+	if len(*calls) != 2 || (*calls)[1] != (publishedCall{groupID, publishedAt, false, true}) {
 		t.Fatalf("the edit while unmarked: calls %+v", *calls)
 	}
 	e.business.Advance(time.Minute)
@@ -1079,7 +1081,7 @@ func TestReplayedPublication(t *testing.T) {
 		t.Fatalf("after the replay %+v", d)
 	}
 	if d.publishedAt == nil || !d.publishedAt.Equal(first) || len(*calls) != 1 ||
-		(*calls)[0] != (publishedCall{groupID, first, false}) {
+		(*calls)[0] != (publishedCall{groupID, first, false, true}) {
 		t.Errorf("published at %v, marked %+v", d.publishedAt, *calls)
 	}
 	if !slices.Equal(e.eventKinds(), []string{"publication"}) || bridgeLatency(t) != latency {

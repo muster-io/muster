@@ -597,7 +597,12 @@ func TestEditWindowRecordFailures(t *testing.T) {
 func TestRepublicationAsProbe(t *testing.T) {
 	e, _, w := publishedWindowed(t)
 	marked := 0
-	e.w.Published = func(context.Context, int64, time.Time) error { marked++; return nil }
+	var starts []bool
+	e.w.Published = func(_ context.Context, _ int64, _ time.Time, s bool) error {
+		marked++
+		starts = append(starts, s)
+		return nil
+	}
 	e.business.Set(business0.Add(11 * time.Minute))
 	e.breakDest(destMM, "503")
 	e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
@@ -606,11 +611,18 @@ func TestRepublicationAsProbe(t *testing.T) {
 	if len(e.rec.Calls()) != 0 {
 		t.Fatalf("called while broken: %s", callMethods(e.rec.Calls()))
 	}
+	// A delivery that a change of configuration released: its republication starts no Escalation chain (C-32.FR-5).
+	for _, d := range e.db.deliveries {
+		d.byConfiguration = true
+	}
 	e.business.Set(*e.db.dests[destMM].nextProbe)
 	e.round(t)
 	if callMethods(e.rec.Calls()) != "publish,reply" || e.db.dests[destMM].health != "healthy" || marked != 1 ||
 		w.Reads() != 1 {
 		t.Errorf("probe %s, health %s, marked %d", callMethods(e.rec.Calls()), e.db.dests[destMM].health, marked)
+	}
+	if !slices.Equal(starts, []bool{false}) {
+		t.Errorf("marked as starting the chains %v", starts)
 	}
 	if kinds := e.eventKinds(); !slices.Equal(kinds, []string{"republished_past_edit_window", "destination_recovered"}) {
 		t.Errorf("events %v", kinds)

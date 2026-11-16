@@ -27,6 +27,7 @@ const (
 	DeliveryEvent      Prefix = "DE"
 	Destination        Prefix = "DS"
 	EscalationChain    Prefix = "EC"
+	EscalationRun      Prefix = "ER"
 	GatewayContact     Prefix = "GC"
 	LinkRule           Prefix = "KR"
 	Note               Prefix = "NE"

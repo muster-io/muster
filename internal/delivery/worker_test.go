@@ -107,6 +107,7 @@ type (
 		payload, hash                       []byte
 		receivedAt                          *time.Time
 		loud                                pgtype.Bool
+		byConfiguration                     bool
 		actualVersion                       int64
 		actualHash                          []byte
 		messageID, messageURL               *string
@@ -468,6 +469,7 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	if d.receivedAt == nil && arg.ReceivedAt.Valid {
 		d.receivedAt = at(arg.ReceivedAt.Time)
 	}
+	d.byConfiguration = d.byConfiguration && arg.Quiet
 	switch {
 	case arg.Quiet && d.state == "not_delivered" && d.publishedAt == nil:
 		d.loud = pgtype.Bool{Bool: false, Valid: true}
@@ -671,7 +673,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 	ds := f.dests[d.dest]
 	out := dbgen.GetLeasedDeliveryRow{ID: d.id, AlertGroupID: d.group, DesiredVersion: d.version,
 		DesiredPayload: d.payload, DesiredHash: d.hash, DesiredReceivedAt: tz(d.receivedAt), PublicationLoud: d.loud,
-		LateNote: d.lateNote, RepublishedAfterDelete: d.republished, DesiredRetire: d.desiredRetire,
+		PublishedByConfiguration: d.byConfiguration,
+		LateNote:                 d.lateNote, RepublishedAfterDelete: d.republished, DesiredRetire: d.desiredRetire,
 		ActualHash: d.actualHash, MessageID: txt(d.messageID), MessageUrl: txt(d.messageURL),
 		PublishedAt: tz(d.publishedAt), Publications: d.publications, ResponseValues: valuesOf(d.responseValues),
 		ThreadOpened: d.threadOpened, PublicationStartedAt: tz(d.started), Attempts: d.attempts, DestinationID: ds.id,

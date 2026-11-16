@@ -2740,18 +2740,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (46)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (47)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":46`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":47`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":46`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":47`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2767,10 +2767,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (46)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (47)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":46`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":47`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -4706,6 +4706,132 @@ func TestIntegrationEscalationChains(t *testing.T) {
 			t.Errorf("after down: %d tables and Permissions left", got)
 		}
 		if err := e.mm.Migrate(46); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationEscalationRuns runs 0047 over a database at 46 with a chain, a Route and an Alert Group with an ack
+// timeout timer: up adds the runs and their steps, the timer kind escalation_step whose subject is the run, one timer
+// per run beside the Alert Group's timers, the columns of the escalation entries and alert_groups.chain_generation;
+// the CHECKs refuse a timer of a run that names an Alert Group, a run in an unknown state, a stopped run without its
+// Command and a second run of one chain in one start; deleting the Alert Group deletes its runs, their steps and their
+// timers; down drops it all, deleting the timers of runs, with the CHECKs of 0001 back; up again works.
+func TestIntegrationEscalationRuns(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 46)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000ER', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', true, 900,
+				false, 60, 60, false, '2026-11-17', '2026-11-17'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000ER', 1, id, '{alertname}', '{}', sha256('g'), 't', '{}', '{}', '{}', 'firing',
+				'warning', false, '2026-11-17', '2026-11-17'
+			FROM routes`)
+		e.exec(t, `INSERT INTO escalation_chains (org_id, public_id, name, created_at, updated_at)
+			SELECT id, 'EC0000000000ER', 'devops', '2026-11-17', '2026-11-17' FROM organizations`)
+		e.exec(t, `INSERT INTO timers (org_id, alert_group_id, kind, deadline, notice_number, created_at, updated_at)
+			SELECT org_id, id, 'ack_timeout', '2026-11-17 00:15', 1, '2026-11-17', '2026-11-17' FROM alert_groups`)
+		if err := e.mm.Migrate(47); err != nil {
+			t.Fatalf("up to 47: %v", err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM alert_groups WHERE chain_generation = 0`); got != 1 {
+			t.Errorf("chain_generation of the alert group: %d at 0", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname IN ('escalation_runs_group_idx',
+			'escalation_runs_chain_idx', 'timers_escalation_run_key', 'escalation_run_steps_at_idx')
+			AND (indexdef LIKE '%(alert_group_id, generation)' OR indexdef LIKE '%(chain_id, started_at DESC, id DESC)'
+			OR indexdef LIKE '%(escalation_run_id) WHERE (escalation_run_id IS NOT NULL)'
+			OR indexdef LIKE '%(org_id, at)')`); got != 4 {
+			t.Errorf("%d indexes of the cascades", got)
+		}
+		run := func(publicID, state, extra, values string) string {
+			return `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_id, chain_name, sources, steps,
+				state, generation, started_at` + extra + `)
+				SELECT g.org_id, '` + publicID + `', g.id, c.id, 'devops', '[{"kind":"route"}]', '[]', '` + state +
+				`', 1, '2026-11-17'` + values + ` FROM alert_groups g, escalation_chains c`
+		}
+		e.exec(t, run("ER0000000000R1", "running", "", ""))
+		refusedBy := func(t *testing.T, sql, constraint string) {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), sql)
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.ConstraintName != constraint {
+				t.Errorf("%s: refused by %v, want %s", sql, err, constraint)
+			}
+		}
+		refusedBy(t, run("ER0000000000R2", "running", "", ""), "escalation_runs_chain_key")
+		refusedBy(t, run("ER0000000000R3", "paused", ", ended_at", ", '2026-11-17'"), "escalation_runs_state_check")
+		refusedBy(t, run("ER0000000000R4", "stopped", ", ended_at", ", '2026-11-17'"), "escalation_runs_stop_check")
+		refusedBy(t, run("ER0000000000R5", "ran_out", "", ""), "escalation_runs_ended_check")
+		refusedBy(t, run("XX0000000000R6", "running", "", ""), "escalation_runs_public_id_check")
+		e.exec(t, `INSERT INTO timers (org_id, escalation_run_id, kind, deadline, created_at, updated_at)
+			SELECT org_id, id, 'escalation_step', '2026-11-17', '2026-11-17', '2026-11-17' FROM escalation_runs`)
+		refusedBy(t, `INSERT INTO timers (org_id, escalation_run_id, kind, deadline, created_at, updated_at)
+			SELECT org_id, id, 'escalation_step', '2026-11-18', '2026-11-17', '2026-11-17' FROM escalation_runs`,
+			"timers_escalation_run_key")
+		refusedBy(t, `INSERT INTO timers (org_id, alert_group_id, escalation_run_id, kind, deadline, created_at,
+			updated_at)
+			SELECT r.org_id, r.alert_group_id, r.id, 'escalation_step', '2026-11-17', '2026-11-17', '2026-11-17'
+			FROM escalation_runs r`, "timers_subject_v2_check")
+		refusedBy(t, `INSERT INTO timers (org_id, alert_group_id, escalation_run_id, kind, deadline, created_at,
+			updated_at)
+			SELECT r.org_id, r.alert_group_id, r.id, 'reminder', '2026-11-17', '2026-11-17', '2026-11-17'
+			FROM escalation_runs r`, "timers_subject_v2_check")
+		refusedBy(t, `INSERT INTO timers (org_id, alert_group_id, kind, deadline, created_at, updated_at)
+			SELECT org_id, id, 'paging', '2026-11-17', '2026-11-17', '2026-11-17' FROM alert_groups`,
+			"timers_kind_v2_check")
+		if got := e.count(t, `SELECT count(*) FROM pg_constraint WHERE conname IN ('timers_kind_check',
+			'timers_subject_check')`); got != 0 {
+			t.Errorf("%d CHECKs of 0001 left", got)
+		}
+		e.exec(t, `INSERT INTO escalation_run_steps (org_id, run_id, seq, number, kind, at, outcome, reason)
+			SELECT org_id, id, 1, 3, 'page_people', '2026-11-17', 'skipped', 'severity' FROM escalation_runs`)
+		refusedBy(t, `INSERT INTO escalation_run_steps (org_id, run_id, seq, number, kind, at, outcome)
+			SELECT org_id, id, 2, 3, 'page_people', '2026-11-17', 'skipped' FROM escalation_runs`,
+			"escalation_run_steps_reason_check")
+		if got := e.count(t, `SELECT count(*) FROM timers`); got != 2 {
+			t.Errorf("%d timers, want the ack timeout and the run's", got)
+		}
+		// A deleted chain leaves its runs with their names.
+		e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = '2026-11-17', stop_command = 'resolve'`)
+		e.exec(t, `DELETE FROM escalation_chains`)
+		if got := e.count(t, `SELECT count(*) FROM escalation_runs WHERE chain_id IS NULL AND chain_name = 'devops'`); got != 1 {
+			t.Errorf("after the chain's deletion: %d runs keep their name", got)
+		}
+		e.exec(t, `DELETE FROM alert_groups`)
+		if got := e.count(t, `SELECT count(*) FROM escalation_runs`) +
+			e.count(t, `SELECT count(*) FROM escalation_run_steps`) + e.count(t, `SELECT count(*) FROM timers`); got != 0 {
+			t.Errorf("after the alert group's deletion: %d rows left", got)
+		}
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000E2', 2, id, '{alertname}', '{}', sha256('h'), 't', '{}', '{}', '{}', 'firing',
+				'warning', false, '2026-11-17', '2026-11-17'
+			FROM routes`)
+		e.exec(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, sources, steps, state,
+			generation, started_at)
+			SELECT org_id, 'ER0000000000R7', id, 'gone', '[]', '[]', 'running', 1, '2026-11-17' FROM alert_groups`)
+		e.exec(t, `INSERT INTO timers (org_id, escalation_run_id, kind, deadline, created_at, updated_at)
+			SELECT org_id, id, 'escalation_step', '2026-11-17', '2026-11-17', '2026-11-17' FROM escalation_runs`)
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM timers`) + e.count(t, `SELECT count(*) FROM information_schema.tables
+			WHERE table_name IN ('escalation_runs', 'escalation_run_steps')`) + e.count(t, `SELECT count(*)
+			FROM information_schema.columns WHERE column_name IN ('chain_generation', 'escalation_run_id',
+			'escalation_chain_id', 'step_number', 'published_by_configuration')`); got != 0 {
+			t.Errorf("after down: %d rows, tables and columns left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_constraint WHERE conname IN ('timers_kind_check',
+			'timers_subject_check')`); got != 2 {
+			t.Errorf("after down: %d CHECKs of 0001", got)
+		}
+		if err := e.mm.Migrate(47); err != nil {
 			t.Errorf("up again: %v", err)
 		}
 	})

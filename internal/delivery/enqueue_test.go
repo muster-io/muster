@@ -35,10 +35,11 @@ var person = groups.Actor{Kind: audit.ActorUser, Transport: audit.TransportUI}
 // TestTableMatchesLifecycleEvents: the table of delivery has a row for every row of the lifecycle event tables of
 // C-09.FR-22 and C-10.FR-15, with the same loudness and Mentions, resolved split by who resolved; the six rows of
 // C-17.FR-11, the two of C-25 — team_joined, a Root message update, and unknown_team_value, nothing (C-11.FR-20
-// revised) — the three of destination_joined of C-26, a new Root message, and page_not_delivered of C-30, nothing in a
-// messenger, complete the 38; a Loud event is always a new message and an edit is always Quiet (C-11.FR-7).
+// revised) — the three of destination_joined of C-26, a new Root message, page_not_delivered of C-30 and
+// escalation_step_skipped of C-32, nothing in a messenger, complete the 39; a Loud event is always a new message and an
+// edit is always Quiet (C-11.FR-7).
 func TestTableMatchesLifecycleEvents(t *testing.T) {
-	if len(delivery.Table) != 38 {
+	if len(delivery.Table) != 39 {
 		t.Errorf("%d rows", len(delivery.Table))
 	}
 	seen := map[string]bool{}
@@ -2121,5 +2122,45 @@ func TestFooterRepairDuringStalePublication(t *testing.T) {
 	e.round(t)
 	if len(e.rec.Calls()) != 0 || d.state != "delivered" {
 		t.Errorf("a second rendering: %s, %+v", d.state, e.rec.Calls())
+	}
+}
+
+// TestEnqueueUnreached is C-32.FR-5: the creation of an Alert Group that no Destination reaches, or only Broken ones,
+// reports it unreached, so that its Escalation chains start at once; one that a healthy Destination reaches, and every
+// rendering but the creation, report nothing.
+func TestEnqueueUnreached(t *testing.T) {
+	unreached := func(e *env, level string, events ...groups.Recorded) bool {
+		got := false
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, level, false),
+			Actor: groups.System, Events: events, Teams: []int64{teamPayments},
+			Unreached: func() { got = true }}); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if e := reachEnv(t); unreached(e, "warning", created()) {
+		t.Error("reached by healthy destinations")
+	}
+	e := reachEnv(t)
+	e.breakDest(destMM, "503")
+	e.breakDest(destTeamNotice, "503")
+	if !unreached(e, "warning", created()) {
+		t.Error("only broken destinations: not reported")
+	}
+	e = reachEnv(t)
+	for id := range e.db.dests {
+		e.breakDest(id, "503")
+	}
+	if unreached(e, "warning") {
+		t.Error("a rendering without the creation reported")
+	}
+	// No Destination's condition meets the level: none reaches it.
+	e = reachEnv(t)
+	r := e.db.routes[routeID]
+	r.toTeams = false
+	e.db.routes[routeID] = r
+	e.breakDest(destMM, "503")
+	if !unreached(e, "warning", created()) {
+		t.Error("no destination reaches it: not reported")
 	}
 }

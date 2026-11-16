@@ -27,7 +27,9 @@ import type {
   EscalationChain,
   EscalationChainInput,
   EscalationChainList,
+  EscalationRunList,
   ForbiddenResponse,
+  ListEscalationChainRunsParams,
   ListEscalationChainsParams,
   NotFoundResponse,
   PreconditionFailedResponse,
@@ -518,3 +520,119 @@ export const useDeleteEscalationChain = <TError = UnauthorizedResponse | Forbidd
       > => {
       return useMutation(getDeleteEscalationChainMutationOptions(options), queryClient);
     }
+    export const getListEscalationChainRunsUrl = (escalationChainId: string,
+    params?: ListEscalationChainRunsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/escalation-chains/${escalationChainId}/runs?${stringifiedParams}` : `/api/v1/escalation-chains/${escalationChainId}/runs`
+}
+
+/**
+ * The recent runs of the chain on Alert Groups, newest first, for "How it went" (C-32.FR-18): one per start of the chains of an Alert Group, so an Alert Group whose chains started over has a run per start. Each run names its Alert Group, the steps it made and skipped with the reason of each skip, and what stopped it — the Command and its actor — or that it ran out. Runs of a chain keep its steps from when they started (P-73).
+ * @summary List the runs of an Escalation chain
+ */
+export const listEscalationChainRuns = async (escalationChainId: string,
+    params?: ListEscalationChainRunsParams, options?: Parameters<typeof apiFetch>[1]): Promise<EscalationRunList> => {
+
+  return apiFetch<EscalationRunList>(getListEscalationChainRunsUrl(escalationChainId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListEscalationChainRunsQueryKey = (escalationChainId: string,
+    params?: ListEscalationChainRunsParams,) => {
+    return [
+    `/api/v1/escalation-chains/${escalationChainId}/runs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListEscalationChainRunsQueryOptions = <TData = Awaited<ReturnType<typeof listEscalationChainRuns>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(escalationChainId: string,
+    params?: ListEscalationChainRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listEscalationChainRuns>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListEscalationChainRunsQueryKey(escalationChainId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listEscalationChainRuns>>> = ({ signal }) => listEscalationChainRuns(escalationChainId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: escalationChainId !== null && escalationChainId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listEscalationChainRuns>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListEscalationChainRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listEscalationChainRuns>>>
+export type ListEscalationChainRunsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse
+
+
+export function useListEscalationChainRuns<TData = Awaited<ReturnType<typeof listEscalationChainRuns>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ escalationChainId: string,
+    params: undefined |  ListEscalationChainRunsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listEscalationChainRuns>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEscalationChainRuns>>,
+          TError,
+          Awaited<ReturnType<typeof listEscalationChainRuns>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListEscalationChainRuns<TData = Awaited<ReturnType<typeof listEscalationChainRuns>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ escalationChainId: string,
+    params?: ListEscalationChainRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listEscalationChainRuns>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEscalationChainRuns>>,
+          TError,
+          Awaited<ReturnType<typeof listEscalationChainRuns>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListEscalationChainRuns<TData = Awaited<ReturnType<typeof listEscalationChainRuns>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ escalationChainId: string,
+    params?: ListEscalationChainRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listEscalationChainRuns>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the runs of an Escalation chain
+ */
+
+export function useListEscalationChainRuns<TData = Awaited<ReturnType<typeof listEscalationChainRuns>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ escalationChainId: string,
+    params?: ListEscalationChainRunsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listEscalationChainRuns>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListEscalationChainRunsQueryOptions(escalationChainId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+

@@ -307,6 +307,8 @@ export function entryText(
       switch (entry.event) {
         case "page_not_delivered":
           return t("timeline.escalation.event", { event: entry.event });
+        case "escalation_step_skipped":
+          return t("timeline.escalation.event", { event: entry.event });
         default:
           return t("timeline.escalation.event", { event: entry.event });
       }

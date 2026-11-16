@@ -4446,6 +4446,42 @@ paths:
           $ref: '#/components/responses/PreconditionFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /escalation-chains/{escalation_chain_id}/runs:
+    get:
+      operationId: listEscalationChainRuns
+      tags:
+      - Escalation chains
+      summary: List the runs of an Escalation chain
+      description: 'The recent runs of the chain on Alert Groups, newest first, for "How it went" (C-32.FR-18): one per
+        start of the chains of an Alert Group, so an Alert Group whose chains started over has a run per start. Each run
+        names its Alert Group, the steps it made and skipped with the reason of each skip, and what stopped it — the
+        Command and its actor — or that it ran out. Runs of a chain keep its steps from when they started (P-73).'
+      x-permission: escalation-chains:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/EscalationChainId'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of runs of the Escalation chain.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationRunList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /alert-groups:
     get:
       operationId: listAlertGroups
@@ -14035,7 +14071,7 @@ components:
         `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE`
         Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN`
         Connection, `CR` check run, `DE` delivery
-        event, `DS` Destination, `EC` Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
+        event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
         access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service
         account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup
         table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses
@@ -14774,6 +14810,7 @@ components:
       - delivery_problem
       - allowed_commands
       - teams
+      - escalation_chains
       properties:
         id:
           $ref: '#/components/schemas/PublicId'
@@ -14878,6 +14915,232 @@ components:
             user's Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.
           items:
             $ref: '#/components/schemas/CommandName'
+        escalation_chains:
+          type: array
+          description: 'The runs of the Escalation chains of the Alert Group since they last started (C-32.FR-18): one per
+            chain, in the order they started, empty before its chains first started or where none applies. A run stays
+            here, `ran_out` or `stopped`, until the chains start over. Changes arrive as the `alert-group` hint.'
+          items:
+            $ref: '#/components/schemas/AlertGroupChain'
+    AlertGroupChain:
+      type: object
+      description: A run of an Escalation chain on an Alert Group, of the current start of its chains.
+      required:
+      - run_id
+      - chain
+      - chain_name
+      - sources
+      - state
+      - step
+      - next_step_at
+      - started_at
+      properties:
+        run_id:
+          $ref: '#/components/schemas/PublicId'
+        chain:
+          description: The chain, null once it was deleted.
+          oneOf:
+          - $ref: '#/components/schemas/EscalationChainRef'
+          - type: 'null'
+        chain_name:
+          type: string
+          description: The name of the chain when the run started.
+        sources:
+          type: array
+          description: What named the chain on the Alert Group, one run however many name it (P-70).
+          items:
+            $ref: '#/components/schemas/EscalationRunSource'
+        state:
+          $ref: '#/components/schemas/EscalationRunState'
+        step:
+          description: The step the run is at while it runs — a wait it waits out, or the step due next — and null
+            once it ran out or stopped.
+          oneOf:
+          - $ref: '#/components/schemas/EscalationStepPosition'
+          - type: 'null'
+        next_step_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: When the next step is due, on the business clock; null once it ran out or stopped.
+        started_at:
+          type: string
+          format: date-time
+    EscalationRunSource:
+      type: object
+      description: What named the chain of a run on an Alert Group, its Route or one of its Teams.
+      required:
+      - kind
+      - team
+      properties:
+        kind:
+          type: string
+          enum:
+          - route
+          - team
+        team:
+          description: The Team, for `team`; null for `route`.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+    EscalationRunState:
+      type: string
+      description: 'The state of a run: `running`, `ran_out` once it passed its last step without an acknowledgement,
+        `stopped` by Acknowledge, Snooze or Resolve.'
+      enum:
+      - running
+      - ran_out
+      - stopped
+    EscalationStepPosition:
+      type: object
+      description: A step of a run by its number and kind.
+      required:
+      - number
+      - kind
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        kind:
+          $ref: '#/components/schemas/EscalationStepKind'
+    EscalationRunList:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationRun'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+    EscalationRun:
+      type: object
+      description: A run of an Escalation chain on an Alert Group, as "How it went" lists it. S-155 adds its Pages.
+      required:
+      - id
+      - alert_group
+      - started_at
+      - state
+      - ended_at
+      - stopped_by
+      - steps
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        alert_group:
+          $ref: '#/components/schemas/EscalationRunAlertGroup'
+        started_at:
+          type: string
+          format: date-time
+        state:
+          $ref: '#/components/schemas/EscalationRunState'
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: When it ran out or stopped; null while it runs.
+        stopped_by:
+          description: What stopped it; null while it runs and once it ran out.
+          oneOf:
+          - $ref: '#/components/schemas/EscalationRunStop'
+          - type: 'null'
+        steps:
+          type: array
+          description: The steps it made and skipped, in their order; a repeat makes its steps again. A step is
+            `skipped` here only as a whole; a person a step that was made skipped — a Viewer or a disabled User — is
+            in the Timeline of the Alert Group as `escalation_step_skipped`, and the Pages follow with a later version.
+          items:
+            $ref: '#/components/schemas/EscalationRunStep'
+    EscalationRunAlertGroup:
+      type: object
+      description: The Alert Group of a run.
+      required:
+      - id
+      - number
+      - title
+      - severity_level
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        number:
+          type: integer
+        title:
+          type: string
+        severity_level:
+          $ref: '#/components/schemas/SeverityLevel'
+    EscalationRunStop:
+      type: object
+      description: 'What stopped a run: the Command `acknowledge`, `snooze` or `resolve`, or `started_over` for a run
+        that a start-over of the chains found still running; the person who ran it, null for Muster, as for a Resolve by
+        the Alerts; and the Destination whose message the Command came from, which this version does not record yet:
+        always null.'
+      required:
+      - command
+      - actor
+      - destination
+      properties:
+        command:
+          type: string
+          enum:
+          - acknowledge
+          - snooze
+          - resolve
+          - started_over
+        actor:
+          oneOf:
+          - $ref: '#/components/schemas/ActorRef'
+          - type: 'null'
+        destination:
+          oneOf:
+          - $ref: '#/components/schemas/DestinationRef'
+          - type: 'null'
+    EscalationRunStep:
+      type: object
+      description: A step a run made or skipped, with the reason of a skip.
+      required:
+      - number
+      - kind
+      - at
+      - outcome
+      - reason
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        kind:
+          $ref: '#/components/schemas/EscalationStepKind'
+        at:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          enum:
+          - made
+          - skipped
+        reason:
+          $ref: '#/components/schemas/EscalationSkipReason'
+    EscalationSkipReason:
+      type:
+      - string
+      - 'null'
+      description: 'Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its
+        chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the
+        Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer (`viewer`) or was disabled
+        (`disabled`) since it was saved. Null when the step was made. Later versions add reasons; clients show an
+        unknown one as it is.'
+      enum:
+      - outside_working_hours
+      - severity
+      - schedule_gap
+      - viewer
+      - disabled
+      - null
     AlertGroupList:
       type: object
       required:
@@ -15173,6 +15436,7 @@ components:
       - unknown_team_value
       - destination_joined
       - page_not_delivered
+      - escalation_step_skipped
       x-event-kinds:
         status:
         - created
@@ -15209,6 +15473,7 @@ components:
         - destination_joined
         escalation:
         - page_not_delivered
+        - escalation_step_skipped
     Loudness:
       type: string
       enum:
@@ -15560,7 +15825,8 @@ components:
       - null
     TimelineEscalationEntry:
       description: An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a
-        Notification gateway that ended Not delivered.
+        Notification gateway that ended Not delivered, or `escalation_step_skipped` for a step of a chain that was
+        skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person.
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'
       - $ref: '#/components/schemas/TimelineLifecycleFields'
@@ -15585,6 +15851,24 @@ components:
             - type: 'null'
           reason:
             $ref: '#/components/schemas/PageNotDeliveredReason'
+          chain:
+            description: The Escalation chain of the event, null once it was deleted or for an event of no chain.
+            oneOf:
+            - $ref: '#/components/schemas/EscalationChainRef'
+            - type: 'null'
+          chain_name:
+            type:
+            - string
+            - 'null'
+            description: The name of the chain when its run started; null for an event of no chain.
+          step:
+            type:
+            - integer
+            - 'null'
+            minimum: 1
+            description: The number of the step of the chain; null for an event of no chain.
+          skip_reason:
+            $ref: '#/components/schemas/EscalationSkipReason'
     TimelineEntry:
       description: One Timeline entry; `kind` selects the variant.
       oneOf:
@@ -15968,7 +16252,7 @@ components:
 
         | `type` | `id` | Meaning |
         |---|---|---|
-        | `alert-group` | the Alert Group `public_id` | It changed (status, Alerts, Timeline, delivery state): refresh its page and any list row. |
+        | `alert-group` | the Alert Group `public_id` | It changed (status, Alerts, Timeline, delivery state, the runs of its Escalation chains): refresh its page and any list row. |
         | `alert-groups` | null | New Alert Groups may match the current list filters or counts: the UI announces "N new". |
         | `integration`, `route`, `connection`, `destination`, `team`, `schedule`, `escalation-chain` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
         | `organization` | null | Organization settings changed. |
@@ -20198,6 +20482,7 @@ components:
       - unknown_team_value
       - destination_joined
       - page_not_delivered
+      - escalation_step_skipped
       - test
     WebhookMentionTarget:
       type: object
@@ -20256,7 +20541,9 @@ components:
           - string
           - 'null'
           description: Reason of a `system` transition, for example `timer`, or `owner_disabled` and `owner_deleted` when
-            disabling or deleting a user released their acknowledgement.
+            disabling or deleting a user released their acknowledgement. On `page_not_delivered` and
+            `escalation_step_skipped` it repeats the reason of the event, also given in `page.reason` and
+            `escalation_step.reason`.
     WebhookUser:
       type: object
       required:
@@ -20368,6 +20655,41 @@ components:
           - type: 'null'
         reason:
           $ref: '#/components/schemas/PageNotDeliveredReason'
+    WebhookEscalationStep:
+      type: object
+      description: A step of an Escalation chain as an outgoing webhook event names it, on `escalation_step_skipped`;
+        `users` names the person of a skip of a person, and is empty otherwise.
+      required:
+      - chain
+      - step
+      - reason
+      - users
+      properties:
+        chain:
+          description: The chain, null once it was deleted.
+          oneOf:
+          - $ref: '#/components/schemas/WebhookChainRef'
+          - type: 'null'
+        step:
+          type: integer
+          minimum: 1
+        reason:
+          $ref: '#/components/schemas/EscalationSkipReason'
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookUser'
+    WebhookChainRef:
+      type: object
+      description: An Escalation chain as an outgoing webhook event names it.
+      required:
+      - id
+      - name
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
     WebhookDestinationRef:
       type: object
       description: A Destination as an outgoing webhook event names it.
@@ -20467,6 +20789,9 @@ components:
         page:
           $ref: '#/components/schemas/WebhookPage'
           description: The Page, only on `page_not_delivered`.
+        escalation_step:
+          $ref: '#/components/schemas/WebhookEscalationStep'
+          description: The chain, the step and the reason, only on `escalation_step_skipped`.
         test:
           type: boolean
           description: True only on the `test` event, which carries an example or recent Alert Group and belongs to no Alert

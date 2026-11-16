@@ -127,6 +127,7 @@ type Queries interface {
 	ShareTeamMembership(ctx context.Context, arg dbgen.ShareTeamMembershipParams) error
 	ListGroupsTeamIDs(ctx context.Context, arg dbgen.ListGroupsTeamIDsParams) ([]dbgen.ListGroupsTeamIDsRow, error)
 	ListReachEntries(ctx context.Context, arg dbgen.ListReachEntriesParams) ([]dbgen.ListReachEntriesRow, error)
+	SetChainGeneration(ctx context.Context, arg dbgen.SetChainGenerationParams) error
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the connection or transaction the queries run on, which the re-render step writes through.
@@ -292,6 +293,9 @@ type Group struct {
 	RemindersUnanswered int64
 	LastReminderAt      *time.Time
 	OwnerAnsweredAt     *time.Time
+	// ChainGeneration is the current start of its Escalation chains, raised by each start and start-over, 0 before the
+	// first (C-32.FR-5).
+	ChainGeneration int64
 }
 
 // groupOf reads a locked row.
@@ -315,6 +319,7 @@ func groupOf(r dbgen.LockGroupsRow) (*Group, error) {
 		AckTimeoutNoticesSent: r.AckTimeoutNoticesSent,
 		Unclaimed:             r.Unclaimed, RemindersSent: r.RemindersSent, RemindersUnanswered: r.RemindersUnanswered,
 		LastReminderAt: timeOf(r.LastReminderAt), OwnerAnsweredAt: timeOf(r.OwnerAnsweredAt),
+		ChainGeneration: r.ChainGeneration,
 	}
 	if r.PriorStatus.Valid {
 		g.Prior = &Prior{Status: Status(r.PriorStatus.String), OwnerUserID: int8Of(r.PriorOwnerUserID),
@@ -354,6 +359,7 @@ func (g *Group) saveParams(orgID int64) dbgen.SaveGroupParams {
 		AckTimeoutStartedAt: timestamptz(g.AckTimeoutStartedAt), AckTimeoutNoticesSent: g.AckTimeoutNoticesSent,
 		Unclaimed: g.Unclaimed, RemindersSent: g.RemindersSent, RemindersUnanswered: g.RemindersUnanswered,
 		LastReminderAt: timestamptz(g.LastReminderAt), OwnerAnsweredAt: timestamptz(g.OwnerAnsweredAt),
+		ChainGeneration: g.ChainGeneration,
 	}
 	if g.Prior != nil {
 		p.PriorStatus = pgtype.Text{String: string(g.Prior.Status), Valid: true}
@@ -402,6 +408,8 @@ type entry struct {
 	// Page is the Page of an event of the kind escalation: the people it names, its gateway and its reason
 	// (C-32.FR-19, C-30.FR-7).
 	Page *Page
+	// Chain is the run, the chain and the step of an event of an Escalation chain, such as escalation_step_skipped.
+	Chain *ChainEntry
 }
 
 // change is what one transition does to a locked Alert Group: the entries it records and, for a status change, the
@@ -414,8 +422,12 @@ type change struct {
 	written bool
 	action  string
 	details map[string]any
-	// configuration marks a change that a change of configuration made, which publishes Quietly (Rendering).
+	// configuration marks a change that a change of configuration made, which publishes Quietly (Rendering) and
+	// starts no Escalation chain (ADR-0018).
 	configuration bool
+	// noChains marks a change that starts no Escalation chain without being a change of configuration for the
+	// re-render: the first Publication that a change of configuration released (markPublished).
+	noChains bool
 }
 
 func (c *change) add(e entry) { c.entries = append(c.entries, e) }
@@ -468,6 +480,9 @@ type Rendering struct {
 	Configuration bool
 	Grows         *Growth
 	Teams         []int64
+	// Unreached, when set, is called by the re-render of the creation of the Alert Group when no Destination reaches
+	// it, or only Broken ones, so that its chains start at once (C-32.FR-5).
+	Unreached func()
 }
 
 // Growth is what a change of a Team's Destination entries may add to the reach of the open Alert Groups that have the
@@ -509,6 +524,8 @@ type Recorded struct {
 	Team        int64
 	// Page is the Page of an event of the kind escalation, which outgoing webhooks carry (C-15.FR-2).
 	Page *Page
+	// Chain is the run, the chain and the step of an event of an Escalation chain, which outgoing webhooks carry.
+	Chain *ChainEntry
 }
 
 // JoinedDestination is the Destination of a destination_joined: its internal id, public_id, name and type, and the
@@ -599,6 +616,8 @@ type dispatcher struct {
 	routeIDs func(ctx context.Context, q Queries, id int64) (string, error)
 	// reached is the answer rule's check whether a Reminder reached a Destination; nil counts none as reached.
 	reached ReminderCheck
+	// chains are the runs of the Escalation chains; nil runs none, and every Alert Group keeps its ack timeout.
+	chains ChainRuns
 }
 
 // dispatch runs t on the locked Alert Group g as actor and records what it did; after are the counters and log lines
@@ -625,7 +644,7 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	if err := d.syncSnoozeTimer(ctx, q, g, snoozeEnd, now); err != nil {
 		return err
 	}
-	if err := d.syncTimers(ctx, q, g, timersBefore, now); err != nil {
+	if err := d.syncTimers(ctx, q, g, timersBefore, &c, now, after); err != nil {
 		return err
 	}
 	markAnswered(g, timersBefore, actor, now)
@@ -647,13 +666,23 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	if err := q.SaveGroup(ctx, g.saveParams(d.orgID)); err != nil {
 		return fmt.Errorf("save alert group #%d: %w", g.Number, err)
 	}
+	if err := d.stopChains(ctx, q, g, timersBefore, recorded, now, after); err != nil {
+		return err
+	}
 	if d.rerender != nil {
-		failures, _, err := d.render(ctx, q, g, actor, recorded, rendering{configuration: c.configuration}, after)
+		unreached := false
+		failures, _, err := d.render(ctx, q, g, actor, recorded, rendering{configuration: c.configuration,
+			unreached: func() { unreached = from == "" }}, after)
 		if err != nil {
 			return err
 		}
 		if err := d.recordFallbacks(ctx, q, g, failures, now); err != nil {
 			return err
+		}
+		if unreached {
+			if err := d.startUnreached(ctx, q, g, now, after); err != nil {
+				return err
+			}
 		}
 	}
 	if err := d.hint(ctx, q, g, from); err != nil {
@@ -675,6 +704,7 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 type rendering struct {
 	configuration bool
 	grows         *Growth
+	unreached     func()
 }
 
 // render runs the re-render step on g, changed by actor with the lifecycle events recorded, in the transaction of q,
@@ -697,7 +727,7 @@ func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Acto
 	if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded, ReceivedAt: received,
 		After: after.add, Fallback: func(f TemplateFailure) { failures = append(failures, f) },
 		Changed: func() { changed = true }, Configuration: how.configuration || how.grows != nil, Grows: how.grows,
-		Teams: teams}); err != nil {
+		Teams: teams, Unreached: how.unreached}); err != nil {
 		return nil, false, err
 	}
 	return failures, changed, nil
@@ -749,6 +779,11 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			p.PagedUserIds, p.GatewayConnectionID, p.Reason = e.Page.userIDs(), e.Page.gatewayID(),
 				nonEmpty(e.Page.Reason)
 		}
+		if e.Chain != nil {
+			p.EscalationRunID = pgtype.Int8{Int64: e.Chain.Run, Valid: true}
+			p.EscalationChainID = pgtype.Int8{Int64: e.Chain.Chain, Valid: e.Chain.Chain != 0}
+			p.StepNumber = pgtype.Int4{Int32: int32(e.Chain.Step), Valid: true} //nolint:gosec // G115: at most 20
+		}
 		// The gateway of a Command through the Transport gateway names its status entry, such as acknowledged, never
 		// the other entries the same Command records.
 		if actor.Gateway != 0 && e.Page == nil && e.Event != "" && rowOf(e.Event, e.Variant).Kind == KindStatus {
@@ -781,7 +816,7 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			}
 			rec := Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant, Loudness: row.Loudness,
 				Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason, Destination: e.Destination,
-				Page: e.Page}
+				Page: e.Page, Chain: e.Chain}
 			if e.TeamID != nil {
 				rec.Team = *e.TeamID
 			}

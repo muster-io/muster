@@ -3,6 +3,7 @@
  * Do not edit manually.
  */
 import type { ActorRef } from './actorRef';
+import type { AlertGroupChain } from './alertGroupChain';
 import type { AlertGroupLink } from './alertGroupLink';
 import type { AlertGroupNotice } from './alertGroupNotice';
 import type { AlertGroupStatus } from './alertGroupStatus';
@@ -66,4 +67,6 @@ export interface AlertGroup {
   links?: AlertGroupLink[];
   /** Commands the current status allows for the caller's Permissions and identity; Acknowledge on another user's Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`. */
   allowed_commands: CommandName[];
+  /** The runs of the Escalation chains of the Alert Group since they last started (C-32.FR-18): one per chain, in the order they started, empty before its chains first started or where none applies. A run stays here, `ran_out` or `stopped`, until the chains start over. Changes arrive as the `alert-group` hint. */
+  escalation_chains: AlertGroupChain[];
 }

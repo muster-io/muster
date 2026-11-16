@@ -12,6 +12,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countGenerationRuns = `-- name: CountGenerationRuns :one
+SELECT count(*)::bigint AS total, count(*) FILTER (WHERE state = 'ran_out')::bigint AS ran_out,
+       count(*) FILTER (WHERE state = 'stopped')::bigint AS stopped
+FROM escalation_runs
+WHERE org_id = $1 AND alert_group_id = $2 AND generation = $3
+`
+
+type CountGenerationRunsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	Generation   int64
+}
+
+type CountGenerationRunsRow struct {
+	Total   int64
+	RanOut  int64
+	Stopped int64
+}
+
+// CountGenerationRuns counts the runs of an Alert Group in a start of its chains: all of them, those that ran out and
+// those stopped.
+func (q *Queries) CountGenerationRuns(ctx context.Context, arg CountGenerationRunsParams) (CountGenerationRunsRow, error) {
+	row := q.db.QueryRow(ctx, countGenerationRuns, arg.OrgID, arg.AlertGroupID, arg.Generation)
+	var i CountGenerationRunsRow
+	err := row.Scan(&i.Total, &i.RanOut, &i.Stopped)
+	return i, err
+}
+
 const deleteChain = `-- name: DeleteChain :exec
 DELETE FROM escalation_chains
 WHERE org_id = $1 AND id = $2
@@ -25,6 +53,22 @@ type DeleteChainParams struct {
 // DeleteChain deletes a chain; its steps, their people and the entries of deleted Routes go with it.
 func (q *Queries) DeleteChain(ctx context.Context, arg DeleteChainParams) error {
 	_, err := q.db.Exec(ctx, deleteChain, arg.OrgID, arg.ID)
+	return err
+}
+
+const deleteRunTimers = `-- name: DeleteRunTimers :exec
+DELETE FROM timers
+WHERE org_id = $1 AND escalation_run_id = ANY($2::bigint[]) AND kind = 'escalation_step'
+`
+
+type DeleteRunTimersParams struct {
+	OrgID  int64
+	RunIds []int64
+}
+
+// DeleteRunTimers deletes the timers of the runs.
+func (q *Queries) DeleteRunTimers(ctx context.Context, arg DeleteRunTimersParams) error {
+	_, err := q.db.Exec(ctx, deleteRunTimers, arg.OrgID, arg.RunIds)
 	return err
 }
 
@@ -92,6 +136,25 @@ func (q *Queries) GetChain(ctx context.Context, arg GetChainParams) (GetChainRow
 	return i, err
 }
 
+const getChainID = `-- name: GetChainID :one
+SELECT id
+FROM escalation_chains
+WHERE org_id = $1 AND public_id = $2
+`
+
+type GetChainIDParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+// GetChainID reads the id of a chain by public_id.
+func (q *Queries) GetChainID(ctx context.Context, arg GetChainIDParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getChainID, arg.OrgID, arg.PublicID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getOrganizationWorkingHours = `-- name: GetOrganizationWorkingHours :one
 
 
@@ -123,6 +186,25 @@ func (q *Queries) GetOrganizationWorkingHours(ctx context.Context, orgID int64) 
 		&i.TimeZone,
 	)
 	return i, err
+}
+
+const getRunGroup = `-- name: GetRunGroup :one
+SELECT alert_group_id
+FROM escalation_runs
+WHERE org_id = $1 AND id = $2
+`
+
+type GetRunGroupParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// GetRunGroup reads the Alert Group of a run, which the step of its timer locks first.
+func (q *Queries) GetRunGroup(ctx context.Context, arg GetRunGroupParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getRunGroup, arg.OrgID, arg.ID)
+	var alert_group_id int64
+	err := row.Scan(&alert_group_id)
+	return alert_group_id, err
 }
 
 const getTeamID = `-- name: GetTeamID :one
@@ -205,6 +287,77 @@ func (q *Queries) InsertChain(ctx context.Context, arg InsertChainParams) (int64
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertRun = `-- name: InsertRun :one
+INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_id, chain_name, owning_team_id, sources, steps,
+                             state, generation, started_at)
+VALUES ($1, $2, $3, $4, $5, $6::bigint, $7,
+        $8, 'running', $9, $10)
+RETURNING id
+`
+
+type InsertRunParams struct {
+	OrgID        int64
+	PublicID     string
+	AlertGroupID int64
+	ChainID      pgtype.Int8
+	ChainName    string
+	OwningTeamID pgtype.Int8
+	Sources      []byte
+	Steps        []byte
+	Generation   int64
+	Now          time.Time
+}
+
+// InsertRun starts a run of a chain on an Alert Group at its first step, with the chain's name and owning Team.
+func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertRun,
+		arg.OrgID,
+		arg.PublicID,
+		arg.AlertGroupID,
+		arg.ChainID,
+		arg.ChainName,
+		arg.OwningTeamID,
+		arg.Sources,
+		arg.Steps,
+		arg.Generation,
+		arg.Now,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertRunStep = `-- name: InsertRunStep :exec
+INSERT INTO escalation_run_steps (org_id, run_id, seq, number, kind, at, outcome, reason)
+VALUES ($1, $2,
+        (SELECT coalesce(max(x.seq), 0) + 1 FROM escalation_run_steps x WHERE x.org_id = $1 AND x.run_id = $2),
+        $3, $4, $5, $6, $7)
+`
+
+type InsertRunStepParams struct {
+	OrgID   int64
+	RunID   int64
+	Number  int32
+	Kind    string
+	At      time.Time
+	Outcome string
+	Reason  pgtype.Text
+}
+
+// InsertRunStep records a step a run made or skipped, numbered after the run's last one.
+func (q *Queries) InsertRunStep(ctx context.Context, arg InsertRunStepParams) error {
+	_, err := q.db.Exec(ctx, insertRunStep,
+		arg.OrgID,
+		arg.RunID,
+		arg.Number,
+		arg.Kind,
+		arg.At,
+		arg.Outcome,
+		arg.Reason,
+	)
+	return err
 }
 
 const insertStep = `-- name: InsertStep :one
@@ -399,6 +552,173 @@ func (q *Queries) ListChainInfo(ctx context.Context, orgID int64) ([]ListChainIn
 	return items, nil
 }
 
+const listChainRuns = `-- name: ListChainRuns :many
+SELECT r.id, r.public_id, r.state, r.started_at, r.ended_at, r.stop_command, g.public_id AS group_public_id,
+       g.number AS group_number, g.title AS group_title, g.severity_level AS group_severity,
+       g.resolved_at AS group_resolved_at, o.retention_alert_details_days,
+       coalesce(e.actor_kind, '')::text AS actor_kind, u.public_id AS user_public_id, u.name AS user_name,
+       u.login AS user_login, coalesce(u.status = 'deleted', false)::boolean AS user_deleted,
+       sa.public_id AS service_account_public_id, sa.name AS service_account_name,
+       coalesce(sa.status = 'deleted', false)::boolean AS service_account_deleted
+FROM escalation_runs r
+JOIN alert_groups g ON g.org_id = r.org_id AND g.id = r.alert_group_id
+JOIN organizations o ON o.id = r.org_id
+LEFT JOIN LATERAL (SELECT te.actor_kind, te.actor_user_id, te.actor_service_account_id
+                   FROM timeline_entries te
+                   WHERE te.org_id = r.org_id AND te.alert_group_id = r.alert_group_id
+                     AND te.event_seq = r.stop_event_seq
+                   LIMIT 1) e ON true
+LEFT JOIN users u ON u.org_id = r.org_id AND u.id = e.actor_user_id
+LEFT JOIN service_accounts sa ON sa.org_id = r.org_id AND sa.id = e.actor_service_account_id
+WHERE r.org_id = $1 AND r.chain_id = $2
+  AND ($3::bigint IS NULL
+       OR (r.started_at, r.id) < ($4::timestamptz, $3::bigint))
+ORDER BY r.started_at DESC, r.id DESC
+LIMIT $5
+`
+
+type ListChainRunsParams struct {
+	OrgID    int64
+	ChainID  pgtype.Int8
+	AfterID  pgtype.Int8
+	AfterAt  pgtype.Timestamptz
+	PageSize int32
+}
+
+type ListChainRunsRow struct {
+	ID                        int64
+	PublicID                  string
+	State                     string
+	StartedAt                 time.Time
+	EndedAt                   pgtype.Timestamptz
+	StopCommand               pgtype.Text
+	GroupPublicID             string
+	GroupNumber               int64
+	GroupTitle                string
+	GroupSeverity             string
+	GroupResolvedAt           pgtype.Timestamptz
+	RetentionAlertDetailsDays int64
+	ActorKind                 string
+	UserPublicID              pgtype.Text
+	UserName                  pgtype.Text
+	UserLogin                 pgtype.Text
+	UserDeleted               bool
+	ServiceAccountPublicID    pgtype.Text
+	ServiceAccountName        pgtype.Text
+	ServiceAccountDeleted     bool
+}
+
+// ListChainRuns reads a page of the runs of a chain, newest first, after a position, with their Alert Groups — with
+// when they resolved and retention.alert_details, which decide whether their details are removed — and what stopped
+// them: the Command and its actor, from the lifecycle event that stopped them.
+func (q *Queries) ListChainRuns(ctx context.Context, arg ListChainRunsParams) ([]ListChainRunsRow, error) {
+	rows, err := q.db.Query(ctx, listChainRuns,
+		arg.OrgID,
+		arg.ChainID,
+		arg.AfterID,
+		arg.AfterAt,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChainRunsRow{}
+	for rows.Next() {
+		var i ListChainRunsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.State,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.StopCommand,
+			&i.GroupPublicID,
+			&i.GroupNumber,
+			&i.GroupTitle,
+			&i.GroupSeverity,
+			&i.GroupResolvedAt,
+			&i.RetentionAlertDetailsDays,
+			&i.ActorKind,
+			&i.UserPublicID,
+			&i.UserName,
+			&i.UserLogin,
+			&i.UserDeleted,
+			&i.ServiceAccountPublicID,
+			&i.ServiceAccountName,
+			&i.ServiceAccountDeleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChainSources = `-- name: ListChainSources :many
+
+SELECT x.kind, x.team_id, x.chain_id, x.severity_condition
+FROM (SELECT 'route'::text AS kind, 0::bigint AS team_id, rc.chain_id, rc.severity_condition
+      FROM route_escalation_chains rc
+      WHERE rc.org_id = $1 AND rc.route_id = $2
+      UNION ALL
+      SELECT 'team'::text, tc.team_id, tc.chain_id, tc.severity_condition
+      FROM team_escalation_chains tc
+      JOIN teams t ON t.org_id = tc.org_id AND t.id = tc.team_id
+      JOIN routes r ON r.org_id = tc.org_id AND r.id = $2
+      WHERE tc.org_id = $1 AND t.deleted_at IS NULL AND r.deliver_to_teams AND r.run_team_chains
+        AND tc.team_id IN (SELECT gt.team_id
+                           FROM alert_group_teams gt
+                           WHERE gt.org_id = $1 AND gt.alert_group_id = $3)) x
+ORDER BY x.chain_id, x.kind, x.team_id
+`
+
+type ListChainSourcesParams struct {
+	OrgID        int64
+	RouteID      int64
+	AlertGroupID int64
+}
+
+type ListChainSourcesRow struct {
+	Kind              string
+	TeamID            int64
+	ChainID           int64
+	SeverityCondition string
+}
+
+// The runs of Escalation chains on Alert Groups (C-32.FR-4 to FR-7, FR-14 to FR-16, FR-18). Every statement below runs
+// in the dispatcher's transaction, after the Alert Group's lock (Lock order of runs.go).
+// ListChainSources lists the chains that may run on an Alert Group, each by the source that names it: its Route's,
+// and, where the Route delivers to the Teams and runs their chains, those of the Teams of the Alert Group that are not
+// deleted, each with its Severity condition.
+func (q *Queries) ListChainSources(ctx context.Context, arg ListChainSourcesParams) ([]ListChainSourcesRow, error) {
+	rows, err := q.db.Query(ctx, listChainSources, arg.OrgID, arg.RouteID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChainSourcesRow{}
+	for rows.Next() {
+		var i ListChainSourcesRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.TeamID,
+			&i.ChainID,
+			&i.SeverityCondition,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChains = `-- name: ListChains :many
 SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.owning_team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
@@ -523,6 +843,184 @@ func (q *Queries) ListGateways(ctx context.Context, orgID int64) ([]ListGateways
 	return items, nil
 }
 
+const listGenerationRuns = `-- name: ListGenerationRuns :many
+SELECT id, public_id, chain_id, state, sources
+FROM escalation_runs
+WHERE org_id = $1 AND alert_group_id = $2 AND generation = $3
+ORDER BY id
+`
+
+type ListGenerationRunsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	Generation   int64
+}
+
+type ListGenerationRunsRow struct {
+	ID       int64
+	PublicID string
+	ChainID  pgtype.Int8
+	State    string
+	Sources  []byte
+}
+
+// ListGenerationRuns lists the runs of an Alert Group in a start of its chains.
+func (q *Queries) ListGenerationRuns(ctx context.Context, arg ListGenerationRunsParams) ([]ListGenerationRunsRow, error) {
+	rows, err := q.db.Query(ctx, listGenerationRuns, arg.OrgID, arg.AlertGroupID, arg.Generation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGenerationRunsRow{}
+	for rows.Next() {
+		var i ListGenerationRunsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.ChainID,
+			&i.State,
+			&i.Sources,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupRuns = `-- name: ListGroupRuns :many
+SELECT g.public_id AS group_public_id, r.id, r.public_id, r.chain_id, r.chain_name, r.sources, r.steps, r.step_index, r.state, r.started_at,
+       c.public_id AS chain_public_id, c.name AS current_chain_name, t.public_id AS team_public_id,
+       t.name AS team_name, t.slug AS team_slug, (t.deleted_at IS NOT NULL)::boolean AS team_deleted,
+       coalesce((SELECT x.deadline
+                 FROM timers x
+                 WHERE x.org_id = r.org_id AND x.escalation_run_id = r.id AND x.kind = 'escalation_step'),
+                '0001-01-01 00:00:00+00')::timestamptz AS deadline
+FROM alert_groups g
+JOIN escalation_runs r ON r.org_id = g.org_id AND r.alert_group_id = g.id AND r.generation = g.chain_generation
+LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = c.owning_team_id
+WHERE g.org_id = $1 AND g.public_id = ANY($2::text[])
+ORDER BY g.id, r.id
+`
+
+type ListGroupRunsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ListGroupRunsRow struct {
+	GroupPublicID    string
+	ID               int64
+	PublicID         string
+	ChainID          pgtype.Int8
+	ChainName        string
+	Sources          []byte
+	Steps            []byte
+	StepIndex        int32
+	State            string
+	StartedAt        time.Time
+	ChainPublicID    pgtype.Text
+	CurrentChainName pgtype.Text
+	TeamPublicID     pgtype.Text
+	TeamName         pgtype.Text
+	TeamSlug         pgtype.Text
+	TeamDeleted      bool
+	Deadline         time.Time
+}
+
+// ListGroupRuns reads the runs of Alert Groups, by public_id, in the current start of their chains
+// (alert_groups.chain_generation), with their chains, owning Teams and the deadline of their timers, the zero time
+// 0001-01-01 for none.
+func (q *Queries) ListGroupRuns(ctx context.Context, arg ListGroupRunsParams) ([]ListGroupRunsRow, error) {
+	rows, err := q.db.Query(ctx, listGroupRuns, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupRunsRow{}
+	for rows.Next() {
+		var i ListGroupRunsRow
+		if err := rows.Scan(
+			&i.GroupPublicID,
+			&i.ID,
+			&i.PublicID,
+			&i.ChainID,
+			&i.ChainName,
+			&i.Sources,
+			&i.Steps,
+			&i.StepIndex,
+			&i.State,
+			&i.StartedAt,
+			&i.ChainPublicID,
+			&i.CurrentChainName,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.TeamSlug,
+			&i.TeamDeleted,
+			&i.Deadline,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPeopleStates = `-- name: ListPeopleStates :many
+SELECT id, public_id, name, login, role, status
+FROM users
+WHERE org_id = $1 AND id = ANY($2::bigint[])
+`
+
+type ListPeopleStatesParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListPeopleStatesRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Login    string
+	Role     string
+	Status   string
+}
+
+// ListPeopleStates reads the Role and status of the people a step names, deleted ones included.
+func (q *Queries) ListPeopleStates(ctx context.Context, arg ListPeopleStatesParams) ([]ListPeopleStatesRow, error) {
+	rows, err := q.db.Query(ctx, listPeopleStates, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPeopleStatesRow{}
+	for rows.Next() {
+		var i ListPeopleStatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Login,
+			&i.Role,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteReferrers = `-- name: ListRouteReferrers :many
 SELECT rc.chain_id, r.id, r.public_id, r.name, rc.severity_condition
 FROM route_escalation_chains rc
@@ -561,6 +1059,57 @@ func (q *Queries) ListRouteReferrers(ctx context.Context, arg ListRouteReferrers
 			&i.PublicID,
 			&i.Name,
 			&i.SeverityCondition,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunSteps = `-- name: ListRunSteps :many
+SELECT run_id, seq, number, kind, at, outcome, reason
+FROM escalation_run_steps
+WHERE org_id = $1 AND run_id = ANY($2::bigint[])
+ORDER BY run_id, seq
+`
+
+type ListRunStepsParams struct {
+	OrgID  int64
+	RunIds []int64
+}
+
+type ListRunStepsRow struct {
+	RunID   int64
+	Seq     int32
+	Number  int32
+	Kind    string
+	At      time.Time
+	Outcome string
+	Reason  pgtype.Text
+}
+
+// ListRunSteps reads the steps the runs made or skipped, in their order.
+func (q *Queries) ListRunSteps(ctx context.Context, arg ListRunStepsParams) ([]ListRunStepsRow, error) {
+	rows, err := q.db.Query(ctx, listRunSteps, arg.OrgID, arg.RunIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRunStepsRow{}
+	for rows.Next() {
+		var i ListRunStepsRow
+		if err := rows.Scan(
+			&i.RunID,
+			&i.Seq,
+			&i.Number,
+			&i.Kind,
+			&i.At,
+			&i.Outcome,
+			&i.Reason,
 		); err != nil {
 			return nil, err
 		}
@@ -789,6 +1338,52 @@ func (q *Queries) ListTeamReferrers(ctx context.Context, arg ListTeamReferrersPa
 	return items, nil
 }
 
+const listTeamRefs = `-- name: ListTeamRefs :many
+SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
+FROM teams
+WHERE org_id = $1 AND id = ANY($2::bigint[])
+`
+
+type ListTeamRefsParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListTeamRefsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
+}
+
+// ListTeamRefs names Teams by id, deleted ones included.
+func (q *Queries) ListTeamRefs(ctx context.Context, arg ListTeamRefsParams) ([]ListTeamRefsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamRefs, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamRefsRow{}
+	for rows.Next() {
+		var i ListTeamRefsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.Deleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserTeams = `-- name: ListUserTeams :many
 SELECT t.id
 FROM team_users tu
@@ -897,6 +1492,78 @@ func (q *Queries) LockOwningTeam(ctx context.Context, arg LockOwningTeamParams) 
 		&i.Slug,
 	)
 	return i, err
+}
+
+const lockRun = `-- name: LockRun :one
+SELECT r.id, r.public_id, r.alert_group_id, r.chain_id, r.chain_name, r.steps, r.step_index, r.repeats, r.state,
+       r.generation, c.public_id AS chain_public_id, r.owning_team_id,
+       (SELECT coalesce(max(s.seq), 0)
+        FROM escalation_run_steps s
+        WHERE s.org_id = r.org_id AND s.run_id = r.id)::bigint AS steps_made,
+       coalesce((SELECT t.deadline
+                 FROM timers t
+                 WHERE t.org_id = r.org_id AND t.escalation_run_id = r.id AND t.kind = 'escalation_step'),
+                '0001-01-01 00:00:00+00')::timestamptz AS deadline
+FROM escalation_runs r
+LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+WHERE r.org_id = $1 AND r.id = $2
+FOR NO KEY UPDATE OF r
+`
+
+type LockRunParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockRunRow struct {
+	ID            int64
+	PublicID      string
+	AlertGroupID  int64
+	ChainID       pgtype.Int8
+	ChainName     string
+	Steps         []byte
+	StepIndex     int32
+	Repeats       []byte
+	State         string
+	Generation    int64
+	ChainPublicID pgtype.Text
+	OwningTeamID  pgtype.Int8
+	StepsMade     int64
+	Deadline      time.Time
+}
+
+// LockRun locks a run for its step, after its Alert Group, with the deadline of its timer — none, the zero time
+// 0001-01-01, once it was stopped or replaced — and the number of steps it made and skipped so far.
+func (q *Queries) LockRun(ctx context.Context, arg LockRunParams) (LockRunRow, error) {
+	row := q.db.QueryRow(ctx, lockRun, arg.OrgID, arg.ID)
+	var i LockRunRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.AlertGroupID,
+		&i.ChainID,
+		&i.ChainName,
+		&i.Steps,
+		&i.StepIndex,
+		&i.Repeats,
+		&i.State,
+		&i.Generation,
+		&i.ChainPublicID,
+		&i.OwningTeamID,
+		&i.StepsMade,
+		&i.Deadline,
+	)
+	return i, err
+}
+
+const notifyRunTimers = `-- name: NotifyRunTimers :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyRunTimers wakes the timer workers of every replica once the transaction commits.
+func (q *Queries) NotifyRunTimers(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyRunTimers, channel)
+	return err
 }
 
 const resolveDestinations = `-- name: ResolveDestinations :many
@@ -1098,6 +1765,229 @@ func (q *Queries) ResolveUsers(ctx context.Context, arg ResolveUsersParams) ([]R
 	return items, nil
 }
 
+const saveRun = `-- name: SaveRun :exec
+UPDATE escalation_runs
+SET step_index = $1, repeats = $2, state = $3, ended_at = $4
+WHERE org_id = $5 AND id = $6
+`
+
+type SaveRunParams struct {
+	StepIndex int32
+	Repeats   []byte
+	State     string
+	EndedAt   pgtype.Timestamptz
+	OrgID     int64
+	ID        int64
+}
+
+// SaveRun writes where a run is after its steps.
+func (q *Queries) SaveRun(ctx context.Context, arg SaveRunParams) error {
+	_, err := q.db.Exec(ctx, saveRun,
+		arg.StepIndex,
+		arg.Repeats,
+		arg.State,
+		arg.EndedAt,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const setRunSources = `-- name: SetRunSources :exec
+UPDATE escalation_runs
+SET sources = $1
+WHERE org_id = $2 AND id = $3
+`
+
+type SetRunSourcesParams struct {
+	Sources []byte
+	OrgID   int64
+	ID      int64
+}
+
+// SetRunSources writes the sources of a run that another source now names too (P-70).
+func (q *Queries) SetRunSources(ctx context.Context, arg SetRunSourcesParams) error {
+	_, err := q.db.Exec(ctx, setRunSources, arg.Sources, arg.OrgID, arg.ID)
+	return err
+}
+
+const shareChains = `-- name: ShareChains :many
+SELECT id, public_id, name, owning_team_id
+FROM escalation_chains
+WHERE org_id = $1 AND id = ANY($2::bigint[])
+ORDER BY id
+FOR KEY SHARE
+`
+
+type ShareChainsParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ShareChainsRow struct {
+	ID           int64
+	PublicID     string
+	Name         string
+	OwningTeamID pgtype.Int8
+}
+
+// ShareChains reads the chains a start runs FOR KEY SHARE in id order, before any run is written: the deletion of a
+// chain locks it FOR UPDATE first and waits, or has deleted it and the start finds it gone.
+func (q *Queries) ShareChains(ctx context.Context, arg ShareChainsParams) ([]ShareChainsRow, error) {
+	rows, err := q.db.Query(ctx, shareChains, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ShareChainsRow{}
+	for rows.Next() {
+		var i ShareChainsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.OwningTeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const snapshotSteps = `-- name: SnapshotSteps :many
+SELECT s.chain_id, s.position, s.kind, s.importance, s.schedule_id, sc.public_id AS schedule_public_id, s.team_id,
+       s.everyone, s.call_target, s.gateway_connection_id, s.wait_seconds, s.destination_id, s.repeat_from,
+       s.repeat_times, s.working_hours_only, s.severity_condition,
+       ARRAY(SELECT su.user_id
+             FROM escalation_step_users su
+             WHERE su.org_id = s.org_id AND su.step_id = s.id
+             ORDER BY su.position)::bigint[] AS user_ids
+FROM escalation_steps s
+LEFT JOIN schedules sc ON sc.org_id = s.org_id AND sc.id = s.schedule_id
+WHERE s.org_id = $1 AND s.chain_id = ANY($2::bigint[])
+ORDER BY s.chain_id, s.position
+`
+
+type SnapshotStepsParams struct {
+	OrgID    int64
+	ChainIds []int64
+}
+
+type SnapshotStepsRow struct {
+	ChainID             int64
+	Position            int32
+	Kind                string
+	Importance          pgtype.Text
+	ScheduleID          pgtype.Int8
+	SchedulePublicID    pgtype.Text
+	TeamID              pgtype.Int8
+	Everyone            pgtype.Text
+	CallTarget          pgtype.Text
+	GatewayConnectionID pgtype.Int8
+	WaitSeconds         pgtype.Int4
+	DestinationID       pgtype.Int8
+	RepeatFrom          pgtype.Int4
+	RepeatTimes         pgtype.Int4
+	WorkingHoursOnly    bool
+	SeverityCondition   string
+	UserIds             []int64
+}
+
+// SnapshotSteps reads the steps of the chains with the people of each, in one statement, so that a run takes the steps
+// of one version of its chain (P-73).
+func (q *Queries) SnapshotSteps(ctx context.Context, arg SnapshotStepsParams) ([]SnapshotStepsRow, error) {
+	rows, err := q.db.Query(ctx, snapshotSteps, arg.OrgID, arg.ChainIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SnapshotStepsRow{}
+	for rows.Next() {
+		var i SnapshotStepsRow
+		if err := rows.Scan(
+			&i.ChainID,
+			&i.Position,
+			&i.Kind,
+			&i.Importance,
+			&i.ScheduleID,
+			&i.SchedulePublicID,
+			&i.TeamID,
+			&i.Everyone,
+			&i.CallTarget,
+			&i.GatewayConnectionID,
+			&i.WaitSeconds,
+			&i.DestinationID,
+			&i.RepeatFrom,
+			&i.RepeatTimes,
+			&i.WorkingHoursOnly,
+			&i.SeverityCondition,
+			&i.UserIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const stopRuns = `-- name: StopRuns :many
+UPDATE escalation_runs r
+SET state = 'stopped', ended_at = $1, stop_command = $2, stop_event_seq = $3
+WHERE r.org_id = $4 AND r.alert_group_id = $5 AND r.state = 'running'
+RETURNING r.id, r.public_id,
+          coalesce((SELECT c.public_id
+                    FROM escalation_chains c
+                    WHERE c.org_id = r.org_id AND c.id = r.chain_id), '')::text AS chain_public_id
+`
+
+type StopRunsParams struct {
+	Now          pgtype.Timestamptz
+	StopCommand  pgtype.Text
+	StopEventSeq pgtype.Int8
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type StopRunsRow struct {
+	ID            int64
+	PublicID      string
+	ChainPublicID string
+}
+
+// StopRuns stops the running runs of an Alert Group with what stopped them; runs that ran out stay as they are.
+func (q *Queries) StopRuns(ctx context.Context, arg StopRunsParams) ([]StopRunsRow, error) {
+	rows, err := q.db.Query(ctx, stopRuns,
+		arg.Now,
+		arg.StopCommand,
+		arg.StopEventSeq,
+		arg.OrgID,
+		arg.AlertGroupID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StopRunsRow{}
+	for rows.Next() {
+		var i StopRunsRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.ChainPublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateChain = `-- name: UpdateChain :exec
 UPDATE escalation_chains
 SET name = $1, description = $2, owning_team_id = $3::bigint,
@@ -1123,6 +2013,33 @@ func (q *Queries) UpdateChain(ctx context.Context, arg UpdateChainParams) error 
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertRunTimer = `-- name: UpsertRunTimer :exec
+INSERT INTO timers (org_id, escalation_run_id, kind, deadline, created_at, updated_at)
+VALUES ($1, $2::bigint, 'escalation_step', $3, $4, $4)
+ON CONFLICT (escalation_run_id) WHERE escalation_run_id IS NOT NULL
+DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NULL, attempts = 0,
+              updated_at = excluded.updated_at
+`
+
+type UpsertRunTimerParams struct {
+	OrgID           int64
+	EscalationRunID int64
+	Deadline        time.Time
+	Now             time.Time
+}
+
+// UpsertRunTimer sets the timer of a run at its deadline, a new lease to claim. The subject is the run: the Alert Group
+// and the Storm are null, and the conflict is on timers_escalation_run_key, never timers_alert_group_key.
+func (q *Queries) UpsertRunTimer(ctx context.Context, arg UpsertRunTimerParams) error {
+	_, err := q.db.Exec(ctx, upsertRunTimer,
+		arg.OrgID,
+		arg.EscalationRunID,
+		arg.Deadline,
+		arg.Now,
 	)
 	return err
 }

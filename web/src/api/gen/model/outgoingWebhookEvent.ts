@@ -7,6 +7,7 @@ import type { WebhookActor } from './webhookActor';
 import type { WebhookAlert } from './webhookAlert';
 import type { WebhookAlertGroup } from './webhookAlertGroup';
 import type { WebhookDestinationRef } from './webhookDestinationRef';
+import type { WebhookEscalationStep } from './webhookEscalationStep';
 import type { WebhookEventName } from './webhookEventName';
 import type { WebhookMentionTarget } from './webhookMentionTarget';
 import type { WebhookPage } from './webhookPage';
@@ -34,6 +35,8 @@ export interface OutgoingWebhookEvent {
   destination?: WebhookDestinationRef;
   /** The Page, only on `page_not_delivered`. */
   page?: WebhookPage;
+  /** The chain, the step and the reason, only on `escalation_step_skipped`. */
+  escalation_step?: WebhookEscalationStep;
   /** True only on the `test` event, which carries an example or recent Alert Group and belongs to no Alert Group's order. */
   test?: boolean;
 }

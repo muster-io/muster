@@ -220,3 +220,90 @@ func TestStormAlertGroups(t *testing.T) {
 		}
 	})
 }
+
+// TestPublishedByConfiguration is C-32.FR-5 and ADR-0018 on PostgreSQL: ReleaseHeld marks the release of a held
+// delivery by a change of configuration (Quiet) as published by configuration, and an Alert's release does not; the
+// mark is cleared where an Alert restarts the first Publication — a re-hold by RejoinDelivery, the end of the Storm
+// (ReleaseHeldOpen) and a Desired state that is not Quiet — so that its Publication starts the Escalation chains; a
+// Quiet Desired state keeps it; the worker's lease reads it.
+func TestPublishedByConfiguration(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fresh(t, 1000, 1)
+		l.fire(t, "g", "disk1")
+		q := deliverydb.New(l.d.Pool)
+		var id, group, storm int64
+		if err := l.d.Pool.QueryRow(ctx, `SELECT id, alert_group_id FROM deliveries WHERE alert_group_id IS NOT NULL`).
+			Scan(&id, &group); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO storms (org_id, route_id, started_at, alert_group_count)
+			VALUES ($1, $2, $3, 3) RETURNING id`, l.orgID, l.routeID, l.business.Now()).Scan(&storm); err != nil {
+			t.Fatal(err)
+		}
+		flag := func() bool {
+			t.Helper()
+			var b bool
+			if err := l.d.Pool.QueryRow(ctx, `SELECT published_by_configuration FROM deliveries WHERE id = $1`,
+				id).Scan(&b); err != nil {
+				t.Fatal(err)
+			}
+			return b
+		}
+		hold := func() {
+			t.Helper()
+			l.exec(t, `UPDATE deliveries SET held_by_storm_id = $2, state = 'pending', published_at = NULL
+				WHERE id = $1`, id, storm)
+		}
+		release := func(loud bool) {
+			t.Helper()
+			if err := q.ReleaseHeld(ctx, deliverydb.ReleaseHeldParams{OrgID: l.orgID, ID: id, Loud: loud,
+				Now: l.business.Now()}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		hold()
+		release(true)
+		if flag() {
+			t.Error("an Alert's release is marked as by configuration")
+		}
+		hold()
+		release(false)
+		if !flag() {
+			t.Fatal("the release by a raised Minimum severity is not marked")
+		}
+		// Re-held by a rejoin while a Storm holds the Alert Group, then published at the Storm's end.
+		l.exec(t, `UPDATE deliveries SET state = 'withheld' WHERE id = $1`, id)
+		if _, err := q.RejoinDelivery(ctx, deliverydb.RejoinDeliveryParams{OrgID: l.orgID, AlertGroupID: group,
+			DestinationID: l.dests[0], HeldByStormID: pgtype.Int8{Int64: storm, Valid: true},
+			Now: l.business.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if flag() {
+			t.Error("a rejoin keeps the mark")
+		}
+		release(false)
+		l.exec(t, `UPDATE deliveries SET held_by_storm_id = $2 WHERE id = $1`, id, storm)
+		if err := q.ReleaseHeldOpen(ctx, deliverydb.ReleaseHeldOpenParams{OrgID: l.orgID, StormID: storm, Loud: false,
+			Now: l.business.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if flag() {
+			t.Error("the end of the Storm keeps the mark")
+		}
+		// A Quiet Desired state keeps the mark; one that an Alert or a Command made clears it.
+		for _, quiet := range []bool{true, false} {
+			hold()
+			release(false)
+			if _, err := q.SetDesired(ctx, deliverydb.SetDesiredParams{OrgID: l.orgID, ID: id, DesiredText: "t",
+				DesiredHash: []byte{byte(len("q"))}, Open: true, Quiet: quiet, Firing: true,
+				Now: l.business.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if flag() != quiet {
+				t.Errorf("a Desired state Quiet %v: marked %v", quiet, flag())
+			}
+		}
+	})
+}

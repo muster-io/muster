@@ -621,6 +621,38 @@ func (q *Queries) DeleteExpiredMemberships(ctx context.Context, arg DeleteExpire
 	return result.RowsAffected(), nil
 }
 
+const deleteExpiredRunSteps = `-- name: DeleteExpiredRunSteps :execrows
+DELETE FROM escalation_run_steps s
+WHERE s.org_id = $1 AND (s.run_id, s.seq) IN (
+    SELECT x.run_id, x.seq
+    FROM escalation_run_steps x
+    JOIN escalation_runs r ON r.org_id = x.org_id AND r.id = x.run_id
+    JOIN alert_groups g ON g.org_id = r.org_id AND g.id = r.alert_group_id
+    WHERE x.org_id = $1 AND x.at < $2::timestamptz AND g.status = 'resolved'
+      AND g.resolved_at < $2::timestamptz
+    LIMIT $3
+    FOR UPDATE OF x SKIP LOCKED)
+`
+
+type DeleteExpiredRunStepsParams struct {
+	OrgID     int64
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+// DeleteExpiredRunSteps deletes at most @batch_size steps of the runs of Escalation chains on Alert Groups resolved
+// before @cutoff, the details of those Alert Groups ("How it went"); the runs stay with their summary rows. It starts
+// from the steps still present that were made before the cutoff (escalation_run_steps_at_idx) — a step is made while
+// its Alert Group fires, so before it resolves — and not from every Alert Group resolved long ago, whose steps are
+// mostly gone. Rows another transaction holds wait for the next run.
+func (q *Queries) DeleteExpiredRunSteps(ctx context.Context, arg DeleteExpiredRunStepsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredRunSteps, arg.OrgID, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteOpenGroupUpdate = `-- name: DeleteOpenGroupUpdate :exec
 DELETE FROM open_group_updates
 WHERE org_id = $1 AND id = $2
@@ -1395,7 +1427,7 @@ INSERT INTO timeline_entries (
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
     period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
-    paged_user_ids, gateway_connection_id
+    paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
@@ -1406,7 +1438,8 @@ VALUES (
     $24, $25::text[], $26,
     $27, $28, $29, $30,
     $31, $32, $33, $34,
-    $35, $36::bigint[], $37
+    $35, $36::bigint[], $37,
+    $38, $39, $40
 )
 `
 
@@ -1448,6 +1481,9 @@ type InsertTimelineEntryParams struct {
 	DestinationID         pgtype.Int8
 	PagedUserIds          []int64
 	GatewayConnectionID   pgtype.Int8
+	EscalationRunID       pgtype.Int8
+	EscalationChainID     pgtype.Int8
+	StepNumber            pgtype.Int4
 }
 
 // InsertTimelineEntry records one Timeline entry: a lifecycle event or a system entry.
@@ -1490,6 +1526,9 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.DestinationID,
 		arg.PagedUserIds,
 		arg.GatewayConnectionID,
+		arg.EscalationRunID,
+		arg.EscalationChainID,
+		arg.StepNumber,
 	)
 	return err
 }
@@ -4179,7 +4218,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -4235,6 +4274,9 @@ type ListTimelineAscRow struct {
 	DestinationID         pgtype.Int8
 	PagedUserIds          []int64
 	GatewayConnectionID   pgtype.Int8
+	EscalationRunID       pgtype.Int8
+	EscalationChainID     pgtype.Int8
+	StepNumber            pgtype.Int4
 }
 
 // ListTimelineAsc reads the Timeline entries of an Alert Group, oldest first, after a position.
@@ -4291,6 +4333,66 @@ func (q *Queries) ListTimelineAsc(ctx context.Context, arg ListTimelineAscParams
 			&i.DestinationID,
 			&i.PagedUserIds,
 			&i.GatewayConnectionID,
+			&i.EscalationRunID,
+			&i.EscalationChainID,
+			&i.StepNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTimelineChains = `-- name: ListTimelineChains :many
+SELECT r.id AS run_id, r.chain_name, c.public_id AS chain_public_id, c.name AS chain_name_now,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted
+FROM escalation_runs r
+LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = c.owning_team_id
+WHERE r.org_id = $1 AND r.id = ANY($2::bigint[])
+`
+
+type ListTimelineChainsParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListTimelineChainsRow struct {
+	RunID         int64
+	ChainName     string
+	ChainPublicID pgtype.Text
+	ChainNameNow  pgtype.Text
+	TeamPublicID  pgtype.Text
+	TeamName      pgtype.Text
+	TeamSlug      pgtype.Text
+	TeamDeleted   bool
+}
+
+// ListTimelineChains names the chains of the escalation entries by their runs: the chain with its owning Team, null
+// once deleted, and the name of the chain when the run started.
+func (q *Queries) ListTimelineChains(ctx context.Context, arg ListTimelineChainsParams) ([]ListTimelineChainsRow, error) {
+	rows, err := q.db.Query(ctx, listTimelineChains, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTimelineChainsRow{}
+	for rows.Next() {
+		var i ListTimelineChainsRow
+		if err := rows.Scan(
+			&i.RunID,
+			&i.ChainName,
+			&i.ChainPublicID,
+			&i.ChainNameNow,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.TeamSlug,
+			&i.TeamDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -4386,7 +4488,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -4442,6 +4544,9 @@ type ListTimelineDescRow struct {
 	DestinationID         pgtype.Int8
 	PagedUserIds          []int64
 	GatewayConnectionID   pgtype.Int8
+	EscalationRunID       pgtype.Int8
+	EscalationChainID     pgtype.Int8
+	StepNumber            pgtype.Int4
 }
 
 // The Timeline merges three sources by (at, source, id): its entries (source 0), Notes (1) and delivery events (2).
@@ -4500,6 +4605,9 @@ func (q *Queries) ListTimelineDesc(ctx context.Context, arg ListTimelineDescPara
 			&i.DestinationID,
 			&i.PagedUserIds,
 			&i.GatewayConnectionID,
+			&i.EscalationRunID,
+			&i.EscalationChainID,
+			&i.StepNumber,
 		); err != nil {
 			return nil, err
 		}
@@ -4889,7 +4997,7 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
        last_changed_at, first_acknowledged_at, first_published_at, ack_timeout_started_at, ack_timeout_notices_sent,
        unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at,
-       first_acknowledged_by_user_id
+       first_acknowledged_by_user_id, chain_generation
 FROM alert_groups
 WHERE org_id = $1 AND id = ANY($2::bigint[])
 ORDER BY id
@@ -4959,6 +5067,7 @@ type LockGroupsRow struct {
 	LastReminderAt                 pgtype.Timestamptz
 	OwnerAnsweredAt                pgtype.Timestamptz
 	FirstAcknowledgedByUserID      pgtype.Int8
+	ChainGeneration                int64
 }
 
 // LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other. The lock
@@ -5033,6 +5142,7 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 			&i.LastReminderAt,
 			&i.OwnerAnsweredAt,
 			&i.FirstAcknowledgedByUserID,
+			&i.ChainGeneration,
 		); err != nil {
 			return nil, err
 		}
@@ -5521,8 +5631,8 @@ SET route_id = $1, moved_from_route_id = $2, title = $3,
     first_published_at = $42, ack_timeout_started_at = $43,
     ack_timeout_notices_sent = $44, unclaimed = $45, reminders_sent = $46,
     reminders_unanswered = $47, last_reminder_at = $48,
-    owner_answered_at = $49
-WHERE org_id = $50 AND id = $51
+    owner_answered_at = $49, chain_generation = $50
+WHERE org_id = $51 AND id = $52
 `
 
 type SaveGroupParams struct {
@@ -5575,6 +5685,7 @@ type SaveGroupParams struct {
 	RemindersUnanswered            int64
 	LastReminderAt                 pgtype.Timestamptz
 	OwnerAnsweredAt                pgtype.Timestamptz
+	ChainGeneration                int64
 	OrgID                          int64
 	ID                             int64
 }
@@ -5631,6 +5742,7 @@ func (q *Queries) SaveGroup(ctx context.Context, arg SaveGroupParams) error {
 		arg.RemindersUnanswered,
 		arg.LastReminderAt,
 		arg.OwnerAnsweredAt,
+		arg.ChainGeneration,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -5645,6 +5757,25 @@ SAVEPOINT grouping
 // start again under the counter row when an Alert Group it found turns out to need a creation or a Reopen.
 func (q *Queries) SavepointGrouping(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, savepointGrouping)
+	return err
+}
+
+const setChainGeneration = `-- name: SetChainGeneration :exec
+UPDATE alert_groups
+SET chain_generation = $1
+WHERE org_id = $2 AND id = $3
+`
+
+type SetChainGenerationParams struct {
+	ChainGeneration int64
+	OrgID           int64
+	ID              int64
+}
+
+// SetChainGeneration writes the start of the chains of an Alert Group that the re-render step found no Destination
+// for, after the dispatcher saved it.
+func (q *Queries) SetChainGeneration(ctx context.Context, arg SetChainGenerationParams) error {
+	_, err := q.db.Exec(ctx, setChainGeneration, arg.ChainGeneration, arg.OrgID, arg.ID)
 	return err
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/schedules/dbgen"
 )
@@ -564,11 +565,21 @@ func (s *Service) OnCall(ctx context.Context, scheduleID string, from, to *time.
 
 // OnCallAt is the person On-call in the Schedule scheduleID at t and what decides it, nil in a gap (C-27.FR-4).
 func (s *Service) OnCallAt(ctx context.Context, scheduleID string, t time.Time) (Segment, error) {
-	sc, err := s.get(ctx, s.store, scheduleID)
+	return s.OnCallAtIn(ctx, nil, scheduleID, t)
+}
+
+// OnCallAtIn is OnCallAt read through db, the transaction of the caller, such as the step of an Escalation chain that
+// holds its Alert Group's lock, or the main pool for a nil one.
+func (s *Service) OnCallAtIn(ctx context.Context, db mentions.DBTX, scheduleID string, t time.Time) (Segment, error) {
+	q := Queries(s.store)
+	if db != nil {
+		q = s.store.On(db)
+	}
+	sc, err := s.get(ctx, q, scheduleID)
 	if err != nil {
 		return Segment{}, err
 	}
-	res, err := s.result(ctx, s.store, sc, t, t.Add(time.Second))
+	res, err := s.result(ctx, q, sc, t, t.Add(time.Second))
 	if err != nil {
 		return Segment{}, err
 	}

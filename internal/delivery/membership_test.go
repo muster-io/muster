@@ -92,6 +92,7 @@ func (f *fakeDB) RejoinDelivery(_ context.Context, arg dbgen.RejoinDeliveryParam
 			d.publishedAt, d.responseValues, d.threadOpened = nil, nil, false
 			d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, false
 			d.loud, d.heldBy = pgtype.Bool{Bool: arg.Loud, Valid: true}, arg.HeldByStormID.Int64
+			d.byConfiguration = false
 			d.actualStatus, d.pastEditWindow, d.restarted = nil, false, nil
 		}
 		d.lateNote, d.desiredRetire, d.state, d.next, d.updated = false, false, "pending", arg.Now, arg.Now

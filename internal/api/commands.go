@@ -46,7 +46,12 @@ func (s *Server) command(ctx context.Context, run func(groups.Caller) (groups.Re
 	if err != nil {
 		return gen.CommandResult{}, err
 	}
-	return gen.CommandResult{Outcome: gen.CommandOutcome(r.Outcome), AlertGroup: alertGroupOf(r.Group, c)}, nil
+	chains, err := s.groupChains(ctx, r.Group.PublicID)
+	if err != nil {
+		return gen.CommandResult{}, err
+	}
+	return gen.CommandResult{Outcome: gen.CommandOutcome(r.Outcome), AlertGroup: alertGroupOf(r.Group, c,
+		chains[r.Group.PublicID])}, nil
 }
 
 // AcknowledgeAlertGroup is acknowledgeAlertGroup.

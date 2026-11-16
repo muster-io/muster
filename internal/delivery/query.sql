@@ -115,7 +115,9 @@ RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_
 -- (@configuration_only, configurationOnly in enqueue.go), which ClaimDueDeliveries takes after the rest: set only on a
 -- delivered row, kept on a pending row that had it, cleared once the edit is delivered (MarkDelivered, RecordDelivered,
 -- RecordRepublished) and by any other change, so that a Publication, a final edit, a delivery restarted after Not
--- delivered and a re-render on top of the pending change of an Alert or a Command keep their place.
+-- delivered and a re-render on top of the pending change of an Alert or a Command keep their place. A change that is
+-- not one of configuration (not @quiet) clears published_by_configuration: an Alert or a Command restarting the first
+-- Publication makes it one that starts the Escalation chains.
 -- name: SetDesired :one
 UPDATE deliveries
 SET desired_version     = desired_version + 1,
@@ -136,6 +138,7 @@ SET desired_version     = desired_version + 1,
                               ELSE publication_loud
                           END,
     late_note           = CASE WHEN @open::boolean THEN false ELSE late_note END,
+    published_by_configuration = published_by_configuration AND @quiet::boolean,
     configuration_only  = @configuration_only::boolean AND published_at IS NOT NULL AND NOT desired_retire
                           AND (state = 'delivered' OR (state = 'pending' AND configuration_only)),
     urgent              = @urgent,
@@ -287,7 +290,7 @@ SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
        d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, d.thread_anchor_id,
        d.actual_status, d.past_edit_window, d.republication_started_at, d.urgent, d.configuration_only,
-       ds.id AS destination_id,
+       d.published_by_configuration, ds.id AS destination_id,
        ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id, (ds.deleted_at IS NOT NULL)::boolean AS destination_deleted,
@@ -1293,12 +1296,13 @@ WHERE d.org_id = @org_id AND d.storm_id = @storm_id::bigint
 ORDER BY d.id;
 
 -- ReleaseHeld lets an Alert Group a Storm holds be published at once: it became Urgent. A release that a change of
--- configuration made — a raised Minimum severity — publishes Quietly (@loud false); one that an Alert made keeps the
+-- configuration made — a raised Minimum severity — publishes Quietly (@loud false) and marks the Publication as made by
+-- configuration, which starts no Escalation chain (published_by_configuration); one that an Alert made keeps the
 -- loudness the delivery was created with.
 -- name: ReleaseHeld :exec
 UPDATE deliveries
-SET held_by_storm_id = NULL, publication_loud = (publication_loud AND @loud::boolean), next_attempt_at = @now,
-    updated_at = @now
+SET held_by_storm_id = NULL, publication_loud = (publication_loud AND @loud::boolean),
+    published_by_configuration = NOT @loud::boolean, next_attempt_at = @now, updated_at = @now
 WHERE org_id = @org_id AND id = @id AND held_by_storm_id IS NOT NULL;
 
 -- LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.
@@ -1333,11 +1337,13 @@ JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 WHERE d.org_id = @org_id AND d.held_by_storm_id = @storm_id::bigint AND d.state = 'pending'
   AND g.status <> 'resolved';
 
--- ReleaseHeldOpen publishes the open Alert Groups a Storm held, Loud as @loud, within the limiters (C-11.FR-6). It locks
+-- ReleaseHeldOpen publishes the open Alert Groups a Storm held, Loud as @loud, within the limiters (C-11.FR-6), as
+-- Publications that start the Escalation chains, whatever released them before (published_by_configuration). It locks
 -- the held deliveries by Alert Group, then by Destination, the order of Enqueue and of the re-render after a rotation.
 -- name: ReleaseHeldOpen :exec
 UPDATE deliveries d
-SET held_by_storm_id = NULL, publication_loud = @loud::boolean, next_attempt_at = @now, updated_at = @now
+SET held_by_storm_id = NULL, publication_loud = @loud::boolean, published_by_configuration = false,
+    next_attempt_at = @now, updated_at = @now
 FROM (SELECT x.id
       FROM deliveries x
       JOIN alert_groups g ON g.org_id = x.org_id AND g.id = x.alert_group_id
@@ -1458,8 +1464,9 @@ WHERE org_id = @org_id AND id = @id;
 
 -- RejoinDelivery makes the delivery of an open Alert Group in a Destination that joins its Route current again: one
 -- that left (retired) or was never published there (withheld) is published afresh, Quiet as @loud, held by the active
--- Storm @held_by_storm_id when one holds the Alert Group; one whose final edit still waits keeps its Root message and
--- is edited to the current state instead.
+-- Storm @held_by_storm_id when one holds the Alert Group, its earlier release by configuration forgotten
+-- (published_by_configuration); one whose final edit still waits keeps its Root message and is edited to the current
+-- state instead.
 -- name: RejoinDelivery :execrows
 UPDATE deliveries
 SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE message_id END,
@@ -1477,6 +1484,7 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     publication_started_at   = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE publication_started_at END,
     republication_started_at = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE republication_started_at END,
     publication_loud         = CASE WHEN state IN ('retired', 'withheld') THEN @loud::boolean ELSE publication_loud END,
+    published_by_configuration = published_by_configuration AND state NOT IN ('retired', 'withheld'),
     republished_after_delete = CASE WHEN state IN ('retired', 'withheld') THEN false ELSE republished_after_delete END,
     late_note                = false,
     desired_retire           = false,

@@ -23,8 +23,20 @@ type EscalationChains interface {
 	Delete(ctx context.Context, r escalation.Requester, publicID string, version *int64) error
 }
 
-// escalationChainsCursor is the cursor of the list of Escalation chains.
-const escalationChainsCursor = "escalation-chains"
+// ChainRuns is what the API needs of the runs of Escalation chains (C-32.FR-18): the runs of the current start of
+// the chains of Alert Groups, and the recent runs of a chain.
+type ChainRuns interface {
+	GroupChains(ctx context.Context, publicIDs []string) (map[string][]escalation.GroupChain, error)
+	ChainRuns(ctx context.Context, publicID string, after *escalation.RunPosition, limit int) (escalation.RunPage,
+		error)
+}
+
+// escalationChainsCursor is the cursor of the list of Escalation chains, and escalationRunsCursor that of the runs of
+// a chain.
+const (
+	escalationChainsCursor = "escalation-chains"
+	escalationRunsCursor   = "escalation-runs"
+)
 
 // escalationRequester is who asks for a change of an Escalation chain through the API.
 func escalationRequester(ctx context.Context) (escalation.Requester, error) {
@@ -275,4 +287,113 @@ func escalationStepOf(st escalation.Step, owner *escalation.TeamRef) gen.Escalat
 		out.SeverityCondition = new(gen.SeverityCondition(st.Condition))
 	}
 	return out
+}
+
+// ListEscalationChainRuns is listEscalationChainRuns: the recent runs of the chain, newest first, for "How it went".
+func (s *Server) ListEscalationChainRuns(ctx context.Context, req gen.ListEscalationChainRunsRequestObject) (
+	gen.ListEscalationChainRunsResponseObject, error) {
+	if s.chainRuns == nil {
+		return nil, escalation.ErrNotFound
+	}
+	var after escalation.RunPosition
+	var at *escalation.RunPosition
+	if ok, err := decodeCursor(req.Params.Cursor, escalationRunsCursor+":"+req.EscalationChainId, &after); err != nil {
+		return nil, err
+	} else if ok {
+		at = &after
+	}
+	page, err := s.chainRuns.ChainRuns(ctx, req.EscalationChainId, at, pageSize(req.Params.Limit))
+	if err != nil {
+		return nil, err
+	}
+	out := gen.EscalationRunList{Items: make([]gen.EscalationRun, len(page.Runs))}
+	for i, r := range page.Runs {
+		out.Items[i] = escalationRunOf(r)
+	}
+	out.NextCursor.SetNull()
+	if page.Next != nil {
+		out.NextCursor.Set(encodeCursor(escalationRunsCursor+":"+req.EscalationChainId, *page.Next))
+	}
+	return gen.ListEscalationChainRuns200JSONResponse(out), nil
+}
+
+// escalationRunOf is the API form of a run of a chain.
+func escalationRunOf(r escalation.ChainRun) gen.EscalationRun {
+	out := gen.EscalationRun{Id: r.PublicID, State: gen.EscalationRunState(r.State), StartedAt: r.StartedAt,
+		EndedAt: nullableTime(r.EndedAt), Steps: make([]gen.EscalationRunStep, len(r.Steps)),
+		AlertGroup: gen.EscalationRunAlertGroup{Id: r.Group.PublicID, Number: int(r.Group.Number),
+			Title: r.Group.Title, SeverityLevel: gen.SeverityLevel(r.Group.Severity)}}
+	for i, st := range r.Steps {
+		step := gen.EscalationRunStep{Number: st.Number, Kind: gen.EscalationStepKind(st.Kind), At: st.At,
+			Outcome: gen.EscalationRunStepOutcome(st.Outcome)}
+		step.Reason.SetNull()
+		if st.Reason != "" {
+			step.Reason.Set(gen.EscalationSkipReason(st.Reason))
+		}
+		out.Steps[i] = step
+	}
+	out.StoppedBy.SetNull()
+	if r.StoppedBy != nil {
+		stop := gen.EscalationRunStop{Command: gen.EscalationRunStopCommand(r.StoppedBy.Command)}
+		stop.Actor.SetNull()
+		stop.Destination.SetNull()
+		if a := r.StoppedBy.Actor; a != nil {
+			ref := gen.ActorRef{Kind: gen.ActorRefKind(a.Kind), Id: a.PublicID, Name: a.Name, Deactivated: a.Deactivated}
+			if a.Login != "" {
+				ref.Login = &a.Login
+			}
+			stop.Actor.Set(ref)
+		}
+		out.StoppedBy.Set(stop)
+	}
+	return out
+}
+
+// alertGroupChainsOf is the API form of the runs of the current start of an Alert Group's chains.
+func alertGroupChainsOf(list []escalation.GroupChain) []gen.AlertGroupChain {
+	out := make([]gen.AlertGroupChain, len(list))
+	for i, c := range list {
+		a := gen.AlertGroupChain{RunId: c.RunID, ChainName: c.ChainName, State: gen.EscalationRunState(c.State),
+			StartedAt: c.StartedAt, NextStepAt: nullableTime(c.NextStepAt),
+			Sources: make([]gen.EscalationRunSource, len(c.Sources))}
+		a.Chain = escalationChainRefOf(c.Chain)
+		a.Step.SetNull()
+		if c.Step != nil {
+			a.Step.Set(gen.EscalationStepPosition{Number: c.Step.Number, Kind: gen.EscalationStepKind(c.Step.Kind)})
+		}
+		for j, src := range c.Sources {
+			ref := gen.EscalationRunSource{Kind: gen.EscalationRunSourceKind(src.Kind)}
+			ref.Team.SetNull()
+			if src.Team != nil {
+				ref.Team.Set(escalationTeamRefOf(*src.Team))
+			}
+			a.Sources[j] = ref
+		}
+		out[i] = a
+	}
+	return out
+}
+
+// escalationChainRefOf is the API form of the chain of a run, null once it was deleted.
+func escalationChainRefOf(c *escalation.ChainRef) nullable.Nullable[gen.EscalationChainRef] {
+	var out nullable.Nullable[gen.EscalationChainRef]
+	if c == nil {
+		out.SetNull()
+		return out
+	}
+	ref := gen.EscalationChainRef{Id: c.PublicID, Name: c.Name}
+	ref.OwningTeam.SetNull()
+	if c.OwningTeam != nil {
+		ref.OwningTeam.Set(escalationTeamRefOf(*c.OwningTeam))
+	}
+	out.Set(ref)
+	return out
+}
+
+// groupChains reads the runs of the chains of the Alert Groups publicIDs, none without runs.
+func (s *Server) groupChains(ctx context.Context, publicIDs ...string) (map[string][]escalation.GroupChain, error) {
+	if s.chainRuns == nil {
+		return map[string][]escalation.GroupChain{}, nil
+	}
+	return s.chainRuns.GroupChains(ctx, publicIDs)
 }

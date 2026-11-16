@@ -158,7 +158,7 @@ func (w *Worker) republished(ctx context.Context, q queries, org int64, a attemp
 		return false, err
 	}
 	if a.row.GroupUnpublished {
-		logs.add(w.markPublished(a.row.AlertGroupID, a.row.PublishedAt.Time))
+		logs.add(w.markPublished(a.row.AlertGroupID, a.row.PublishedAt.Time, !a.row.PublishedByConfiguration))
 	}
 	if a.row.DestinationHealth == healthBroken {
 		return true, markHealthy(ctx, q, w.raiser(org), org, a.destination.ID, now, logs)

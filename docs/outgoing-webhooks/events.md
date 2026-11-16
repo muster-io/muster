@@ -184,6 +184,11 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
     gateway of a call in `gateway` (`id`, `name`), null for a Page by Mention, and the `reason`. No other event
     carries it.
 
+`escalation_step`
+:   Only on `escalation_step_skipped`: the Escalation chain in `chain` (`id`, `name`), null once the chain was deleted,
+    the number of the step in `step`, the `reason` and, for a person the step names who was skipped, that person in
+    `users` (`id`, `name`, `login`), empty otherwise. No other event carries it.
+
 The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
 
 ### Event names
@@ -264,6 +269,13 @@ never sent.
     budget was used (`call_budget_used`), the person had no confirmed contact at the gateway
     (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); named in
     `page` ([Notification gateways](../messengers/notification-gateways.md)).
+
+`escalation_step_skipped`
+:   `notify`: false. A step of an Escalation chain on the Alert Group was skipped, and the chain went on with its next
+    step: outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not
+    meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer
+    (`viewer`) or was disabled (`disabled`) since it was saved; named in `escalation_step`
+    ([Escalation chains](../concepts/escalation-chains.md#when-chains-run)).
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.

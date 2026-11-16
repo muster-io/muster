@@ -340,7 +340,8 @@ func (w *Worker) releaseEvent(ctx context.Context, q queries, org, id int64, rea
 // eventPublished marks, once committed, the first Publication of an Alert Group in an outgoing webhook in the events
 // mode, which has no Root message (C-17.FR-1, C-15.AC-11): its created event delivered at now; for a later event
 // delivered while the Alert Group is still unmarked, when its created event was delivered there, or at now when none
-// was (a webhook added to a Route with open Alert Groups, or a created event not delivered).
+// was (a webhook added to a Route with open Alert Groups, or a created event not delivered). It starts the Escalation
+// chains, as an Alert made the Alert Group (C-32.FR-5): no change of configuration releases an event.
 func (w *Worker) eventPublished(ctx context.Context, q queries, org int64, a eventAttempt, now time.Time,
 	logs *after) error {
 	if !a.row.GroupUnpublished {
@@ -358,7 +359,7 @@ func (w *Worker) eventPublished(ctx context.Context, q queries, org int64, a eve
 			at = created
 		}
 	}
-	logs.add(w.markPublished(a.row.AlertGroupID, at))
+	logs.add(w.markPublished(a.row.AlertGroupID, at, true))
 	return nil
 }
 

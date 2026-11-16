@@ -12,17 +12,19 @@ import type {
 
 import type {
   EscalationChain,
-  EscalationChainList
+  EscalationChainList,
+  EscalationRunList
 } from '../../model';
 
 import {
   getCreateEscalationChainResponseMock,
   getGetEscalationChainResponseMock,
+  getListEscalationChainRunsResponseMock,
   getListEscalationChainsResponseMock,
   getUpdateEscalationChainResponseMock
 } from './escalation-chains.faker';
 
-export { getListEscalationChainsResponseMock, getCreateEscalationChainResponseMock, getGetEscalationChainResponseMock, getUpdateEscalationChainResponseMock } from './escalation-chains.faker';
+export { getListEscalationChainsResponseMock, getCreateEscalationChainResponseMock, getGetEscalationChainResponseMock, getUpdateEscalationChainResponseMock, getListEscalationChainRunsResponseMock } from './escalation-chains.faker';
 
 
 export const getListEscalationChainsMockHandler = (overrideResponse?: EscalationChainList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<EscalationChainList> | EscalationChainList), options?: RequestHandlerOptions) => {
@@ -82,10 +84,23 @@ export const getDeleteEscalationChainMockHandler = (overrideResponse?: void | ((
       })
   }, options)
 }
+
+export const getListEscalationChainRunsMockHandler = (overrideResponse?: EscalationRunList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<EscalationRunList> | EscalationRunList), options?: RequestHandlerOptions) => {
+  return http.get('*/escalation-chains/:escalationChainId/runs', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListEscalationChainRunsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 export const getEscalationChainsMock = () => [
   getListEscalationChainsMockHandler(),
   getCreateEscalationChainMockHandler(),
   getGetEscalationChainMockHandler(),
   getUpdateEscalationChainMockHandler(),
-  getDeleteEscalationChainMockHandler()
+  getDeleteEscalationChainMockHandler(),
+  getListEscalationChainRunsMockHandler()
 ]
