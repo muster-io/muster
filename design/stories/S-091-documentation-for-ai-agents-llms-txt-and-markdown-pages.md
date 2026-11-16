@@ -19,13 +19,13 @@ files_touched:
   - docs/index.md
   - AGENTS.md
 acceptance:
-  - "[C-21.FR-8] `make docs` writes `site/llms.txt` from `docs/llms.txt.tmpl` and the navigation of `mkdocs.yml`, in English: an index: the title, what Muster is, the statement that it is the index of the documentation for AI agents and that an agent must not rely on its training data about Muster, the specifications as the sources of truth, the document map with a one-line note per page, and the size of `llms-full.txt`; it is at most 32 KiB and, so that later documentation stories have room, kept well under half of that. `site/llms-full.txt` opens with the rules and the four scenarios — a bridge in Go, a bridge in Python, connecting Alertmanager, automating through the API — each naming the pages to read, before the text of the pages (`llmsgen_test.go`, Verification)."
+  - "[C-21.FR-8] `make docs` writes `site/llms.txt` from `docs/llms.txt.tmpl` and the navigation of `mkdocs.yml`, in English: an index: the title, what Muster is, the statement that it is the index of the documentation for AI agents and that an agent must not rely on its training data about Muster, the specifications as the sources of truth, the document map with a one-line note per page, and links to the guide, to `llms-full.txt` and to every file of the full text with its number of pages and its size in tokens; it is at most 32 KiB and, so that later documentation stories have room, kept at about half of that. `site/llms-full-guide.txt` holds the rules and the four scenarios — a bridge in Go, a bridge in Python, connecting Alertmanager, automating through the API — each naming the pages to read (`llmsgen_test.go`, Verification)."
   - "[C-21.FR-8] Each rule takes its value from its source when the site is built: the error classes from the `ErrorClass` enum of `api/bridge.yaml`; confirming a press at most 3 seconds after it and keeping each `Idempotency-Key` per token for at least 24 hours from the description of `api/bridge.yaml`; the edit-window margin and the longest wait of `rate_limited` from `bridge.edit_window_margin` and `bridge.retry_after_max` in defaults.md; and the sources of truth are `api/openapi.yaml` and `api/bridge.yaml`, which the build publishes under `api/` beside the pages of the same version."
   - "[C-21.FR-8] Every page of the navigation has a Markdown version at its source path under `docs/` — `messengers/bridge.md` for `messengers/bridge/`, `reference/index.md` for the section page `reference/` — byte for byte its source, and one entry in the document map of `llms.txt`, in the order of the navigation, with its title and the first sentence of its first paragraph, linked to the Markdown version."
-  - "[C-21.FR-8] `site/llms-full.txt` holds every page of the navigation once, in the order of the navigation, each after a line with its absolute `.md` URL, with relative links made absolute; the rendered API and Bridge protocol references are no pages and have no Markdown version, and `llms.txt` names their specifications instead."
+  - "[C-21.FR-8] The full text is one file per top-level section of the navigation, `site/llms-full-<section>.txt`, and `site/llms-full-home.txt` for the top-level pages outside any section; together they hold every page of the navigation once, each file its pages in the order of the navigation, each page after a line with its absolute `.md` URL, with relative links made absolute; `site/llms-full.txt` lists the guide and these files with their sizes; the rendered API and Bridge protocol references are no pages and have no Markdown version, and `llms.txt` names their specifications instead."
   - "[C-21.FR-8] Every link of `llms.txt` points into the same version of the site, `<site_url><version>/`, with the version from `DOCS_VERSION` — `latest` by default, the published minor in the publishing workflow — or to a repository under `https://github.com/muster-io/`; `docspublish` copies the `llms.txt` of the version that the root redirects to into the root of the published site, so that `https://muster-io.github.io/muster/llms.txt` answers, and removes the root copy when that version has none (`docspublish_test.go`)."
-  - "[C-21.FR-8, C-21.AC-4] `make docs`, and so `make docs-check`, fails naming the file when a phrase, a setting, an enum or a page that `docs/llms.txt.tmpl` names is no longer in its source, when an anchor it links is no `id` of the built page, when a page of the navigation has no title, when a link of `llms.txt` or `llms-full.txt` into the site does not resolve under `site/`, when `llms.txt` is larger than 32 KiB, and when `llms-full.txt` is 1 MiB or larger (`llmsgen_test.go`, Verification)."
-  - "[C-21.AC-4] On the built site, `llms.txt` links to the Markdown version of every page of the navigation and every one of its links resolves under `site/`; `llms-full.txt` holds every page and is smaller than 1 MiB, under about 262,000 tokens at 4 bytes a token (`llmsgen_test.go`, Verification)."
+  - "[C-21.FR-8, C-21.AC-4] `make docs`, and so `make docs-check`, fails naming the file when a phrase, a setting, an enum or a page that `docs/llms.txt.tmpl` names is no longer in its source, when an anchor it links is no `id` of the built page, when a page of the navigation has no title, when two sections of the navigation would write the same file, when a link of `llms.txt` or of a file of the full text into the site does not resolve under `site/`, when `llms.txt` does not link every file of the full text, when `llms.txt` is larger than 32 KiB, and when a file of the full text is 1 MiB or larger, naming the section to split (`llmsgen_test.go`, Verification)."
+  - "[C-21.AC-4] On the built site, `llms.txt` links to the Markdown version of every page of the navigation and every one of its links resolves under `site/`; the files of the full text together hold every page, and each is smaller than 1 MiB, under about 262,000 tokens at 4 bytes a token (`llmsgen_test.go`, Verification)."
   - "[C-21.FR-8] The home page points AI agents to `llms.txt` (Verification)."
 verify: "make ci docs-check"
 operator_attention: false
@@ -40,8 +40,9 @@ issue: 287
 
 - `llms.txt` at the root of every version of the site and of the published site: the entry point for AI agents and
   coding assistants: an index, with the specifications and the map of the documentation.
-- `llms-full.txt`, the text of the whole site in one file, opening with the rules that agents get wrong most and the
-  scenarios, and a Markdown version of every page.
+- The full text of the site, one file per top-level section of the navigation and one for the pages outside any section,
+  all listed in `llms-full.txt`; the guide for agents, `llms-full-guide.txt`, with the rules that agents get wrong most
+  and the scenarios; and a Markdown version of every page.
 - The generator `llmsgen`, run by `make docs` after the site is built, with the checks that make `make docs-check`
   fail when the hand-written template, its index and its guide, no longer matches its sources.
 - The root copy of `llms.txt` in `docspublish`, and the version of the links in the publishing workflow.
@@ -63,10 +64,10 @@ issue: 287
   use, so no dependency is added (ADR-0001). The outputs live only in the built site, which git ignores, and are made
   again by every `make docs`, so they can never lag the pages; what can go stale is the hand-written template, and the
   checks below find it. Zensical's own `llmstxt` support is not used (Notes).
-- **Version and links**: the links of `llms.txt` and `llms-full.txt` are absolute, under `<site_url><version>/`, where
-  `site_url` comes from `mkdocs.yml` (`https://muster-io.github.io/muster/`) and the version from `DOCS_VERSION`, a
-  variable of the Makefile that is `latest` by default; `.github/workflows/docs.yml` runs `make docs` with
-  `DOCS_VERSION` set to the version it publishes, so a release's `llms.txt` points into that release.
+- **Version and links**: the links of `llms.txt` and of the files of the full text are absolute, under
+  `<site_url><version>/`, where `site_url` comes from `mkdocs.yml` (`https://muster-io.github.io/muster/`) and the
+  version from `DOCS_VERSION`, a variable of the Makefile that is `latest` by default; `.github/workflows/docs.yml` runs
+  `make docs` with `DOCS_VERSION` set to the version it publishes, so a release's `llms.txt` points into that release.
 - **Markdown versions**: for every page of the navigation, `site/<source path>` is a byte-for-byte copy of
   `docs/<source path>`. With directory URLs this is the page's URL with `.md` added — `messengers/write-a-bridge/` has
   `messengers/write-a-bridge.md` — and a section page or the home page keeps its file name: `reference/` has
@@ -77,18 +78,34 @@ issue: 287
   ADR-0017, C-03.FR-23, C-22.FR-20).
 - **Rendered references**: the API and Bridge protocol references rendered with Redocly
   (`reference/api/spec/`, `reference/bridge/spec/`) are files of the site, not pages: they get no Markdown version and
-  are not in `llms-full.txt`. Their pages in the navigation (`reference/api.md`, `reference/bridge-protocol.md`) are in
+  are not in the full text. Their pages in the navigation (`reference/api.md`, `reference/bridge-protocol.md`) are in
   both, and `llms.txt` names the specifications themselves. Generated pages of `docs/reference/` are pages like any
   other: their Markdown version is the generated file.
-- **`llms-full.txt`**: a title line and a line naming `llms.txt` and saying that the rules for agents follow, then the guide for agents — the part of the template that is defined as `full`, with the rules and the scenarios of the table and the list below, which `llms.txt` leaves out because it is an index; absent when the template defines none — then every page of the navigation once, in the order
-  of the navigation, each preceded by a line `<!-- Source: <absolute URL of its Markdown version> -->` and separated by
-  a blank line. Relative link targets outside fenced code are resolved against the page's source path and made
-  absolute under the version's base URL; a link to a page keeps `.md`.
+- **The full text**, written by `llmsgen` and not by the template, in files that are each smaller than 1 MiB:
+  - `llms-full-<section>.txt` for each top-level section of the navigation, `<section>` its title in lower case with
+    every run of other characters than ASCII letters and digits a hyphen — `llms-full-messengers.txt`,
+    `llms-full-outgoing-webhooks.txt`, `llms-full-sign-in.txt` — and `llms-full-home.txt` for the top-level pages
+    outside any section (Home, Quick start, First alert in a messenger), titled after them; a section without pages has
+    none, and two sections whose titles give one name, a section named `guide` or `home`, or a title without an ASCII
+    letter or digit fail the run. Each opens with a title line naming the version and the section, and a line naming
+    `llms.txt`, `llms-full.txt` and the guide, then holds every page of its part of the navigation once, in the order
+    of the navigation, each preceded by a line `<!-- Source: <absolute URL of its Markdown version> -->` and separated
+    by a blank line. Relative link targets outside fenced code are resolved against the page's source path and made
+    absolute under the version's base URL; a link to a page keeps `.md`.
+  - `llms-full-guide.txt`, the guide for agents: a title line and a line naming `llms.txt` and `llms-full.txt`, then
+    the part of the template that is defined as `full`, with the rules and the scenarios of the table and the list
+    below, which `llms.txt` leaves out because it is an index; absent when the template defines none.
+  - `llms-full.txt`, which held the whole text in one file before L2 and stays so that a link to it still leads to the
+    text: a title line, a line naming `llms.txt`, and a list of the guide and of the files of the sections, in the
+    order of the navigation, each linked with its title, its number of pages and its size in bytes and in estimated
+    tokens.
 - **The template** (`docs/llms.txt.tmpl`, in English): a Go text template, left out of the site by `exclude_docs`, with a
-  second template `full` defined in it by `{{define "full"}}`, which is written into `llms-full.txt` and not into
-  `llms.txt`, and has the same functions and `.Version` and `.Base`. Its
-  data are `.Version`, `.Base` (the base URL with the version) and the size of `llms-full.txt` in bytes and in
-  estimated tokens (bytes / 4). Its functions take every value from a source and fail with the template's name and the
+  second template `full` defined in it by `{{define "full"}}`, which is written into `llms-full-guide.txt` and not
+  into `llms.txt`, and has the same functions and `.Version` and `.Base`. Its
+  data are `.Version`, `.Base` (the base URL with the version), `.Full` (`llms-full.txt`), `.Guide`
+  (`llms-full-guide.txt`, nil without the template `full`) and `.Sections` (the files of the full text in their
+  order), each with `.Name`, `.URL`, `.Title`, `.Pages`, `.Bytes` and `.Tokens`, the size in estimated tokens
+  (bytes / 4). Its functions take every value from a source and fail with the template's name and the
   source's when the source no longer has it:
   - `page "<source path>[#anchor]"` — the absolute URL of the page's Markdown version; the path must be a page of the
     navigation, and an anchor an `id` of the built page `site/<page URL>index.html`;
@@ -103,8 +120,8 @@ issue: 287
   1. `# Muster` and a block quote: what Muster is, in the words of the home page; that this file is the index of the
      documentation of Muster for AI agents and coding assistants and covers version `.Version`; and that an agent reads the
      pages it links instead of relying on its training data about Muster.
-  2. `## Start here`: the two specifications as the sources of truth, and a line that the rules and the scenarios open
-     `llms-full.txt`.
+  2. `## Start here`: the two specifications as the sources of truth, and a line that links the rules and the
+     scenarios in `llms-full-guide.txt`.
   3. `## Document map`, a heading of the template, and under it what `map` writes: one `###` heading per top-level
      section of the navigation, a nested section a level lower, and per page
      `- [<title>](<Markdown URL>): <description>` in the order of the navigation. A top-level page outside any section
@@ -115,8 +132,9 @@ issue: 287
      cut at a word before 100 characters and ended with `…` when it is longer, so that the map stays an index, and is
      left out when the page has no such paragraph. Title and description have their links reduced to their text
      and their images left out, so that the map links only to the Markdown versions.
-  4. `## Optional`: `llms-full.txt` with its size.
-- **The guide of `llms-full.txt`**, the template `full`, in this order:
+  4. `## Optional`: `llms-full.txt`, and every file of the full text with a one-line note: the title of its section,
+     its number of pages and its size in estimated tokens.
+- **The guide, `llms-full-guide.txt`**, the template `full`, in this order:
   1. **`## Rules`** of the guide, each rule with its value taken as the table says:
 
      | Rule | Value | Source | Function |
@@ -145,12 +163,14 @@ issue: 287
        every Muster at `/api/v1/openapi.yaml`), Concepts → statuses and commands, Operations → CLI.
 - **Checks** (`llmsgen`, C-21.AC-4): it exits non-zero, naming the file and what is wrong, when a template function
   fails as above, when the template does not call `map` exactly once, when a page of the navigation does not exist or
-  has no title, when a link of `llms.txt` or `llms-full.txt` under the version's base URL does not resolve to a file
-  under `site/`, when a link of `llms.txt` — a link, not a URL in a code span or fenced code, such as the
+  has no title, when two sections would write the same file, when a link of `llms.txt` or of a file of the full text
+  under the version's base URL does not resolve to a file under `site/`, when a link of `llms.txt`, the guide or
+  `llms-full.txt` — a link, not a URL in a code span or fenced code, such as the
   `https://api.telegram.org` that a description quotes — leaves the site other than to a repository under
-  `https://github.com/muster-io/`, when `llms.txt` is larger than 32 KiB, and when `llms-full.txt` is 1 MiB (1,048,576
-  bytes) or larger. It prints the sizes of `llms.txt` and `llms-full.txt` and the token estimate of the latter. Because
-  `make docs-check` runs `make docs`, it fails the same way in CI.
+  `https://github.com/muster-io/`, when `llms.txt` does not link every file of the full text, when `llms.txt` is larger
+  than 32 KiB, and when a file of the full text is 1 MiB (1,048,576 bytes) or larger, naming the section to split. It
+  prints the size of `llms.txt` and of every file of the full text, with its token estimate and its number of pages.
+  Because `make docs-check` runs `make docs`, it fails the same way in CI.
 - **Root of the published site** (`docspublish`): after writing the redirect, it copies `<target>/<redirect>/llms.txt`
   to `<target>/llms.txt` when that version has one — the newest release, or `latest/` while none is published — so the
   root answers `https://muster-io.github.io/muster/llms.txt` with links into that version. When that version has none,
@@ -160,14 +180,15 @@ issue: 287
   serves the pages without the outputs of `llmsgen`, which only `make docs` writes; AGENTS.md's rows for `make docs` and
   `make docs-check` say so.
 - **Home page** (`docs/index.md`): a sentence for AI agents linking `llms.txt`. The file does not exist when Zensical
-  builds, so the link is checked where the home page's text reaches `llms-full.txt`, by the link check above.
+  builds, so the link is checked where the home page's text reaches `llms-full-home.txt`, by the link check above.
 
 ## Steps
 
-1. Write `llmsgen` without the template: the navigation, the Markdown versions, `llms-full.txt`, the document map, the
+1. Write `llmsgen` without the template: the navigation, the Markdown versions, the full text, the document map, the
    copied specifications and the link checks, with fixtures of a small site. Check: `llmsgen_test.go` — the order of a
    nested navigation, top-level pages before and after a section, titles from the navigation and from headings,
-   descriptions, absolute links in `llms-full.txt`, a page without a title, a broken link, an `llms-full.txt` of 1 MiB.
+   descriptions, absolute links in the full text, a page without a title, a broken link, a file of the full text of
+   1 MiB.
 2. Add the template functions and write `docs/llms.txt.tmpl`, its index and its template `full` with the rules and scenarios; the checks of the links of `llms.txt` hold for the guide too. Check: `llmsgen_test.go` —
    each function with a present and a missing value, `map` called twice; `make docs` writes `site/llms.txt`.
 3. Wire the Makefile, `exclude_docs`, `docs.yml`, the root copy of `docspublish`, the home page and AGENTS.md. Check:
@@ -179,7 +200,7 @@ issue: 287
 
 ```sh
 make docs; echo "exit=$?"                                               # exit=0, after the sizes llmsgen prints
-test -s site/llms.txt && test -s site/llms-full.txt && test -s site/api/bridge.yaml && echo ok   # ok
+test -s site/llms.txt && test -s site/llms-full.txt && test -s site/llms-full-guide.txt && test -s site/api/bridge.yaml && echo ok   # ok
 python3 -m http.server 8000 --directory site > /dev/null 2>&1 & srv=$!; sleep 1
 curl -sf localhost:8000/llms.txt | head -8
 # # Muster
@@ -196,21 +217,22 @@ for t in 'api/bridge.yaml' 'api/openapi.yaml' '`transient`, `rate_limited`, `gon
   'at most 3 seconds' 'for at least 24 hours' 'per token' 'edit_max_age_seconds' 'edit_window_closed' '60 s' '15 min' \
   'muster bridge check' 'Write a bridge in Go' 'Write a bridge in Python' 'Connect Alertmanager' \
   'Automate through the API' 'muster-bridge-go' 'muster-bridge-python'; do
-  grep -qF -- "$t" site/llms-full.txt || echo "missing: $t"; done                             # (nothing)
+  grep -qF -- "$t" site/llms-full-guide.txt || echo "missing: $t"; done                       # (nothing)
 
 # every page of the navigation: its Markdown version, its entry in the map and its place in the full text
 nav=$(awk '/^nav:/ { n = 1; next } /^[^ #]/ { n = 0 } n' mkdocs.yml | grep -oE '[^ :]+\.md')
 for p in $nav; do
   cmp -s "docs/$p" "site/$p" || echo "no markdown version: $p"
   grep -qF "/latest/$p)" site/llms.txt || echo "not in the map: $p"; done                     # (nothing)
-echo "$nav" | wc -l; grep -c '^<!-- Source: ' site/llms-full.txt                               # the same number twice
+echo "$nav" | wc -l; cat site/llms-full-*.txt | grep -c '^<!-- Source: '                         # the same number twice
+cat site/llms-full-*.txt | grep '^<!-- Source: ' | sort | uniq -d                              # (nothing)
 
 # every link of llms.txt into the site resolves under site/
 grep -oE '\(https://muster-io\.github\.io/muster/latest/[^)#]*' site/llms.txt | sort -u |
   sed 's|^(https://muster-io.github.io/muster/latest/||' |
   while read -r f; do test -f "site/$f" || echo "broken: $f"; done      # (nothing)
-wc -c < site/llms.txt                                                   # under 16384 (the limit is 32768)
-wc -c < site/llms-full.txt                                              # under 1048576
+wc -c < site/llms.txt                                                   # under 17408 (the limit is 32768)
+wc -c site/llms-full*.txt                                               # each under 1048576
 # about bytes / 4 tokens: under 262,000
 
 # the version of the links
@@ -231,7 +253,7 @@ mv docs/llms.txt.tmpl.bak docs/llms.txt.tmpl
 
 # a value follows its source without an edit of the template
 sed -i.bak 's/^| `bridge.edit_window_margin` | 60 s/| `bridge.edit_window_margin` | 90 s/' design/prd/l1/defaults.md
-make docs > /dev/null && grep -c '90 s' site/llms-full.txt              # 1 or more
+make docs > /dev/null && grep -c '90 s' site/llms-full-guide.txt        # 1 or more
 mv design/prd/l1/defaults.md.bak design/prd/l1/defaults.md
 
 # the root of the published site
@@ -263,9 +285,15 @@ None.
 - The libraries' repositories have their own `AGENTS.md`, for agents that change the libraries (S-083, S-084); this
   story's `llms.txt` is for agents that use Muster or write a bridge, and points to those repositories.
 - `llms.txt` stays an index: the page text belongs in the pages, and a value belongs in its source; the template only
-  names them. What an agent needs beyond the index — the rules and the scenarios — is in `llms-full.txt`, so a
-  documentation story that adds a scenario edits the template `full`, and `llms.txt` stays well under half of its limit
-  (the maintainer's decision when it was 7 bytes under it).
+  names them. What an agent needs beyond the index — the rules and the scenarios — is in the guide,
+  `llms-full-guide.txt`, so a documentation story that adds a scenario edits the template `full`, and `llms.txt` stays
+  an index of about half of its limit (the maintainer's decision when it was 7 bytes under it; see the next bullet).
+- The full text was one file, `llms-full.txt`, until it reached 92.7 % of its 1 MiB limit with the L2 documentation
+  stories still to come; the maintainer decided on 2026-11-16 to split it into one file per top-level section of the
+  navigation and keep the 1 MiB limit per file, and to keep `llms-full.txt` as the list of the files (C-21.FR-8,
+  revised for L2). A section that outgrows 1 MiB is split in the navigation. The links to the files of the full text
+  take `llms.txt` just past half of its limit, to 16,589 bytes, so the target is now about half (17 KiB), not well
+  under it.
 
 ## Coverage
 

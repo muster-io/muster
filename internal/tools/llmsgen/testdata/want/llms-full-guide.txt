@@ -1,0 +1,11 @@
+# Rules and scenarios for AI agents, Muster documentation version latest
+
+The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text, one per section.
+
+## Rules
+
+- Sources of truth: https://muster-io.github.io/muster/latest/api/bridge.yaml and https://muster-io.github.io/muster/latest/api/openapi.yaml.
+- Error classes: `transient`, `rate_limited`, `gone`, `forbidden`, `invalid`.
+- Presses: at most 3 seconds.
+- Waits: 15 min; edit windows: 60 s; plain: 5 | 6.
+- Read [the deep part](https://muster-io.github.io/muster/latest/section/nested/deep.md#deep-part) and https://github.com/muster-io/muster-bridge-go.

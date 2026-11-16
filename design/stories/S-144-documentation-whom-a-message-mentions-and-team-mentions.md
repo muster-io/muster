@@ -26,7 +26,7 @@ acceptance:
   - "[C-28.FR-11] Concepts → Whom a message mentions describes the entries and their Loud events with the example of `infra-critical` mentioning \"On-call of the Team from the label\" on every Loud event and `@here` only for a new Alert Group, a rise to critical and the start of a Storm; the table of C-28.FR-2; Team mentions without a fallback to the On-call; undelivered Mentions; the Owner rules that stay; and the migration of the 0.1 settings, with screenshots of the Mentions grid and of \"How to mention the Team\"."
   - "[C-25.FR-12] Concepts → Teams has \"Team mentions\" per messenger — a Mattermost group, a Slack user group with `usergroups:read`, a bridge's group, none in Telegram — and links to the page above; the page on buttons (Statuses and commands, \"Button sets\") is linked from it."
   - "[C-28.FR-11] Loud and Quiet, Messages and templates, the pages of each messenger, Write a bridge (declaring group mentions and mentions of everyone in `info`, and the `kind` of a Mention), Connect Mattermost (that the bot reads groups with the role Member and no added permission, F-122) and the pages of outgoing webhooks (a Team as a target of `mentions`) point to the new page instead of describing the 0.1 settings; what S-132 and S-138 recorded about groups, `<!everyone>` and muted discussion groups is said where it matters, citing the facts, as the Contracts list them."
-  - "`make docs-screenshots GUIDES=mentions` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms-full.txt` lists the page in a scenario on mentioning the right people."
+  - "`make docs-screenshots GUIDES=mentions` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms-full-guide.txt` lists the page in a scenario on mentioning the right people."
 verify: "make docs-check"
 operator_attention: false
 issue: 433
@@ -77,7 +77,7 @@ issue: 433
   who had muted it, so a person who created the discussion group or is anonymous in it does not mute it (F-129); a
   subscriber of the channel who is not in the discussion group is not mentioned (F-014), and the Destination check names
   the people of its Teams outside the group, a leave showing only some time later, about a minute in F-128.
-- **llms-full.txt** (the template `full` of `docs/llms.txt.tmpl`): a scenario "Mention the right people" with Concepts → Whom a message mentions and
+- **llms-full-guide.txt** (the template `full` of `docs/llms.txt.tmpl`): a scenario "Mention the right people" with Concepts → Whom a message mentions and
   Concepts → Teams.
 
 ## Steps

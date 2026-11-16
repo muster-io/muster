@@ -74,4 +74,4 @@ of each Alert Group there up to date until the Alert Group is resolved.
 ## AI agents
 
 AI agents and coding assistants start at [llms.txt](llms.txt): the map of this documentation for agents, with a
-Markdown version of every page and the full text in one file.
+Markdown version of every page and the full text in one file per section.

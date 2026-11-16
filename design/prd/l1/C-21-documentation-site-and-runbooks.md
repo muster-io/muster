@@ -75,6 +75,12 @@ explains it.
   for an ordinary page and `index.md` under the URL for a section page or the home page. The values of the rules come
   from their sources, and `make docs-check` fails when a rule, a scenario or the map no longer matches the pages, the
   specifications or [defaults](defaults.md).
+  _Revised for L2 (2026-11-16):_ the full text no longer fits one file of 1 MiB, so it is split into one file per
+  top-level section of the navigation, `llms-full-<section>.txt` named after the section's title, and one,
+  `llms-full-home.txt`, for the top-level pages outside any section; each holds its pages in the order of the
+  navigation and is smaller than 1 MiB. The rules and the scenarios are in a file of their own, `llms-full-guide.txt`.
+  `llms-full.txt` stays, as the list of these files with their sizes, so that a link to it still leads to the text;
+  and `llms.txt` links the guide and every file of the full text with a one-line note.
 - **C-21.FR-9** Guides with screenshots. The site has one end-to-end tutorial, "First alert in a messenger", placed
   after Quick start: create an Integration and send its snippet to Alertmanager, create a Telegram Connection, add a
   Destination, add a Route that sends to it, link the Admin's Telegram account, send a test alert, and acknowledge the
@@ -129,6 +135,8 @@ The API reference of the site is rendered from the same OpenAPI document that th
 - **C-21.AC-4** On the built site, `llms.txt` links to the Markdown version of every page of the navigation and each of
   its links resolves; `llms-full.txt` holds every page; and a value of the rules that its source no longer has makes
   `make docs-check` fail, naming the file.
+  _Revised for L2 (2026-11-16):_ the files of the full text (FR-8) together hold every page once, each is smaller than
+  1 MiB, and `llms.txt` links every one of them.
 - **C-21.AC-5** On a fresh `muster dev`, the Playwright suite of the tutorial follows its steps in order through the
   UI, with the fake Alertmanager and the fake Telegram server, and ends with the Alert Group acknowledged by the Admin,
   its Timeline naming the Transport Telegram; every step of the tutorial has the screenshot that run took.

@@ -27,6 +27,22 @@ var navPages = []string{
 	"reference/api.md",
 }
 
+// sectionFiles are the files of the fixture's full text and their pages, in their order: the top-level pages outside
+// any section, then each section.
+var sectionFiles = []struct {
+	name  string
+	pages []string
+}{
+	{"llms-full-home.txt", []string{"index.md", "guide.md", "after.md"}},
+	{"llms-full-section.txt", []string{"section/index.md", "section/titled.md", "section/nested/deep.md"}},
+	{"llms-full-reference.txt", []string{"reference/api.md"}},
+}
+
+// outputs are every file of the full text, the list and the guide included, in the order of the summary.
+var outputs = []string{
+	"llms-full.txt", "llms-full-guide.txt", "llms-full-home.txt", "llms-full-section.txt", "llms-full-reference.txt",
+}
+
 // fixture copies the fixture repository into a temporary directory, which a run and the test may change.
 func fixture(t *testing.T) string {
 	t.Helper()
@@ -118,19 +134,43 @@ func golden(t *testing.T, name, got string) {
 func TestGenerate(t *testing.T) {
 	root := fixture(t)
 	stdout := mustGenerate(t, root)
-	llms, full := readFile(t, root, "site/llms.txt"), readFile(t, root, "site/llms-full.txt")
-	want := fmt.Sprintf("site/llms.txt: %d bytes; site/llms-full.txt: %d bytes, about %d tokens; 7 pages\n",
-		len(llms), len(full), len(full)/4)
+	llms := readFile(t, root, "site/llms.txt")
+	want := fmt.Sprintf("site/llms.txt: %d bytes\n", len(llms))
+	texts := map[string]string{}
+	for _, name := range outputs {
+		text := readFile(t, root, "site/"+name)
+		texts[name] = text
+		want += fmt.Sprintf("site/%s: %d bytes, about %d tokens", name, len(text), len(text)/4)
+		for _, f := range sectionFiles {
+			if f.name == name {
+				want += "; " + countPages(len(f.pages))
+			}
+		}
+		want += "\n"
+		golden(t, name, text)
+		if !strings.Contains(llms, "("+base+name+")") {
+			t.Errorf("llms.txt does not link %s:\n%s", name, llms)
+		}
+	}
+	want += "7 pages in 3 section files\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
-	if strings.Contains(llms, "## Rules") || !strings.Contains(full, "\n## Rules\n") {
-		t.Errorf("the template \"full\" is not in llms-full.txt alone:\n%s\n%s", llms, full)
+	for name, text := range texts {
+		if strings.Contains(text, "\n## Rules\n") != (name == "llms-full-guide.txt") {
+			t.Errorf("the template \"full\" is not in llms-full-guide.txt alone: %s:\n%s", name, text)
+		}
+	}
+	if strings.Contains(llms, "## Rules") {
+		t.Errorf("the template \"full\" is in llms.txt:\n%s", llms)
 	}
 	golden(t, "llms.txt", llms)
-	golden(t, "llms-full.txt", full)
-	if !strings.Contains(llms, fmt.Sprintf("): %d bytes, about %d tokens.", len(full), len(full)/4)) {
-		t.Errorf("llms.txt does not give the size of llms-full.txt:\n%s", llms)
+	for _, f := range sectionFiles {
+		text := texts[f.name]
+		line := fmt.Sprintf("): %s, %d bytes, about %d tokens.", countPages(len(f.pages)), len(text), len(text)/4)
+		if !strings.Contains(llms, f.name+line) || !strings.Contains(texts["llms-full.txt"], f.name+line) {
+			t.Errorf("llms.txt or llms-full.txt does not give the size of %s", f.name)
+		}
 	}
 	if !strings.Contains(llms, "to build (RFC 6238) the site, with **bold**.\n") {
 		t.Errorf("llms.txt: the links of a description are not reduced to their text:\n%s", llms)
@@ -168,18 +208,42 @@ var sourceRe = regexp.MustCompile(`(?m)^<!-- Source: (.*) -->$`)
 func TestFullText(t *testing.T) {
 	root := fixture(t)
 	mustGenerate(t, root)
-	full := readFile(t, root, "site/llms-full.txt")
-	header := "# Muster documentation, version latest\n\n" +
-		"The index of this text is " + base + "llms.txt; the rules for AI agents follow it.\n\n"
-	if !strings.HasPrefix(full, header) {
-		t.Errorf("llms-full.txt does not start with its title and the line naming llms.txt:\n%s", full)
+	var all []string
+	var full string
+	for _, f := range sectionFiles {
+		text := readFile(t, root, "site/"+f.name)
+		full += text
+		var sources []string
+		for _, m := range sourceRe.FindAllStringSubmatch(text, -1) {
+			sources = append(sources, strings.TrimPrefix(m[1], base))
+		}
+		if !slices.Equal(sources, f.pages) {
+			t.Errorf("%s: the Source lines name %v, want %v in the order of the navigation", f.name, sources, f.pages)
+		}
+		all = append(all, sources...)
 	}
-	var sources []string
-	for _, m := range sourceRe.FindAllStringSubmatch(full, -1) {
-		sources = append(sources, strings.TrimPrefix(m[1], base))
+	slices.Sort(all)
+	want := slices.Clone(navPages)
+	slices.Sort(want)
+	if !slices.Equal(all, want) {
+		t.Errorf("the files of the full text hold %v, want every page of the navigation once %v", all, want)
 	}
-	if !slices.Equal(sources, navPages) {
-		t.Errorf("the Source lines name %v, want every page once in the order of the navigation %v", sources, navPages)
+	section := readFile(t, root, "site/llms-full-section.txt")
+	header := "# Muster documentation, version latest: Section\n\n" +
+		"This file holds the full text of the section Section. The index of the documentation is " + base +
+		"llms.txt, and " + base + "llms-full.txt lists the files of the full text; the rules for AI agents are in " +
+		base + "llms-full-guide.txt.\n\n<!-- Source: " + base + "section/index.md -->\n"
+	if !strings.HasPrefix(section, header) {
+		t.Errorf("llms-full-section.txt does not start with its title and the line naming the index:\n%s", section)
+	}
+	if home := readFile(t, root, "site/llms-full-home.txt"); !strings.HasPrefix(home,
+		"# Muster documentation, version latest: Home, Guide, After\n\nThis file holds the full text of the pages outside any section.") {
+		t.Errorf("llms-full-home.txt is not titled after its pages:\n%s", home)
+	}
+	guide := readFile(t, root, "site/llms-full-guide.txt")
+	if !strings.HasPrefix(guide, "# Rules and scenarios for AI agents, Muster documentation version latest\n\n") ||
+		strings.Contains(guide, "<!-- Source: ") {
+		t.Errorf("llms-full-guide.txt is not the guide alone:\n%s", guide)
 	}
 	for _, want := range []string{
 		"[site](" + base + `section/index.md "The section")`,
@@ -199,14 +263,14 @@ func TestFullText(t *testing.T) {
 		"[mention](muster-mention:ref)",
 		"`[kept](kept.md)`",
 		"```md\n[in a fence](fenced.md)\n```\n",
-		"\nspans two lines. More text.\n\n<!-- Source: ",
+		"```\n\n<!-- Source: " + base + "after.md -->\nAfter the section",
 	} {
 		if !strings.Contains(full, want) {
-			t.Errorf("llms-full.txt lacks %q", want)
+			t.Errorf("the full text lacks %q", want)
 		}
 	}
 	if !strings.HasSuffix(full, "`api/openapi.yaml`. More.\n") {
-		t.Error("llms-full.txt does not end its last page with one newline")
+		t.Error("llms-full-reference.txt does not end its last page with one newline")
 	}
 }
 
@@ -459,8 +523,9 @@ func TestFailures(t *testing.T) {
 				replaceIn(t, root, tmpl, "## Rules\n", "## Rules\n\nSee [guide](guide.md) and https://example.org/x.\n")
 			},
 			want: []string{
-				"site/llms-full.txt: the link guide.md is not absolute",
-				"site/llms-full.txt: https://example.org/x leaves the site and is no repository under https://github.com/muster-io/",
+				"site/llms-full-guide.txt: the link guide.md is not absolute",
+				"site/llms-full-guide.txt: https://example.org/x leaves the site and is no repository under " +
+					"https://github.com/muster-io/",
 			},
 		},
 		"a missing page named twice": {
@@ -473,7 +538,36 @@ func TestFailures(t *testing.T) {
 			change: func(t *testing.T, root string) {
 				replaceIn(t, root, "docs/guide.md", "## Links\n", "## Links\n\nSee [missing](missing.md#x).\n")
 			},
-			want: []string{"site/llms-full.txt: " + base + "missing.md#x does not resolve under site/"},
+			want: []string{"site/llms-full-home.txt: " + base + "missing.md#x does not resolve under site/"},
+		},
+		"a section named like the guide": {
+			change: func(t *testing.T, root string) {
+				replaceIn(t, root, "mkdocs.yml", "  - Section:\n", "  - Guide:\n")
+			},
+			want: []string{
+				`mkdocs.yml: the section "Guide" would write site/llms-full-guide.txt, the file of the guide for AI agents; ` +
+					"rename one of them"},
+		},
+		"two sections with one file": {
+			change: func(t *testing.T, root string) {
+				replaceIn(t, root, "mkdocs.yml", "  - Reference:\n", "  - Sec-tion: []\n  - Reference:\n")
+				replaceIn(t, root, "mkdocs.yml", "  - Section:\n", "  - Sec tion:\n")
+			},
+			want: []string{`mkdocs.yml: the section "Sec-tion" would write site/llms-full-sec-tion.txt, ` +
+				"the file of the section Sec tion; rename one of them"},
+		},
+		"a section without a letter or a digit": {
+			change: func(t *testing.T, root string) { replaceIn(t, root, "mkdocs.yml", "  - Section:\n", "  - \"—\":\n") },
+			want: []string{
+				`mkdocs.yml: the section "—" has no letter or digit to name its file llms-full-<name>.txt`},
+		},
+		"a file of the full text that llms.txt does not link": {
+			change: func(t *testing.T, root string) {
+				replaceIn(t, root, tmpl, "{{range .Sections}}", `{{range .Sections}}{{if ne .Name "llms-full-section.txt"}}`)
+				replaceIn(t, root, tmpl, "tokens.\n{{end -}}", "tokens.\n{{end}}{{end -}}")
+			},
+			want: []string{"site/llms.txt: does not link " + base +
+				"llms-full-section.txt; it links every file of the full text"},
 		},
 		"a broken link in llms.txt": {
 			change: func(t *testing.T, root string) {
@@ -596,34 +690,93 @@ func TestFailures(t *testing.T) {
 					t.Errorf("the line %q does not start with the file it concerns", l)
 				}
 			}
-			for _, f := range []string{"site/llms.txt", "site/llms-full.txt"} {
-				if exists(t, root, f) {
-					t.Errorf("%s of the earlier run outlives the failed run", f)
+			for _, f := range append([]string{"llms.txt"}, outputs...) {
+				if exists(t, root, "site/"+f) {
+					t.Errorf("site/%s of the earlier run outlives the failed run", f)
 				}
 			}
 		})
 	}
 }
 
-// TestFullTextLimit pads a page so that llms-full.txt is just under 1 MiB, then exactly 1 MiB.
+// TestFullTextLimit pads a page of the top-level pages and one of the section so that each of their files is just
+// under 1 MiB, more than 1 MiB together, then the section's file to exactly 1 MiB: the limit holds per file.
 func TestFullTextLimit(t *testing.T) {
 	baseline := fixture(t)
 	mustGenerate(t, baseline)
-	size := len(readFile(t, baseline, "site/llms-full.txt"))
+	home := len(readFile(t, baseline, "site/llms-full-home.txt"))
+	section := len(readFile(t, baseline, "site/llms-full-section.txt"))
 	for _, total := range []int{maxFullBytes - 1, maxFullBytes} {
 		root := fixture(t)
-		replaceIn(t, root, "docs/after.md", "More text.\n", "More text.\n"+strings.Repeat("x", total-size-1)+"\n")
+		replaceIn(t, root, "docs/after.md", "More text.\n",
+			"More text.\n"+strings.Repeat("x", maxFullBytes-1-home-1)+"\n")
+		replaceIn(t, root, "docs/section/titled.md", "Yes.\n", "Yes.\n"+strings.Repeat("x", total-section-1)+"\n")
 		code, stdout, stderr := generateIn(t, root)
 		if total < maxFullBytes {
-			want := fmt.Sprintf("site/llms-full.txt: %d bytes, about %d tokens; 7 pages\n", total, total/4)
-			if code != 0 || !strings.HasSuffix(stdout, want) {
-				t.Errorf("%d bytes: run = %d, stdout %q, stderr:\n%s", total, code, stdout, stderr)
+			for _, want := range []string{
+				fmt.Sprintf("site/llms-full-home.txt: %d bytes, about %d tokens; 3 pages\n", total, total/4),
+				fmt.Sprintf("site/llms-full-section.txt: %d bytes, about %d tokens; 3 pages\n", total, total/4),
+			} {
+				if code != 0 || !strings.Contains(stdout, want) {
+					t.Errorf("%d bytes: run = %d, stdout %q lacks %q, stderr:\n%s", total, code, stdout, want, stderr)
+				}
 			}
 			continue
 		}
-		want := "site/llms-full.txt: 1048576 bytes; it must be smaller than 1 MiB (1048576 bytes)\n"
+		want := "site/llms-full-section.txt: 1048576 bytes; it must be smaller than 1 MiB (1048576 bytes); " +
+			"split the section Section of the nav of mkdocs.yml\n"
 		if code != 1 || stderr != want {
 			t.Errorf("%d bytes: run = %d, stderr %q, want %q", total, code, stderr, want)
+		}
+	}
+	root := fixture(t)
+	replaceIn(t, root, "docs/after.md", "More text.\n", "More text.\n"+strings.Repeat("x", maxFullBytes-home-1)+"\n")
+	want := "site/llms-full-home.txt: 1048576 bytes; it must be smaller than 1 MiB (1048576 bytes); " +
+		"move pages outside any section of the nav of mkdocs.yml into a section\n"
+	if code, _, stderr := generateIn(t, root); code != 1 || stderr != want {
+		t.Errorf("the top-level pages: run = %d, stderr %q, want %q", code, stderr, want)
+	}
+}
+
+// TestNoGuide runs a template without the template "full": no llms-full-guide.txt, and no file of the full text names
+// one.
+func TestNoGuide(t *testing.T) {
+	root := fixture(t)
+	content := readFile(t, root, "docs/llms.txt.tmpl")
+	start, end := strings.Index(content, "{{define"), strings.Index(content, "{{end -}}\n# Fixture")
+	content = content[:start] + content[end+len("{{end -}}\n"):]
+	content = strings.Replace(content, "- [Guide]({{.Guide.URL}}): {{.Guide.Bytes}} bytes, about {{.Guide.Tokens}} tokens; ", "- ", 1)
+	writeFile(t, root, "docs/llms.txt.tmpl", content)
+	stdout := mustGenerate(t, root)
+	if exists(t, root, "site/llms-full-guide.txt") || strings.Contains(stdout, "guide") {
+		t.Errorf("a template without \"full\" writes a guide: %q", stdout)
+	}
+	for _, name := range []string{"llms-full.txt", "llms-full-home.txt", "llms-full-section.txt"} {
+		if text := readFile(t, root, "site/"+name); strings.Contains(text, "guide.txt") {
+			t.Errorf("%s names a guide:\n%s", name, text)
+		}
+	}
+}
+
+// TestRenamedSection renames a section: the file of its old name does not outlive the run.
+func TestRenamedSection(t *testing.T) {
+	root := fixture(t)
+	mustGenerate(t, root)
+	replaceIn(t, root, "mkdocs.yml", "  - Section:\n", "  - Renamed section:\n")
+	stdout := mustGenerate(t, root)
+	if exists(t, root, "site/llms-full-section.txt") || !exists(t, root, "site/llms-full-renamed-section.txt") ||
+		!strings.Contains(stdout, "site/llms-full-renamed-section.txt: ") {
+		t.Errorf("the renamed section's file: stdout %q", stdout)
+	}
+}
+
+func TestSlug(t *testing.T) {
+	for in, want := range map[string]string{
+		"Concepts": "concepts", "Outgoing webhooks": "outgoing-webhooks", "Sign-in": "sign-in",
+		" API & tokens (v2) ": "api-tokens-v2", "—": "", "Déjà vu": "d-j-vu",
+	} {
+		if got := slug(in); got != want {
+			t.Errorf("slug(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -638,7 +791,7 @@ func TestLLMSLimit(t *testing.T) {
 		replaceIn(t, root, "docs/llms.txt.tmpl", "## Optional", strings.Repeat("x", total-size-1)+"\n## Optional")
 		code, stdout, stderr := generateIn(t, root)
 		if total == maxLLMSBytes {
-			if code != 0 || !strings.HasPrefix(stdout, "site/llms.txt: 32768 bytes; ") {
+			if code != 0 || !strings.HasPrefix(stdout, "site/llms.txt: 32768 bytes\n") {
 				t.Errorf("%d bytes: run = %d, stdout %q, stderr:\n%s", total, code, stdout, stderr)
 			}
 			continue
@@ -653,11 +806,15 @@ func TestLLMSLimit(t *testing.T) {
 func TestVersion(t *testing.T) {
 	root := fixture(t)
 	mustGenerate(t, root, "-version", "0.4")
-	llms, full := readFile(t, root, "site/llms.txt"), readFile(t, root, "site/llms-full.txt")
-	for name, text := range map[string]string{"llms.txt": llms, "llms-full.txt": full} {
+	llms, full := readFile(t, root, "site/llms.txt"), readFile(t, root, "site/llms-full-section.txt")
+	for _, name := range append([]string{"llms.txt"}, outputs...) {
+		text := readFile(t, root, "site/"+name)
 		if strings.Contains(text, "/latest/") || !strings.Contains(text, "https://muster-io.github.io/muster/0.4/") {
 			t.Errorf("%s does not link into 0.4/:\n%s", name, text)
 		}
+	}
+	if want := "- [Section](https://muster-io.github.io/muster/0.4/llms-full-section.txt): "; !strings.Contains(llms, want) {
+		t.Errorf("llms.txt lacks %q", want)
 	}
 	for _, want := range []string{
 		"- [Home](https://muster-io.github.io/muster/0.4/index.md)",
@@ -666,11 +823,12 @@ func TestVersion(t *testing.T) {
 			t.Errorf("llms.txt lacks %q", want)
 		}
 	}
-	if want := "[the deep part](https://muster-io.github.io/muster/0.4/section/nested/deep.md#deep-part)"; !strings.Contains(full, want) {
-		t.Errorf("llms-full.txt lacks %q", want)
+	guide := readFile(t, root, "site/llms-full-guide.txt")
+	if want := "[the deep part](https://muster-io.github.io/muster/0.4/section/nested/deep.md#deep-part)"; !strings.Contains(guide, want) {
+		t.Errorf("llms-full-guide.txt lacks %q", want)
 	}
-	if !strings.HasPrefix(full, "# Muster documentation, version 0.4\n") {
-		t.Errorf("llms-full.txt does not name version 0.4:\n%s", full)
+	if !strings.HasPrefix(full, "# Muster documentation, version 0.4: Section\n") {
+		t.Errorf("llms-full-section.txt does not name version 0.4:\n%s", full)
 	}
 
 	for name, args := range map[string][]string{
