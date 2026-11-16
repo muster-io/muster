@@ -71,9 +71,9 @@ issue: null
 - **Filters** (`statistics-filters.tsx`): the pickers of the Alert Group list reused from `alert-group-filters.tsx`
   (Routes, Integrations, Severity level, Urgent, Reopened), `team-filter.tsx` ("Team" with "All", "My Teams" and each
   Team), the Matcher input of the list (`label-matchers-input.tsx`), and "Acknowledged first by" built on the User
-  picker of `owner-filter.tsx` with "Anyone", "Me" and the Users; no Service accounts, which cannot acknowledge
-  (C-04.FR-2, C-09.FR-30). The list's other filters — resolved by, Owner, Assignee, snoozed with no end, Delivery
-  problem and Unclaimed — are not offered. At phone width the filters move into a panel, as on the list.
+  picker of `owner-filter.tsx` with "Anyone", "Me" and the Users; it offers no Service accounts, since the field names a
+  User only (C-09.FR-27, C-09.FR-30). The list's other filters — resolved by, Owner, Assignee, snoozed with no end,
+  Delivery problem and Unclaimed — are not offered. At phone width the filters move into a panel, as on the list.
 - **By team** (`statistics-table.tsx`): the table of By route with the Teams, captioned "Statistics by team", the
   column "Team", the empty text "There are no teams to show."; the name is a link (`/statistics?by=people&team=<id>`
   with the current period and filters) and the days open with "Per day", since the name no longer opens them.

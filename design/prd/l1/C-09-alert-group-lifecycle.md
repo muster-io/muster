@@ -244,26 +244,25 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   filter, which then narrows the other views too. The period still selects the Alert Groups that started in it, and the
   first acknowledgement also records who made it (FR-27).
 - **C-09.FR-27** _Added for L2 (2026-11-16)._ The first acknowledgement of an Alert Group records who made it — "first
-  acknowledged by", a User or a Service account, kept as the resolver of a Resolve is — on the summary row, in the
-  transaction that sets the time of the first acknowledgement. Neither changes afterwards: a Takeover, an Unacknowledge,
-  a later Acknowledge, a Reopen and an Unresolve leave both as they are, as time to acknowledge has it (FR-15). While
-  only a User can acknowledge (C-04.FR-2, C-10.FR-1), it names a User. It is kept as long as the summary row
-  (`retention.alert_group_summaries`); a User or Service account deleted later stays, under the name its deletion
-  leaves (C-03.FR-13), marked as deactivated. For the Alert Groups acknowledged before 0.2.0, the upgrade fills it from
-  the `acknowledged` entry of their first acknowledgement — the earliest one — where their Timeline is still whole, its
-  `created` entry still kept (`retention.alert_details`); an Alert Group whose Timeline is gone or partly gone, and one
-  first acknowledged by a replica of an earlier version during the rolling update, keeps it empty and counts as
-  "Unknown" in By people (FR-28).
+  acknowledged by", a User — on the summary row, in the transaction that sets the time of the first acknowledgement.
+  Only Users acknowledge (C-04.FR-2, C-10.FR-1), so the field names a User and never a Service account. Neither changes
+  afterwards: a Takeover, an Unacknowledge, a later Acknowledge, a Reopen and an Unresolve leave both as they are, as
+  time to acknowledge has it (FR-15). It is kept as long as the summary row (`retention.alert_group_summaries`); a User
+  deleted later stays, under the name their deletion leaves (C-03.FR-13), marked as deactivated. For the Alert Groups
+  acknowledged before 0.2.0, the upgrade fills it from the `acknowledged` entry of their first acknowledgement — the
+  earliest one — where their Timeline is still whole, its `created` entry still kept (`retention.alert_details`); an
+  Alert Group whose Timeline is gone or partly gone, and one first acknowledged by a replica of an earlier version
+  during the rolling update, keeps it empty and counts as "Unknown" in By people (FR-28).
 - **C-09.FR-28** _Added for L2 (2026-11-16)._ The view By people of the statistics page is a table of who acted on the
-  selected Alert Groups — those that started in the period and match the filters (FR-30): one row per User and per
-  Service account that acknowledged at least one of them first or resolved at least one, a Service account marked
-  "Service account". Its columns are the name; "Acknowledged first", the number of the selected Alert Groups whose first
-  acknowledgement the row made (FR-27); "Resolved", the number the row resolved, by its resolver; and the median and
-  95th percentile of time to acknowledge (FR-15) over the Alert Groups the row acknowledged first, also where that
-  acknowledgement came after the end of the period. The values are totals over the period, with no split by day. Every
-  column sorts, either direction; by default the rows go by "Acknowledged first", most first, then by name. An Alert
-  Group gives at most one "Acknowledged first" and one "Resolved", each to one row, which may be two different people;
-  one never acknowledged counts in no "Acknowledged first", and one resolved by the system in no "Resolved". The
+  selected Alert Groups — those that started in the period and match the filters (FR-30): one row per User that
+  acknowledged at least one of them first or resolved at least one, and one per Service account that resolved at least
+  one, marked "Service account". Its columns are the name; "Acknowledged first", the number of the selected Alert Groups
+  whose first acknowledgement the row made (FR-27); "Resolved", the number the row resolved, by its resolver; and the
+  median and 95th percentile of time to acknowledge (FR-15) over the Alert Groups the row acknowledged first, also where
+  that acknowledgement came after the end of the period. The values are totals over the period, with no split by day.
+  Every column sorts, either direction; by default the rows go by "Acknowledged first", most first, then by name. An
+  Alert Group gives at most one "Acknowledged first" and one "Resolved", each to one row, which may be two different
+  people; one never acknowledged counts in no "Acknowledged first", and one resolved by the system in no "Resolved". The
   selected Alert Groups that were acknowledged but whose first acknowledgement names nobody (FR-27) make one more row,
   "Unknown", always last, with their number under "Acknowledged first", their own median and 95th percentile and nothing
   under "Resolved". So "Acknowledged first" adds up over the rows to the number of the selected Alert Groups
@@ -279,16 +278,15 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
 - **C-09.FR-30** _Added for L2 (2026-11-16)._ The statistics page has these filters of the Alert Group list (FR-13, with
   its revision for L2): Route, Integration, Severity level, Urgent, Team with "My Teams", Reopened and labels as
   Matchers, each matched as on the list; the list's other filters — resolved by, Owner, Assignee, snoozed with no end,
-  Delivery problem and Unclaimed — are not offered. It adds one of its own, "Acknowledged first by": a User, a Service
-  account or "me", the caller, which keeps the Alert Groups whose first acknowledgement (FR-27) they made. The page
-  offers "Me" and the Users; a Service account, which cannot acknowledge (C-04.FR-2), is accepted through the API and
-  selects nothing. The filters combine and apply to every view — By Route, By Integration, By Team and By people — and
-  the view, the period, the filters and the sorting of By people are kept in the URL, so a view can be shared as a link.
-  In By Route, By Integration and By Team, the Routes, Integrations or Teams chosen in that view's own filter are also
-  its rows. The page has no status tabs and no search by text or `#N`, and its period keeps selecting the Alert Groups
-  that started in it (FR-15), not those whose lifetime overlaps it, as the list's time range does. Everyone who reads
-  Alert Groups (`alert-groups:read`: Admin, Responder and Viewer) sees every view and filter; no Permission is added,
-  and Teams limit nothing anyone sees (C-25.FR-1).
+  Delivery problem and Unclaimed — are not offered. It adds one of its own, "Acknowledged first by": a User or "me", the
+  signed-in User, which keeps the Alert Groups whose first acknowledgement (FR-27) that User made; like the Owner
+  filter, it takes no Service account. The filters combine and apply to every view — By Route, By Integration, By Team
+  and By people — and the view, the period, the filters and the sorting of By people are kept in the URL, so a view can
+  be shared as a link. In By Route, By Integration and By Team, the Routes, Integrations or Teams chosen in that view's
+  own filter are also its rows. The page has no status tabs and no search by text or `#N`, and its period keeps
+  selecting the Alert Groups that started in it (FR-15), not those whose lifetime overlaps it, as the list's time range
+  does. Everyone who reads Alert Groups (`alert-groups:read`: Admin, Responder and Viewer) sees every view and filter;
+  no Permission is added, and Teams limit nothing anyone sees (C-25.FR-1).
 - **C-09.FR-31** _Added for L2 (2026-11-16)._ The documentation's section on statistics in Concepts → Alert Groups
   describes the views By Team and By people, that the first acknowledgement gets the credit and why a Takeover does
   not move it, the row "Unknown" and the Alert Groups acknowledged before 0.2.0, and the filters, with screenshots of
