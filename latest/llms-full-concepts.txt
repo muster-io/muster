@@ -228,18 +228,84 @@ Alerts resolve or a person resolves it.
 
 ## Statistics
 
-**Statistics** counts the Alert Groups that started in a period and how fast people took and closed them: for each
-Route or each Integration, the number of Alert Groups and the median and the 95th percentile of the time to acknowledge
-and of the time to resolve. Days are split in your time zone.
+**Statistics** counts the Alert Groups that started in a period and shows how fast people took and closed them. It has
+four views, chosen under **Show**: **By route**, **By integration**, **By team** and **By people**. The first three
+give, for each Route, Integration or Team, the number of Alert Groups and the median and the 95th percentile of the
+time to acknowledge and of the time to resolve. **By people** shows who did the acknowledging and the resolving. Days
+are split in your time zone. Everyone who can read Alert Groups sees every view and filter; Teams limit nothing.
 
-1. Open **Statistics**. Choose the **Period** — **Last 7 days**, **Last 30 days**, **Last 90 days** or **Custom** — and
-   show it **By route** or **By integration**; add Routes or Integrations to narrow it.
+The period counts the Alert Groups that **started** in it, not those that were open during it. Choose the **Period** —
+**Last 7 days**, **Last 30 days**, **Last 90 days** or **Custom**.
+
+1. Open **Statistics**. Choose the **Period** and the view, and add filters to narrow it.
 
     ![Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/06-statistics.png){ .screenshot }
 
-2. Select a Route or an Integration to see its Alert Groups per day of start, with the median times of each day.
+2. Select a Route, an Integration or a Team to see its Alert Groups per day of start, with the median times of each
+   day (**Per day**).
 
     ![The Alert Groups per day of start of the Route payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/07-statistics-days.png){ .screenshot }
+
+### Filters
+
+The page takes these filters of the Alert Group list, and they apply to every view and stay when you change the view:
+**Routes**, **Integrations**, **Severity**, **Urgent**, **Team** (a Team or **My Teams**), **Reopened** and **Label
+filters**. It adds one of its own, **Acknowledged first by**: **Anyone**, **Me** or a User; a Service account cannot be
+chosen, because it cannot acknowledge. The page has no status tabs and no search. The view, the period and the filters
+are in the address of the page, so a link shares exactly what you see.
+
+In **By route**, **By integration** and **By team**, the Routes, Integrations or Teams you choose in their own filter
+are also the rows of the table.
+
+### By team
+
+**By team** shows what **By route** shows, for each Team. An Alert Group with several Teams counts for each of them, as
+one with Alerts from several Integrations counts for each Integration; an Alert Group with no Team counts for none. So
+the Teams do not add up to the total. For example, with the Teams payments and search, an Alert Group of both counts
+once for payments and once for search.
+
+The name of a Team opens **By people** for that Team, with the period and the other filters kept.
+
+![Statistics by team: the Teams payments and search, with the Alert Group that both share counted for each](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/08-statistics-by-team.png){ .screenshot }
+
+### By people
+
+**By people** is a table with one row for each person who acted on the Alert Groups of the period, with totals over the
+period and no split by day. Click a column to sort by it; by default the rows go by **Acknowledged first**, most first.
+
+**Acknowledged first**
+:   the number of Alert Groups the person was the first to acknowledge.
+
+**Resolved**
+:   the number of Alert Groups the person resolved.
+
+**Median** and **95th percentile** of the **Time to acknowledge**
+:   over the Alert Groups the person acknowledged first.
+
+An Alert Group gives one **Acknowledged first** and one **Resolved**, each to one row; they may be two different people.
+One that nobody acknowledged counts in no **Acknowledged first**, and one the system resolved counts in no
+**Resolved**. Takeovers, Snoozes and Notes are not counted.
+
+A Service account appears with what it resolved, marked **Service account**, and with no times: it cannot acknowledge.
+
+![Statistics by people: alice, bob and the Service account terraform, with what each acknowledged first and resolved and the times to acknowledge](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/09-statistics-by-people.png){ .screenshot }
+
+#### Who gets the credit
+
+An Alert Group gives its acknowledgement to whoever acknowledged it **first**. A Takeover, an Unacknowledge, a later
+Acknowledge or a Reopen does not move it. So if alice acknowledges an Alert Group five minutes after it starts and bob
+takes it over an hour later, the Alert Group stays with alice, with five minutes; bob, who took over late, gets no
+credit for it. The acknowledgement counts even when it came after the end of the period, as long as the Alert Group
+started in it.
+
+#### The row Unknown
+
+The row **Unknown** holds the Alert Groups that were acknowledged but whose first acknowledger Muster does not know:
+those acknowledged before 0.2.0 whose Timeline was already removed, wholly or in part (`retention.alert_details`), and
+those first acknowledged while Muster was being updated by a rolling update. It is always the last row, whatever the
+sorting, and it has no **Resolved**. It is there so that **Acknowledged first** adds up over the rows to the number of
+Alert Groups that were acknowledged, which is the **Acknowledged** column of **By route**. The row is not shown
+when it has no Alert Groups, nor when **Acknowledged first by** is set.
 
 ## How long Alert Groups are kept
 

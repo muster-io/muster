@@ -3364,20 +3364,68 @@ an Alert Group's status. A new Group key or new Matchers apply only to Alerts th
 route. A moved Alert Group keeps its Group key values, takes no new Alerts, and never reopens; it stays open until its
 Alerts resolve or a person resolves it.</p>
 <h2 id="statistics">Statistics<a class="headerlink" href="#statistics" title="Permanent link">&para;</a></h2>
-<p><strong>Statistics</strong> counts the Alert Groups that started in a period and how fast people took and closed them: for each
-Route or each Integration, the number of Alert Groups and the median and the 95th percentile of the time to acknowledge
-and of the time to resolve. Days are split in your time zone.</p>
+<p><strong>Statistics</strong> counts the Alert Groups that started in a period and shows how fast people took and closed them. It has
+four views, chosen under <strong>Show</strong>: <strong>By route</strong>, <strong>By integration</strong>, <strong>By team</strong> and <strong>By people</strong>. The first three
+give, for each Route, Integration or Team, the number of Alert Groups and the median and the 95th percentile of the
+time to acknowledge and of the time to resolve. <strong>By people</strong> shows who did the acknowledging and the resolving. Days
+are split in your time zone. Everyone who can read Alert Groups sees every view and filter; Teams limit nothing.</p>
+<p>The period counts the Alert Groups that <strong>started</strong> in it, not those that were open during it. Choose the <strong>Period</strong> —
+<strong>Last 7 days</strong>, <strong>Last 30 days</strong>, <strong>Last 90 days</strong> or <strong>Custom</strong>.</p>
 <ol>
 <li>
-<p>Open <strong>Statistics</strong>. Choose the <strong>Period</strong> — <strong>Last 7 days</strong>, <strong>Last 30 days</strong>, <strong>Last 90 days</strong> or <strong>Custom</strong> — and
-   show it <strong>By route</strong> or <strong>By integration</strong>; add Routes or Integrations to narrow it.</p>
+<p>Open <strong>Statistics</strong>. Choose the <strong>Period</strong> and the view, and add filters to narrow it.</p>
 <p><img alt="Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/06-statistics.png" /></p>
 </li>
 <li>
-<p>Select a Route or an Integration to see its Alert Groups per day of start, with the median times of each day.</p>
+<p>Select a Route, an Integration or a Team to see its Alert Groups per day of start, with the median times of each
+   day (<strong>Per day</strong>).</p>
 <p><img alt="The Alert Groups per day of start of the Route payments" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/07-statistics-days.png" /></p>
 </li>
 </ol>
+<h3 id="filters">Filters<a class="headerlink" href="#filters" title="Permanent link">&para;</a></h3>
+<p>The page takes these filters of the Alert Group list, and they apply to every view and stay when you change the view:
+<strong>Routes</strong>, <strong>Integrations</strong>, <strong>Severity</strong>, <strong>Urgent</strong>, <strong>Team</strong> (a Team or <strong>My Teams</strong>), <strong>Reopened</strong> and <strong>Label
+filters</strong>. It adds one of its own, <strong>Acknowledged first by</strong>: <strong>Anyone</strong>, <strong>Me</strong> or a User; a Service account cannot be
+chosen, because it cannot acknowledge. The page has no status tabs and no search. The view, the period and the filters
+are in the address of the page, so a link shares exactly what you see.</p>
+<p>In <strong>By route</strong>, <strong>By integration</strong> and <strong>By team</strong>, the Routes, Integrations or Teams you choose in their own filter
+are also the rows of the table.</p>
+<h3 id="by-team">By team<a class="headerlink" href="#by-team" title="Permanent link">&para;</a></h3>
+<p><strong>By team</strong> shows what <strong>By route</strong> shows, for each Team. An Alert Group with several Teams counts for each of them, as
+one with Alerts from several Integrations counts for each Integration; an Alert Group with no Team counts for none. So
+the Teams do not add up to the total. For example, with the Teams payments and search, an Alert Group of both counts
+once for payments and once for search.</p>
+<p>The name of a Team opens <strong>By people</strong> for that Team, with the period and the other filters kept.</p>
+<p><img alt="Statistics by team: the Teams payments and search, with the Alert Group that both share counted for each" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/08-statistics-by-team.png" /></p>
+<h3 id="by-people">By people<a class="headerlink" href="#by-people" title="Permanent link">&para;</a></h3>
+<p><strong>By people</strong> is a table with one row for each person who acted on the Alert Groups of the period, with totals over the
+period and no split by day. Click a column to sort by it; by default the rows go by <strong>Acknowledged first</strong>, most first.</p>
+<dl>
+<dt><strong>Acknowledged first</strong></dt>
+<dd>the number of Alert Groups the person was the first to acknowledge.</dd>
+<dt><strong>Resolved</strong></dt>
+<dd>the number of Alert Groups the person resolved.</dd>
+<dt><strong>Median</strong> and <strong>95th percentile</strong> of the <strong>Time to acknowledge</strong></dt>
+<dd>over the Alert Groups the person acknowledged first.</dd>
+</dl>
+<p>An Alert Group gives one <strong>Acknowledged first</strong> and one <strong>Resolved</strong>, each to one row; they may be two different people.
+One that nobody acknowledged counts in no <strong>Acknowledged first</strong>, and one the system resolved counts in no
+<strong>Resolved</strong>. Takeovers, Snoozes and Notes are not counted.</p>
+<p>A Service account appears with what it resolved, marked <strong>Service account</strong>, and with no times: it cannot acknowledge.</p>
+<p><img alt="Statistics by people: alice, bob and the Service account terraform, with what each acknowledged first and resolved and the times to acknowledge" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/09-statistics-by-people.png" /></p>
+<h4 id="who-gets-the-credit">Who gets the credit<a class="headerlink" href="#who-gets-the-credit" title="Permanent link">&para;</a></h4>
+<p>An Alert Group gives its acknowledgement to whoever acknowledged it <strong>first</strong>. A Takeover, an Unacknowledge, a later
+Acknowledge or a Reopen does not move it. So if alice acknowledges an Alert Group five minutes after it starts and bob
+takes it over an hour later, the Alert Group stays with alice, with five minutes; bob, who took over late, gets no
+credit for it. The acknowledgement counts even when it came after the end of the period, as long as the Alert Group
+started in it.</p>
+<h4 id="the-row-unknown">The row Unknown<a class="headerlink" href="#the-row-unknown" title="Permanent link">&para;</a></h4>
+<p>The row <strong>Unknown</strong> holds the Alert Groups that were acknowledged but whose first acknowledger Muster does not know:
+those acknowledged before 0.2.0 whose Timeline was already removed, wholly or in part (<code>retention.alert_details</code>), and
+those first acknowledged while Muster was being updated by a rolling update. It is always the last row, whatever the
+sorting, and it has no <strong>Resolved</strong>. It is there so that <strong>Acknowledged first</strong> adds up over the rows to the number of
+Alert Groups that were acknowledged, which is the <strong>Acknowledged</strong> column of <strong>By route</strong>. The row is not shown
+when it has no Alert Groups, nor when <strong>Acknowledged first by</strong> is set.</p>
 <h2 id="how-long-alert-groups-are-kept">How long Alert Groups are kept<a class="headerlink" href="#how-long-alert-groups-are-kept" title="Permanent link">&para;</a></h2>
 <dl>
 <dt><code>retention.alert_details</code></dt>
