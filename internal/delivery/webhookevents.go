@@ -115,7 +115,7 @@ func (s *Service) queueEvents(ctx context.Context, tx groups.DBTX, q queries, r 
 			var targets []mentions.Target
 			if names := row.mentionsOf(e); loud && s.mentions != nil && len(names) > 0 {
 				if targets, err = s.mentions.Resolve(ctx, tx, s.orgID, mentions.Request{DestinationID: d.ID,
-					DestinationType: d.Type, AlertGroupID: g.ID, Seq: e.Seq, Mentions: names}); err != nil {
+					DestinationType: d.Type, AlertGroupID: g.ID, Seq: e.Seq, At: now, Mentions: names}); err != nil {
 					return fmt.Errorf("resolve the mentions of the %s event of alert group #%d in %s: %w", e.Event,
 						g.Number, d.PublicID, err)
 				}

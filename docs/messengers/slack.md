@@ -349,15 +349,18 @@ the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Men
 - **Edits are Quiet.** An edit of the Root message carries no Mention, so a Loud change is always a new message: a new
   Root message, or a reply in the Thread. The edit drops the Mentions that the Root message had; Slack may then remove
   them from the person's list of mentions.
-- **Mentions** are `@channel` and `@here`, as the Destination's Mention settings ask, and the people chosen in them,
-  through their Account links. A person without a link is named by their display name as text, which notifies nobody. A
-  Slack Destination takes neither `@all` nor groups. The footer of a Root message — "Acknowledged by", "Snoozed by",
-  "Resolved by" — writes a person with an Account link for the Connection as their Mention, which Slack shows as their
-  name, in an edit as in a new message; a person without one is their display name as text.
+- **Mentions** are those of the Destination's [Mention entries](../concepts/mentions.md): `@channel` and `@here`, and
+  people through their Account links. A person whom an entry names is mentioned only through their Account link;
+  without one they are left out. The Owner of a Reminder, an auto-unacknowledge or a Takeover is still named by their
+  display name as text without a link, which notifies nobody. A Slack Destination takes neither
+  `@everyone` nor `@all`. User groups and Teams are taken once the check found `usergroups:read`, but Muster does not
+  write them in Slack messages yet. The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" —
+  writes a person with an Account link for the Connection as their Mention, which Slack shows as their name, in an
+  edit as in a new message; a person without one is their display name as text.
 - **Thread replies** stay in the Thread: Muster never also broadcasts them to the channel.
 - **Alert data and template text never mention anyone.** An `&`, `<` or `>` in a label or an annotation is escaped, and
   so is `@`. A literal `<!here>` or `<@U…>` written in a template is shown as text and notifies nobody. Only the
-  Destination's Mention settings, `{{ mention "here" }}` and its siblings, and linked people notify.
+  Destination's Mention entries, `{{ mention "here" }}` and its siblings, and linked people notify.
 
 See [Loud and Quiet](../concepts/loud-and-quiet.md).
 

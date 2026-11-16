@@ -466,6 +466,56 @@ func (q *Queries) GetScheduleOverride(ctx context.Context, arg GetScheduleOverri
 	return i, err
 }
 
+const getTeamMainSchedule = `-- name: GetTeamMainSchedule :one
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+WHERE s.org_id = $1 AND s.team_id = $2 AND s.main AND t.deleted_at IS NULL
+`
+
+type GetTeamMainScheduleParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+type GetTeamMainScheduleRow struct {
+	ID           int64
+	PublicID     string
+	Name         string
+	TimeZone     string
+	Main         bool
+	GapAlert     string
+	Version      int64
+	CreatedAt    time.Time
+	TeamID       int64
+	TeamPublicID string
+	TeamName     string
+	TeamSlug     string
+}
+
+// GetTeamMainSchedule reads the main Schedule of a Team that is not deleted, for its On-call at a moment (C-27.FR-4,
+// C-28.FR-3).
+func (q *Queries) GetTeamMainSchedule(ctx context.Context, arg GetTeamMainScheduleParams) (GetTeamMainScheduleRow, error) {
+	row := q.db.QueryRow(ctx, getTeamMainSchedule, arg.OrgID, arg.TeamID)
+	var i GetTeamMainScheduleRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.TimeZone,
+		&i.Main,
+		&i.GapAlert,
+		&i.Version,
+		&i.CreatedAt,
+		&i.TeamID,
+		&i.TeamPublicID,
+		&i.TeamName,
+		&i.TeamSlug,
+	)
+	return i, err
+}
+
 const insertRotationLayer = `-- name: InsertRotationLayer :one
 INSERT INTO rotation_layers (
     org_id, public_id, schedule_id, position, name, shift_length, shift_seconds, handover_time, handover_day,

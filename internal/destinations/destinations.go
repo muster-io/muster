@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
@@ -78,7 +79,8 @@ type TemplateError struct {
 // Destination is a Destination of any type as read. The fields of the other types are empty: Mattermost has its
 // team and channel, Telegram its channel and the discussion group a Destination check found, a Bridge and Slack their
 // channel id and the channel's name their Destination check read, an outgoing webhook its mode, request templates,
-// proxy and Signing secret. Mentions, EventsConfig and TemplateConfig are the stored JSON. Buttons is the button set of
+// proxy and Signing secret. EventsConfig and TemplateConfig are the stored JSON. MentionEntries are the Mention entries
+// in order, with what each mentions now (C-28.FR-1); the L1 Mention settings are computed from them. Buttons is the button set of
 // a messenger Destination, its own or "As in the Organization", and OrganizationButtons the Organization's set, which
 // the latter follows (C-28.FR-8).
 type Destination struct {
@@ -114,7 +116,7 @@ type Destination struct {
 	// SigningSecretOnce is the first Signing secret of an outgoing webhook, set only by Create, which returns it once.
 	SigningSecretOnce logging.Secret
 
-	Mentions            json.RawMessage
+	MentionEntries      []mentions.Entry
 	Buttons             buttons.Own
 	OrganizationButtons buttons.Set
 	LimiterLimit        int64
@@ -252,10 +254,37 @@ func (s *Service) Get(ctx context.Context, publicID string) (Destination, error)
 	return list[0], nil
 }
 
-// withRoutes sets the Routes of each Destination and the Teams that name it.
+// withEntries sets the Mention entries of each Destination with what each mentions now; without a MentionValidator,
+// as a reader without the changes has, none.
+func (s *Service) withEntries(ctx context.Context, list []Destination) error {
+	if len(list) == 0 || s.writer.Mentions == nil {
+		return nil
+	}
+	ds := make([]mentions.EntryDestination, len(list))
+	for i, d := range list {
+		ds[i] = mentions.EntryDestination{ID: d.ID, Type: d.Type, Connection: deref(d.Connection)}
+	}
+	by, err := s.writer.Mentions.Entries(ctx, nil, ds)
+	if err != nil {
+		return fmt.Errorf("read the mention entries of the destinations: %w", err)
+	}
+	for i := range list {
+		if e := by[list[i].ID]; e != nil {
+			list[i].MentionEntries = e
+		} else {
+			list[i].MentionEntries = []mentions.Entry{}
+		}
+	}
+	return nil
+}
+
+// withRoutes sets the Routes of each Destination, the Teams that name it and its Mention entries.
 func (s *Service) withRoutes(ctx context.Context, list []Destination) error {
 	if len(list) == 0 {
 		return nil
+	}
+	if err := s.withEntries(ctx, list); err != nil {
+		return err
 	}
 	ids := make([]int64, len(list))
 	for i, d := range list {
@@ -393,7 +422,7 @@ func destinationOf(r dbgen.GetDestinationRow) Destination {
 		EventsConfig: r.WebhookEventsConfig, TemplateConfig: r.WebhookTemplateConfig,
 		SigningSecret: SigningSecret{Set: r.SigningSecretSet, UpdatedAt: timeOf(r.SigningSecretUpdatedAt),
 			PreviousActiveSince: timeOf(r.PreviousSigningSecretSince)},
-		Mentions: r.Mentions, LimiterLimit: r.LimiterLimit, LimiterPerSeconds: r.LimiterPerSeconds,
+		MentionEntries: []mentions.Entry{}, LimiterLimit: r.LimiterLimit, LimiterPerSeconds: r.LimiterPerSeconds,
 		Health:    Health{State: r.Health, Since: timeOf(r.BrokenSince), Reason: textOf(r.BrokenReason)},
 		CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
 	if r.TelegramChannelChatID.Valid {

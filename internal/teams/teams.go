@@ -34,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/matchers"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams/dbgen"
@@ -316,6 +317,9 @@ type Queries interface {
 	DeleteTeamMentions(ctx context.Context, arg dbgen.DeleteTeamMentionsParams) error
 	InsertTeamMentions(ctx context.Context, arg dbgen.InsertTeamMentionsParams) error
 	GetTeamMention(ctx context.Context, arg dbgen.GetTeamMentionParams) (dbgen.GetTeamMentionRow, error)
+	// AddTeamEntry adds the Mention entry "Team {Team}" to a Destination the Team names (mentions.AddTeamEntry).
+	AddTeamEntry(ctx context.Context, org, destinationID, teamID int64, teamPublicID string, now time.Time) (
+		mentions.TeamEntry, bool, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -344,6 +348,11 @@ func newQueries(d dbgen.DBTX) pgQueries {
 
 func (q pgQueries) Notify(ctx context.Context, h db.Hint) error {
 	return db.NotifyHint(ctx, q.exec, h)
+}
+
+func (q pgQueries) AddTeamEntry(ctx context.Context, org, destinationID, teamID int64, teamPublicID string,
+	now time.Time) (mentions.TeamEntry, bool, error) {
+	return mentions.AddTeamEntry(ctx, q.exec, org, destinationID, teamID, teamPublicID, now)
 }
 
 type pgStore struct {
@@ -798,6 +807,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 				return err
 			}
 		}
+		if err := s.addTeamEntries(ctx, q, r, id, p.PublicID, nil, dests, now); err != nil {
+			return err
+		}
 		if _, err := s.writeDestinations(ctx, q, id, nil, dests, now); err != nil {
 			return err
 		}
@@ -930,6 +942,10 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 		}
 		if dests != nil && !slices.Equal(before.DestinationEntries, next.DestinationEntries) {
+			if err := s.addTeamEntries(ctx, q, r, before.ID, before.PublicID, before.DestinationEntries, dests,
+				now); err != nil {
+				return err
+			}
 			if err := s.changeDestinations(ctx, q, before.ID, now, func() ([]int64, error) {
 				return s.writeDestinations(ctx, q, before.ID, before.DestinationEntries, dests, now)
 			}); err != nil {

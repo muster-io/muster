@@ -35,7 +35,7 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
-       d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
+       d.signing_secret_updated_at, d.previous_signing_secret_since, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
        d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
        t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, d.buttons,
@@ -80,7 +80,6 @@ type GetDestinationRow struct {
 	SigningSecretSet             bool
 	SigningSecretUpdatedAt       pgtype.Timestamptz
 	PreviousSigningSecretSince   pgtype.Timestamptz
-	Mentions                     []byte
 	LimiterLimit                 int64
 	LimiterPerSeconds            int64
 	Health                       string
@@ -131,7 +130,6 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 		&i.SigningSecretSet,
 		&i.SigningSecretUpdatedAt,
 		&i.PreviousSigningSecretSince,
-		&i.Mentions,
 		&i.LimiterLimit,
 		&i.LimiterPerSeconds,
 		&i.Health,
@@ -571,7 +569,7 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
-       d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
+       d.signing_secret_updated_at, d.previous_signing_secret_since, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
        d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
        t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, d.buttons,
@@ -639,7 +637,6 @@ type ListDestinationsRow struct {
 	SigningSecretSet             bool
 	SigningSecretUpdatedAt       pgtype.Timestamptz
 	PreviousSigningSecretSince   pgtype.Timestamptz
-	Mentions                     []byte
 	LimiterLimit                 int64
 	LimiterPerSeconds            int64
 	Health                       string
@@ -661,6 +658,9 @@ type ListDestinationsRow struct {
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // Destinations (C-11.FR-18): reading every type with its health and Routes. Secrets are read only as their status.
+// The L1 Mention settings in destinations.mentions are neither read nor written after 0043, except that a creation
+// stores the L1 default, nobody, for the replicas of 0.1 of a rolling update (C-28.FR-5); the Mention entries are
+// internal/mentions'.
 // ListDestinations reads a page of the Destinations that are not deleted, in id order after a cursor, filtered by
 // type, health, the public_id of a Route that is not deleted, and the public_id of the Team that owns them or a User
 // in the Team that owns them.
@@ -710,7 +710,6 @@ func (q *Queries) ListDestinations(ctx context.Context, arg ListDestinationsPara
 			&i.SigningSecretSet,
 			&i.SigningSecretUpdatedAt,
 			&i.PreviousSigningSecretSince,
-			&i.Mentions,
 			&i.LimiterLimit,
 			&i.LimiterPerSeconds,
 			&i.Health,
@@ -989,10 +988,10 @@ func (q *Queries) SetDestinationOwningTeam(ctx context.Context, arg SetDestinati
 const updateBridgeDestination = `-- name: UpdateBridgeDestination :exec
 UPDATE destinations
 SET name = $1, connection_id = $2, bridge_channel_id = $3,
-    bridge_channel_name = $4, mentions = $5, limiter_limit = $6,
-    limiter_per_seconds = $7, buttons = $8::jsonb,
-    updated_at = $9::timestamptz, version = version + 1
-WHERE org_id = $10 AND id = $11 AND type = 'bridge'
+    bridge_channel_name = $4, limiter_limit = $5,
+    limiter_per_seconds = $6, buttons = $7::jsonb,
+    updated_at = $8::timestamptz, version = version + 1
+WHERE org_id = $9 AND id = $10 AND type = 'bridge'
 `
 
 type UpdateBridgeDestinationParams struct {
@@ -1000,7 +999,6 @@ type UpdateBridgeDestinationParams struct {
 	ConnectionID      pgtype.Int8
 	ChannelID         pgtype.Text
 	ChannelName       pgtype.Text
-	Mentions          []byte
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
@@ -1017,7 +1015,6 @@ func (q *Queries) UpdateBridgeDestination(ctx context.Context, arg UpdateBridgeD
 		arg.ConnectionID,
 		arg.ChannelID,
 		arg.ChannelName,
-		arg.Mentions,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
@@ -1032,10 +1029,10 @@ const updateMattermostDestination = `-- name: UpdateMattermostDestination :exec
 UPDATE destinations
 SET name = $1, connection_id = $2, mattermost_team_id = $3,
     mattermost_channel_id = $4, mattermost_team_name = $5, mattermost_channel_name = $6,
-    mentions = $7, limiter_limit = $8, limiter_per_seconds = $9,
-    buttons = $10::jsonb,
-    updated_at = $11::timestamptz, version = version + 1
-WHERE org_id = $12 AND id = $13
+    limiter_limit = $7, limiter_per_seconds = $8,
+    buttons = $9::jsonb,
+    updated_at = $10::timestamptz, version = version + 1
+WHERE org_id = $11 AND id = $12
 `
 
 type UpdateMattermostDestinationParams struct {
@@ -1045,7 +1042,6 @@ type UpdateMattermostDestinationParams struct {
 	ChannelID         pgtype.Text
 	TeamName          pgtype.Text
 	ChannelName       pgtype.Text
-	Mentions          []byte
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
@@ -1064,7 +1060,6 @@ func (q *Queries) UpdateMattermostDestination(ctx context.Context, arg UpdateMat
 		arg.ChannelID,
 		arg.TeamName,
 		arg.ChannelName,
-		arg.Mentions,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
@@ -1078,10 +1073,10 @@ func (q *Queries) UpdateMattermostDestination(ctx context.Context, arg UpdateMat
 const updateSlackDestination = `-- name: UpdateSlackDestination :exec
 UPDATE destinations
 SET name = $1, connection_id = $2, slack_channel_id = $3,
-    slack_channel_name = $4, mentions = $5, limiter_limit = $6,
-    limiter_per_seconds = $7, buttons = $8::jsonb,
-    updated_at = $9::timestamptz, version = version + 1
-WHERE org_id = $10 AND id = $11 AND type = 'slack'
+    slack_channel_name = $4, limiter_limit = $5,
+    limiter_per_seconds = $6, buttons = $7::jsonb,
+    updated_at = $8::timestamptz, version = version + 1
+WHERE org_id = $9 AND id = $10 AND type = 'slack'
 `
 
 type UpdateSlackDestinationParams struct {
@@ -1089,7 +1084,6 @@ type UpdateSlackDestinationParams struct {
 	ConnectionID      pgtype.Int8
 	ChannelID         pgtype.Text
 	ChannelName       pgtype.Text
-	Mentions          []byte
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
@@ -1106,7 +1100,6 @@ func (q *Queries) UpdateSlackDestination(ctx context.Context, arg UpdateSlackDes
 		arg.ConnectionID,
 		arg.ChannelID,
 		arg.ChannelName,
-		arg.Mentions,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
@@ -1122,10 +1115,10 @@ UPDATE destinations
 SET name = $1, connection_id = $2, telegram_channel_id = $3,
     telegram_channel_chat_id = $4, telegram_discussion_chat_id = $5,
     telegram_channel_title = $6, telegram_discussion_group_title = $7,
-    mentions = $8, limiter_limit = $9, limiter_per_seconds = $10,
-    buttons = $11::jsonb,
-    updated_at = $12::timestamptz, version = version + 1
-WHERE org_id = $13 AND id = $14 AND type = 'telegram'
+    limiter_limit = $8, limiter_per_seconds = $9,
+    buttons = $10::jsonb,
+    updated_at = $11::timestamptz, version = version + 1
+WHERE org_id = $12 AND id = $13 AND type = 'telegram'
 `
 
 type UpdateTelegramDestinationParams struct {
@@ -1136,7 +1129,6 @@ type UpdateTelegramDestinationParams struct {
 	DiscussionChatID     pgtype.Int8
 	ChannelTitle         pgtype.Text
 	DiscussionGroupTitle pgtype.Text
-	Mentions             []byte
 	LimiterLimit         int64
 	LimiterPerSeconds    int64
 	Buttons              []byte
@@ -1156,7 +1148,6 @@ func (q *Queries) UpdateTelegramDestination(ctx context.Context, arg UpdateTeleg
 		arg.DiscussionChatID,
 		arg.ChannelTitle,
 		arg.DiscussionGroupTitle,
-		arg.Mentions,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
@@ -1177,9 +1168,9 @@ SET name = $1, webhook_mode = $2, webhook_events_config = $3::jsonb,
                                      ELSE proxy_password_key_id END,
     proxy_password_updated_at = CASE WHEN $6::boolean THEN $9::timestamptz
                                      ELSE proxy_password_updated_at END,
-    mentions = $10, limiter_limit = $11, limiter_per_seconds = $12,
+    limiter_limit = $10, limiter_per_seconds = $11,
     updated_at = $9::timestamptz, version = version + 1
-WHERE org_id = $13 AND id = $14 AND type = 'webhook'
+WHERE org_id = $12 AND id = $13 AND type = 'webhook'
 `
 
 type UpdateWebhookDestinationParams struct {
@@ -1192,7 +1183,6 @@ type UpdateWebhookDestinationParams struct {
 	ProxyPasswordCiphertext []byte
 	ProxyPasswordKeyID      pgtype.Text
 	Now                     time.Time
-	Mentions                []byte
 	LimiterLimit            int64
 	LimiterPerSeconds       int64
 	OrgID                   int64
@@ -1213,7 +1203,6 @@ func (q *Queries) UpdateWebhookDestination(ctx context.Context, arg UpdateWebhoo
 		arg.ProxyPasswordCiphertext,
 		arg.ProxyPasswordKeyID,
 		arg.Now,
-		arg.Mentions,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.OrgID,

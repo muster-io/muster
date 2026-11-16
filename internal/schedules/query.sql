@@ -60,6 +60,15 @@ FROM schedules s
 JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
 WHERE s.org_id = @org_id AND s.public_id = @public_id;
 
+-- GetTeamMainSchedule reads the main Schedule of a Team that is not deleted, for its On-call at a moment (C-27.FR-4,
+-- C-28.FR-3).
+-- name: GetTeamMainSchedule :one
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+WHERE s.org_id = @org_id AND s.team_id = @team_id AND s.main AND t.deleted_at IS NULL;
+
 -- FindScheduleTeam reads the Team of a Schedule, to lock it before the Schedule.
 -- name: FindScheduleTeam :one
 SELECT team_id

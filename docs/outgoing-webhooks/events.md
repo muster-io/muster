@@ -149,9 +149,10 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 :   `true` exactly when the event is Loud.
 
 `mentions`
-:   Who the event mentions under the Destination's Mention settings, as data: `{"type": "everyone"}`,
-    `{"type": "group", "name": …}` or `{"type": "user", "id": …, "name": …, "login": …}`. Always `[]` for a Quiet
-    event.
+:   Who the event mentions under the Destination's Mention entries, as data: `{"type": "everyone"}`,
+    `{"type": "group", "name": …}`, `{"type": "user", "id": …, "name": …, "login": …}` — the On-call of a Team too —
+    or `{"type": "team", "slug": …, "name": …}`, with one target per Team of the Alert Group for "Team from the label".
+    Always `[]` for a Quiet event.
 
 `sequence`
 :   The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,

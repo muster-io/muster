@@ -151,13 +151,15 @@ func (c *TemplateConfig) readable(name string) []string {
 	return out
 }
 
-// Mention is a resolved Mention as the request templates read it (`.Mentions`, C-15.FR-11): everyone with the choice
-// of the Mention settings — all, channel or here — a group by its name, or a User by public_id, display name and login.
+// Mention is a resolved Mention as the request templates read it (`.Mentions`, C-15.FR-11): everyone with the word of
+// its entry — all, channel, here or everyone — a group by its name, a User by public_id, display name and login, or a
+// Team by its slug and name.
 type Mention struct {
 	Type     string
 	ID       string
 	Name     string
 	Login    string
+	Slug     string
 	Everyone string
 }
 
@@ -175,14 +177,18 @@ func mentionsOf(ts []mentions.Target) []Mention {
 				out = append(out, Mention{Type: mentions.TargetUser, ID: t.User.PublicID, Name: t.User.Name,
 					Login: t.User.Login})
 			}
+		case mentions.TargetTeam:
+			if t.Team != nil {
+				out = append(out, Mention{Type: mentions.TargetTeam, Name: t.Team.Name, Slug: t.Team.Slug})
+			}
 		}
 	}
 	return out
 }
 
-// mentionText is `mention` in a request template: a target of `.Mentions` as plain text — @all, @channel or @here as
-// the Mention settings chose, the group's name, or @ and the User's login — for the template to wrap in the
-// receiver's syntax (C-15.FR-11).
+// mentionText is `mention` in a request template: a target of `.Mentions` as plain text — @all, @channel, @here or
+// @everyone as its entry chose, the group's name, @ and the User's login, or the Team's slug — for the template to wrap
+// in the receiver's syntax (C-15.FR-11).
 func mentionText(target any) (string, error) {
 	m, ok := target.(Mention)
 	if !ok {
@@ -195,6 +201,8 @@ func mentionText(target any) (string, error) {
 		return m.Name, nil
 	case mentions.TargetUser:
 		return "@" + m.Login, nil
+	case mentions.TargetTeam:
+		return m.Slug, nil
 	}
 	return "", fmt.Errorf("mention: unknown target %q", m.Type)
 }

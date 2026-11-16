@@ -1408,7 +1408,7 @@ func (l *live) storm(t *testing.T) {
 			t.Errorf("call %s", c.Method)
 		case strings.HasPrefix(text, "⛈ Storm on storm: 10 Alert Groups, "):
 			summaries++
-			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
+			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{delivery.MentionStormStarted}) {
 				t.Errorf("summary %s %v", c.Loudness, c.Mentions)
 			}
 		default:
@@ -2926,16 +2926,17 @@ func (l *live) stormTexts(t *testing.T) {
 // setting mentions the channel.
 func (l *live) mentionTargets(t *testing.T) {
 	l.fresh(t, 1000, 1)
-	nobody := `{"everyone":"none","user_ids":[],"groups":[]}`
-	l.exec(t, `UPDATE destinations SET mentions = $1 WHERE id = $2`, `{"new_alert_group":{"everyone":"channel",
-		"user_ids":[],"groups":[]},"new_alerts":{"everyone":"none","user_ids":["sraaaaaaaaaaa1"],"groups":[]},
-		"reopen":{"everyone":"channel","user_ids":[],"groups":[]},"ack_timeout":`+nobody+`,"snooze_ended":`+nobody+
-		`,"rise_to_urgent":`+nobody+`}`, l.dests[0])
+	// The Mention entries of the first Destination: @channel for a new Alert Group and a Reopen, alice for new Alerts.
+	l.exec(t, `INSERT INTO mention_entries (org_id, destination_id, position, target_kind, everyone, events, created_at)
+		VALUES ($1, $2, 0, 'everyone', 'channel', '{new_alert_group,reopen}', $3)`, l.orgID, l.dests[0], t0)
+	l.exec(t, `INSERT INTO mention_entries (org_id, destination_id, position, target_kind, user_id, events, created_at)
+		SELECT $1, $2, 1, 'user', id, '{new_alerts}', $3 FROM users WHERE public_id = 'SRAAAAAAAAAAA1'`, l.orgID,
+		l.dests[0], t0)
 	l.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username,
 		created_at) SELECT $1, 'AKAAAAAAAAAAA1', id, 'mattermost', $2, 'mm-alice', 'alice.mm', $3 FROM users
 		WHERE public_id = 'SRAAAAAAAAAAA1'`, l.orgID, l.conn, t0)
 	t.Cleanup(func() {
-		for _, stmt := range []string{`UPDATE destinations SET mentions = '{}'`, `DELETE FROM account_links`} {
+		for _, stmt := range []string{`DELETE FROM mention_entries`, `DELETE FROM account_links`} {
 			if _, err := l.d.Pool.Exec(context.Background(), stmt); err != nil {
 				t.Error(err)
 			}

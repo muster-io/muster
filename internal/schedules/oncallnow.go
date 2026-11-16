@@ -5,11 +5,14 @@ package schedules
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/schedules/dbgen"
 )
 
@@ -84,4 +87,39 @@ func run(segs []Segment, i int) int {
 		j++
 	}
 	return j
+}
+
+// TeamOnCallAt is the User on Shift in the main Schedule of the Team teamID at t, by id (C-27.FR-4), and false for a
+// Team that is deleted, without a main Schedule, or in a gap of it at t: the On-call that a Mention entry mentions
+// (C-28.FR-3). It reads through db, the transaction of the resolution, or the main pool for a nil one, so that a caller
+// that holds a connection of the pool takes no second one. It satisfies the interface OnCalls that internal/mentions
+// declares.
+func (s *Service) TeamOnCallAt(ctx context.Context, db mentions.DBTX, teamID int64, t time.Time) (int64, bool,
+	error) {
+	q := Queries(s.store)
+	if db != nil {
+		q = s.store.On(db)
+	}
+	r, err := q.GetTeamMainSchedule(ctx, dbgen.GetTeamMainScheduleParams{OrgID: s.orgID, TeamID: teamID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read the main schedule of the team %d: %w", teamID, err)
+	}
+	sc := Schedule{ID: r.ID, PublicID: r.PublicID, Name: r.Name, TimeZone: r.TimeZone, Main: r.Main,
+		GapAlert: r.GapAlert, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
+		Team: TeamRef{ID: r.TeamID, PublicID: r.TeamPublicID, Name: r.TeamName, Slug: r.TeamSlug}}
+	list := []Schedule{sc}
+	if err := s.withLayers(ctx, q, list); err != nil {
+		return 0, false, err
+	}
+	res, err := s.result(ctx, q, list[0], t.UTC(), t.UTC().Add(time.Second))
+	if err != nil {
+		return 0, false, err
+	}
+	if len(res.Segments) == 0 || res.Segments[0].User == nil {
+		return 0, false, nil
+	}
+	return res.Segments[0].User.ID, true, nil
 }

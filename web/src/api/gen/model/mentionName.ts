@@ -18,4 +18,5 @@ export const MentionName = {
   ack_timeout: 'ack_timeout',
   snooze_ended: 'snooze_ended',
   rise_to_urgent: 'rise_to_urgent',
+  storm_started: 'storm_started',
 } as const;

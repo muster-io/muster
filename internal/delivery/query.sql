@@ -1191,22 +1191,35 @@ SELECT count(*)::bigint
 FROM alert_groups
 WHERE org_id = @org_id AND route_id = @route_id AND created_at > @since::timestamptz;
 
--- JoinStorm adds a new Alert Group to the active Storm of a Route, counting it Urgent when it is. No row when the Route
--- has no active Storm.
+-- JoinStorm adds a new Alert Group to the active Storm of a Route, counting it Urgent when it is, and records it among
+-- the Alert Groups the Storm counts. No row when the Route has no active Storm.
 -- name: JoinStorm :one
-UPDATE storms
-SET alert_group_count = alert_group_count + 1,
-    urgent_count      = urgent_count + CASE WHEN @urgent::boolean THEN 1 ELSE 0 END
-WHERE org_id = @org_id AND route_id = @route_id AND ended_at IS NULL
-RETURNING id, started_at, alert_group_count, urgent_count;
+WITH s AS (
+    UPDATE storms
+    SET alert_group_count = alert_group_count + 1,
+        urgent_count      = urgent_count + CASE WHEN @urgent::boolean THEN 1 ELSE 0 END
+    WHERE storms.org_id = @org_id AND storms.route_id = @route_id AND storms.ended_at IS NULL
+    RETURNING id, org_id, started_at, alert_group_count, urgent_count
+), m AS (
+    INSERT INTO storm_alert_groups (org_id, storm_id, alert_group_id)
+    SELECT s.org_id, s.id, @alert_group_id::bigint FROM s
+    ON CONFLICT (storm_id, alert_group_id) DO NOTHING
+)
+SELECT s.id, s.started_at, s.alert_group_count, s.urgent_count FROM s;
 
--- StartStorm starts the Storm of a Route with the Alert Group that started it. No row when another transaction started
--- one first.
+-- StartStorm starts the Storm of a Route with the Alert Group that started it, recorded as the first Alert Group the
+-- Storm counts. No row when another transaction started one first.
 -- name: StartStorm :one
-INSERT INTO storms (org_id, route_id, started_at, alert_group_count, urgent_count)
-VALUES (@org_id, @route_id, @now, 1, CASE WHEN @urgent::boolean THEN 1 ELSE 0 END)
-ON CONFLICT (route_id) WHERE ended_at IS NULL DO NOTHING
-RETURNING id, started_at, alert_group_count, urgent_count;
+WITH s AS (
+    INSERT INTO storms (org_id, route_id, started_at, alert_group_count, urgent_count)
+    VALUES (@org_id, @route_id, @now, 1, CASE WHEN @urgent::boolean THEN 1 ELSE 0 END)
+    ON CONFLICT (route_id) WHERE ended_at IS NULL DO NOTHING
+    RETURNING id, org_id, started_at, alert_group_count, urgent_count
+), m AS (
+    INSERT INTO storm_alert_groups (org_id, storm_id, alert_group_id)
+    SELECT s.org_id, s.id, @alert_group_id::bigint FROM s
+)
+SELECT s.id, s.started_at, s.alert_group_count, s.urgent_count FROM s;
 
 -- SetStormTimer sets the deadline of the calm check of a Storm, free of any lease.
 -- name: SetStormTimer :exec

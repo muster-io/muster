@@ -2434,17 +2434,25 @@ func (q *Queries) InsertWebhookEvent(ctx context.Context, arg InsertWebhookEvent
 }
 
 const joinStorm = `-- name: JoinStorm :one
-UPDATE storms
-SET alert_group_count = alert_group_count + 1,
-    urgent_count      = urgent_count + CASE WHEN $1::boolean THEN 1 ELSE 0 END
-WHERE org_id = $2 AND route_id = $3 AND ended_at IS NULL
-RETURNING id, started_at, alert_group_count, urgent_count
+WITH s AS (
+    UPDATE storms
+    SET alert_group_count = alert_group_count + 1,
+        urgent_count      = urgent_count + CASE WHEN $1::boolean THEN 1 ELSE 0 END
+    WHERE storms.org_id = $2 AND storms.route_id = $3 AND storms.ended_at IS NULL
+    RETURNING id, org_id, started_at, alert_group_count, urgent_count
+), m AS (
+    INSERT INTO storm_alert_groups (org_id, storm_id, alert_group_id)
+    SELECT s.org_id, s.id, $4::bigint FROM s
+    ON CONFLICT (storm_id, alert_group_id) DO NOTHING
+)
+SELECT s.id, s.started_at, s.alert_group_count, s.urgent_count FROM s
 `
 
 type JoinStormParams struct {
-	Urgent  bool
-	OrgID   int64
-	RouteID int64
+	Urgent       bool
+	OrgID        int64
+	RouteID      int64
+	AlertGroupID int64
 }
 
 type JoinStormRow struct {
@@ -2454,10 +2462,15 @@ type JoinStormRow struct {
 	UrgentCount     int64
 }
 
-// JoinStorm adds a new Alert Group to the active Storm of a Route, counting it Urgent when it is. No row when the Route
-// has no active Storm.
+// JoinStorm adds a new Alert Group to the active Storm of a Route, counting it Urgent when it is, and records it among
+// the Alert Groups the Storm counts. No row when the Route has no active Storm.
 func (q *Queries) JoinStorm(ctx context.Context, arg JoinStormParams) (JoinStormRow, error) {
-	row := q.db.QueryRow(ctx, joinStorm, arg.Urgent, arg.OrgID, arg.RouteID)
+	row := q.db.QueryRow(ctx, joinStorm,
+		arg.Urgent,
+		arg.OrgID,
+		arg.RouteID,
+		arg.AlertGroupID,
+	)
 	var i JoinStormRow
 	err := row.Scan(
 		&i.ID,
@@ -5841,17 +5854,24 @@ func (q *Queries) StartRepublication(ctx context.Context, arg StartRepublication
 }
 
 const startStorm = `-- name: StartStorm :one
-INSERT INTO storms (org_id, route_id, started_at, alert_group_count, urgent_count)
-VALUES ($1, $2, $3, 1, CASE WHEN $4::boolean THEN 1 ELSE 0 END)
-ON CONFLICT (route_id) WHERE ended_at IS NULL DO NOTHING
-RETURNING id, started_at, alert_group_count, urgent_count
+WITH s AS (
+    INSERT INTO storms (org_id, route_id, started_at, alert_group_count, urgent_count)
+    VALUES ($1, $2, $3, 1, CASE WHEN $4::boolean THEN 1 ELSE 0 END)
+    ON CONFLICT (route_id) WHERE ended_at IS NULL DO NOTHING
+    RETURNING id, org_id, started_at, alert_group_count, urgent_count
+), m AS (
+    INSERT INTO storm_alert_groups (org_id, storm_id, alert_group_id)
+    SELECT s.org_id, s.id, $5::bigint FROM s
+)
+SELECT s.id, s.started_at, s.alert_group_count, s.urgent_count FROM s
 `
 
 type StartStormParams struct {
-	OrgID   int64
-	RouteID int64
-	Now     time.Time
-	Urgent  bool
+	OrgID        int64
+	RouteID      int64
+	Now          time.Time
+	Urgent       bool
+	AlertGroupID int64
 }
 
 type StartStormRow struct {
@@ -5861,14 +5881,15 @@ type StartStormRow struct {
 	UrgentCount     int64
 }
 
-// StartStorm starts the Storm of a Route with the Alert Group that started it. No row when another transaction started
-// one first.
+// StartStorm starts the Storm of a Route with the Alert Group that started it, recorded as the first Alert Group the
+// Storm counts. No row when another transaction started one first.
 func (q *Queries) StartStorm(ctx context.Context, arg StartStormParams) (StartStormRow, error) {
 	row := q.db.QueryRow(ctx, startStorm,
 		arg.OrgID,
 		arg.RouteID,
 		arg.Now,
 		arg.Urgent,
+		arg.AlertGroupID,
 	)
 	var i StartStormRow
 	err := row.Scan(

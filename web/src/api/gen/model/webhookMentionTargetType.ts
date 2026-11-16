@@ -10,4 +10,5 @@ export const WebhookMentionTargetType = {
   everyone: 'everyone',
   group: 'group',
   user: 'user',
+  team: 'team',
 } as const;

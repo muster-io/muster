@@ -226,6 +226,22 @@ func (s *fakeStore) GetSchedule(_ context.Context, arg dbgen.GetScheduleParams) 
 		TeamName: t.name, TeamSlug: t.slug}, nil
 }
 
+func (s *fakeStore) GetTeamMainSchedule(_ context.Context, arg dbgen.GetTeamMainScheduleParams) (
+	dbgen.GetTeamMainScheduleRow, error) {
+	if err := s.err("GetTeamMainSchedule"); err != nil {
+		return dbgen.GetTeamMainScheduleRow{}, err
+	}
+	for _, sc := range s.schedules {
+		if sc.team == arg.TeamID && sc.main && arg.OrgID == orgID {
+			t := s.team(sc.team)
+			return dbgen.GetTeamMainScheduleRow{ID: sc.id, PublicID: sc.publicID, Name: sc.name, TimeZone: sc.tz,
+				Main: sc.main, GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created, TeamID: t.id,
+				TeamPublicID: t.publicID, TeamName: t.name, TeamSlug: t.slug}, nil
+		}
+	}
+	return dbgen.GetTeamMainScheduleRow{}, pgx.ErrNoRows
+}
+
 func (s *fakeStore) FindScheduleTeam(_ context.Context, arg dbgen.FindScheduleTeamParams) (int64, error) {
 	if err := s.err("FindScheduleTeam"); err != nil {
 		return 0, err
@@ -728,6 +744,9 @@ func (s *fakeStore) InAlertsTx(_ context.Context, f func(internalalerts.Store) e
 }
 
 // InTx runs f and, when it fails, puts back the rows as they were, as a rolled back transaction does.
+// On is the store itself: the fake has no transactions.
+func (s *fakeStore) On(dbgen.DBTX) Queries { return s }
+
 func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 	schedules, layers, overrides := s.snapshot()
 	err := f(s)

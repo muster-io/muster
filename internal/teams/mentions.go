@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams/dbgen"
 )
@@ -299,19 +300,23 @@ func (s *Service) writeMentions(ctx context.Context, q Queries, teamID int64, ms
 	return nil
 }
 
-// TeamMention is the Team mention that mentions a Team through a Connection, as delivery renders it (S-140): the group
-// and, for a Slack Connection, the user group's id.
-type TeamMention struct {
-	Group   string
-	GroupID string
-}
+// TeamMention is the Team mention that mentions a Team through a Connection, as delivery renders it: the group and, for
+// a Slack Connection, the user group's id; the type internal/mentions declares for its interface TeamMentions.
+type TeamMention = mentions.TeamMention
 
 // ForConnection is the Team mention of the Team teamID for the Connection connectionID, by their ids, and whether there
 // is one that the Connection can carry now: none for a deleted Team or Connection, without a Team mention, or when the
 // Connection lost the ability, so that the Team is mentioned as nobody and never by its On-call (C-25.FR-8,
-// C-28.FR-3). It satisfies the interface TeamMentions that internal/mentions declares (S-140).
-func (s *Service) ForConnection(ctx context.Context, teamID, connectionID int64) (TeamMention, bool, error) {
-	r, err := s.store.GetTeamMention(ctx, dbgen.GetTeamMentionParams{OrgID: s.orgID, TeamID: teamID,
+// C-28.FR-3). It reads through db, the transaction of the resolution, or the main pool for a nil one, so that a caller
+// that holds a connection of the pool takes no second one. It satisfies the interface TeamMentions that
+// internal/mentions declares.
+func (s *Service) ForConnection(ctx context.Context, db mentions.DBTX, teamID, connectionID int64) (TeamMention, bool,
+	error) {
+	q := Queries(s.store)
+	if db != nil {
+		q = s.store.On(db)
+	}
+	r, err := q.GetTeamMention(ctx, dbgen.GetTeamMentionParams{OrgID: s.orgID, TeamID: teamID,
 		ConnectionID: connectionID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TeamMention{}, false, nil

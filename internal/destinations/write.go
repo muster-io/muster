@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -182,19 +184,110 @@ type ButtonSetInput struct {
 // button set of a messenger Destination, nil when the request omits it: "As in the Organization" on a creation, the
 // stored set on an update; an outgoing webhook has none.
 type Input struct {
-	Type       string
-	Name       string
-	Mentions   mentions.Settings
-	Buttons    *ButtonSetInput
-	Limiter    Limiter
-	Mattermost *MattermostInput
-	Telegram   *TelegramInput
-	Webhook    *WebhookInput
-	Bridge     *BridgeInput
-	Slack      *SlackInput
+	Type string
+	Name string
+	// MentionEntries are the Mention entries (C-28.FR-1), nil when the request omits them: none on a creation, the
+	// stored ones on an update. Mentions are the L1 Mention settings, nil when the request omits them, which a request
+	// without entries converts into entries until 0.3.0 (C-28.FR-5).
+	MentionEntries *[]mentions.EntryInput
+	Mentions       mentions.Settings
+	Buttons        *ButtonSetInput
+	Limiter        Limiter
+	Mattermost     *MattermostInput
+	Telegram       *TelegramInput
+	Webhook        *WebhookInput
+	Bridge         *BridgeInput
+	Slack          *SlackInput
 	// OwningTeamID is the public_id of the Team that owns the Destination (C-25.FR-2): nil keeps the stored one on an
 	// update and is none on a creation, and an empty string clears it.
 	OwningTeamID *string
+	// entries are the Mention entries the save writes, validated, which validate sets.
+	entries []mentions.EntryInput
+}
+
+// entriesOf are the Mention entries a validated save of in writes, as the Destination saved reads them until its
+// next read says what they mention now.
+func entriesOf(in Input) []mentions.Entry {
+	out := make([]mentions.Entry, len(in.entries))
+	for i, e := range in.entries {
+		out[i] = mentions.Entry{EntryInput: e}
+	}
+	return out
+}
+
+// nobodyJSON is the L1 Mention settings that mention nobody, which a creation stores in the L1 column for the replicas
+// of 0.1 of a rolling update (C-28.FR-5).
+func nobodyJSON() json.RawMessage {
+	b, _ := json.Marshal(mentions.Nobody()) // strings and lists only
+	return b
+}
+
+// connectionOf is the Connection of in by public_id, empty for an outgoing webhook.
+func connectionOf(in Input) string {
+	switch {
+	case in.Mattermost != nil:
+		return in.Mattermost.Connection
+	case in.Telegram != nil:
+		return in.Telegram.Connection
+	case in.Bridge != nil:
+		return in.Bridge.Connection
+	case in.Slack != nil:
+		return in.Slack.Connection
+	}
+	return ""
+}
+
+// planMentions sets the Mention entries the save of in writes (C-28.FR-1, FR-5); stored is nil on a creation: the
+// entries of the request, validated against what its Connection can mention; without them, the L1 settings of the
+// request, validated as L1 validated them and converted — on a creation by mentions.FromSettings, on an update by
+// mentions.MergeSettings, which keeps the entries L1 cannot express; settings that equal the L1 form of the stored
+// entries change nothing and are not validated again, and the validation takes the Users the stored entries name, so
+// that a read sent back with a User deleted since is not refused (C-28.FR-5, settled 2); without either, none on a
+// creation and the stored ones on an update.
+func (s *Service) planMentions(ctx context.Context, in *Input, stored *Destination) error {
+	var before []mentions.EntryInput
+	if stored != nil {
+		before = mentions.Inputs(stored.MentionEntries)
+	}
+	switch {
+	case in.MentionEntries != nil:
+		out, err := s.writer.Mentions.ValidateEntries(ctx, mentions.Check{DestinationType: in.Type,
+			Connection: connectionOf(*in), Entries: *in.MentionEntries, Stored: before})
+		if err != nil {
+			return err
+		}
+		in.entries = out
+	case in.Mentions != nil && stored != nil && mentions.SameForm(in.Type, before, in.Mentions):
+		in.entries = before
+	case in.Mentions != nil:
+		if err := s.writer.Mentions.Validate(ctx, in.Type, in.Mentions, before); err != nil {
+			return err
+		}
+		if stored == nil {
+			in.entries = mentions.FromSettings(in.Type, in.Mentions)
+		} else {
+			in.entries = mentions.MergeSettings(in.Type, before, in.Mentions)
+		}
+	default:
+		in.entries = before
+	}
+	if in.entries == nil {
+		in.entries = []mentions.EntryInput{}
+	}
+	return nil
+}
+
+// writeMentionEntries writes the Mention entries of d, saved with the id id, in the transaction of the save, when they
+// differ from those of before, the zero Destination on a creation.
+func (s *Service) writeMentionEntries(ctx context.Context, q TxQueries, id int64, before, d Destination) error {
+	a, b := mentions.Inputs(d.MentionEntries), mentions.Inputs(before.MentionEntries)
+	if slices.EqualFunc(a, b, func(x, y mentions.EntryInput) bool { return reflect.DeepEqual(x, y) }) {
+		return nil
+	}
+	if err := s.writer.Mentions.WriteEntries(ctx, q.DB(), id, a, s.writer.Business.Now().UTC()); err != nil {
+		return fmt.Errorf("write the mention entries of the destination %s: %w", d.PublicID, err)
+	}
+	return nil
 }
 
 // checkOwner refuses an owning Team that cannot be a Team's public_id, and writes the canonical form of one that can.
@@ -345,10 +438,15 @@ type SlackChecker interface {
 	CheckSlackChannel(ctx context.Context, c SlackChannelCheck) (SlackChannelChecked, error)
 }
 
-// MentionValidator validates the Mention settings of a Destination type (C-12.FR-8), declared by its consumer;
-// *mentions.Service implements it.
+// MentionValidator validates the Mention settings of a Destination type (C-12.FR-8) and its Mention entries
+// (C-28.FR-1, FR-2), reads the entries of Destinations with what they mention now and writes them, declared by its
+// consumer; *mentions.Service implements it.
 type MentionValidator interface {
-	Validate(ctx context.Context, destinationType string, set mentions.Settings) error
+	Validate(ctx context.Context, destinationType string, set mentions.Settings, stored []mentions.EntryInput) error
+	ValidateEntries(ctx context.Context, c mentions.Check) ([]mentions.EntryInput, error)
+	Entries(ctx context.Context, db mentions.DBTX, ds []mentions.EntryDestination) (map[int64][]mentions.Entry, error)
+	WriteEntries(ctx context.Context, db mentions.DBTX, destinationID int64, entries []mentions.EntryInput,
+		now time.Time) error
 }
 
 // Healthy ends the Broken state of the Destination destinationID after a successful Destination check started by a
@@ -391,9 +489,10 @@ type view struct {
 	Events     *webhooks.EventsConfig   `json:"events,omitempty"`
 	Template   *webhooks.TemplateConfig `json:"template,omitempty"`
 	Proxy      *proxyconf.Config        `json:"proxy,omitempty"`
-	Mentions   mentions.Settings        `json:"mentions"`
-	Buttons    json.RawMessage          `json:"buttons,omitempty"`
-	Limiter    Limiter                  `json:"limiter"`
+	// MentionEntries are the Mention entries; the L1 settings are computed from them and not shown.
+	MentionEntries []mentions.EntryInput `json:"mention_entries"`
+	Buttons        json.RawMessage       `json:"buttons,omitempty"`
+	Limiter        Limiter               `json:"limiter"`
 	// OwningTeam is the public_id of the Team that owns the Destination, null for none.
 	OwningTeam *string `json:"owning_team_id"`
 }
@@ -415,11 +514,7 @@ func viewOf(d Destination) (view, error) {
 	if d.Type != TypeWebhook {
 		v.Buttons = buttonsView(d.Buttons)
 	}
-	if len(d.Mentions) > 0 {
-		if err := json.Unmarshal(d.Mentions, &v.Mentions); err != nil {
-			return view{}, fmt.Errorf("read the mention settings of %s: %w", d.PublicID, err)
-		}
-	}
+	v.MentionEntries = mentions.Inputs(d.MentionEntries)
 	if len(d.EventsConfig) > 0 {
 		c, err := webhooks.ParseEventsConfig(d.EventsConfig)
 		if err != nil {
@@ -543,10 +638,13 @@ func proxyOf(p Proxy) proxyconf.Config {
 	return c
 }
 
-// validate checks the common fields of in, the fields of its type and the button set of a messenger Destination,
-// before the Destination check; stored is nil on a creation.
+// validate checks the common fields of in, the fields of its type, its Mention entries or settings and the button set
+// of a messenger Destination, before the Destination check; stored is nil on a creation.
 func (s *Service) validate(ctx context.Context, in *Input, stored *Destination) error {
 	if err := s.validateFields(ctx, in, stored); err != nil {
+		return err
+	}
+	if err := s.planMentions(ctx, in, stored); err != nil {
 		return err
 	}
 	if in.Type == TypeWebhook {
@@ -563,7 +661,7 @@ func (s *Service) validateFields(ctx context.Context, in *Input, stored *Destina
 	case stored != nil && stored.Type != in.Type:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type of a Destination cannot change."}
 	case in.Type == TypeTelegram && in.Telegram != nil:
-		return s.validateTelegram(ctx, in)
+		return s.validateTelegram(in)
 	case in.Type == TypeTelegram:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
 	case in.Type == TypeBridge && in.Bridge != nil:
@@ -571,7 +669,7 @@ func (s *Service) validateFields(ctx context.Context, in *Input, stored *Destina
 	case in.Type == TypeBridge:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
 	case in.Type == TypeSlack && in.Slack != nil:
-		return s.validateSlack(ctx, in)
+		return s.validateSlack(in)
 	case in.Type == TypeSlack:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
 	case in.Type == TypeWebhook && in.Webhook != nil:
@@ -581,7 +679,7 @@ func (s *Service) validateFields(ctx context.Context, in *Input, stored *Destina
 		if err := s.validateWebhook(in.Webhook); err != nil {
 			return err
 		}
-		return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+		return nil
 	case in.Type != TypeMattermost || in.Mattermost == nil:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type is not mattermost."}
 	}
@@ -601,7 +699,7 @@ func (s *Service) validateFields(ctx context.Context, in *Input, stored *Destina
 		return unknownConnection()
 	}
 	m.Connection = conn
-	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+	return nil
 }
 
 // validateCommon checks the name and the limiter of in, trimming the name.
@@ -719,15 +817,11 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	mode := in.Webhook.Mode
 	events, template := webhookConfigs(in.Webhook)
 	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, WebhookMode: &mode,
 		EventsConfig: events, TemplateConfig: template, Proxy: proxyRead(sec.proxy, sec.password),
-		SigningSecret: SigningSecret{Set: true, UpdatedAt: &now}, SigningSecretOnce: secret, Mentions: set,
+		SigningSecret: SigningSecret{Set: true, UpdatedAt: &now}, SigningSecretOnce: secret, MentionEntries: entriesOf(in),
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
 	planOwner(in, &d)
@@ -742,7 +836,7 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 		p := dbgen.InsertWebhookDestinationParams{OrgID: s.orgID, PublicID: d.PublicID, Name: d.Name,
 			WebhookMode: text(d.WebhookMode), WebhookEventsConfig: d.EventsConfig,
 			WebhookTemplateConfig: d.TemplateConfig, Proxy: sec.proxy.JSON(), SigningSecretCiphertext: signing.Ciphertext, SigningSecretKeyID: nonEmpty(signing.KeyID), Now: now,
-			Mentions: set, LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds}
+			Mentions: nobodyJSON(), LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds}
 		if sec.password.Set() {
 			p.ProxyPasswordCiphertext, p.ProxyPasswordKeyID = sec.password.Ciphertext, nonEmpty(sec.password.KeyID)
 			p.ProxyPasswordUpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
@@ -753,6 +847,9 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 		}
 		d.ID = id
 		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
+		if err := s.writeMentionEntries(ctx, q, id, Destination{}, d); err != nil {
 			return err
 		}
 		return s.record(ctx, q, r, ActionCreated, d, append(audit.Created(after), sec.diff...))
@@ -773,13 +870,9 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	d := before
 	mode := in.Webhook.Mode
-	d.Name, d.WebhookMode, d.Mentions = in.Name, &mode, set
+	d.Name, d.WebhookMode, d.MentionEntries = in.Name, &mode, entriesOf(in)
 	d.EventsConfig, d.TemplateConfig = webhookConfigs(in.Webhook)
 	d.LimiterLimit, d.LimiterPerSeconds = in.Limiter.Limit, in.Limiter.PerSeconds
 	d.Proxy = proxyRead(sec.proxy, sec.password)
@@ -816,7 +909,7 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 		p := dbgen.UpdateWebhookDestinationParams{Name: d.Name, WebhookMode: text(d.WebhookMode),
 			WebhookEventsConfig: d.EventsConfig, WebhookTemplateConfig: d.TemplateConfig, Proxy: sec.proxy.JSON(),
 			PasswordGiven: sec.given, Now: now,
-			Mentions: set, LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, OrgID: s.orgID,
+			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, OrgID: s.orgID,
 			ID: before.ID}
 		if sec.password.Set() {
 			p.ProxyPasswordCiphertext, p.ProxyPasswordKeyID = sec.password.Ciphertext, nonEmpty(sec.password.KeyID)
@@ -826,6 +919,9 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 		}
 		d.Version++
 		if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+			return err
+		}
+		if err := s.writeMentionEntries(ctx, q, before.ID, before, d); err != nil {
 			return err
 		}
 		if err := s.renamed(ctx, q, before, d); err != nil {
@@ -942,6 +1038,23 @@ func (s *Service) check(ctx context.Context, in Input, destinationID *int64) (Ch
 // (C-22.FR-3, C-24.FR-3). An outgoing webhook in the events mode has no check: it is created with its first Signing
 // secret (C-15.FR-1, FR-5). It is recorded as destination.created.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destination, error) {
+	d, err := s.create(ctx, r, in)
+	return s.described(ctx, d, err)
+}
+
+// described is the Destination d of a save that succeeded, with what its Mention entries mention now.
+func (s *Service) described(ctx context.Context, d Destination, err error) (Destination, error) {
+	if err != nil {
+		return Destination{}, err
+	}
+	list := []Destination{d}
+	if err := s.withEntries(ctx, list); err != nil {
+		return Destination{}, err
+	}
+	return list[0], nil
+}
+
+func (s *Service) create(ctx context.Context, r Requester, in Input) (Destination, error) {
 	if err := s.validate(ctx, &in, nil); err != nil {
 		return Destination{}, err
 	}
@@ -962,15 +1075,11 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	now := s.writer.Business.Now().UTC()
 	conn := in.Mattermost.Connection
 	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, Connection: &conn,
 		MattermostTeamID: &in.Mattermost.TeamID, MattermostChannelID: &in.Mattermost.ChannelID,
-		MattermostTeamName: &checked.Check.TeamName, MattermostChannelName: &checked.Check.ChannelName, Mentions: set,
+		MattermostTeamName: &checked.Check.TeamName, MattermostChannelName: &checked.Check.ChannelName, MentionEntries: entriesOf(in),
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
 	planOwner(in, &d)
@@ -989,7 +1098,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 		id, err := q.InsertMattermostDestination(ctx, dbgen.InsertMattermostDestinationParams{OrgID: s.orgID,
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			TeamID: text(d.MattermostTeamID), ChannelID: text(d.MattermostChannelID),
-			TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName), Mentions: set,
+			TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName), Mentions: nobodyJSON(),
 			Buttons:      d.Buttons.JSON(),
 			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
@@ -997,6 +1106,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 		}
 		d.ID = id
 		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
+		if err := s.writeMentionEntries(ctx, q, id, Destination{}, d); err != nil {
 			return err
 		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
@@ -1019,6 +1131,12 @@ func created(d Destination, err error) (Destination, error) {
 // limited by the Destination; a passing check of a Broken Destination ends its Broken state (C-13.FR-10, C-14.FR-14).
 // An update that changes nothing writes nothing.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Destination,
+	error) {
+	d, err := s.update(ctx, r, publicID, version, in)
+	return s.described(ctx, d, err)
+}
+
+func (s *Service) update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Destination,
 	error) {
 	before, err := s.Get(ctx, publicID)
 	if err != nil {
@@ -1047,16 +1165,12 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	d := before
 	conn := in.Mattermost.Connection
 	d.Name, d.Connection, d.MattermostTeamID, d.MattermostChannelID = in.Name, &conn, &in.Mattermost.TeamID,
 		&in.Mattermost.ChannelID
 	d.MattermostTeamName, d.MattermostChannelName = &checked.Check.TeamName, &checked.Check.ChannelName
-	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	d.MentionEntries, d.LimiterLimit, d.LimiterPerSeconds = entriesOf(in), in.Limiter.Limit, in.Limiter.PerSeconds
 	withButtons(&d, in)
 	old, err := viewOf(before)
 	if err != nil {
@@ -1092,13 +1206,16 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			if err := q.UpdateMattermostDestination(ctx, dbgen.UpdateMattermostDestinationParams{OrgID: s.orgID,
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 				TeamID: text(d.MattermostTeamID), ChannelID: text(d.MattermostChannelID),
-				TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName), Mentions: set,
+				TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName),
 				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.writeMentionEntries(ctx, q, before.ID, before, d); err != nil {
 				return err
 			}
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
@@ -1273,7 +1390,7 @@ var telegramChannel = regexp.MustCompile(`^(-?[1-9][0-9]{0,19}|@[A-Za-z][A-Za-z0
 
 // validateTelegram checks the common fields of in and its channel, a chat id or an @username, trimmed, and its
 // Connection.
-func (s *Service) validateTelegram(ctx context.Context, in *Input) error {
+func (s *Service) validateTelegram(in *Input) error {
 	if err := validateCommon(in); err != nil {
 		return err
 	}
@@ -1291,7 +1408,7 @@ func (s *Service) validateTelegram(ctx context.Context, in *Input) error {
 		return unknownTelegramConnection()
 	}
 	t.Connection = conn
-	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+	return nil
 }
 
 // checkTelegram runs the Destination check of the Telegram channel of in for the Destination destinationID, nil before
@@ -1342,14 +1459,10 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	now := s.writer.Business.Now().UTC()
 	conn, channel := in.Telegram.Connection, in.Telegram.ChannelID
 	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, Connection: &conn,
-		TelegramChannelID: &channel, Mentions: set, LimiterLimit: in.Limiter.Limit,
+		TelegramChannelID: &channel, MentionEntries: entriesOf(in), LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	withButtons(&d, in)
@@ -1371,7 +1484,7 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			ChannelID: text(d.TelegramChannelID), ChannelChatID: pgtype.Int8{Int64: c.ChannelID, Valid: true},
 			DiscussionChatID: pgtype.Int8{Int64: c.GroupID, Valid: true}, ChannelTitle: text(d.TelegramChannelTitle),
-			DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: set,
+			DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: nobodyJSON(),
 			Buttons: d.Buttons.JSON(), LimiterLimit: d.LimiterLimit,
 			LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
@@ -1379,6 +1492,9 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 		}
 		d.ID = id
 		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
+		if err := s.writeMentionEntries(ctx, q, id, Destination{}, d); err != nil {
 			return err
 		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
@@ -1398,14 +1514,10 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	d := before
 	conn, channel := in.Telegram.Connection, in.Telegram.ChannelID
 	d.Name, d.Connection, d.TelegramChannelID = in.Name, &conn, &channel
-	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	d.MentionEntries, d.LimiterLimit, d.LimiterPerSeconds = entriesOf(in), in.Limiter.Limit, in.Limiter.PerSeconds
 	withButtons(&d, in)
 	telegramFound(&d, checked.Check)
 	old, err := viewOf(before)
@@ -1445,13 +1557,16 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 				ChannelID: text(d.TelegramChannelID), ChannelChatID: pgtype.Int8{Int64: c.ChannelID, Valid: true},
 				DiscussionChatID: pgtype.Int8{Int64: c.GroupID, Valid: true}, ChannelTitle: text(d.TelegramChannelTitle),
-				DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: set, Buttons: d.Buttons.JSON(),
+				DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Buttons: d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
 				Now: s.writer.Business.Now().UTC()}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.writeMentionEntries(ctx, q, before.ID, before, d); err != nil {
 				return err
 			}
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
@@ -1524,7 +1639,7 @@ func (s *Service) validateBridge(ctx context.Context, in *Input, stored *Destina
 	}
 	b.Connection = conn
 	if stored != nil && stored.Connection != nil && *stored.Connection == conn {
-		return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+		return nil
 	}
 	only, err := s.writer.Bridge.GatewayOnly(ctx, conn)
 	if err != nil {
@@ -1534,7 +1649,7 @@ func (s *Service) validateBridge(ctx context.Context, in *Input, stored *Destina
 		return &FieldError{Pointer: pointerConnection, Code: CodeGatewayOnly,
 			Detail: "The Bridge Connection is a Notification gateway, which cannot be a Destination."}
 	}
-	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+	return nil
 }
 
 // checkBridge runs the Destination check of the Bridge channel of in for the Destination destinationID, nil before it
@@ -1570,14 +1685,10 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	now := s.writer.Business.Now().UTC()
 	conn, channel, name := in.Bridge.Connection, in.Bridge.ChannelID, checked.Check.Name
 	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, Connection: &conn,
-		BridgeChannelID: &channel, BridgeChannelName: &name, Mentions: set, LimiterLimit: in.Limiter.Limit,
+		BridgeChannelID: &channel, BridgeChannelName: &name, MentionEntries: entriesOf(in), LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	planOwner(in, &d)
@@ -1595,7 +1706,7 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 		}
 		id, err := q.InsertBridgeDestination(ctx, dbgen.InsertBridgeDestinationParams{OrgID: s.orgID,
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
-			ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: set,
+			ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: nobodyJSON(),
 			Buttons:      d.Buttons.JSON(),
 			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
@@ -1603,6 +1714,9 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 		}
 		d.ID = id
 		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
+		if err := s.writeMentionEntries(ctx, q, id, Destination{}, d); err != nil {
 			return err
 		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
@@ -1622,14 +1736,10 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	d := before
 	conn, channel, name := in.Bridge.Connection, in.Bridge.ChannelID, checked.Check.Name
 	d.Name, d.Connection, d.BridgeChannelID, d.BridgeChannelName = in.Name, &conn, &channel, &name
-	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	d.MentionEntries, d.LimiterLimit, d.LimiterPerSeconds = entriesOf(in), in.Limiter.Limit, in.Limiter.PerSeconds
 	withButtons(&d, in)
 	old, err := viewOf(before)
 	if err != nil {
@@ -1661,7 +1771,7 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 			}
 			if err := q.UpdateBridgeDestination(ctx, dbgen.UpdateBridgeDestinationParams{OrgID: s.orgID,
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
-				ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: set,
+				ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName),
 				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
 				Now: s.writer.Business.Now().UTC()}); err != nil {
@@ -1669,6 +1779,9 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.writeMentionEntries(ctx, q, before.ID, before, d); err != nil {
 				return err
 			}
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
@@ -1717,7 +1830,7 @@ func unknownSlackConnection() *FieldError {
 
 // validateSlack checks, before any request, the common fields of in, its channel id, trimmed, which names a channel —
 // C… or G… in upper-case letters and digits, as entered (C-24.FR-3) — its Connection and its Mention settings.
-func (s *Service) validateSlack(ctx context.Context, in *Input) error {
+func (s *Service) validateSlack(in *Input) error {
 	if err := validateCommon(in); err != nil {
 		return err
 	}
@@ -1735,7 +1848,7 @@ func (s *Service) validateSlack(ctx context.Context, in *Input) error {
 		return unknownSlackConnection()
 	}
 	sl.Connection = conn
-	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+	return nil
 }
 
 // checkSlack runs the Destination check of the Slack channel of in for the Destination destinationID, nil before it
@@ -1772,14 +1885,10 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	now := s.writer.Business.Now().UTC()
 	conn, channel, name := in.Slack.Connection, in.Slack.ChannelID, checked.Check.Name
 	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, Connection: &conn,
-		SlackChannelID: &channel, SlackChannelName: &name, Mentions: set, LimiterLimit: in.Limiter.Limit,
+		SlackChannelID: &channel, SlackChannelName: &name, MentionEntries: entriesOf(in), LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	planOwner(in, &d)
@@ -1797,7 +1906,7 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 		}
 		id, err := q.InsertSlackDestination(ctx, dbgen.InsertSlackDestinationParams{OrgID: s.orgID,
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
-			ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: set,
+			ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: nobodyJSON(),
 			Buttons:      d.Buttons.JSON(),
 			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
@@ -1805,6 +1914,9 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 		}
 		d.ID = id
 		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
+		if err := s.writeMentionEntries(ctx, q, id, Destination{}, d); err != nil {
 			return err
 		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
@@ -1824,14 +1936,10 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 	if err != nil {
 		return Destination{}, err
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
-	}
 	d := before
 	conn, channel, name := in.Slack.Connection, in.Slack.ChannelID, checked.Check.Name
 	d.Name, d.Connection, d.SlackChannelID, d.SlackChannelName = in.Name, &conn, &channel, &name
-	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	d.MentionEntries, d.LimiterLimit, d.LimiterPerSeconds = entriesOf(in), in.Limiter.Limit, in.Limiter.PerSeconds
 	withButtons(&d, in)
 	old, err := viewOf(before)
 	if err != nil {
@@ -1863,7 +1971,7 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 			}
 			if err := q.UpdateSlackDestination(ctx, dbgen.UpdateSlackDestinationParams{OrgID: s.orgID,
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
-				ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: set,
+				ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName),
 				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
 				Now: s.writer.Business.Now().UTC()}); err != nil {
@@ -1871,6 +1979,9 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.writeMentionEntries(ctx, q, before.ID, before, d); err != nil {
 				return err
 			}
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {

@@ -262,6 +262,8 @@ type Queries interface {
 		error)
 	CountTeamSchedules(ctx context.Context, arg dbgen.CountTeamSchedulesParams) (int64, error)
 	ListSchedules(ctx context.Context, arg dbgen.ListSchedulesParams) ([]dbgen.ListSchedulesRow, error)
+	GetTeamMainSchedule(ctx context.Context, arg dbgen.GetTeamMainScheduleParams) (dbgen.GetTeamMainScheduleRow,
+		error)
 	GetSchedule(ctx context.Context, arg dbgen.GetScheduleParams) (dbgen.GetScheduleRow, error)
 	FindScheduleTeam(ctx context.Context, arg dbgen.FindScheduleTeamParams) (int64, error)
 	LockSchedule(ctx context.Context, arg dbgen.LockScheduleParams) (int64, error)
@@ -306,6 +308,8 @@ type Queries interface {
 type Store interface {
 	Queries
 	InTx(ctx context.Context, f func(Queries) error) error
+	// On are the queries in a caller's transaction tx.
+	On(tx dbgen.DBTX) Queries
 	InAlertsTx(ctx context.Context, f func(internalalerts.Store) error) error
 }
 
@@ -332,6 +336,8 @@ type pgStore struct {
 	pgQueries
 	pool *pgxpool.Pool
 }
+
+func (pgStore) On(tx dbgen.DBTX) Queries { return newQueries(tx) }
 
 func (s pgStore) InTx(ctx context.Context, f func(Queries) error) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {

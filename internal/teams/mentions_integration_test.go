@@ -102,10 +102,22 @@ func TestIntegrationTeamMentions(t *testing.T) {
 			(SELECT id FROM connections WHERE public_id = 'CN0000000000SK')`).Scan(&mm, &sk); err != nil {
 			t.Fatal(err)
 		}
-		if m, ok, err := e.svc.ForConnection(ctx, pay.ID, mm); err != nil || !ok || m.Group != "payments_team" {
+		// Through a caller's transaction as through the pool.
+		tx, err := e.d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m, ok, err := e.svc.ForConnection(ctx, tx, pay.ID, mm); err != nil || !ok || m.Group != "payments_team" {
+			t.Fatalf("ForConnection mattermost in a transaction = %+v, %v, %v", m, ok, err)
+		}
+		_ = tx.Rollback(ctx)
+		if _, _, err := e.svc.ForConnection(ctx, tx, pay.ID, mm); err == nil {
+			t.Fatal("ForConnection through an ended transaction read through the pool")
+		}
+		if m, ok, err := e.svc.ForConnection(ctx, nil, pay.ID, mm); err != nil || !ok || m.Group != "payments_team" {
 			t.Fatalf("ForConnection mattermost = %+v, %v, %v", m, ok, err)
 		}
-		if m, ok, err := e.svc.ForConnection(ctx, pay.ID, sk); err != nil || ok {
+		if m, ok, err := e.svc.ForConnection(ctx, nil, pay.ID, sk); err != nil || ok {
 			t.Fatalf("ForConnection slack without the scope = %+v, %v, %v", m, ok, err)
 		}
 
@@ -115,7 +127,7 @@ func TestIntegrationTeamMentions(t *testing.T) {
 		if n := e.count(t, `SELECT count(*) FROM team_mentions WHERE org_id = $1`, e.orgID); n != 0 {
 			t.Fatalf("%d team mentions after the deletion of the Team", n)
 		}
-		if _, ok, err := e.svc.ForConnection(ctx, pay.ID, mm); err != nil || ok {
+		if _, ok, err := e.svc.ForConnection(ctx, nil, pay.ID, mm); err != nil || ok {
 			t.Fatalf("ForConnection after the deletion = %v, %v", ok, err)
 		}
 	})

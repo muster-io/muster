@@ -1031,7 +1031,9 @@ func TestBridgeAccountLinks(t *testing.T) {
 		e.secrets = append(e.secrets, m["token"].(string))
 	}
 
-	// C-22.AC-20, FR-16: a Destination of Example Bridge that mentions Alice and Bob for new Alert Groups.
+	// C-22.AC-20, FR-16: a Destination of Example Bridge that mentions Alice and Bob for new Alert Groups, converted
+	// into two user entries. Bob has no Account link: C-28.FR-3 and C-12.FR-12, revised for L2, leave him out of the
+	// message, neither mentioned nor named as text.
 	mentions := map[string]any{}
 	for _, kind := range []string{"new_alert_group", "new_alerts", "reopen", "ack_timeout", "snooze_ended",
 		"rise_to_urgent"} {
@@ -1047,7 +1049,7 @@ func TestBridgeAccountLinks(t *testing.T) {
 	env := b.waitPosted("Mention", 1)[0].Envelope
 	first, _, _ := strings.Cut(env.Body, "\n")
 	if mustJSON(env.Mentions) != `[{"display_name":"Alice Smith","external_id":"u-alice","ref":"m1"}]` ||
-		first != "[@Alice Smith](muster-mention:m1) Bob B." || !env.Notify {
+		first != "[@Alice Smith](muster-mention:m1)" || strings.Contains(env.Body, "Bob B.") || !env.Notify {
 		t.Errorf("the Root message: mentions %s, first line %q, notify %v", mustJSON(env.Mentions), first, env.Notify)
 	}
 	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g+"/acknowledge", "", http.StatusOK)
@@ -1361,7 +1363,8 @@ func TestSlackAccountLinks(t *testing.T) {
 		t.Errorf("%d records with a masked code", masked)
 	}
 
-	// C-24.FR-6, AC-15, C-12.FR-12: Alice by <@U0FAKEALICE>, Dora by her name, and the footer by Alice's link.
+	// C-24.FR-6, AC-15, C-12.FR-12: Alice by <@U0FAKEALICE> and the footer by Alice's link. Dora has no Account link:
+	// C-28.FR-3 and C-12.FR-12, revised for L2, leave her out, neither mentioned nor named as text.
 	d := s.api.do(http.MethodGet, "/api/v1/destinations/"+s.dest, "")
 	var dest map[string]any
 	decode(t, d, &dest)
@@ -1381,7 +1384,7 @@ func TestSlackAccountLinks(t *testing.T) {
 		top = root.Top[0].Text.Text
 	}
 	for _, text := range []string{root.Text, top} {
-		if !strings.Contains(text, "<@"+fakeslack.UserAlice+">") || !strings.Contains(text, "Dora D.") ||
+		if !strings.Contains(text, "<@"+fakeslack.UserAlice+">") || strings.Contains(text, "Dora D.") ||
 			strings.Contains(text, "<@"+fakeslack.UserDora+">") {
 			t.Errorf("the mentions in %q", text)
 		}

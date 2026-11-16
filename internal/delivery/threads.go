@@ -176,7 +176,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 				return err
 			}
 		}
-		targets, err := w.targets(ctx, tx, org, d, row.AlertGroupID, seq, groups.Loudness(row.Loudness), mentions)
+		targets, err := w.targets(ctx, tx, org, d, row.AlertGroupID, 0, seq, groups.Loudness(row.Loudness), mentions)
 		if err != nil {
 			return err
 		}

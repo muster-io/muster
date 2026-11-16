@@ -282,6 +282,8 @@ type fakeStorm struct {
 	started                      time.Time
 	calmSince, ended             *time.Time
 	alertGroupCount, urgentCount int64
+	// members are the Alert Groups the Storm counts, as storm_alert_groups records them.
+	members []int64
 }
 
 // fakeInternal is a raise or a resolve of an Internal alert.
@@ -2951,5 +2953,72 @@ func TestIdempotentPublicationKey(t *testing.T) {
 	mm.round(t)
 	if !slices.Equal(keys.Keys(), []string{""}) || mm.rec.Count(deliverytest.MethodPublish) != 1 {
 		t.Errorf("mattermost keys %v", keys.Keys())
+	}
+}
+
+// TestLoudEventMentions is C-28.FR-4, C-26.FR-5, C-11.FR-20 and C-17.FR-2 in the tables of delivery: destination_joined
+// mentions the entries for new_alert_group and an ack timeout notice those for ack_timeout; Reminders and
+// auto-unacknowledge mention the Owner and a Takeover the previous Owner whatever the entries, a Reopen into
+// acknowledged only the Owner; an edit and a Quiet message mention nobody; the first publication of a Storm summary
+// mentions the entries for storm_started (C-28.FR-7). The worker leaves the time of a Loud Publication to the
+// Mentioner, which takes the On-call at the time of the event, read in the transaction of the attempt
+// (mentions.TestResolveEventTime), so that an attempt delayed past a change of Shift still mentions the On-call of the
+// event.
+func TestLoudEventMentions(t *testing.T) {
+	row := func(e groups.Event, v groups.Variant) delivery.Row {
+		t.Helper()
+		for _, r := range delivery.Table {
+			if r.Event == e && r.Variant == v {
+				return r
+			}
+		}
+		t.Fatalf("no row %s/%s", e, v)
+		return delivery.Row{}
+	}
+	for _, tc := range []struct {
+		event   groups.Event
+		variant groups.Variant
+		want    []groups.Mention
+	}{
+		{groups.EventDestinationJoined, groups.VariantFiring, []groups.Mention{groups.MentionNewAlertGroup}},
+		{groups.EventAckTimeout, groups.VariantAny, []groups.Mention{groups.MentionAckTimeout}},
+		{groups.EventReminder, groups.VariantAny, []groups.Mention{groups.MentionOwner}},
+		{groups.EventAutoUnacknowledged, groups.VariantAny, []groups.Mention{groups.MentionOwner}},
+		{groups.EventTakeover, groups.VariantAny, []groups.Mention{groups.MentionPreviousOwner}},
+		{groups.EventReopened, groups.VariantAcknowledged, []groups.Mention{groups.MentionOwner}},
+		{groups.EventUrgencyRaised, groups.VariantRemoves, []groups.Mention{groups.MentionOwner,
+			groups.MentionRiseToUrgent}},
+		{groups.EventDestinationJoined, groups.VariantAcknowledged, nil},
+	} {
+		if r := row(tc.event, tc.variant); !slices.Equal(r.Mentions, tc.want) {
+			t.Errorf("%s/%s mentions %v, want %v", tc.event, tc.variant, r.Mentions, tc.want)
+		}
+	}
+	for _, r := range delivery.Table {
+		if r.Loudness == groups.Quiet && len(r.Mentions) > 0 {
+			t.Errorf("a Quiet row %s/%s mentions %v", r.Event, r.Variant, r.Mentions)
+		}
+	}
+	for _, r := range delivery.DeliveryEvents {
+		want := []groups.Mention(nil)
+		switch r.Name {
+		case delivery.DeliveryStormSummary:
+			want = []groups.Mention{delivery.MentionStormStarted}
+		case delivery.DeliveryAfterRecovery:
+			want = []groups.Mention{groups.MentionNewAlertGroup}
+		}
+		if !slices.Equal(r.Mentions, want) {
+			t.Errorf("%s mentions %v, want %v", r.Name, r.Mentions, want)
+		}
+	}
+
+	e := newEnv(t)
+	m := &fakeMentioner{}
+	e.w.Mentions = m
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.business.Advance(time.Minute)
+	e.round(t)
+	if len(m.reqs) != 1 || !m.reqs[0].At.IsZero() || m.reqs[0].StormID != 0 || m.reqs[0].AlertGroupID != groupID {
+		t.Errorf("requests %+v", m.reqs)
 	}
 }

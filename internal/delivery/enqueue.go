@@ -139,7 +139,7 @@ const (
 // sends of its own, or decides not to send, reads its loudness and Mentions here.
 var DeliveryEvents = []EventRow{
 	{DeliveryAddedDestination, FormPublication, groups.Quiet, nil, false},
-	{DeliveryStormSummary, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup}, false},
+	{DeliveryStormSummary, FormPublication, groups.Loud, []groups.Mention{MentionStormStarted}, false},
 	{DeliveryStormUpdate, FormUpdate, groups.Quiet, nil, false},
 	{DeliveryAfterStorm, FormPublication, groups.Quiet, nil, false},
 	{DeliveryLate, FormPublication, groups.Quiet, nil, false},
