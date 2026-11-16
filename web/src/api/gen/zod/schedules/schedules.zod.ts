@@ -369,7 +369,7 @@ export const DeleteScheduleHeader = zod.object({
 export const DeleteScheduleResponse = zod.void()
 
 /**
- * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+ * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
  * @summary Read the On-call and the Result of a Schedule
  */
 export const getScheduleOnCallPathScheduleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -398,6 +398,7 @@ export const getScheduleOnCallResponseOverridesItemCreatedByIdRegExp = new RegEx
 export const getScheduleOnCallResponseWarningsItemUserOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getScheduleOnCallResponseWarningsItemRotationLayerOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getScheduleOnCallResponseWarningsItemOverrideIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getScheduleOnCallResponseWarningsItemDestinationOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const GetScheduleOnCallResponse = zod.object({
@@ -467,7 +468,7 @@ export const GetScheduleOnCallResponse = zod.object({
   "etag": zod.string()
 })).describe('The Overrides in the period, in the order they were created.'),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['disabled', 'viewer', 'not_in_team', 'gap', 'unreachable']).describe('`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.'),
+  "kind": zod.enum(['disabled', 'viewer', 'not_in_team', 'gap', 'unreachable']).describe('`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with the `messenger` and the `reason` (C-27.FR-8).'),
   "user": zod.union([zod.object({
   "id": zod.string().regex(getScheduleOnCallResponseWarningsItemUserOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -477,10 +478,22 @@ export const GetScheduleOnCallResponse = zod.object({
   "rotation_layer": zod.union([zod.object({
   "id": zod.string().regex(getScheduleOnCallResponseWarningsItemRotationLayerOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
-}),zod.null()]),
-  "override_id": zod.string().regex(getScheduleOnCallResponseWarningsItemOverrideIdRegExp).nullable().describe('A `public_id` in the format of `PublicId`, or null.'),
-  "start": zod.iso.datetime({"offset":true}).nullable().describe('The start of the gap, cut to the period; null for another kind.'),
-  "end": zod.iso.datetime({"offset":true}).nullable().describe('The end of the gap, cut to the period; null for another kind.')
+}),zod.null()]).describe('The Rotation layer of the Shifts that are skipped, or for `unreachable` the one whose Shift makes the person On-call in the segment; null otherwise.'),
+  "override_id": zod.string().regex(getScheduleOnCallResponseWarningsItemOverrideIdRegExp).nullable().describe('The Override that is skipped, or for `unreachable` the one that makes the person On-call in the segment; null otherwise.'),
+  "start": zod.iso.datetime({"offset":true}).nullable().describe('The start of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.'),
+  "end": zod.iso.datetime({"offset":true}).nullable().describe('The end of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.'),
+  "destination": zod.union([zod.object({
+  "id": zod.string().regex(getScheduleOnCallResponseWarningsItemDestinationOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge', 'slack']),
+  "health": zod.object({
+  "state": zod.enum(['healthy', 'broken']),
+  "since": zod.iso.datetime({"offset":true}).nullish(),
+  "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
+})
+}),zod.null()]).describe('The Destination of the Team that a Mention of the person cannot reach; null for another kind.'),
+  "messenger": zod.union([zod.enum(['mattermost', 'telegram', 'webhook', 'bridge', 'slack']),zod.null()]).describe('The messenger of `destination` — the type of its Connection, or `webhook` for an outgoing webhook; null for another kind.'),
+  "reason": zod.union([zod.enum(['no_account_link', 'bridge_no_native_mentions', 'webhook_no_thread_reply', 'not_in_discussion_group']).describe('Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.'),zod.null()]).describe('Why a Mention of the person cannot reach `destination`; null for another kind.')
 })).describe('Each person of a Rotation layer or an Override in the period who may not be Paged, once per person and Rotation layer, or per Override.')
 }).describe('The Result of a Schedule over a period, with what it is made of.')
 
@@ -701,7 +714,7 @@ export const GetIcalCalendarParams = zod.object({
 export const GetIcalCalendarResponse = zod.unknown()
 
 /**
- * "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+ * "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
  * @summary Read who is On-call now in each Team
  */
 export const getOnCallNowQueryTeamsDefault = `all`;
@@ -716,6 +729,7 @@ export const getOnCallNowResponseItemsItemScheduleOneTeamIdRegExp = new RegExp('
 export const getOnCallNowResponseItemsItemUserOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getOnCallNowResponseItemsItemRotationLayerOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getOnCallNowResponseItemsItemNextOneUserOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getOnCallNowResponseItemsItemUnreachableItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const GetOnCallNowResponse = zod.object({
@@ -757,7 +771,21 @@ export const GetOnCallNowResponse = zod.object({
 }).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),zod.null()]).describe('The person On-call then; null for a gap.'),
   "start": zod.iso.datetime({"offset":true}),
   "end": zod.iso.datetime({"offset":true})
-}).describe('The segment of a Schedule\'s Result after the current one, cut to `schedule.gap_view`.'),zod.null()]).describe('The segment that follows within `schedule.gap_view`, or null.')
+}).describe('The segment of a Schedule\'s Result after the current one, cut to `schedule.gap_view`.'),zod.null()]).describe('The segment that follows within `schedule.gap_view`, or null.'),
+  "unreachable": zod.array(zod.object({
+  "destination": zod.object({
+  "id": zod.string().regex(getOnCallNowResponseItemsItemUnreachableItemDestinationIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge', 'slack']),
+  "health": zod.object({
+  "state": zod.enum(['healthy', 'broken']),
+  "since": zod.iso.datetime({"offset":true}).nullish(),
+  "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
+})
+}),
+  "messenger": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge', 'slack']).describe('The messenger of the Destination — the type of its Connection, or `webhook`.'),
+  "reason": zod.enum(['no_account_link', 'bridge_no_native_mentions', 'webhook_no_thread_reply', 'not_in_discussion_group']).describe('Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.')
+}).describe('A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).')).describe('The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by the Destination\'s name; empty in a gap, without a Schedule and when every Destination reaches them.')
 }).describe('The On-call of a Team\'s main Schedule now. With `no_schedule` true, the Team has no main Schedule and every other field but `team` is null.'))
 }).describe('"On call now": the On-call of each Team, by the Team\'s name.')
 

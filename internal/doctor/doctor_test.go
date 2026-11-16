@@ -100,22 +100,23 @@ type conn struct {
 
 func newFakeDB(ssl bool) *fakeDB {
 	return &fakeDB{answers: map[string]*rows{
-		"SHOW server_version_num":    {values: [][]any{{"170011"}}},
-		"SHOW server_version":        {values: [][]any{{"17.11 (Debian 17.11-1)"}}},
-		"pg_stat_ssl":                {values: [][]any{{ssl}}},
-		"pg_advisory_unlock":         {values: [][]any{{true}}},
-		"clock_timestamp":            {values: [][]any{{time.Now()}}},
-		"FROM organizations":         {values: [][]any{{int64(1)}}},
-		"GetOutboundPolicy":          {values: [][]any{{"standard", []string(nil), []string(nil)}}},
-		"FROM encrypted_values":      {values: [][]any{}},
-		"FROM replicas":              {values: [][]any{}},
-		"FROM deliveries":            {values: [][]any{}},
-		"FROM audit_log":             {values: [][]any{}},
-		"ListConnections":            {values: [][]any{}},
-		"ListMattermostDestinations": {values: [][]any{}},
-		"ListTelegramDestinations":   {values: [][]any{}},
-		"ListBridgeDestinations":     {values: [][]any{}},
-		"ListSlackDestinations":      {values: [][]any{}},
+		"SHOW server_version_num":       {values: [][]any{{"170011"}}},
+		"SHOW server_version":           {values: [][]any{{"17.11 (Debian 17.11-1)"}}},
+		"pg_stat_ssl":                   {values: [][]any{{ssl}}},
+		"pg_advisory_unlock":            {values: [][]any{{true}}},
+		"clock_timestamp":               {values: [][]any{{time.Now()}}},
+		"FROM organizations":            {values: [][]any{{int64(1)}}},
+		"GetOutboundPolicy":             {values: [][]any{{"standard", []string(nil), []string(nil)}}},
+		"FROM encrypted_values":         {values: [][]any{}},
+		"FROM replicas":                 {values: [][]any{}},
+		"FROM deliveries":               {values: [][]any{}},
+		"FROM audit_log":                {values: [][]any{}},
+		"ListConnections":               {values: [][]any{}},
+		"ListMattermostDestinations":    {values: [][]any{}},
+		"ListTelegramDestinations":      {values: [][]any{}},
+		"ListTelegramDestinationPeople": {values: [][]any{}},
+		"ListBridgeDestinations":        {values: [][]any{}},
+		"ListSlackDestinations":         {values: [][]any{}},
 	}}
 }
 
@@ -586,8 +587,10 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 			text(fakemattermost.ChannelNoBot)},
 	}}
 	d.answers["ListTelegramDestinations"] = &rows{values: [][]any{
-		{int64(9), "DSAAAAAAAAAAA3", "tg-alerts", pgtype.Int8{Int64: 2, Valid: true}, text("@muster_alerts")},
-		{int64(10), "DSAAAAAAAAAAA4", "tg-no-comments", pgtype.Int8{Int64: 2, Valid: true}, text("@no_comments")},
+		{int64(9), "DSAAAAAAAAAAA3", "tg-alerts", pgtype.Int8{Int64: 2, Valid: true}, text("@muster_alerts"),
+			pgtype.Int8{}},
+		{int64(10), "DSAAAAAAAAAAA4", "tg-no-comments", pgtype.Int8{Int64: 2, Valid: true}, text("@no_comments"),
+			pgtype.Int8{}},
 	}}
 	d.answers["ListBridgeDestinations"] = &rows{values: [][]any{
 		{int64(11), "DSAAAAAAAAAAA5", "br-alerts", pgtype.Int8{Int64: 3, Valid: true}, text(fakebridge.ChannelAlerts)},

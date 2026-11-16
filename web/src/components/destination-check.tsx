@@ -49,6 +49,8 @@ export function checkItemName(t: TFunction, name: DestinationCheckItemName): str
       return t("destinations.check.items.channelExists");
     case "discussion_group":
       return t("destinations.check.items.discussionGroup");
+    case "discussion_group_members":
+      return t("destinations.check.items.discussionGroupMembers");
     case "bot_rights_channel":
       return t("destinations.check.items.botRightsChannel");
     case "bot_rights_group":

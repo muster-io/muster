@@ -173,3 +173,53 @@ keep its gap alert off. With `by_default` it already is, as long as it is not it
 `getOnCallNow` lists every Team by name — or with `teams=mine` the Teams of the caller — with the On-call of its main
 Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
 within the next 14 days. A Team without a main Schedule has `no_schedule` true.
+
+## Unreachable On-calls
+
+A Mention of the On-call notifies them only where it reaches them. For each segment of the period in which someone is
+On-call, `getScheduleOnCall` lists a warning `unreachable` for each [Destination of their
+Team](routing-to-teams.md) that a Mention of the person cannot reach, whatever its Severity condition, with the
+Destination, its `messenger` and the `reason`; `getOnCallNow` lists the same, for the On-call now, in `unreachable`.
+The warning changes nothing that Muster sends: it says ahead of time what a Mention would not do.
+
+`no_account_link`
+:   The person has no Account link where the Destination posts: a Mattermost, Slack or Bridge Destination needs a link
+    through its Connection, a Telegram one a Telegram link. The person links their account in their profile
+    ([Link your messenger accounts](../messengers/account-links.md)); the warning goes once the link is made.
+
+`bridge_no_native_mentions`
+:   The bridge of a Bridge Destination does not declare `native_mentions` in its
+    [info](../messengers/write-a-bridge.md#getinfo), or Muster has not read its info yet, so a Mention is the person's
+    name in plain text, which notifies nobody, linked or not. A bridge that renders Mentions declares it; check the
+    Connection again once it does.
+
+`webhook_no_thread_reply`
+:   An [outgoing webhook in template mode](../outgoing-webhooks/templates.md) has no **Reply in thread** request, so
+    the follow-ups that carry Mentions are never sent. Add the request; an outgoing webhook in events mode mentions
+    nobody and gets no warning.
+
+`not_in_discussion_group`
+:   The last Destination check of a Telegram Destination saw the person outside the discussion group of its channel,
+    and Telegram notifies only the members of the group about the replies in a Thread, a reply that mentions them
+    included. The person joins the discussion group
+    ([Join the discussion group](../messengers/telegram.md#join-the-discussion-group-and-mute-the-channel)), and
+    then someone selects **Check** on the Destination page, or saves the Destination.
+
+The check of a Telegram Destination — on save, on **Check** and in `muster doctor`, which prints the people it found
+outside the group without recording them — asks Telegram, with `getChatMember`, about every active person of the Teams
+that name the Destination who has a Telegram Account link and is not a Viewer (a disabled User or a Viewer is never
+On-call), and lists those outside the group in its item **Members of the discussion group**, which always passes. It
+makes one request per person, one after the other, limited by the Connection's limiter, not by the Destination's, as
+it sends nothing to the chat; on save and on **Check** it stops after 10 seconds
+(`destination.telegram.group_people_budget`), and `muster doctor` paces its requests at the Connection's limiter and
+stops after as long. A Team with hundreds of linked people may so leave some unasked.
+
+The warning is as old as the last check. A leave reaches Telegram's answer only some time later, about a minute, so a
+check right after someone left the group may still see them in it; check again later. A person the check could not
+tell — Telegram answered with an error, did not answer in time, or was not asked before the check stopped — keeps what
+the check before saw: the warning of someone who was outside the group stays until a check sees them in it, and
+someone never seen outside it gets no warning.
+
+One case the warning cannot see: the creator of the discussion group, who is anonymous there, was not notified of a
+Mention in a group they had muted, while an ordinary member who muted it was. The check sees the creator in the group,
+so they get no warning; a creator who is On-call should keep the discussion group unmuted.

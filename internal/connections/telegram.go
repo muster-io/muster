@@ -4,6 +4,7 @@
 package connections
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -455,8 +456,10 @@ func (s *Service) TelegramTarget(ctx context.Context, destinationID int64) (tele
 
 // CheckTelegramChannel runs the Destination check of a Telegram Destination being saved or checked, for the
 // Destination write path (C-14.FR-2, FR-14): through the Telegram Connection that the check names, on the interactive
-// path, limited by the Destination when it exists and by the Connection otherwise. A Connection that is missing,
-// deleted or not a Telegram one is destinations.ErrUnknownConnection.
+// path, limited by the Destination when it exists and by the Connection otherwise; once its steps pass, the step
+// discussion_group_members reads the membership of the people in.People (C-27.FR-8), limited by the Connection alone
+// and within telegram.GroupPeopleBudget. A Connection that is missing, deleted or not a Telegram one is
+// destinations.ErrUnknownConnection.
 func (s *Service) CheckTelegramChannel(ctx context.Context, in destinations.TelegramChannelCheck) (
 	destinations.TelegramChannelChecked, error) {
 	row, err := s.row(ctx, s.cfg.Store, in.Connection)
@@ -482,5 +485,11 @@ func (s *Service) CheckTelegramChannel(ctx context.Context, in destinations.Tele
 	if err != nil {
 		return destinations.TelegramChannelChecked{}, err
 	}
+	// getChatMember posts nothing to the chat, so the step takes no token of the Destination, whose bucket is for the
+	// sends and edits in its chats (F-016): only the Connection's limits the bot's requests.
+	peopleCtx, cancel := context.WithTimeout(ctx, cmp.Or(s.groupPeopleBudget, telegram.GroupPeopleBudget))
+	defer cancel()
+	res = telegram.CheckGroupPeople(peopleCtx, c, telegram.Interactive(s.cfg.Interactive,
+		delivery.Subject{Connection: &conn}), res, in.People)
 	return destinations.TelegramChannelChecked{ConnectionID: row.ID, Check: res}, nil
 }

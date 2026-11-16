@@ -174,7 +174,8 @@ func TestTelegram(t *testing.T) {
 		t.Errorf("created %s", a.body)
 	}
 	check := e.api.json(http.MethodPost, "/api/v1/destinations/"+dest+"/checks", "", http.StatusOK)
-	if check["ok"] != true || len(check["checks"].([]any)) != 4 {
+	// The four steps of C-14.FR-14 and discussion_group_members (C-27.FR-8).
+	if check["ok"] != true || len(check["checks"].([]any)) != 5 {
 		t.Errorf("check = %v", check)
 	}
 	e.route("tg", "tg", []string{dest}, nil)

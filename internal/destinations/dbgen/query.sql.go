@@ -789,6 +789,62 @@ func (q *Queries) ListRouteDestinationRefs(ctx context.Context, arg ListRouteDes
 	return items, nil
 }
 
+const listTelegramGroupPeople = `-- name: ListTelegramGroupPeople :many
+SELECT u.id, u.public_id, u.name, u.login, al.external_id
+FROM users u
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id AND al.identity_space = 'telegram'
+WHERE u.org_id = $1 AND u.status = 'active' AND u.role <> 'viewer'
+  AND EXISTS (SELECT 1
+              FROM team_destinations td
+              JOIN teams t ON t.org_id = td.org_id AND t.id = td.team_id AND t.deleted_at IS NULL
+              JOIN team_users tu ON tu.org_id = td.org_id AND tu.team_id = td.team_id
+              WHERE td.org_id = $1 AND td.destination_id = $2 AND tu.user_id = u.id)
+ORDER BY lower(u.name), u.id
+`
+
+type ListTelegramGroupPeopleParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+type ListTelegramGroupPeopleRow struct {
+	ID         int64
+	PublicID   string
+	Name       string
+	Login      string
+	ExternalID string
+}
+
+// ListTelegramGroupPeople lists the active Users who are not Viewers — whom a Schedule never makes On-call — in a
+// Team that is not deleted and names the Destination (C-26.FR-1), with a Telegram Account link — the Identity space
+// telegram, which every Telegram Connection shares — and the Telegram user id of the link, by name: the people whose
+// membership of the discussion group the Destination check reads (C-27.FR-8).
+func (q *Queries) ListTelegramGroupPeople(ctx context.Context, arg ListTelegramGroupPeopleParams) ([]ListTelegramGroupPeopleRow, error) {
+	rows, err := q.db.Query(ctx, listTelegramGroupPeople, arg.OrgID, arg.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTelegramGroupPeopleRow{}
+	for rows.Next() {
+		var i ListTelegramGroupPeopleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Login,
+			&i.ExternalID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockBridgeConnection = `-- name: LockBridgeConnection :one
 SELECT id
 FROM connections
@@ -982,6 +1038,48 @@ type SetDestinationOwningTeamParams struct {
 // version.
 func (q *Queries) SetDestinationOwningTeam(ctx context.Context, arg SetDestinationOwningTeamParams) error {
 	_, err := q.db.Exec(ctx, setDestinationOwningTeam, arg.OwningTeamID, arg.OrgID, arg.ID)
+	return err
+}
+
+const setTelegramAbsences = `-- name: SetTelegramAbsences :exec
+UPDATE destinations
+SET telegram_absent_user_ids = ARRAY(
+        SELECT a.user_id
+        FROM (SELECT unnest($1::bigint[]) AS user_id
+              UNION
+              (SELECT unnest(coalesce(telegram_absent_user_ids, '{}'::bigint[]))
+               INTERSECT
+               SELECT unnest($2::bigint[]))) AS a
+        ORDER BY a.user_id),
+    telegram_members_checked_at = $3::timestamptz
+WHERE org_id = $4 AND id = $5 AND type = 'telegram' AND deleted_at IS NULL
+  AND telegram_discussion_chat_id = $6
+`
+
+type SetTelegramAbsencesParams struct {
+	AbsentUserIds  []int64
+	UnknownUserIds []int64
+	CheckedAt      time.Time
+	OrgID          int64
+	ID             int64
+	GroupID        pgtype.Int8
+}
+
+// SetTelegramAbsences records what the Destination check of a Telegram Destination that is not deleted saw of its
+// discussion group (C-27.FR-8): the Users it saw outside the group, and those of the Users stored as outside it whom
+// it could not tell — not asked, or not answered definitively — so that a check that could not confirm a person keeps
+// the absence a check saw before, while a definitive "in the group" ends it; and when, on the business clock. It writes
+// only while the stored group is the one the check read, so that a slow check does not overwrite a save that moved the
+// Destination to another group. It is not a change of the configuration: no version, no updated_at.
+func (q *Queries) SetTelegramAbsences(ctx context.Context, arg SetTelegramAbsencesParams) error {
+	_, err := q.db.Exec(ctx, setTelegramAbsences,
+		arg.AbsentUserIds,
+		arg.UnknownUserIds,
+		arg.CheckedAt,
+		arg.OrgID,
+		arg.ID,
+		arg.GroupID,
+	)
 	return err
 }
 

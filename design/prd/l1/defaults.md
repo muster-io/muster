@@ -164,6 +164,7 @@ Other lifecycle values:
 | `destination.mattermost.limiter` | the same as its Connection's (Mattermost limits per client address, not per channel, [F-030](../../facts.md#rate-limit-and-server-settings)) | Destination | C-13 | decided |
 | `connection.telegram.limiter` | 15 messages/s | Connection | C-14 | P-28 |
 | `destination.telegram.limiter` | 10 requests/min, sends and edits together, in the channel and its discussion group (half of Telegram's measured limit of about 20 per minute per chat, [F-016](../../facts.md#limits)) | Destination | C-14 | decided |
+| `destination.telegram.group_people_budget` | 10 s for the step `discussion_group_members` of a Telegram Destination check, on save, on "Check" and in `muster doctor`; the people not reached by then stay unknown and keep the verdict of the check before | built in | C-27 | decided |
 | `connection.telegram.update_mode` | long polling | Connection | C-14 | decided |
 | `connection.telegram.bot_api_base_url` | `https://api.telegram.org` | Connection | C-14 | decided |
 | `telegram.copy_wait` | 60 s for the automatic copy of a post | built in | C-14 | P-30 |

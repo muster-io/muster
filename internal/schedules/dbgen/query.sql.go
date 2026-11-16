@@ -683,6 +683,44 @@ func (q *Queries) IsTeamUser(ctx context.Context, arg IsTeamUserParams) (bool, e
 	return column_1, err
 }
 
+const listAccountLinkSpaces = `-- name: ListAccountLinkSpaces :many
+SELECT user_id, identity_space
+FROM account_links
+WHERE org_id = $1 AND user_id = ANY($2::bigint[])
+ORDER BY user_id, identity_space
+`
+
+type ListAccountLinkSpacesParams struct {
+	OrgID   int64
+	UserIds []int64
+}
+
+type ListAccountLinkSpacesRow struct {
+	UserID        int64
+	IdentitySpace string
+}
+
+// ListAccountLinkSpaces reads the Identity spaces in which the Users @user_ids have an Account link (C-27.FR-8).
+func (q *Queries) ListAccountLinkSpaces(ctx context.Context, arg ListAccountLinkSpacesParams) ([]ListAccountLinkSpacesRow, error) {
+	rows, err := q.db.Query(ctx, listAccountLinkSpaces, arg.OrgID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccountLinkSpacesRow{}
+	for rows.Next() {
+		var i ListAccountLinkSpacesRow
+		if err := rows.Scan(&i.UserID, &i.IdentitySpace); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGapScanSchedules = `-- name: ListGapScanSchedules :many
 SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
@@ -1349,6 +1387,82 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 			&i.TeamSlug,
 			&i.TeamDeleted,
 			&i.SortName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamReach = `-- name: ListTeamReach :many
+SELECT td.team_id, d.id, d.public_id, d.name, d.type, d.health, d.broken_since, d.broken_reason, d.connection_id,
+       coalesce(d.webhook_mode, '')::text AS webhook_mode,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean
+           AS reply_in_thread,
+       coalesce(c.bridge_info -> 'capabilities' -> 'native_mentions' = 'true'::jsonb, false)::boolean
+           AS native_mentions,
+       coalesce(d.telegram_absent_user_ids, '{}')::bigint[] AS telegram_absent_user_ids
+FROM team_destinations td
+JOIN destinations d ON d.org_id = td.org_id AND d.id = td.destination_id
+LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE td.org_id = $1 AND td.team_id = ANY($2::bigint[]) AND d.deleted_at IS NULL
+ORDER BY td.team_id, lower(d.name), d.id
+`
+
+type ListTeamReachParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListTeamReachRow struct {
+	TeamID                int64
+	ID                    int64
+	PublicID              string
+	Name                  string
+	Type                  string
+	Health                string
+	BrokenSince           pgtype.Timestamptz
+	BrokenReason          pgtype.Text
+	ConnectionID          pgtype.Int8
+	WebhookMode           string
+	ReplyInThread         bool
+	NativeMentions        bool
+	TelegramAbsentUserIds []int64
+}
+
+// ListTeamReach reads the Destinations of the Teams @team_ids that are not deleted — their part of the reach rule of
+// C-26.FR-1, every condition included, as delivery reads them — by Team and the Destination's name, with what decides
+// whether a Mention of an On-call reaches each (C-27.FR-8): the Connection, the mode of an outgoing webhook and
+// whether its template has a "reply in thread" request, whether the info the Connection of a Bridge Destination last
+// read declares native_mentions — false while none was read — and the Users the last check of a Telegram Destination
+// saw outside its discussion group.
+func (q *Queries) ListTeamReach(ctx context.Context, arg ListTeamReachParams) ([]ListTeamReachRow, error) {
+	rows, err := q.db.Query(ctx, listTeamReach, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamReachRow{}
+	for rows.Next() {
+		var i ListTeamReachRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.Health,
+			&i.BrokenSince,
+			&i.BrokenReason,
+			&i.ConnectionID,
+			&i.WebhookMode,
+			&i.ReplyInThread,
+			&i.NativeMentions,
+			&i.TelegramAbsentUserIds,
 		); err != nil {
 			return nil, err
 		}

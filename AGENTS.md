@@ -222,8 +222,15 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   Mattermost servers serve the custom groups `payments_team` (alice) and `devops_team` (bob) at `GET /api/v4/groups`,
   with `member_count` only when asked for, and `/_fake/config` `{"groups_forbidden":true}` makes them refuse that read
   with `403`. Both Mattermost servers and the Telegram server also serve a second bot, with the published tokens
-  `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection. The
-  fake bridge serves three bots: `muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll
+  `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection. In a
+  supergroup, such as the discussion group, the fake Telegram server's `getChatMember` answers a person who is not one
+  of its bots and has no membership there with `400` `Bad Request: PARTICIPANT_ID_INVALID`, as Telegram answers a
+  subscriber of the channel never in the group (F-128); a channel answers such a person `left`, and its bots keep the
+  answers of F-003. `PUT /_fake/chats/{chat}/members/{user}` sets a membership, which `getChatMember` answers at once:
+  a `status` (`creator`, `administrator`, `member`, `restricted` with `is_member`, `left` or `kicked`, an admin with
+  `is_anonymous`), or an `error_code` and a `description` to answer instead, which `/_fake/faults` cannot aim at one
+  person.
+  The fake bridge serves three bots: `muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll
   mode, `muster-dev-bridge-token-b`, for which `muster dev` creates no Connection, and the Notification gateway
   `muster-dev-gateway-token`, whose `info` declares only the role `gateway`, which the demo Connection "Example Gateway"
   uses in poll mode under the path prefix `/gateway`, checked at start; `/_fake/config` changes what its `info` says,

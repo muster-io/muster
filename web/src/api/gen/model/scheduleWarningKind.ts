@@ -4,7 +4,7 @@
  */
 
 /**
- * `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
+ * `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with the `messenger` and the `reason` (C-27.FR-8).
  */
 export type ScheduleWarningKind = typeof ScheduleWarningKind[keyof typeof ScheduleWarningKind];
 

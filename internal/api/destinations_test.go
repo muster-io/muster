@@ -1607,3 +1607,34 @@ func TestDestinationMentionEntriesAPI(t *testing.T) {
 		t.Errorf("unsupported = %v", errs)
 	}
 }
+
+// TestDestinationCheckGroupPeopleAPI is the item discussion_group_members of a Telegram Destination's check at the API
+// (C-27.FR-8): it passes and names in absent_users the people the check saw outside the discussion group, an empty
+// list when there are none, and the other items have no absent_users.
+func TestDestinationCheckGroupPeopleAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	for _, absent := range [][]destinations.UserRef{
+		{{PublicID: "SRAAAAAAAAAAB0", Name: "Bob", Login: "bob", Deactivated: true}}, {}} {
+		fd.check = destinations.CheckResult{OK: true, Health: destinations.Health{State: "healthy"},
+			Items: []destinations.CheckItem{{Name: "bot_rights_group", OK: true},
+				{Name: "discussion_group_members", OK: true, AbsentUsers: absent}}}
+		a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA2/checks", "")
+		var res gen.DestinationCheckResult
+		decodeInto(t, a, &res)
+		if a.status != http.StatusOK || !res.Ok || len(res.Checks) != 2 || res.Checks[0].AbsentUsers != nil ||
+			res.Checks[1].Name != gen.DestinationCheckItemNameDiscussionGroupMembers || !res.Checks[1].Ok ||
+			res.Checks[1].AbsentUsers == nil || len(*res.Checks[1].AbsentUsers) != len(absent) {
+			t.Fatalf("check = %d %s", a.status, a.body)
+		}
+		if len(absent) == 1 {
+			u := (*res.Checks[1].AbsentUsers)[0]
+			if u.Id != "SRAAAAAAAAAAB0" || u.Name != "Bob" || u.Login == nil || *u.Login != "bob" || !u.Deactivated {
+				t.Errorf("absent %+v", u)
+			}
+		}
+	}
+}

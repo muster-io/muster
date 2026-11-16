@@ -855,13 +855,14 @@ func (e DestinationButtonSetSource) Valid() bool {
 
 // Defines values for DestinationCheckItemName.
 const (
-	DestinationCheckItemNameBotInChannel     DestinationCheckItemName = "bot_in_channel"
-	DestinationCheckItemNameBotRightsChannel DestinationCheckItemName = "bot_rights_channel"
-	DestinationCheckItemNameBotRightsGroup   DestinationCheckItemName = "bot_rights_group"
-	DestinationCheckItemNameChannel          DestinationCheckItemName = "channel"
-	DestinationCheckItemNameChannelExists    DestinationCheckItemName = "channel_exists"
-	DestinationCheckItemNameDiscussionGroup  DestinationCheckItemName = "discussion_group"
-	DestinationCheckItemNameToken            DestinationCheckItemName = "token"
+	DestinationCheckItemNameBotInChannel           DestinationCheckItemName = "bot_in_channel"
+	DestinationCheckItemNameBotRightsChannel       DestinationCheckItemName = "bot_rights_channel"
+	DestinationCheckItemNameBotRightsGroup         DestinationCheckItemName = "bot_rights_group"
+	DestinationCheckItemNameChannel                DestinationCheckItemName = "channel"
+	DestinationCheckItemNameChannelExists          DestinationCheckItemName = "channel_exists"
+	DestinationCheckItemNameDiscussionGroup        DestinationCheckItemName = "discussion_group"
+	DestinationCheckItemNameDiscussionGroupMembers DestinationCheckItemName = "discussion_group_members"
+	DestinationCheckItemNameToken                  DestinationCheckItemName = "token"
 )
 
 // Valid indicates whether the value is a known member of the DestinationCheckItemName enum.
@@ -878,6 +879,8 @@ func (e DestinationCheckItemName) Valid() bool {
 	case DestinationCheckItemNameChannelExists:
 		return true
 	case DestinationCheckItemNameDiscussionGroup:
+		return true
+	case DestinationCheckItemNameDiscussionGroupMembers:
 		return true
 	case DestinationCheckItemNameToken:
 		return true
@@ -2677,6 +2680,30 @@ func (e ProxyType) Valid() bool {
 	case ProxyTypeHttps:
 		return true
 	case ProxyTypeSocks5:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReachReason.
+const (
+	BridgeNoNativeMentions ReachReason = "bridge_no_native_mentions"
+	NoAccountLink          ReachReason = "no_account_link"
+	NotInDiscussionGroup   ReachReason = "not_in_discussion_group"
+	WebhookNoThreadReply   ReachReason = "webhook_no_thread_reply"
+)
+
+// Valid indicates whether the value is a known member of the ReachReason enum.
+func (e ReachReason) Valid() bool {
+	switch e {
+	case BridgeNoNativeMentions:
+		return true
+	case NoAccountLink:
+		return true
+	case NotInDiscussionGroup:
+		return true
+	case WebhookNoThreadReply:
 		return true
 	default:
 		return false
@@ -5430,6 +5457,9 @@ type DestinationButtonSetSource string
 
 // DestinationCheckItem defines model for DestinationCheckItem.
 type DestinationCheckItem struct {
+	// AbsentUsers Set with `discussion_group_members` only, omitted otherwise — the people `getChatMember` answered as outside the discussion group (`left`, `kicked`, `restricted` and not a member, or `400` `Bad Request: PARTICIPANT_ID_INVALID`), by name; a person whose call failed otherwise is not named. Telegram shows a leave only a while after it, about a minute.
+	AbsentUsers *[]UserRef `json:"absent_users,omitempty"`
+
 	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; Slack `channel`: `token_invalid` — Slack refused the bot token, `missing_scope` — the bot token lacks a scope `conversations.info` needs, which `missing_scopes` lists, `channel_not_found` — no such channel, a deleted one, or a private channel the bot is not in, `channel_archived`, `bot_not_in_channel` — `message` says "Invite the bot to the channel: /invite @{bot}", and `request_failed` for any other error of Slack's, which `message` names; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 	Code nullable.Nullable[NullableDestinationCheckCode] `json:"code,omitempty"`
 
@@ -5439,12 +5469,12 @@ type DestinationCheckItem struct {
 	// MissingScopes Set with the code `missing_scope` (Slack `channel`), omitted otherwise — the scopes Slack named as needed (`needed` of its answer), which clients name in their own words; `message` names them in English.
 	MissingScopes *[]string `json:"missing_scopes,omitempty"`
 
-	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member.
+	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside (C-27.FR-8).
 	Name DestinationCheckItemName `json:"name"`
 	Ok   bool                     `json:"ok"`
 }
 
-// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member.
+// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside (C-27.FR-8).
 type DestinationCheckItemName string
 
 // DestinationCheckResult defines model for DestinationCheckResult.
@@ -7024,6 +7054,17 @@ type OnCallNow struct {
 	Items []TeamOnCall `json:"items"`
 }
 
+// OnCallReach A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).
+type OnCallReach struct {
+	Destination DestinationRef `json:"destination"`
+
+	// Messenger The messenger of the Destination — the type of its Connection, or `webhook`.
+	Messenger DestinationType `json:"messenger"`
+
+	// Reason Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
+	Reason ReachReason `json:"reason"`
+}
+
 // OnCallSegment A segment of the Result, with the person On-call in it, or nobody in a gap.
 type OnCallSegment struct {
 	End time.Time `json:"end"`
@@ -7494,6 +7535,9 @@ type QueueDepth struct {
 	Destination EntityRef `json:"destination"`
 	Queued      int       `json:"queued"`
 }
+
+// ReachReason Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
+type ReachReason string
 
 // RelatedAlertGroup defines model for RelatedAlertGroup.
 type RelatedAlertGroup struct {
@@ -8197,24 +8241,35 @@ type ScheduleRef struct {
 
 // ScheduleWarning defines model for ScheduleWarning.
 type ScheduleWarning struct {
-	// End The end of the gap, cut to the period; null for another kind.
+	// Destination The Destination of the Team that a Mention of the person cannot reach; null for another kind.
+	Destination nullable.Nullable[DestinationRef] `json:"destination"`
+
+	// End The end of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
 	End nullable.Nullable[time.Time] `json:"end"`
 
-	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
+	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with the `messenger` and the `reason` (C-27.FR-8).
 	Kind ScheduleWarningKind `json:"kind"`
 
-	// OverrideId A `public_id` in the format of `PublicId`, or null.
-	OverrideId    nullable.Nullable[NullablePublicId] `json:"override_id"`
-	RotationLayer nullable.Nullable[EntityRef]        `json:"rotation_layer"`
+	// Messenger The messenger of `destination` — the type of its Connection, or `webhook` for an outgoing webhook; null for another kind.
+	Messenger nullable.Nullable[DestinationType] `json:"messenger"`
 
-	// Start The start of the gap, cut to the period; null for another kind.
+	// OverrideId The Override that is skipped, or for `unreachable` the one that makes the person On-call in the segment; null otherwise.
+	OverrideId nullable.Nullable[NullablePublicId] `json:"override_id"`
+
+	// Reason Why a Mention of the person cannot reach `destination`; null for another kind.
+	Reason nullable.Nullable[ReachReason] `json:"reason"`
+
+	// RotationLayer The Rotation layer of the Shifts that are skipped, or for `unreachable` the one whose Shift makes the person On-call in the segment; null otherwise.
+	RotationLayer nullable.Nullable[EntityRef] `json:"rotation_layer"`
+
+	// Start The start of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
 	Start nullable.Nullable[time.Time] `json:"start"`
 
 	// User Null for a gap.
 	User nullable.Nullable[UserRef] `json:"user"`
 }
 
-// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
+// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with the `messenger` and the `reason` (C-27.FR-8).
 type ScheduleWarningKind string
 
 // SecretStatus What a read shows instead of a Secret. The value itself is never returned.
@@ -9049,6 +9104,9 @@ type TeamOnCall struct {
 
 	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 	Team TeamRef `json:"team"`
+
+	// Unreachable The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them.
+	Unreachable []OnCallReach `json:"unreachable"`
 
 	// Until The end of the current segment — the On-call's, or the gap's; null when it lasts beyond `schedule.gap_view` and without a Schedule.
 	Until nullable.Nullable[time.Time] `json:"until"`
@@ -14650,7 +14708,7 @@ type ClientInterface interface {
 
 	// GetOnCallNow Read who is On-call now in each Team
 	//
-	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 	//
 	// Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
 	GetOnCallNow(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -14946,7 +15004,7 @@ type ClientInterface interface {
 
 	// GetScheduleOnCall Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 	GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -18295,7 +18353,7 @@ func (c *Client) CheckOidcSettings(ctx context.Context, reqEditors ...RequestEdi
 
 // GetOnCallNow Read who is On-call now in each Team
 //
-// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 //
 // Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
 func (c *Client) GetOnCallNow(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -18971,7 +19029,7 @@ func (c *Client) UpdateSchedule(ctx context.Context, scheduleId ScheduleId, para
 
 // GetScheduleOnCall Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 func (c *Client) GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -31257,7 +31315,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetOnCallNowWithResponse Read who is On-call now in each Team
 	//
-	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -31593,7 +31651,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -51028,7 +51086,7 @@ func (c *ClientWithResponses) CheckOidcSettingsWithResponse(ctx context.Context,
 
 // GetOnCallNowWithResponse Read who is On-call now in each Team
 //
-// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -51592,7 +51650,7 @@ func (c *ClientWithResponses) UpdateScheduleWithResponse(ctx context.Context, sc
 
 // GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Returns a wrapper object for the known response body format(s).
 //
