@@ -124,6 +124,9 @@ func TestGenerate(t *testing.T) {
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
+	if strings.Contains(llms, "## Rules") || !strings.Contains(full, "\n## Rules\n") {
+		t.Errorf("the template \"full\" is not in llms-full.txt alone:\n%s\n%s", llms, full)
+	}
 	golden(t, "llms.txt", llms)
 	golden(t, "llms-full.txt", full)
 	if !strings.Contains(llms, fmt.Sprintf("): %d bytes, about %d tokens.", len(full), len(full)/4)) {
@@ -167,7 +170,7 @@ func TestFullText(t *testing.T) {
 	mustGenerate(t, root)
 	full := readFile(t, root, "site/llms-full.txt")
 	header := "# Muster documentation, version latest\n\n" +
-		"The index of this text, with the rules for AI agents, is " + base + "llms.txt.\n\n"
+		"The index of this text is " + base + "llms.txt; the rules for AI agents follow it.\n\n"
 	if !strings.HasPrefix(full, header) {
 		t.Errorf("llms-full.txt does not start with its title and the line naming llms.txt:\n%s", full)
 	}
@@ -204,6 +207,25 @@ func TestFullText(t *testing.T) {
 	}
 	if !strings.HasSuffix(full, "`api/openapi.yaml`. More.\n") {
 		t.Error("llms-full.txt does not end its last page with one newline")
+	}
+}
+
+func TestNote(t *testing.T) {
+	long := strings.Repeat("word ", 30)
+	tests := map[string]string{
+		"":                               "",
+		"short":                          "short",
+		strings.Repeat("a", 100):         strings.Repeat("a", 100),
+		long:                             strings.TrimSpace(strings.Repeat("word ", 20)) + "…",
+		strings.Repeat("a", 99) + " b c": strings.Repeat("a", 99) + "…",
+		strings.Repeat("a", 90) + " — bbbbbbbbbbbbbb": strings.Repeat("a", 90) + "…",
+		strings.Repeat("é", 150):                      strings.Repeat("é", 100) + "…",
+		strings.Repeat("a, ", 40):                     strings.Repeat("a, ", 32) + "a…",
+	}
+	for in, want := range tests {
+		if got := note(in); got != want {
+			t.Errorf("note(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -432,6 +454,15 @@ func TestFailures(t *testing.T) {
 				"site/llms.txt: the link #top is not absolute",
 			},
 		},
+		"a relative link in the full template": {
+			change: func(t *testing.T, root string) {
+				replaceIn(t, root, tmpl, "## Rules\n", "## Rules\n\nSee [guide](guide.md) and https://example.org/x.\n")
+			},
+			want: []string{
+				"site/llms-full.txt: the link guide.md is not absolute",
+				"site/llms-full.txt: https://example.org/x leaves the site and is no repository under https://github.com/muster-io/",
+			},
+		},
 		"a missing page named twice": {
 			change: func(t *testing.T, root string) {
 				replaceIn(t, root, tmpl, "{{map}}", `{{page "section/nope.md"}} {{page "section/nope.md#x"}}`+"\n\n{{map}}")
@@ -530,11 +561,11 @@ func TestFailures(t *testing.T) {
 		},
 		"a template that does not parse": {
 			change: func(t *testing.T, root string) { replaceIn(t, root, tmpl, "## Optional", "## Optional {{nope}}") },
-			want:   []string{`docs/llms.txt.tmpl:19: function "nope" not defined`},
+			want:   []string{`docs/llms.txt.tmpl:20: function "nope" not defined`},
 		},
 		"a field the data lacks": {
 			change:     func(t *testing.T, root string) { replaceIn(t, root, tmpl, "{{.Version}}", "{{.Nope}}") },
-			wantPrefix: []string{"docs/llms.txt.tmpl:5:"},
+			wantPrefix: []string{"docs/llms.txt.tmpl:14:"},
 		},
 	}
 	for name, tc := range tests {
@@ -629,12 +660,14 @@ func TestVersion(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"[the deep part](https://muster-io.github.io/muster/0.4/section/nested/deep.md#deep-part)",
 		"- [Home](https://muster-io.github.io/muster/0.4/index.md)",
 	} {
 		if !strings.Contains(llms, want) {
 			t.Errorf("llms.txt lacks %q", want)
 		}
+	}
+	if want := "[the deep part](https://muster-io.github.io/muster/0.4/section/nested/deep.md#deep-part)"; !strings.Contains(full, want) {
+		t.Errorf("llms-full.txt lacks %q", want)
 	}
 	if !strings.HasPrefix(full, "# Muster documentation, version 0.4\n") {
 		t.Errorf("llms-full.txt does not name version 0.4:\n%s", full)
