@@ -43,12 +43,31 @@ function useDirectory(q: string) {
   });
 }
 
-export function OwnerFilter({
+/** A choice that is not a user and still names who is meant: its value goes into the URL as it is. */
+export interface SpecialChoice {
+  value: string;
+  label: string;
+}
+
+/**
+ * A picker of a user of the directory, with the special choices `specials` after "Anyone". The Owner filter takes "Mine"
+ * and "Nobody"; "Acknowledged first by" of the statistics page takes "Me" and no Service accounts, as the directory
+ * lists Users only.
+ */
+export function UserFilter({
   value,
   onChange,
+  label,
+  searchLabel,
+  specials,
+  testId,
 }: {
   value: string | undefined;
   onChange: (next: string | undefined) => void;
+  label: string;
+  searchLabel: string;
+  specials: readonly SpecialChoice[];
+  testId: string;
 }) {
   const { t } = useTranslation();
   const id = useId();
@@ -62,7 +81,7 @@ export function OwnerFilter({
   const all = useDirectory("");
   const found = useDirectory(q);
   const users = found.data?.items ?? [];
-  const special = value === undefined || value === OWNER_ME || value === OWNER_NONE;
+  const special = value === undefined || specials.some((c) => c.value === value);
   const chosen =
     special || users.some((u) => u.id === value)
       ? undefined
@@ -72,15 +91,15 @@ export function OwnerFilter({
           deactivated: false,
         });
   return (
-    <div className="flex min-w-0 flex-col gap-1.5" data-testid="filter-owner">
-      <Label htmlFor={`${id}-owner`}>{t("alertGroups.filters.owner")}</Label>
+    <div className="flex min-w-0 flex-col gap-1.5" data-testid={testId}>
+      <Label htmlFor={`${id}-owner`}>{label}</Label>
       <Input
         id={`${id}-search`}
         type="search"
         value={text}
         autoComplete="off"
-        aria-label={t("alertGroups.filters.ownerSearch")}
-        placeholder={t("alertGroups.filters.ownerSearch")}
+        aria-label={searchLabel}
+        placeholder={searchLabel}
         onChange={(e) => setText(e.target.value)}
       />
       <NativeSelect
@@ -90,10 +109,11 @@ export function OwnerFilter({
         onChange={(e) => onChange(e.target.value === "" ? undefined : e.target.value)}
       >
         <NativeSelectOption value="">{t("alertGroups.filters.anyone")}</NativeSelectOption>
-        <NativeSelectOption value={OWNER_ME}>{t("alertGroups.filters.mine")}</NativeSelectOption>
-        <NativeSelectOption value={OWNER_NONE}>
-          {t("alertGroups.filters.nobody")}
-        </NativeSelectOption>
+        {specials.map((c) => (
+          <NativeSelectOption key={c.value} value={c.value}>
+            {c.label}
+          </NativeSelectOption>
+        ))}
         {chosen !== undefined && (
           <NativeSelectOption value={chosen.id}>{directoryLabel(t, chosen)}</NativeSelectOption>
         )}
@@ -109,6 +129,29 @@ export function OwnerFilter({
         </p>
       )}
     </div>
+  );
+}
+
+export function OwnerFilter({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (next: string | undefined) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <UserFilter
+      value={value}
+      onChange={onChange}
+      label={t("alertGroups.filters.owner")}
+      searchLabel={t("alertGroups.filters.ownerSearch")}
+      specials={[
+        { value: OWNER_ME, label: t("alertGroups.filters.mine") },
+        { value: OWNER_NONE, label: t("alertGroups.filters.nobody") },
+      ]}
+      testId="filter-owner"
+    />
   );
 }
 

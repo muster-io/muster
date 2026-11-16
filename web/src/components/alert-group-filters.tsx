@@ -38,7 +38,7 @@ import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 
 /** A choice of a picker: its value and what it shows. */
-interface Choice {
+export interface Choice {
   value: string;
   label: string;
 }
@@ -112,7 +112,7 @@ export function MultiPicker({
 }
 
 /** A picker of one value or none ("any"), as a native select. */
-function OnePicker<T extends string>({
+export function OnePicker<T extends string>({
   label,
   choices,
   value,
@@ -147,15 +147,15 @@ function OnePicker<T extends string>({
 }
 
 /** A filter of a boolean as a native select: any, yes or no. */
-function flag(value: boolean | undefined): "yes" | "no" | undefined {
+export function flag(value: boolean | undefined): "yes" | "no" | undefined {
   return value === undefined ? undefined : value ? "yes" : "no";
 }
 
-function fromFlag(value: "yes" | "no" | undefined): boolean | undefined {
+export function fromFlag(value: "yes" | "no" | undefined): boolean | undefined {
   return value === undefined ? undefined : value === "yes";
 }
 
-function severityChoices(t: TFunction): Choice[] {
+export function severityChoices(t: TFunction): Choice[] {
   return Object.values(SeverityLevel).map((level) => ({
     value: level,
     label: severityLabel(t, level),

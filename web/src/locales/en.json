@@ -2597,15 +2597,21 @@
     "by": {
       "integration": "By integration",
       "label": "Show",
-      "route": "By route"
+      "people": "By people",
+      "route": "By route",
+      "team": "By team"
     },
     "columns": {
       "acknowledged": "Acknowledged",
+      "acknowledgedFirst": "Acknowledged first",
       "alertGroups": "Alert Groups",
       "integration": "Integration",
       "median": "Median",
+      "name": "Name",
       "p95": "95th percentile",
+      "resolved": "Resolved",
       "route": "Route",
+      "team": "Team",
       "timeToAcknowledge": "Time to acknowledge",
       "timeToResolve": "Time to resolve"
     },
@@ -2618,18 +2624,21 @@
       "resolveMedian": "Median time to resolve"
     },
     "emptyIntegrations": "There are no integrations to show.",
+    "emptyPeople": "Nobody acknowledged or resolved an Alert Group in this period.",
     "emptyRoutes": "There are no routes to show.",
+    "emptyTeams": "There are no teams to show.",
     "errors": {
       "unknownItem": "A chosen item does not exist any more. Remove it from the choice."
     },
-    "hint": "Alert Groups that started in the period, with the median and the 95th percentile of the time to acknowledge and the time to resolve. Days are split in your time zone, {{timeZone}}.",
-    "items": {
-      "allIntegrations": "All integrations; add one to narrow",
-      "allRoutes": "All routes; add one to narrow",
-      "integrations": "Integrations",
-      "routes": "Routes"
+    "filters": {
+      "done": "Show statistics",
+      "firstAcknowledgedBy": "Acknowledged first by",
+      "me": "Me"
     },
+    "hint": "Alert Groups that started in the period, with the median and the 95th percentile of the time to acknowledge and the time to resolve. Days are split in your time zone, {{timeZone}}. The filters apply to every view.",
     "none": "—",
+    "perDay": "Per day",
+    "perDayOf": "Per day: {{name}}",
     "period": {
       "custom": "Custom",
       "from": "From",
@@ -2641,11 +2650,16 @@
       "last90Days": "Last 90 days",
       "to": "To"
     },
+    "serviceAccount": "Service account",
     "table": {
       "byIntegration": "Statistics by integration",
-      "byRoute": "Statistics by route"
+      "byPeople": "Statistics by people",
+      "byRoute": "Statistics by route",
+      "byTeam": "Statistics by team"
     },
-    "title": "Statistics"
+    "title": "Statistics",
+    "unknown": "Unknown",
+    "unknownHint": "Acknowledged before Muster recorded who acknowledged first."
   },
   "systemStatus": {
     "attention": {
