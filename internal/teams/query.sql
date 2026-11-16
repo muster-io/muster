@@ -509,3 +509,44 @@ JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
 JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
 WHERE m.org_id = @org_id AND m.team_id = @team_id AND m.connection_id = @connection_id AND c.deleted_at IS NULL
   AND t.deleted_at IS NULL;
+
+-- ListTeamOwnedChains lists the Escalation chains a Team owns by name, which refuse its deletion (C-25.FR-10).
+-- name: ListTeamOwnedChains :many
+SELECT public_id, name
+FROM escalation_chains
+WHERE org_id = @org_id AND owning_team_id = @team_id
+ORDER BY lower(name), id;
+
+-- ListTeamChains lists the Escalation chains of the Teams with their Severity conditions and their owning Teams, by
+-- Team, then by public_id.
+-- name: ListTeamChains :many
+SELECT tc.team_id, tc.severity_condition, c.public_id, c.name, o.public_id AS owner_public_id, o.name AS owner_name,
+       o.slug AS owner_slug, (o.deleted_at IS NOT NULL)::boolean AS owner_deleted
+FROM team_escalation_chains tc
+JOIN escalation_chains c ON c.org_id = tc.org_id AND c.id = tc.chain_id
+LEFT JOIN teams o ON o.org_id = c.org_id AND o.id = c.owning_team_id
+WHERE tc.org_id = @org_id AND tc.team_id = ANY(@team_ids::bigint[])
+ORDER BY tc.team_id, c.public_id;
+
+-- ResolveTeamChains reads the Escalation chains among the public_ids FOR KEY SHARE, for the chains of a Team: the
+-- deletion of a chain locks it FOR UPDATE and then reads the entries that name it, so it either sees this save's entry
+-- or this save waits and then finds the chain gone.
+-- name: ResolveTeamChains :many
+SELECT id, public_id
+FROM escalation_chains
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[])
+ORDER BY id
+FOR KEY SHARE;
+
+-- DeleteTeamChainsExcept removes the Escalation chains of a Team other than those it keeps.
+-- name: DeleteTeamChainsExcept :exec
+DELETE FROM team_escalation_chains
+WHERE org_id = @org_id AND team_id = @team_id AND chain_id <> ALL(@keep_ids::bigint[]);
+
+-- UpsertTeamChains adds Escalation chains to a Team now with their Severity conditions, and changes the condition of
+-- those it has, which keep the time they were added.
+-- name: UpsertTeamChains :exec
+INSERT INTO team_escalation_chains (org_id, team_id, chain_id, severity_condition, added_at)
+SELECT @org_id, @team_id, x.id, x.condition, @now
+FROM (SELECT unnest(@chain_ids::bigint[]) AS id, unnest(@conditions::text[]) AS condition) AS x
+ON CONFLICT (team_id, chain_id) DO UPDATE SET severity_condition = excluded.severity_condition;

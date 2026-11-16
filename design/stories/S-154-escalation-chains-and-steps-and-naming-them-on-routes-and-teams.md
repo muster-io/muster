@@ -9,8 +9,9 @@ covers: [C-32.FR-1, C-32.FR-2, C-32.FR-3, C-32.FR-17, C-32.FR-19, C-32.AC-15, C-
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0040_escalation_chains.up.sql
-  - internal/db/migrations/0040_escalation_chains.down.sql
+  - internal/db/migrations/0046_escalation_chains.up.sql
+  - internal/db/migrations/0046_escalation_chains.down.sql
+  - sqlc.yaml
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -23,29 +24,41 @@ files_touched:
   - internal/escalation/warnings_test.go
   - internal/escalation/query.sql
   - internal/escalation/chains_integration_test.go
+  - internal/escalation/fake_test.go
   - internal/api/escalationchains.go
   - internal/api/escalationchains_test.go
   - internal/api/problem.go
   - internal/api/server.go
+  - internal/api/server_test.go
   - internal/routing/routes.go
+  - internal/routing/chains.go
   - internal/routing/query.sql
   - internal/routing/routes_test.go
+  - internal/routing/chains_test.go
   - internal/api/routes.go
   - internal/teams/teams.go
+  - internal/teams/chains.go
   - internal/teams/query.sql
   - internal/teams/teams_test.go
+  - internal/teams/chains_test.go
   - internal/api/teams.go
   - web/src/test/fixtures/teams.ts
+  - web/src/components/route-editor.test.tsx
+  - web/src/components/route-form.test.tsx
   - internal/schedules/schedules.go
   - internal/schedules/query.sql
+  - internal/schedules/schedules_test.go
   - internal/schedules/schedules_integration_test.go
   - internal/runtime/runtime.go
   - internal/metrics/catalogue.go
+  - internal/metrics/metrics.go
+  - internal/metrics/metrics_test.go
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
   - design/prd/L2.md
   - test/e2e/escalation_chains_test.go
   - docs/concepts/escalation-chains.md
+  - docs/install/versions.md
   - mkdocs.yml
   - internal/auth/auth_integration_test.go
 acceptance:
@@ -53,10 +66,10 @@ acceptance:
   - "[C-32.FR-3] A step is one of `page_on_call` (a Schedule of any Team, `normal` or `important`), `page_people` (`user_ids`, `normal` or `important`), `page_team` (a Team — the chain's owning Team when omitted — or `everyone` with `channel`, `here`, `all` or `everyone`), `call` (`call_target` `on_call` with a Schedule or `people` with `user_ids`, and `gateway_id` when more than one Notification gateway exists), `wait` (`wait_seconds`, a whole number of minutes), `webhook` (an outgoing webhook Destination in events mode or both) and `repeat` (`repeat_from`, an earlier step's number, and `repeat_times`); a step that Pages or sends takes `working_hours_only` and a `severity_condition`; other fields with a kind answer `422` at their pointer (`steps_test.go`)."
   - "[C-32.FR-3, C-32.AC-15] Saving a step that names a Viewer or a disabled User — in `page_people` or `call` — answers `422` `not_pageable` at `/steps/{i}/user_ids/{j}` with the `reason` `viewer` or `disabled`, for the people the save adds, as S-131 does for Rotation layers; more than 20 steps, a wait outside 1 to 1,440 minutes or not a whole number of minutes — `wait_seconds` not a multiple of 60 from 60 to 86400 —, `repeat_times` above 10 or a `repeat_from` that is not an earlier step answer `422` `out_of_range` (`escalation.limits`); a `webhook` step naming a Destination that is not an outgoing webhook in events mode or both answers `422` `webhook_events_required` (`steps_test.go`)."
   - "[C-30.FR-9, C-32.FR-3] A `call` step answers `422` `gateway_required` while no Notification gateway exists, and `422` `required` at `gateway_id` while several do; a chain whose `call` step names a gateway deleted since reads the warning `gateway_deleted` on that step (`steps_test.go`, `warnings_test.go`)."
-  - "[C-32.FR-2, C-08.FR-1] Routes and Teams take `chain_entries` — each a chain with a `severity_condition`, `any` by default — in their inputs, reads and Audit log diffs, with `routes:write` and `teams:write`; the chain reads its `referrers` (each Route and Team with its condition) and `destinations` (those of its Routes and Teams, where it writes); `deleteEscalationChain` of a named chain answers `409` `chain_in_use` naming them in `in_use_by` (`routes_test.go`, `teams_test.go`, `chains_test.go`)."
+  - "[C-32.FR-2, C-08.FR-1] Routes and Teams take `chain_entries` — each a chain with a `severity_condition`, `any` by default — in their inputs, reads and Audit log diffs, with `routes:write` and `teams:write`; the chain reads its `referrers` (each Route and Team with its condition) and `destinations` (those of its Routes and Teams, where it writes); `deleteEscalationChain` of a named chain answers `409` `chain_in_use` naming them in `in_use_by` (`internal/routing/chains_test.go` `TestRouteChainEntries`, `internal/teams/chains_test.go` `TestTeamChainEntries`, `internal/escalation/chains_test.go`)."
   - "[C-32.FR-17] A chain reads `warnings`: `everyone_unsupported` for a `page_team` step whose Team mention or token one of its Destinations' Connections cannot mention, with the Destination and the reason of `MentionUnavailableReason` — such as a Telegram Destination — and `gateway_deleted` and `destination_deleted` for steps whose gateway or webhook Destination is gone (`warnings_test.go`)."
   - "[C-32.AC-15] A Responder gets `403` on `createEscalationChain`, `updateEscalationChain` and `deleteEscalationChain`; a Viewer reads chains with `escalation-chains:read`; naming a chain on a Route needs `routes:write` (`escalationchains_test.go`)."
-  - "[C-25.FR-10, C-25.FR-1, C-25.FR-9] `deleteTeam` of a Team that owns a chain answers `409` `team_in_use` naming the chain in `in_use_by` (`type` `escalation_chain`); a Team's chains are in its read as `chains`; a step limited to Working hours uses those of the chain's owning Team, else the Organization's (`teams_test.go`, `steps_test.go`)."
+  - "[C-25.FR-10, C-25.FR-1, C-25.FR-9] `deleteTeam` of a Team that owns a chain answers `409` `team_in_use` naming the chain in `in_use_by` (`type` `escalation_chain`); a Team's chains are in its read as `chains`; a step limited to Working hours uses those of the chain's owning Team, else the Organization's (`internal/teams/chains_test.go` `TestTeamChainEntries` and `TestDeleteOwningTeam`, `steps_test.go`)."
   - "[C-27.FR-12, C-27.AC-8] `deleteSchedule` of a Schedule that a step names answers `409` `schedule_in_use` naming the chain, through `schedules.Referrers` (`schedules_integration_test.go`)."
   - "The migration adds the Permissions `escalation-chains:read` (every Role) and `escalation-chains:write` (Admin), so that `TestIntegrationRoleMatrix` counts 38, 16 and 11 Permissions for Admin, Responder and Viewer instead of S-131's 36, 15 and 10 — no story between them adds one (`auth_integration_test.go`); reference.md moves them and `muster_escalation_chain_info` into the main tables; P-84 is confirmed in defaults.md and L2.md §5.3; Concepts → Escalation chains has \"What an Escalation chain is\", \"Steps\" and \"Naming chains on Routes and Teams\" in the navigation; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -118,7 +131,7 @@ issue: 443
     `out_of_range`; `unknown_id` at the step's reference. `internal/api/problem.go` maps the errors of `escalation` —
     not found, `name_taken`, a stale version, `chain_in_use` with its `in_use_by` (S-131's member), and
     `webhook_events_required` — to their problems.
-- **Schema** (migration `0040_escalation_chains`, expand only; `schema.md` §2, §4.8, §4.15 and §4.18):
+- **Schema** (migration `0046_escalation_chains`, expand only; `schema.md` §2, §4.8, §4.15 and §4.18):
   - `escalation_chains`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^EC[0-9A-HJKMNP-TV-Z]{12}$')`), `name`,
     `description`, `owning_team_id` (FK `teams`, nullable), `version`, `created_at`, `updated_at`; unique `(org_id,
     lower(name))`; index `(org_id, owning_team_id)`.
@@ -168,8 +181,9 @@ issue: 443
    Role read from `role_permissions`.
 2. Write the chains, their steps and validation, with the spec. Check: `make generate-check`; `steps_test.go` covers
    every kind, its fields, the limits, the people, the gateway and the webhook Destination.
-3. Name chains on Routes and Teams; add the refusals. Check: `routes_test.go`, `teams_test.go`, `chains_test.go`,
-   `schedules_integration_test.go`.
+3. Name chains on Routes and Teams; add the refusals. Check: `internal/routing/chains_test.go`
+   (`TestRouteChainEntries`), `internal/teams/chains_test.go` (`TestTeamChainEntries`, `TestDeleteOwningTeam`),
+   `internal/escalation/chains_test.go`, `schedules_integration_test.go`.
 4. Write the warnings. Check: `warnings_test.go` with a Telegram and a Mattermost Destination on one chain.
 5. Move the shared rows, confirm P-84, write the documentation and `test/e2e/escalation_chains_test.go`. Check: the
    Verification below; `make docs-check`.
@@ -228,6 +242,9 @@ a person disabled after the save, which a rename of the chain still saves.
 ## Notes
 
 - Suggested commit: `feat(escalation): add escalation chains with their steps and name them on routes and teams`.
+- The maintainer's decisions on #578 (2026-11-16) add the chain warnings `pages_nobody` and `team_deleted` and settle
+  the `page_team` step without a Team (C-32.FR-3 and FR-17 revised for L2): `warnings_test.go` (`TestChainWarnings`,
+  `TestTeamDeletedWarning`), `escalationchains_test.go` and `test/e2e/escalation_chains_test.go`.
 - The maintainer confirms a provisional value with this story (operator attention): P-84, at most 20 steps, waits of 1
   to 1,440 minutes and repeats up to 10 times in a chain.
 - No chain runs yet: until S-169 a chain is configuration only, so "starts no Escalation chain" of C-25.AC-13 and
@@ -236,7 +253,8 @@ a person disabled after the save, which a rename of the chain still saves.
 - A wait is `wait_seconds`, a multiple of 60, as every duration of the API is in seconds (maintainer's decision Q4 of
   the plan review); C-32 and `escalation.limits` speak in minutes, which the multiple keeps, and the chain page (S-158)
   shows and edits minutes.
-- Migration `0040` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- Migration `0046`: the story map's `0040` was taken by stories merged before it, and 0044 and 0045 by S-164 and
+  S-174, so it was renumbered (S-167's Notes).
 
 ## Coverage
 

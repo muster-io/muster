@@ -15,6 +15,7 @@ export const HintEventType = {
   destination: 'destination',
   team: 'team',
   schedule: 'schedule',
+  'escalation-chain': 'escalation-chain',
   organization: 'organization',
   'system-notices': 'system-notices',
   'system-status': 'system-status',

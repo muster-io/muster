@@ -3,6 +3,7 @@
  * Do not edit manually.
  */
 import type { DestinationRef } from './destinationRef';
+import type { EscalationChainRef } from './escalationChainRef';
 import type { PublicId } from './publicId';
 import type { RouteInput } from './routeInput';
 import type { RouteStorm } from './routeStorm';
@@ -18,6 +19,8 @@ export type Route = RouteInput & ({
   is_default: boolean;
   /** The Route's Destinations with their health, for the Broken warning. */
   destinations: DestinationRef[];
+  /** The Escalation chains of the Route's `chain_entries`, by name. */
+  chains: EscalationChainRef[];
   /** Set while a template of the Route keeps failing. */
   template_error?: TemplateErrorState;
   storm_active: boolean;
@@ -36,6 +39,8 @@ export type Route = RouteInput & ({
   is_default: boolean;
   /** The Route's Destinations with their health, for the Broken warning. */
   destinations: DestinationRef[];
+  /** The Escalation chains of the Route's `chain_entries`, by name. */
+  chains: EscalationChainRef[];
   /** Set while a template of the Route keeps failing. */
   template_error?: TemplateErrorState;
   storm_active: boolean;
@@ -45,4 +50,4 @@ export type Route = RouteInput & ({
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-}), 'minimum_severity' | 'urgent' | 'destination_entries' | 'destination_ids' | 'deliver_to_teams' | 'run_team_chains' | 'own_message_labels' | 'message_labels'>>;
+}), 'minimum_severity' | 'urgent' | 'destination_entries' | 'destination_ids' | 'chain_entries' | 'deliver_to_teams' | 'run_team_chains' | 'own_message_labels' | 'message_labels'>>;

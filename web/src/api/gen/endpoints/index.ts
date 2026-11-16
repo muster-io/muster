@@ -4,6 +4,7 @@ export * from './api-tokens/api-tokens';
 export * from './audit-log/audit-log';
 export * from './connections/connections';
 export * from './destinations/destinations';
+export * from './escalation-chains/escalation-chains';
 export * from './health-and-metrics/health-and-metrics';
 export * from './ingest/ingest';
 export * from './integrations/integrations';

@@ -9,4 +9,6 @@ export type InUseRefType = typeof InUseRefType[keyof typeof InUseRefType];
 export const InUseRefType = {
   schedule: 'schedule',
   escalation_chain: 'escalation_chain',
+  route: 'route',
+  team: 'team',
 } as const;

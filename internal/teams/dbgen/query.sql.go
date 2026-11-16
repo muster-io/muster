@@ -82,6 +82,23 @@ func (q *Queries) DeleteTeam(ctx context.Context, arg DeleteTeamParams) error {
 	return err
 }
 
+const deleteTeamChainsExcept = `-- name: DeleteTeamChainsExcept :exec
+DELETE FROM team_escalation_chains
+WHERE org_id = $1 AND team_id = $2 AND chain_id <> ALL($3::bigint[])
+`
+
+type DeleteTeamChainsExceptParams struct {
+	OrgID   int64
+	TeamID  int64
+	KeepIds []int64
+}
+
+// DeleteTeamChainsExcept removes the Escalation chains of a Team other than those it keeps.
+func (q *Queries) DeleteTeamChainsExcept(ctx context.Context, arg DeleteTeamChainsExceptParams) error {
+	_, err := q.db.Exec(ctx, deleteTeamChainsExcept, arg.OrgID, arg.TeamID, arg.KeepIds)
+	return err
+}
+
 const deleteTeamDestinations = `-- name: DeleteTeamDestinations :exec
 DELETE FROM team_destinations
 WHERE org_id = $1 AND team_id = $2 AND destination_id = ANY($3::bigint[])
@@ -1013,6 +1030,63 @@ func (q *Queries) ListMentionConnections(ctx context.Context, orgID int64) ([]Li
 	return items, nil
 }
 
+const listTeamChains = `-- name: ListTeamChains :many
+SELECT tc.team_id, tc.severity_condition, c.public_id, c.name, o.public_id AS owner_public_id, o.name AS owner_name,
+       o.slug AS owner_slug, (o.deleted_at IS NOT NULL)::boolean AS owner_deleted
+FROM team_escalation_chains tc
+JOIN escalation_chains c ON c.org_id = tc.org_id AND c.id = tc.chain_id
+LEFT JOIN teams o ON o.org_id = c.org_id AND o.id = c.owning_team_id
+WHERE tc.org_id = $1 AND tc.team_id = ANY($2::bigint[])
+ORDER BY tc.team_id, c.public_id
+`
+
+type ListTeamChainsParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListTeamChainsRow struct {
+	TeamID            int64
+	SeverityCondition string
+	PublicID          string
+	Name              string
+	OwnerPublicID     pgtype.Text
+	OwnerName         pgtype.Text
+	OwnerSlug         pgtype.Text
+	OwnerDeleted      bool
+}
+
+// ListTeamChains lists the Escalation chains of the Teams with their Severity conditions and their owning Teams, by
+// Team, then by public_id.
+func (q *Queries) ListTeamChains(ctx context.Context, arg ListTeamChainsParams) ([]ListTeamChainsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamChains, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamChainsRow{}
+	for rows.Next() {
+		var i ListTeamChainsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.SeverityCondition,
+			&i.PublicID,
+			&i.Name,
+			&i.OwnerPublicID,
+			&i.OwnerName,
+			&i.OwnerSlug,
+			&i.OwnerDeleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeamDestinations = `-- name: ListTeamDestinations :many
 
 SELECT td.team_id, td.destination_id, td.severity_condition, d.public_id, d.name, d.type, d.health, d.broken_since,
@@ -1301,6 +1375,44 @@ func (q *Queries) ListTeamMentions(ctx context.Context, arg ListTeamMentionsPara
 			&i.GroupMentions,
 			&i.Messenger,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamOwnedChains = `-- name: ListTeamOwnedChains :many
+SELECT public_id, name
+FROM escalation_chains
+WHERE org_id = $1 AND owning_team_id = $2
+ORDER BY lower(name), id
+`
+
+type ListTeamOwnedChainsParams struct {
+	OrgID  int64
+	TeamID pgtype.Int8
+}
+
+type ListTeamOwnedChainsRow struct {
+	PublicID string
+	Name     string
+}
+
+// ListTeamOwnedChains lists the Escalation chains a Team owns by name, which refuse its deletion (C-25.FR-10).
+func (q *Queries) ListTeamOwnedChains(ctx context.Context, arg ListTeamOwnedChainsParams) ([]ListTeamOwnedChainsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamOwnedChains, arg.OrgID, arg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamOwnedChainsRow{}
+	for rows.Next() {
+		var i ListTeamOwnedChainsRow
+		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1843,6 +1955,47 @@ func (q *Queries) ResolveMentionConnections(ctx context.Context, arg ResolveMent
 	return items, nil
 }
 
+const resolveTeamChains = `-- name: ResolveTeamChains :many
+SELECT id, public_id
+FROM escalation_chains
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+ORDER BY id
+FOR KEY SHARE
+`
+
+type ResolveTeamChainsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ResolveTeamChainsRow struct {
+	ID       int64
+	PublicID string
+}
+
+// ResolveTeamChains reads the Escalation chains among the public_ids FOR KEY SHARE, for the chains of a Team: the
+// deletion of a chain locks it FOR UPDATE and then reads the entries that name it, so it either sees this save's entry
+// or this save waits and then finds the chain gone.
+func (q *Queries) ResolveTeamChains(ctx context.Context, arg ResolveTeamChainsParams) ([]ResolveTeamChainsRow, error) {
+	rows, err := q.db.Query(ctx, resolveTeamChains, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveTeamChainsRow{}
+	for rows.Next() {
+		var i ResolveTeamChainsRow
+		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveTeamDestinations = `-- name: ResolveTeamDestinations :many
 SELECT id, public_id
 FROM destinations
@@ -1942,6 +2095,34 @@ func (q *Queries) UpdateTeam(ctx context.Context, arg UpdateTeamParams) error {
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertTeamChains = `-- name: UpsertTeamChains :exec
+INSERT INTO team_escalation_chains (org_id, team_id, chain_id, severity_condition, added_at)
+SELECT $1, $2, x.id, x.condition, $3
+FROM (SELECT unnest($4::bigint[]) AS id, unnest($5::text[]) AS condition) AS x
+ON CONFLICT (team_id, chain_id) DO UPDATE SET severity_condition = excluded.severity_condition
+`
+
+type UpsertTeamChainsParams struct {
+	OrgID      int64
+	TeamID     int64
+	Now        time.Time
+	ChainIds   []int64
+	Conditions []string
+}
+
+// UpsertTeamChains adds Escalation chains to a Team now with their Severity conditions, and changes the condition of
+// those it has, which keep the time they were added.
+func (q *Queries) UpsertTeamChains(ctx context.Context, arg UpsertTeamChainsParams) error {
+	_, err := q.db.Exec(ctx, upsertTeamChains,
+		arg.OrgID,
+		arg.TeamID,
+		arg.Now,
+		arg.ChainIds,
+		arg.Conditions,
 	)
 	return err
 }

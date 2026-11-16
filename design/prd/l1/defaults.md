@@ -255,7 +255,7 @@ Other lifecycle values:
 | `ical.window` | the segments of the Result in which the User is On-call, from 7 days back to 60 days ahead | built in | C-27 | P-81 |
 | `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | decided |
 | `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | decided |
-| `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | P-84 |
+| `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | decided |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
 | `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per contact | built in | C-30 | P-86 |
 | `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the Pages that come due after it go together in the next call, no sooner than this after the previous call ended, accepted or Not delivered | built in | C-30 | P-87 |

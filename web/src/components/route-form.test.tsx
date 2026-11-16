@@ -61,6 +61,8 @@ function routeOf(overrides: Partial<Route> = {}): Route {
       { destination_id: NOTICE.id, severity_condition: "below_critical" },
     ],
     destination_ids: [CRITICAL.id, NOTICE.id],
+    chain_entries: [],
+    chains: [],
     deliver_to_teams: false,
     run_team_chains: true,
     own_message_labels: false,

@@ -15,6 +15,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -2739,18 +2740,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (45)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (46)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":45`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":46`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":45`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":46`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2766,10 +2767,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (45)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (46)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":45`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":46`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -4608,6 +4609,104 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 		}
 		if got := firsts(t); got != want {
 			t.Errorf("up again:\n%s\nwant\n%s", got, want)
+		}
+	})
+}
+
+// TestIntegrationEscalationChains runs 0046 over a database at 45 with a Team and a Schedule: up adds the chains, their
+// steps and the chains of Routes and Teams; the CHECKs refuse a step with a field of another kind, a wait outside
+// escalation.limits, a repeat that does not go back and a name taken ignoring case; deleting a chain takes its steps
+// and their people; the Permissions are seeded; down drops it all and the Permissions, with the grants of a token,
+// which keeps its other grants; up again works.
+func TestIntegrationEscalationChains(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 45)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000PA', 'Payments', 'payments', '2026-11-16', '2026-11-16' FROM organizations`)
+		e.exec(t, `INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, created_at, updated_at)
+			SELECT org_id, 'SC0000000000MA', id, 'Main', 'UTC', true, '2026-11-16', '2026-11-16' FROM teams`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000PE', 'petr', 'Petr', 'responder', 'local', 'active', '2026-11-16', '2026-11-16'
+			FROM organizations`)
+		if err := e.mm.Migrate(46); err != nil {
+			t.Fatalf("up to 46: %v", err)
+		}
+		e.exec(t, `INSERT INTO escalation_chains (org_id, public_id, name, owning_team_id, created_at, updated_at)
+			SELECT org_id, 'EC0000000000PA', 'payments', id, '2026-11-16', '2026-11-16' FROM teams`)
+		const chain = `(SELECT id FROM escalation_chains)`
+		refusedBy := func(t *testing.T, sql, constraint string) {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), sql)
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.ConstraintName != constraint {
+				t.Errorf("%s: refused by %v, want %s", sql, err, constraint)
+			}
+		}
+		step := func(position int, kind, fields, values string) string {
+			return `INSERT INTO escalation_steps (org_id, chain_id, position, kind` + fields + `)
+				SELECT org_id, id, ` + strconv.Itoa(position) + `, '` + kind + `'` + values + ` FROM escalation_chains`
+		}
+		e.exec(t, step(1, "page_on_call", ", importance, schedule_id", ", 'normal', (SELECT id FROM schedules)"))
+		e.exec(t, step(2, "wait", ", wait_seconds", ", 600"))
+		e.exec(t, step(3, "page_people", ", importance, severity_condition", ", 'important', 'critical'"))
+		e.exec(t, `INSERT INTO escalation_step_users (org_id, step_id, position, user_id)
+			SELECT s.org_id, s.id, 1, u.id FROM escalation_steps s, users u WHERE s.position = 3`)
+		refusedBy(t, `INSERT INTO escalation_step_users (org_id, step_id, position, user_id)
+			SELECT s.org_id, s.id, 2, u.id FROM escalation_steps s, users u WHERE s.position = 3`,
+			"escalation_step_users_user_key")
+		e.exec(t, step(4, "page_team", ", working_hours_only", ", true"))
+		e.exec(t, step(5, "repeat", ", repeat_from, repeat_times", ", 3, 2"))
+		refusedBy(t, step(6, "wait", ", wait_seconds, importance", ", 60, 'normal'"), "escalation_steps_fields_check")
+		refusedBy(t, step(6, "wait", ", wait_seconds, working_hours_only", ", 60, true"), "escalation_steps_fields_check")
+		refusedBy(t, step(6, "page_team", ", everyone, team_id", ", 'here', (SELECT id FROM teams)"),
+			"escalation_steps_fields_check")
+		refusedBy(t, step(6, "call", ", call_target", ", 'people'"), "escalation_steps_fields_check")
+		refusedBy(t, step(6, "wait", ", wait_seconds", ", 90"), "escalation_steps_wait_seconds_check")
+		refusedBy(t, step(6, "wait", ", wait_seconds", ", 86460"), "escalation_steps_wait_seconds_check")
+		refusedBy(t, step(6, "repeat", ", repeat_from, repeat_times", ", 6, 1"), "escalation_steps_repeat_from_check")
+		refusedBy(t, step(6, "repeat", ", repeat_from, repeat_times", ", 1, 11"), "escalation_steps_repeat_times_check")
+		refusedBy(t, step(21, "wait", ", wait_seconds", ", 60"), "escalation_steps_position_check")
+		refusedBy(t, step(2, "wait", ", wait_seconds", ", 60"), "escalation_steps_position_key")
+		refusedBy(t, `INSERT INTO escalation_chains (org_id, public_id, name, created_at, updated_at)
+			SELECT id, 'EC0000000000PB', 'PAYMENTS', '2026-11-16', '2026-11-16' FROM organizations`,
+			"escalation_chains_name_key")
+		refusedBy(t, `INSERT INTO escalation_chains (org_id, public_id, name, created_at, updated_at)
+			SELECT id, 'XX0000000000PB', 'other', '2026-11-16', '2026-11-16' FROM organizations`,
+			"escalation_chains_public_id_check")
+		e.exec(t, `INSERT INTO team_escalation_chains (org_id, team_id, chain_id, severity_condition, added_at)
+			SELECT org_id, id, `+chain+`, 'critical', '2026-11-16' FROM teams`)
+		refusedBy(t, `UPDATE team_escalation_chains SET severity_condition = 'warning'`,
+			"team_escalation_chains_severity_condition_check")
+		if got := e.count(t, `SELECT count(*) FROM role_permissions WHERE permission LIKE 'escalation-chains:%'`); got != 4 {
+			t.Errorf("%d allocations of the chains' Permissions", got)
+		}
+		e.exec(t, `DELETE FROM team_escalation_chains`)
+		e.exec(t, `DELETE FROM escalation_chains`)
+		if got := e.count(t, `SELECT count(*) FROM escalation_steps`) +
+			e.count(t, `SELECT count(*) FROM escalation_step_users`); got != 0 {
+			t.Errorf("after the chain's deletion: %d rows left", got)
+		}
+		e.exec(t, `INSERT INTO escalation_chains (org_id, public_id, name, created_at, updated_at)
+			SELECT id, 'EC0000000000PA', 'payments', '2026-11-16', '2026-11-16' FROM organizations`)
+		e.exec(t, `INSERT INTO api_tokens (org_id, public_id, kind, user_id, name, token_hash, created_at)
+			SELECT o.id, 'PT0000000000EC', 'personal', u.id, 't', sha256('t'), '2026-11-16' FROM organizations o, users u`)
+		e.exec(t, `INSERT INTO api_token_permissions (api_token_id, org_id, permission)
+			SELECT id, org_id, p FROM api_tokens, unnest(ARRAY['escalation-chains:read', 'escalation-chains:write',
+				'schedules:read']) AS p`)
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM api_token_permissions WHERE permission LIKE 'escalation-chains:%'`); got != 0 {
+			t.Errorf("after down: a token keeps %d grants of the chains' Permissions", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM api_token_permissions WHERE permission = 'schedules:read'`); got != 1 {
+			t.Errorf("after down: the token lost its other grants: %d", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM information_schema.tables WHERE table_name IN ('escalation_chains',
+			'escalation_steps', 'escalation_step_users', 'route_escalation_chains', 'team_escalation_chains')`) +
+			e.count(t, `SELECT count(*) FROM permissions WHERE name LIKE 'escalation-chains:%'`); got != 0 {
+			t.Errorf("after down: %d tables and Permissions left", got)
+		}
+		if err := e.mm.Migrate(46); err != nil {
+			t.Errorf("up again: %v", err)
 		}
 	})
 }

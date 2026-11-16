@@ -279,12 +279,16 @@ type Route struct {
 	DestinationIDs  []string
 	// DestinationEntries are the Destinations with their Severity conditions (C-26.FR-1).
 	DestinationEntries []DestinationEntry
-	DeliverToTeams     bool
-	RunTeamChains      bool
-	Storm              *Storm
-	TemplateError      *TemplateError
-	CreatedAt          time.Time
-	Version            int64
+	// ChainEntries are the Escalation chains of the Route with their Severity conditions by public_id, and Chains the
+	// same chains by name (C-32.FR-2).
+	ChainEntries   []ChainEntry
+	Chains         []ChainRef
+	DeliverToTeams bool
+	RunTeamChains  bool
+	Storm          *Storm
+	TemplateError  *TemplateError
+	CreatedAt      time.Time
+	Version        int64
 	// OpenAlertGroupCount is the number of its open Alert Groups, which block its deletion (C-09.FR-19).
 	OpenAlertGroupCount int64
 	// OwningTeam is the Team that owns the Route (C-25.FR-2), nil when none does.
@@ -408,6 +412,9 @@ type Input struct {
 	// gives a new one any. Both nil keep the stored entries on an update and are none on a creation.
 	DestinationEntries *[]DestinationEntry
 	DestinationIDs     []string
+	// ChainEntries are the Route's Escalation chains with their Severity conditions, replacing the stored ones as a
+	// whole; nil keeps them on an update and is none on a creation (C-32.FR-2).
+	ChainEntries *[]ChainEntry
 	// DeliverToTeams and RunTeamChains are the options of C-26.FR-2: nil keeps the stored one on an update and is
 	// false, or true for RunTeamChains, on a creation.
 	DeliverToTeams *bool
@@ -487,6 +494,10 @@ type Queries interface {
 	BumpRoutesOfDestination(ctx context.Context, arg dbgen.BumpRoutesOfDestinationParams) (
 		[]dbgen.BumpRoutesOfDestinationRow, error)
 	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
+	ListRouteChains(ctx context.Context, arg dbgen.ListRouteChainsParams) ([]dbgen.ListRouteChainsRow, error)
+	ResolveRouteChains(ctx context.Context, arg dbgen.ResolveRouteChainsParams) ([]dbgen.ResolveRouteChainsRow, error)
+	DeleteRouteChainsExcept(ctx context.Context, arg dbgen.DeleteRouteChainsExceptParams) error
+	UpsertRouteChains(ctx context.Context, arg dbgen.UpsertRouteChainsParams) error
 	ListUserTeams(ctx context.Context, arg dbgen.ListUserTeamsParams) ([]string, error)
 	ListPreviewTeams(ctx context.Context, arg dbgen.ListPreviewTeamsParams) ([]dbgen.ListPreviewTeamsRow, error)
 	ListPreviewTeamEntries(ctx context.Context, arg dbgen.ListPreviewTeamEntriesParams) (
@@ -689,6 +700,9 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 	if err := s.withDestinations(ctx, q, out.Routes); err != nil {
 		return List{}, err
 	}
+	if err := s.withChains(ctx, q, out.Routes); err != nil {
+		return List{}, err
+	}
 	if err := s.withCounts(ctx, q, out.Routes); err != nil {
 		return List{}, err
 	}
@@ -778,6 +792,9 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Route, e
 		return Route{}, err
 	}
 	if err := s.withDestinations(ctx, q, list); err != nil {
+		return Route{}, err
+	}
+	if err := s.withChains(ctx, q, list); err != nil {
 		return Route{}, err
 	}
 	if err := s.withCounts(ctx, q, list); err != nil {
@@ -1149,6 +1166,16 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		if _, _, err := s.writeDestinations(ctx, q, routeID, dests); err != nil {
 			return err
 		}
+		if in.ChainEntries != nil {
+			// The chains are read after the Route's row, in the lock order of internal/escalation.
+			chains, ids, err := s.resolveChains(ctx, q, *in.ChainEntries)
+			if err != nil {
+				return err
+			}
+			if err := s.writeChains(ctx, q, routeID, chains, ids, s.clock.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		if created, err = s.get(ctx, q, id); err != nil {
 			return err
 		}
@@ -1159,7 +1186,10 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		}); err != nil {
 			return err
 		}
-		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: created.PublicID})
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: created.PublicID}); err != nil {
+			return err
+		}
+		return s.notifyChains(ctx, q, nil, created.ChainEntries, false)
 	})
 	if err != nil {
 		return Route{}, err
@@ -1258,7 +1288,17 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if err != nil {
 			return err
 		}
+		var chains chainSet
+		var chainIdx chainIDs
+		if in.ChainEntries != nil {
+			if chains, chainIdx, err = s.resolveChains(ctx, q, *in.ChainEntries); err != nil {
+				return err
+			}
+		}
 		next := before
+		if chains != nil {
+			next.ChainEntries = chains.entries()
+		}
 		next.Name, next.Matchers, next.GroupKey, next.Policy = in.Name, in.Matchers, in.GroupKey, in.Policy
 		if in.MinimumSeverity != nil {
 			next.MinimumSeverity = *in.MinimumSeverity
@@ -1310,6 +1350,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
+		if chains != nil && !slices.Equal(before.ChainEntries, next.ChainEntries) {
+			if err := s.writeChains(ctx, q, before.ID, chains, chainIdx, s.clock.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		if !slices.Equal(before.Matchers, next.Matchers) {
 			if err := q.DeleteRouteMatchers(ctx, dbgen.DeleteRouteMatchersParams{OrgID: s.orgID,
 				RouteID: before.ID}); err != nil {
@@ -1353,7 +1398,12 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}); err != nil {
 			return err
 		}
-		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: updated.PublicID})
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: updated.PublicID}); err != nil {
+			return err
+		}
+		// A chain of the Route reads its name and writes in its Destinations.
+		return s.notifyChains(ctx, q, before.ChainEntries, updated.ChainEntries, before.Name != updated.Name ||
+			!slices.Equal(before.DestinationEntries, updated.DestinationEntries))
 	})
 	if err != nil {
 		return Route{}, err
@@ -1430,7 +1480,11 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		}); err != nil {
 			return err
 		}
-		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: before.PublicID})
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: before.PublicID}); err != nil {
+			return err
+		}
+		// The chains the deleted object named no longer read it among their referrers.
+		return s.notifyChains(ctx, q, before.ChainEntries, nil, false)
 	})
 	if err != nil {
 		return err
@@ -1785,9 +1839,11 @@ type view struct {
 	DestinationIDs  []string  `json:"destination_ids"`
 	// DestinationEntries are the Destinations with their Severity conditions, of which DestinationIDs are the ids.
 	DestinationEntries []DestinationEntry `json:"destination_entries"`
-	DeliverToTeams     bool               `json:"deliver_to_teams"`
-	RunTeamChains      bool               `json:"run_team_chains"`
-	OwningTeamID       *string            `json:"owning_team_id"`
+	// ChainEntries are the Escalation chains with their Severity conditions (C-32.FR-2).
+	ChainEntries   []ChainEntry `json:"chain_entries"`
+	DeliverToTeams bool         `json:"deliver_to_teams"`
+	RunTeamChains  bool         `json:"run_team_chains"`
+	OwningTeamID   *string      `json:"owning_team_id"`
 	// MessageLabels is the Route's own list of "Labels in the message", null while it is computed.
 	MessageLabels []string `json:"message_labels"`
 	Policy        Policy   `json:"policy"`
@@ -1808,12 +1864,16 @@ func viewOf(r Route) view {
 	if entries == nil {
 		entries = []DestinationEntry{}
 	}
+	chains := r.ChainEntries
+	if chains == nil {
+		chains = []ChainEntry{}
+	}
 	p := r.Policy
 	if p.SnoozeDurationsSeconds == nil {
 		p.SnoozeDurationsSeconds = []int64{}
 	}
 	v := view{Name: r.Name, Description: r.Description, Matchers: ms, MinimumSeverity: r.MinimumSeverity,
-		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, DestinationEntries: entries,
+		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, DestinationEntries: entries, ChainEntries: chains,
 		DeliverToTeams: r.DeliverToTeams, RunTeamChains: r.RunTeamChains, MessageLabels: r.ownLabels(), Policy: p}
 	if r.OwningTeam != nil {
 		v.OwningTeamID = &r.OwningTeam.PublicID

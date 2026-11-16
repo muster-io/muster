@@ -89,6 +89,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `CR` | Check run: the requests of one check or test share it (from S-089) | — (no table of its own) |
 | `DE` | Delivery event (a Timeline entry of the kind `delivery`) | `delivery_events` |
 | `DS` | Destination | `destinations` |
+| `EC` | Escalation chain (from S-154) | `escalation_chains` |
 | `GC` | Contact at a Notification gateway (from S-167) | `gateway_contacts` |
 | `KR` | Link rule | `link_rules` |
 | `NE` | Note (also the id of its Timeline entry) | `notes` |

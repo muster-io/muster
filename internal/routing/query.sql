@@ -479,3 +479,37 @@ SELECT id, public_id, name, type, health, broken_since, broken_reason
 FROM destinations
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]) AND deleted_at IS NULL
 ORDER BY id;
+
+-- ListRouteChains lists the Escalation chains of the Routes with their Severity conditions and their owning Teams, by
+-- Route, then by public_id.
+-- name: ListRouteChains :many
+SELECT rc.route_id, rc.severity_condition, c.public_id, c.name, o.public_id AS owner_public_id, o.name AS owner_name,
+       o.slug AS owner_slug, (o.deleted_at IS NOT NULL)::boolean AS owner_deleted
+FROM route_escalation_chains rc
+JOIN escalation_chains c ON c.org_id = rc.org_id AND c.id = rc.chain_id
+LEFT JOIN teams o ON o.org_id = c.org_id AND o.id = c.owning_team_id
+WHERE rc.org_id = @org_id AND rc.route_id = ANY(@route_ids::bigint[])
+ORDER BY rc.route_id, c.public_id;
+
+-- ResolveRouteChains reads the Escalation chains among the public_ids FOR KEY SHARE, for the chains of a Route: the
+-- deletion of a chain locks it FOR UPDATE and then reads the entries that name it, so it either sees this save's entry
+-- or this save waits and then finds the chain gone.
+-- name: ResolveRouteChains :many
+SELECT id, public_id
+FROM escalation_chains
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[])
+ORDER BY id
+FOR KEY SHARE;
+
+-- DeleteRouteChainsExcept removes the Escalation chains of a Route other than those it keeps.
+-- name: DeleteRouteChainsExcept :exec
+DELETE FROM route_escalation_chains
+WHERE org_id = @org_id AND route_id = @route_id AND chain_id <> ALL(@keep_ids::bigint[]);
+
+-- UpsertRouteChains adds Escalation chains to a Route now with their Severity conditions, and changes the condition of
+-- those it has, which keep the time they were added.
+-- name: UpsertRouteChains :exec
+INSERT INTO route_escalation_chains (org_id, route_id, chain_id, severity_condition, added_at)
+SELECT @org_id, @route_id, x.id, x.condition, @now
+FROM (SELECT unnest(@chain_ids::bigint[]) AS id, unnest(@conditions::text[]) AS condition) AS x
+ON CONFLICT (route_id, chain_id) DO UPDATE SET severity_condition = excluded.severity_condition;

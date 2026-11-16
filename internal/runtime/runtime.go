@@ -34,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/escalation"
 	"github.com/muster-io/muster/internal/gateways"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
@@ -545,6 +546,8 @@ type process struct {
 	teams *teams.Service
 	// schedules holds the Schedules of the Teams, and icalFeeds the personal iCal feeds of their On-call times.
 	schedules *schedules.Service
+	// chains holds the Escalation chains (C-32), kept in the main pool.
+	chains    *escalation.Service
 	icalFeeds *schedules.Feeds
 	snapshots *ingest.Service
 	signals   *heartbeat.Service
@@ -736,6 +739,8 @@ func (p *process) onHint(h db.Hint) {
 		p.teams.InfoChanged()
 	case schedules.Hint:
 		p.schedules.InfoChanged()
+	case escalation.Hint:
+		p.chains.InfoChanged()
 	case connections.Hint:
 		p.poller.Wake()
 		p.bridgePoller.Wake()
@@ -1004,6 +1009,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Business: p.clocks.Business})
 	p.icalFeeds = schedules.NewFeeds(schedules.FeedsConfig{OrgID: orgID, Store: p.db.IcalFeedsStore(), Audit: w,
 		Business: p.clocks.Business, Schedules: p.schedules, PublicURL: p.cfg.PublicURL.String()})
+	p.chains = escalation.New(escalation.Config{OrgID: orgID, Store: escalation.NewStore(p.db.AccountLinksDB()),
+		Audit: w, Business: p.clocks.Business})
 	p.groups = groups.New(groups.Config{OrgID: orgID, Store: p.db.GroupsStore(), Audit: w,
 		Business: p.clocks.Business, Log: p.log,
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
@@ -1241,13 +1248,15 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			},
 			Business: p.clocks.Business, LeaderAbsence: leader.AbsenceNotice, Version: buildinfo.Version,
 			Commit: buildinfo.Commit}),
-		RequestLog:     requestlog.NewReader(orgID, p.db.MessagesDB(), p.clocks.Business),
-		Teams:          p.teams,
-		Schedules:      p.schedules,
-		IcalFeeds:      p.icalFeeds,
-		TrustedProxies: p.cfg.TrustedProxies,
-		Log:            p.log,
-		Real:           p.clocks.Real,
+		RequestLog: requestlog.NewReader(orgID, p.db.MessagesDB(), p.clocks.Business),
+		Teams:      p.teams,
+		Schedules:  p.schedules,
+		IcalFeeds:  p.icalFeeds,
+		// The Escalation chains are kept in the main pool (C-32).
+		EscalationChains: p.chains,
+		TrustedProxies:   p.cfg.TrustedProxies,
+		Log:              p.log,
+		Real:             p.clocks.Real,
 	})
 }
 
@@ -1468,6 +1477,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	destinationInfoTicks, stopDestinationInfoTicks := every(InfoRefreshInterval)
 	teamInfoTicks, stopTeamInfoTicks := every(InfoRefreshInterval)
 	scheduleInfoTicks, stopScheduleInfoTicks := every(InfoRefreshInterval)
+	chainInfoTicks, stopChainInfoTicks := every(InfoRefreshInterval)
 	wg.Go(func() {
 		defer stopLeaderTicks()
 		p.keeper.Run(ctx, leaderTicks)
@@ -1520,6 +1530,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.destinations.InfoChanged()
 				p.teams.InfoChanged()
 				p.schedules.InfoChanged()
+				p.chains.InfoChanged()
 				p.poller.Wake()
 				p.bridgePoller.Wake()
 				p.slackSockets.Wake()
@@ -1560,6 +1571,10 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	wg.Go(func() {
 		defer stopScheduleInfoTicks()
 		p.schedules.RunInfo(ctx, scheduleInfoTicks)
+	})
+	wg.Go(func() {
+		defer stopChainInfoTicks()
+		p.chains.RunInfo(ctx, chainInfoTicks)
 	})
 	return func(wait context.Context) {
 		cancel()

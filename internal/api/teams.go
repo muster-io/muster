@@ -239,6 +239,16 @@ func teamInputOf(b gen.TeamInput) teams.Input {
 		}
 		in.DestinationEntries = &entries
 	}
+	if b.ChainEntries != nil {
+		entries := make([]teams.ChainEntry, len(*b.ChainEntries))
+		for i, e := range *b.ChainEntries {
+			entries[i] = teams.ChainEntry{ChainID: e.ChainId}
+			if e.SeverityCondition != nil {
+				entries[i].Condition = string(*e.SeverityCondition)
+			}
+		}
+		in.ChainEntries = &entries
+	}
 	if b.TeamMentions != nil {
 		ms := make([]teams.MentionInput, len(*b.TeamMentions))
 		for i, m := range *b.TeamMentions {
@@ -328,12 +338,23 @@ func teamOf(t teams.Team) gen.Team {
 		dests[i] = gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
 			Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
 	}
+	chainEntries := make([]gen.ChainEntry, len(t.ChainEntries))
+	for i, e := range t.ChainEntries {
+		chainEntries[i] = gen.ChainEntry{ChainId: e.ChainID, SeverityCondition: new(gen.SeverityCondition(e.Condition))}
+	}
+	chains := make([]gen.EscalationChainRef, len(t.Chains))
+	for i, c := range t.Chains {
+		chains[i] = gen.EscalationChainRef{Id: c.PublicID, Name: c.Name, OwningTeam: teamRefOf("", "", "", false, false)}
+		if o := c.OwningTeam; o != nil {
+			chains[i].OwningTeam = teamRefOf(o.PublicID, o.Name, o.Slug, o.Deleted, true)
+		}
+	}
 	mentions, conns := teamMentionsOf(t)
 	return gen.Team{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Description: t.Description,
 		OwnWorkingHours: t.Own != nil, WorkingHours: workingHoursOf(t.WorkingHours),
 		IdpEntries: idpEntriesOf(t.IdpEntries), UserCount: int(t.UserCount), CreatedAt: t.CreatedAt.UTC(), Etag: &tag,
-		Matchers: ms, DestinationEntries: entries, Destinations: dests, TeamMentions: mentions,
-		MentionConnections: conns}
+		Matchers: ms, DestinationEntries: entries, Destinations: dests, ChainEntries: chainEntries, Chains: chains,
+		TeamMentions: mentions, MentionConnections: conns}
 }
 
 // teamUserOf is the API form of a person in a Team.

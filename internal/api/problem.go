@@ -23,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/escalation"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
@@ -97,6 +98,7 @@ const (
 	codeTeamInUse             = "team_in_use"
 	codeNotInTeam             = "not_in_team"
 	codeScheduleInUse         = "schedule_in_use"
+	codeChainInUse            = "chain_in_use"
 	codeOverrideEnded         = "override_ended"
 	codeGroupsNotListed       = "groups_not_listed"
 	codeTeamMentionsChanged   = "team_mentions_changed"
@@ -153,7 +155,7 @@ type Problem struct {
 	RelatedAlertGroup *gen.AlertGroupRef
 	// LinkRules is set on the in_use refusal of a Lookup table: the Link rules that read it.
 	LinkRules []gen.EntityRef
-	// InUseBy is set on team_in_use and schedule_in_use: the objects that hold the resource.
+	// InUseBy is set on team_in_use, schedule_in_use and chain_in_use: the objects that hold the resource.
 	InUseBy []gen.InUseRef
 	// AttemptsRemaining is set on link_code_invalid and contact_code_invalid: the codes the link request or the contact
 	// still takes.
@@ -219,7 +221,20 @@ func teamInUseProblem(err error) *Problem {
 	}
 	return heldProblem(codeTeamInUse,
 		"The Team has Schedules or owns Escalation chains; delete them or give them another Team first.",
-		"Delete these Schedules of the Team first: ", held)
+		"Delete these Schedules and Escalation chains of the Team, or give them another Team, first: ", held)
+}
+
+// chainInUseProblem is the chain_in_use refusal of an Escalation chain that Routes or Teams name, which in_use_by
+// names.
+func chainInUseProblem(err error) *Problem {
+	var held []gen.InUseRef
+	if e, ok := errors.AsType[*escalation.InUseError](err); ok {
+		for _, h := range e.Holders {
+			held = append(held, gen.InUseRef{Type: gen.InUseRefType(h.Type), Id: h.PublicID, Name: h.Name})
+		}
+	}
+	return heldProblem(codeChainInUse, "Routes or Teams name this Escalation chain; remove it from them first.",
+		"These Routes and Teams name this Escalation chain; remove it from them first: ", held)
 }
 
 // scheduleInUseProblem is the schedule_in_use refusal of a Schedule that Escalation steps name.
@@ -447,6 +462,14 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		}
 		return p
 	}
+	if f, ok := errors.AsType[*escalation.FieldError](err); ok {
+		p := fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		if f.Reason != "" {
+			reason := gen.NotPageableReason(f.Reason)
+			p.Errors[0].Reason = &reason
+		}
+		return p
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return errInvalidCredentials
@@ -564,6 +587,15 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"The Override has ended; it can be neither changed nor deleted.")
 	case errors.Is(err, schedules.ErrInUse):
 		return scheduleInUseProblem(err)
+	case errors.Is(err, escalation.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Escalation chain.")
+	case errors.Is(err, escalation.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken,
+			"Another Escalation chain has this name; names are compared case-insensitively.")
+	case errors.Is(err, escalation.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, escalation.ErrInUse):
+		return chainInUseProblem(err)
 	case errors.Is(err, groups.ErrNotFound), errors.Is(err, delivery.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Alert Group.")
 	case errors.Is(err, groups.ErrRouteNotFound):

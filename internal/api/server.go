@@ -230,6 +230,8 @@ type Config struct {
 	Teams             Teams
 	Schedules         Schedules
 	IcalFeeds         IcalFeeds
+	// EscalationChains are the Escalation chains (C-32).
+	EscalationChains EscalationChains
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -273,6 +275,7 @@ type Server struct {
 	teams             Teams
 	schedules         Schedules
 	icalFeeds         IcalFeeds
+	escalationChains  EscalationChains
 	trustedProxies    []netip.Prefix
 	log               *logging.Logger
 	real              clock.Clock
@@ -342,6 +345,8 @@ var implemented = map[string]bool{
 	"CreateUserGatewayContact": true, "DeleteUserGatewayContact": true,
 	"GetMyNotificationRules": true, "UpdateMyNotificationRules": true, "ResetMyNotificationRules": true,
 	"GetUserNotificationRules": true, "UpdateUserNotificationRules": true,
+	"ListEscalationChains": true, "CreateEscalationChain": true, "GetEscalationChain": true,
+	"UpdateEscalationChain": true, "DeleteEscalationChain": true,
 	// getIcalCalendar is outside /api/v1 and not generated: IcalHandler serves it.
 	"GetIcalCalendar": true,
 }
@@ -381,7 +386,7 @@ func New(cfg Config) (*Server, error) {
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
 		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
 		accountLinks: cfg.AccountLinks, gatewayContacts: cfg.GatewayContacts, notificationRules: cfg.NotificationRules, systemStatus: cfg.SystemStatus, requestLog: cfg.RequestLog, teams: cfg.Teams,
-		schedules: cfg.Schedules, icalFeeds: cfg.IcalFeeds,
+		schedules: cfg.Schedules, icalFeeds: cfg.IcalFeeds, escalationChains: cfg.EscalationChains,
 		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}

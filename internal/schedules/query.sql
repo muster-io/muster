@@ -416,3 +416,14 @@ SELECT user_id, identity_space
 FROM account_links
 WHERE org_id = @org_id AND user_id = ANY(@user_ids::bigint[])
 ORDER BY user_id, identity_space;
+
+-- ListScheduleChains lists the Escalation chains whose steps name a Schedule, each once, by name, which refuse its
+-- deletion (schedule_in_use, C-27.FR-12). The deletion holds the Schedule locked FOR UPDATE, and a save of a chain
+-- reads the Schedules its steps name FOR KEY SHARE, so a step saved meanwhile is either seen here or waits and finds it
+-- gone.
+-- name: ListScheduleChains :many
+SELECT DISTINCT c.id, c.public_id, c.name, lower(c.name)::text AS sort_name
+FROM escalation_steps s
+JOIN escalation_chains c ON c.org_id = s.org_id AND c.id = s.chain_id
+WHERE s.org_id = @org_id AND s.schedule_id = @schedule_id
+ORDER BY sort_name, c.id;

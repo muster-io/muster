@@ -282,6 +282,7 @@ type Queries interface {
 	LookupUsers(ctx context.Context, arg dbgen.LookupUsersParams) ([]dbgen.LookupUsersRow, error)
 	FindUser(ctx context.Context, arg dbgen.FindUserParams) (int64, error)
 	ListPageable(ctx context.Context, arg dbgen.ListPageableParams) ([]dbgen.ListPageableRow, error)
+	ListScheduleChains(ctx context.Context, arg dbgen.ListScheduleChainsParams) ([]dbgen.ListScheduleChainsRow, error)
 	ListPageableInTeams(ctx context.Context, arg dbgen.ListPageableInTeamsParams) ([]dbgen.ListPageableInTeamsRow,
 		error)
 	IsTeamUser(ctx context.Context, arg dbgen.IsTeamUserParams) (bool, error)
@@ -1162,9 +1163,23 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 	return nil
 }
 
-// Referrers lists what names the Schedule, which refuses its deletion: nothing until the Escalation steps (S-154).
-func (s *Service) Referrers(context.Context, Queries, Schedule) ([]Referrer, error) {
-	return nil, nil
+// ReferrerChain is the kind of an Escalation chain whose steps name a Schedule.
+const ReferrerChain = "escalation_chain"
+
+// Referrers lists what names the Schedule, which refuses its deletion: the Escalation chains whose steps name it, each
+// once, by name (C-27.FR-12). It reads escalation_steps with a query of its own, so that the package imports no
+// package of Paging; the deletion holds the Schedule locked, which a save of a chain naming it waits for.
+func (s *Service) Referrers(ctx context.Context, q Queries, sc Schedule) ([]Referrer, error) {
+	rows, err := q.ListScheduleChains(ctx, dbgen.ListScheduleChainsParams{OrgID: s.orgID,
+		ScheduleID: pgtype.Int8{Int64: sc.ID, Valid: true}})
+	if err != nil {
+		return nil, fmt.Errorf("list the escalation chains of the schedule %s: %w", sc.PublicID, err)
+	}
+	out := make([]Referrer, len(rows))
+	for i, r := range rows {
+		out[i] = Referrer{Type: ReferrerChain, PublicID: r.PublicID, Name: r.Name}
+	}
+	return out, nil
 }
 
 // deleted is the diff of a deletion: each configured value before, none after.
