@@ -3389,6 +3389,16 @@ critical, and a Route raises the level of its Alert Groups with its
   writes neither column, and a check it runs leaves what the last check on 0.2.0 saw. A Telegram Destination that
   such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
   the old group until its next check: select <strong>Check</strong> on it once every replica runs 0.2.0.</li>
+<li>Migration 0045 records who made the first acknowledgement of each Alert Group, for the statistics by people.
+  For the Alert Groups acknowledged before its fill starts it fills it from the earliest <code>acknowledged</code> entry of
+  their Timeline, but only where the Timeline is still whole, its <code>created</code> entry kept (<code>retention.alert_details</code>);
+  the older Alert Groups name nobody, and the statistics by people count them in the row "Unknown". It is expand
+  only: a 0.1 replica neither reads nor writes the column and leaves it as it is. The fill sees the Alert Groups
+  as they were when it started: a first acknowledgement that a 0.1 replica records before then is filled with the
+  others; one it records after the fill started, while the rollout lasts, names nobody and counts as "Unknown"
+  too. A change that a 0.1 replica makes to an Alert Group the fill is writing waits until the fill commits; should
+  the two ever deadlock, PostgreSQL ends one of them, and a failed fill is recovered as described below. Their time
+  to acknowledge is kept as before.</li>
 </ul>
 <p><strong>Slack apps get an optional scope.</strong> Team mentions in Slack need the bot scope <code>usergroups:read</code>, which the
 <a href="../../messengers/slack/#create-the-app-from-a-manifest">manifest</a> now has. A Slack app installed before 0.2.0 keeps
@@ -3901,6 +3911,67 @@ transaction: a failure leaves nothing of it, but the schema recorded as dirty at
 same database role as Muster, run <code>UPDATE schema_migrations SET version = 43, dirty = false;</code> and start the 0.2.0
 replica again, or run <code>muster migrate</code>. Going back below 0044 loses what the checks saw, and with it the warnings
 <code>not_in_discussion_group</code>; once 0044 is back, each Telegram Destination's next check finds them again.</p>
+<p>Migration 0045 runs in three transactions: the first adds <code>alert_groups.first_acknowledged_by_user_id</code> with its
+foreign key and <code>alert_groups_first_acknowledged_by_check</code>, both <code>NOT VALID</code>; the second validates them; the third
+fills the column in one <code>UPDATE</code>. The fill reads the <code>created</code> entries of the Timeline that is kept and, for each
+acknowledged Alert Group among them, its earliest <code>acknowledged</code> entry on <code>timeline_entries_group_idx</code>, and writes
+only the Alert Groups acknowledged within <code>retention.alert_details</code>. On a test machine (8 vCPU, PostgreSQL 17) it
+took 7 seconds for 200,000 Alert Groups, of which it filled 76,000, and 40 seconds for 1,000,000 Alert Groups with
+3.3 million kept Timeline entries, of which it filled 380,000: about 100 seconds per million filled Alert Groups,
+nearly all of it writing the rows. It runs under <code>statement_timeout = '5min'</code>, so an installation with more than
+about 3 million acknowledged Alert Groups in its kept Timeline may reach the timeout. Before the upgrade, this
+counts at most the Alert Groups the fill writes, to predict its duration at about 100 seconds per million:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">alert_groups</span><span class="w"> </span><span class="k">g</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="k">g</span><span class="p">.</span><span class="n">first_acknowledged_at</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+<span class="w">   </span><span class="k">AND</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="k">c</span>
+<span class="w">                </span><span class="k">WHERE</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">g</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">alert_group_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">g</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">event</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'created'</span><span class="p">);</span>
+</code></pre></div>
+<p>A failure leaves the schema recorded as dirty at version 45. To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">columns</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'alert_groups'</span>
+<span class="w">   </span><span class="k">AND</span><span class="w"> </span><span class="k">column_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'first_acknowledged_by_user_id'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 44, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, finish the second transaction, run the third without its timeout and clear the mark; the
+   <code>UPDATE</code> skips the Alert Groups already filled, so it can run again after an interruption:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">alert_groups</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">alert_groups_first_acknowledged_by_user_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">alert_groups</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">alert_groups_first_acknowledged_by_check</span><span class="p">;</span>
+<span class="k">SET</span><span class="w"> </span><span class="n">statement_timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">alert_groups</span><span class="w"> </span><span class="k">g</span>
+<span class="k">SET</span><span class="w"> </span><span class="n">first_acknowledged_by_user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">actor_user_id</span>
+<span class="k">FROM</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">org_id</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">actor_user_id</span>
+<span class="w">    </span><span class="k">FROM</span><span class="w"> </span><span class="n">alert_groups</span><span class="w"> </span><span class="n">s</span>
+<span class="w">    </span><span class="k">CROSS</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="k">LATERAL</span><span class="w"> </span><span class="p">(</span>
+<span class="w">        </span><span class="k">SELECT</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">actor_user_id</span>
+<span class="w">        </span><span class="k">FROM</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="n">e</span>
+<span class="w">        </span><span class="k">WHERE</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">alert_group_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">event</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'acknowledged'</span>
+<span class="w">        </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="k">at</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">id</span>
+<span class="w">        </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">1</span>
+<span class="w">    </span><span class="p">)</span><span class="w"> </span><span class="n">a</span>
+<span class="w">    </span><span class="k">WHERE</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">first_acknowledged_at</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">first_acknowledged_by_user_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NULL</span>
+<span class="w">      </span><span class="k">AND</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="mi">1</span>
+<span class="w">                  </span><span class="k">FROM</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="k">c</span>
+<span class="w">                  </span><span class="k">WHERE</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">alert_group_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">event</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'created'</span><span class="p">)</span>
+<span class="p">)</span><span class="w"> </span><span class="n">f</span>
+<span class="k">WHERE</span><span class="w"> </span><span class="k">g</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">org_id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">g</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">actor_user_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
+<p>Going back below 0045 loses who made each first acknowledgement; once 0045 is back, it is filled again from the
+Timeline that is still whole, and the Alert Groups acknowledged since then whose Timeline was removed count as
+"Unknown".</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
