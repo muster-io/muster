@@ -1565,6 +1565,8 @@
       
         
       
+        
+      
     
     
     
@@ -1894,6 +1896,33 @@
     
   
   Notification rules
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/mentions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Whom a message mentions
 
     
   </span>
@@ -3375,9 +3404,10 @@ templates that should handle both branch on it:</p>
 <p>A template that reads <code>.AlertGroup</code> without the branch fails for a summary as a template error.</p>
 <h2 id="mentions">Mentions<a class="headerlink" href="#mentions" title="Permanent link">&para;</a></h2>
 <p>Muster does not know the chat's syntax for a Mention, so a Loud message carries its targets as data in <code>.Mentions</code>:
-each has <code>Type</code> (<code>everyone</code>, <code>group</code> or <code>user</code>) and, by type, <code>Everyone</code> (<code>all</code>, <code>channel</code> or <code>here</code>), <code>Name</code>, <code>ID</code> and
-<code>Login</code>. The trusted function <code>mention</code> renders a target as plain text — <code>@all</code> (or <code>@channel</code>, <code>@here</code> as the Mention
-settings chose), the group's name, or <code>@</code> and the login — for the template to wrap in the chat's syntax:</p>
+each has <code>Type</code> (<code>everyone</code>, <code>group</code>, <code>user</code> or <code>team</code>) and, by type, <code>Everyone</code> (<code>all</code>, <code>channel</code>, <code>here</code> or
+<code>everyone</code>), <code>Name</code>, <code>ID</code> and <code>Login</code>, or a Team's <code>Slug</code> and <code>Name</code>. The trusted function <code>mention</code> renders a target as
+plain text — <code>@all</code> (or <code>@channel</code>, <code>@here</code>, <code>@everyone</code> as the Mention entries chose), the group's name, <code>@</code> and the
+login, or the Team's slug — for the template to wrap in the chat's syntax:</p>
 <div class="highlight"><pre><span></span><code>{{ range .Mentions }}&lt;{{ mention . }}&gt; {{ end }}
 </code></pre></div>
 <h2 id="template-errors">Template errors<a class="headerlink" href="#template-errors" title="Permanent link">&para;</a></h2>

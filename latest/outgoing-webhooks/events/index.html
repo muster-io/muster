@@ -1582,6 +1582,8 @@
       
         
       
+        
+      
     
     
     
@@ -1911,6 +1913,33 @@
     
   
   Notification rules
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/mentions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Whom a message mentions
 
     
   </span>
@@ -3380,9 +3409,10 @@ field, for example <code>/events/headers/0/value</code>: the value is shown to e
 <dt><code>notify</code></dt>
 <dd><code>true</code> exactly when the event is Loud.</dd>
 <dt><code>mentions</code></dt>
-<dd>Who the event mentions under the Destination's Mention settings, as data: <code>{"type": "everyone"}</code>,
-<code>{"type": "group", "name": …}</code> or <code>{"type": "user", "id": …, "name": …, "login": …}</code>. Always <code>[]</code> for a Quiet
-event.</dd>
+<dd>Who the event mentions under the Destination's Mention entries, as data: <code>{"type": "everyone"}</code>,
+<code>{"type": "group", "name": …}</code>, <code>{"type": "user", "id": …, "name": …, "login": …}</code> — the On-call of a Team too —
+or <code>{"type": "team", "slug": …, "name": …}</code>, with one target per Team of the Alert Group for "Team from the label".
+Always <code>[]</code> for a Quiet event.</dd>
 <dt><code>sequence</code></dt>
 <dd>The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
 and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".</dd>

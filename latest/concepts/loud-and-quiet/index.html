@@ -1419,6 +1419,8 @@
       
         
       
+        
+      
     
     
     
@@ -1878,6 +1880,33 @@
     
   
   Notification rules
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mentions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Whom a message mentions
 
     
   </span>
@@ -3327,61 +3356,12 @@ in the text of a reply in the Thread.</p>
 Mention only where this page says it does. Alert data never mention anyone: an <code>@</code> in a label or an annotation is
 neutralized with a zero-width space, so <code>@channel</code> in a label notifies nobody.</p>
 <h3 id="whom-a-loud-change-mentions">Whom a Loud change Mentions<a class="headerlink" href="#whom-a-loud-change-mentions" title="Permanent link">&para;</a></h3>
-<p>Each Destination has a <strong>Mention setting</strong> for each of six kinds of Loud change:</p>
-<ul>
-<li><code>new_alert_group</code>, <code>new_alerts</code>, <code>reopen</code>, <code>ack_timeout</code>, <code>snooze_ended</code> and <code>rise_to_urgent</code>.</li>
-</ul>
-<p>For each, the Destination chooses <strong>nobody</strong> (the default for all six), <strong>everyone in the chat</strong>, <strong>chosen Muster users</strong>,
-or <strong>messenger groups</strong>. What a Destination type offers:</p>
-<table>
-<thead>
-<tr>
-<th>Destination</th>
-<th>Nobody</th>
-<th>Everyone in the chat</th>
-<th>Chosen users</th>
-<th>Messenger groups</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Mattermost</td>
-<td>yes</td>
-<td><code>@channel</code>, <code>@all</code> or <code>@here</code></td>
-<td>yes</td>
-<td>Mattermost group names</td>
-</tr>
-<tr>
-<td>Slack</td>
-<td>yes</td>
-<td><code>@channel</code> or <code>@here</code></td>
-<td>yes</td>
-<td>no</td>
-</tr>
-<tr>
-<td>Telegram</td>
-<td>yes</td>
-<td>no</td>
-<td>yes</td>
-<td>no</td>
-</tr>
-<tr>
-<td>Bridge</td>
-<td>yes</td>
-<td>no</td>
-<td>yes</td>
-<td>no</td>
-</tr>
-<tr>
-<td>Outgoing webhook</td>
-<td>yes</td>
-<td>yes, as data</td>
-<td>yes, as data</td>
-<td>yes, as data</td>
-</tr>
-</tbody>
-</table>
-<p>Some Mentions are not a setting. A <strong>Reminder</strong> and an auto-unacknowledge always Mention the Owner, a <strong>Takeover</strong>
+<p>Each Destination has a list of <strong>Mention entries</strong>: each one a target — everyone in the chat, a user, a messenger
+group, a Team, or the On-call of a Team — and the Loud changes it applies to: <code>new_alert_group</code>, <code>new_alerts</code>,
+<code>reopen</code>, <code>ack_timeout</code>, <code>snooze_ended</code>, <code>rise_to_urgent</code> and <code>storm_started</code>. A Destination without entries mentions
+nobody. <a href="../mentions/">Whom a message mentions</a> describes the entries and
+<a href="../mentions/#what-each-messenger-supports">what each messenger supports</a>.</p>
+<p>Some Mentions are not an entry. A <strong>Reminder</strong> and an auto-unacknowledge always Mention the Owner, a <strong>Takeover</strong>
 Mentions the previous Owner, and a Reopen into acknowledged Mentions only the Owner.</p>
 <h3 id="account-links">Account links<a class="headerlink" href="#account-links" title="Permanent link">&para;</a></h3>
 <p>A Mention of a user needs an <strong>Account link</strong>: the tie between a Muster user and their account in the messenger. The
@@ -3394,9 +3374,10 @@ accounts</a>. Muster renders a Mention in the messenger's own form:</p>
 <li>Bridge: a marker that a bridge with <code>native_mentions</code> renders as the messenger's mention and any other bridge as the
   person's name.</li>
 </ul>
-<p><strong>A user without an Account link is named by their display name as plain text, which notifies nobody.</strong> So choosing a
-user for a Mention setting, or being an Owner, rings a phone only once that person has linked their account. The footer
-of a Root message names a person by their messenger username without <code>@</code>, which does not notify them either.</p>
+<p><strong>A person whom a Mention entry names is mentioned only through their Account link; without one they are left out.</strong>
+So an entry that names a person, directly or as an On-call, rings their phone only once they have linked their
+account. The Owner of a Reminder, an auto-unacknowledge or a Takeover, and the footer's user — the Owner, who snoozed,
+who resolved — are still named by their display name as text without a link, which notifies nobody.</p>
 <p>For an outgoing webhook, Muster does not know the receiver's markup, so the Mention is data: the event's <code>mentions</code>
 list, and <code>.Mentions</code> in a template, with the target's type, id, name and login. Your receiver or your template turns
 it into whatever the receiving system understands.</p>
@@ -3405,7 +3386,7 @@ it into whatever the receiving system understands.</p>
 Groups in one minute than its Storm threshold (<code>route.storm_threshold</code>, 20 by default). Then each of the Route's
 Destinations gets one <strong>Storm summary</strong> instead of a message per Alert Group:</p>
 <ul>
-<li>The summary is Loud only when it first appears, and Mentions as a new Alert Group does (<code>new_alert_group</code>).</li>
+<li>The summary is Loud only when it first appears, and Mentions the Destination's entries for <code>storm_started</code>.</li>
 <li><strong>Urgent</strong> Alert Groups are still posted on their own, first.</li>
 <li>Its updates and its final state are Quiet. When the rate has stayed below the threshold for 5 minutes
   (<code>delivery.storm_calm_period</code>), the summary shows its final state, and the Alert Groups that are still open are
@@ -3416,7 +3397,7 @@ Destinations gets one <strong>Storm summary</strong> instead of a message per Al
 <p>A rule of thumb for on-call: the phones should ring for problems that need a human, and nothing else. Because an edit is
 always silent, a person can acknowledge, snooze and resolve all day, and the message changes under their eyes without a
 sound; and because the loudness of every change is fixed, a team never has to wonder whether a change will ring. The
-Mention settings are the one place to tune who rings.</p>
+Mention entries are the one place to tune who rings.</p>
 
 
 

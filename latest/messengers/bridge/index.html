@@ -1587,6 +1587,8 @@
       
         
       
+        
+      
     
     
     
@@ -1916,6 +1918,33 @@
     
   
   Notification rules
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/mentions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Whom a message mentions
 
     
   </span>
@@ -3392,9 +3421,10 @@ gets no entry.</p>
 </code></pre></div>
 <h2 id="add-a-destination">Add a Destination<a class="headerlink" href="#add-a-destination" title="Permanent link">&para;</a></h2>
 <p>A <strong>Bridge Destination</strong> is one channel of the messenger, named by its <strong>channel id</strong> — the channel as your messenger
-names it, which the bridge's documentation explains how to find. Its <strong>Mention settings</strong> take nobody or chosen
-users; everyone in the chat and messenger groups are not available through a bridge. Its limiter allows 30 requests
-per minute by default, sends and edits together.</p>
+names it, which the bridge's documentation explains how to find. Its <a href="../../concepts/mentions/">Mention entries</a>
+take people and the On-call, and everyone in the chat, groups and Teams as far as the bridge declares them in its
+<code>info</code>; Muster does not write the last three in bridge messages yet. Its limiter allows 30 requests per minute by
+default, sends and edits together.</p>
 <ol>
 <li>Open <strong>Destinations</strong>, select <strong>Create destination</strong> and choose <strong>Bridge</strong>.</li>
 <li>

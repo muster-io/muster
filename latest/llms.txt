@@ -23,7 +23,7 @@
 2. [Render the structured layout](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#render-the-structured-layout): A bridge renders either `body` or `layout`, never both. Render `body` whenever `layout` is absent. Go: `bridge.Layout`.
 3. [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md): the Bridge Connection and its Destinations, and [what Muster posts](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts).
 4. [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md) and its specification, [`api/bridge.yaml`](https://muster-io.github.io/muster/latest/api/bridge.yaml).
-5. The repository [muster-io/muster-bridge-go](https://github.com/muster-io/muster-bridge-go): its README is the guide to the library, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-go/blob/master/AGENTS.md) the guide for an agent that changes the library itself.
+5. The repository [muster-io/muster-bridge-go](https://github.com/muster-io/muster-bridge-go): its README is the library's guide, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-go/blob/master/AGENTS.md) that of an agent changing the library.
 6. Finished when [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check) passes against the bridge.
 
 ### Write a bridge in Python
@@ -32,7 +32,7 @@
 2. [Render the structured layout](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#render-the-structured-layout): Python: `Layout` and `MessageInput`; render `body` whenever `layout` is absent.
 3. [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md): the Bridge Connection and its Destinations, and [what Muster posts](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts).
 4. [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md) and its specification, [`api/bridge.yaml`](https://muster-io.github.io/muster/latest/api/bridge.yaml).
-5. The repository [muster-io/muster-bridge-python](https://github.com/muster-io/muster-bridge-python): its README is the guide to the library, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-python/blob/master/AGENTS.md) the guide for an agent that changes the library itself.
+5. The repository [muster-io/muster-bridge-python](https://github.com/muster-io/muster-bridge-python): its README is the library's guide, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-python/blob/master/AGENTS.md) that of an agent changing the library.
 6. Finished when [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check) passes against the bridge.
 
 ### Connect Alertmanager
@@ -139,6 +139,7 @@
 - [What critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md): An Alert Group whose Severity level is **critical** is **Urgent**.
 - [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md): A **Schedule** says who in a Team is On-call and when.
 - [Notification rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md): A **Notification rule** says how a Page reaches a person.
+- [Whom a message mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md): Mention entries say who is mentioned.
 
 ### Operations
 
@@ -185,4 +186,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 947561 bytes, about 236890 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 957721 bytes, about 239430 tokens.

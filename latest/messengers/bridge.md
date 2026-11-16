@@ -167,9 +167,10 @@ curl -X POST https://muster.example.org/api/v1/connections/checks \
 ## Add a Destination
 
 A **Bridge Destination** is one channel of the messenger, named by its **channel id** — the channel as your messenger
-names it, which the bridge's documentation explains how to find. Its **Mention settings** take nobody or chosen
-users; everyone in the chat and messenger groups are not available through a bridge. Its limiter allows 30 requests
-per minute by default, sends and edits together.
+names it, which the bridge's documentation explains how to find. Its [Mention entries](../concepts/mentions.md)
+take people and the On-call, and everyone in the chat, groups and Teams as far as the bridge declares them in its
+`info`; Muster does not write the last three in bridge messages yet. Its limiter allows 30 requests per minute by
+default, sends and edits together.
 
 1. Open **Destinations**, select **Create destination** and choose **Bridge**.
 2. Choose the **Connection**, enter the **Channel id** and a **Name**.

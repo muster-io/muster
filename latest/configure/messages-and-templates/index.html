@@ -1582,6 +1582,8 @@
       
         
       
+        
+      
     
     
     
@@ -1911,6 +1913,33 @@
     
   
   Notification rules
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/mentions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Whom a message mentions
 
     
   </span>
@@ -3461,10 +3490,10 @@ It always keeps the title, status, footer, buttons and the link. The list shows 
 (<code>message.alerts_listed</code>); above that it shows the distinct values of each label that differs, and "Full list in
 Muster".</p>
 <h2 id="whom-a-message-mentions">Whom a message mentions<a class="headerlink" href="#whom-a-message-mentions" title="Permanent link">&para;</a></h2>
-<p>Each Destination has a <strong>Mentions</strong> section for six kinds of Loud event: nobody by default, or everyone in the chat,
-chosen Muster users, or messenger groups, as far as the messenger offers them (<code>destination.mentions</code>). The
-<a href="../../concepts/loud-and-quiet/#mentions">Loud and Quiet</a> page lists what each Destination type takes and why a user
-needs an Account link to be mentioned.</p>
+<p>Each Destination has a list of Mention entries, each a target and the Loud events it applies to
+(<code>destination.mentions</code>); its <strong>Mentions</strong> section edits those that 0.1 offered: everyone in the chat, chosen
+Muster users, or messenger groups, for six kinds of Loud event. <a href="../../concepts/mentions/">Whom a message mentions</a>
+describes every entry, what each Destination type takes, and why a user needs an Account link to be mentioned.</p>
 <p>In a template, <code>{{ mention "all" }}</code>, <code>{{ mention "channel" }}</code>, <code>{{ mention "here" }}</code>, <code>{{ mention "owner" }}</code> and
 <code>{{ mention "group" "oncall" }}</code> write a trusted Mention that Muster renders for the messenger. A literal <code>@all</code> written
 in a template is escaped and mentions nobody.</p>
