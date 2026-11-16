@@ -14,6 +14,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams/dbgen"
 )
@@ -199,6 +202,52 @@ func (s *Service) writeDestinations(ctx context.Context, q Queries, teamID int64
 		return nil, fmt.Errorf("write the destinations of the team: %w", err)
 	}
 	return slices.Sorted(slices.Values(p.DestinationIds)), nil
+}
+
+// entriesView is the part of a Destination's Audit log diff that the entry of a Team changes.
+type entriesView struct {
+	MentionEntries []mentions.EntryInput `json:"mention_entries"`
+}
+
+// addTeamEntries adds the Mention entry "Team {Team}" for every Loud event to each Destination that the save of the
+// Team teamID (public_id teamPublicID) names and before did not, when it has no entry naming that Team (C-28.FR-6,
+// C-26.FR-1), in the save's transaction, each recorded as destination.updated with the save's actor and the change of
+// its mention_entries, with its hint; a Telegram Destination, which cannot mention Teams, gets none (settled 1). An Admin
+// may remove the entry; naming the Destination again later adds it again only when it has none. The Destinations' rows
+// are locked in id order after the Team's and before its membership lock, the order of a Destination's deletion.
+func (s *Service) addTeamEntries(ctx context.Context, q Queries, r Requester, teamID int64, teamPublicID string,
+	before []DestinationEntry, want map[string]teamDestination, now time.Time) error {
+	had := make(map[string]bool, len(before))
+	for _, e := range before {
+		had[e.DestinationID] = true
+	}
+	var ids []int64
+	for id, d := range want {
+		if !had[id] {
+			ids = append(ids, d.id)
+		}
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		added, ok, err := q.AddTeamEntry(ctx, s.orgID, id, teamID, teamPublicID, now)
+		if err != nil {
+			return fmt.Errorf("add the mention entry of the team to the destination %d: %w", id, err)
+		}
+		if !ok {
+			continue
+		}
+		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
+			Action:        actionDestinationUpdated,
+			Resource:      audit.Resource{Type: resourceDestination, PublicID: added.PublicID, Name: added.Name},
+			Diff:          audit.Diff(entriesView{MentionEntries: added.Before}, entriesView{MentionEntries: added.After}),
+			SourceAddress: r.Address}); err != nil {
+			return err
+		}
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: hintDestination, ID: added.PublicID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func textOf(t pgtype.Text) *string {

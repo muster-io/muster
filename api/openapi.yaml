@@ -14786,6 +14786,7 @@ components:
       - ack_timeout
       - snooze_ended
       - rise_to_urgent
+      - storm_started
     TimelineKind:
       type: string
       enum:
@@ -17058,6 +17059,168 @@ components:
           - type: 'null'
         severity_condition:
           $ref: '#/components/schemas/SeverityCondition'
+    MentionEvent:
+      type: string
+      description: 'A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also
+        applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to
+        critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).'
+      enum:
+      - new_alert_group
+      - new_alerts
+      - reopen
+      - ack_timeout
+      - snooze_ended
+      - rise_to_urgent
+      - storm_started
+    MentionTargetKind:
+      type: string
+      description: 'Whom a Mention entry names (C-28.FR-1): everyone in the chat (`everyone`), a person (`user`), a
+        messenger group (`group`), a Team (`team`), the Teams of the Alert Group (`teams_from_label`), the On-call of a
+        Team''s main Schedule (`on_call_of_team`), and the On-call of each Team of the Alert Group
+        (`on_call_of_teams_from_label`).'
+      enum:
+      - everyone
+      - user
+      - group
+      - team
+      - teams_from_label
+      - on_call_of_team
+      - on_call_of_teams_from_label
+    MentionTargetInput:
+      type: object
+      description: The target of a Mention entry, with the fields of its kind only; another field is refused with `422`
+        `invalid_format` at it, and a missing one with `required`.
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/MentionTargetKind'
+        everyone:
+          type: string
+          description: With `everyone` only, the word of the messenger.
+          enum:
+          - channel
+          - here
+          - all
+          - everyone
+        user_id:
+          description: With `user` only.
+          $ref: '#/components/schemas/PublicId'
+        group:
+          type: string
+          description: With `group` only, the group's name without `@` — 1 to 64 letters, digits, `.`, `_` and `-`,
+            starting with a letter or a digit, the handle of a Slack user group; any text but empty for an outgoing
+            webhook.
+          example: payments_team
+        group_id:
+          type: string
+          description: With `group` only, the Slack user group's id (`S` followed by digits and capital letters), from
+            `listConnectionGroups`, required on Slack and refused on the other types.
+          example: S0FAKEPAYTEAM
+        team_id:
+          description: With `team` and `on_call_of_team` only.
+          $ref: '#/components/schemas/PublicId'
+    MentionEntryInput:
+      type: object
+      description: A Mention entry as written (C-28.FR-1).
+      required:
+      - target
+      properties:
+        target:
+          $ref: '#/components/schemas/MentionTargetInput'
+        events:
+          type: array
+          description: The Loud events the entry applies to, each once; all seven when omitted.
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MentionEvent'
+    MentionTarget:
+      description: The target of a Mention entry as read, with the User or the Team it names; a deleted User reads
+        `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.
+      allOf:
+      - $ref: '#/components/schemas/MentionTargetInput'
+      - type: object
+        properties:
+          user:
+            description: The User of a `user` target.
+            $ref: '#/components/schemas/UserRef'
+          team:
+            description: The Team of a `team` or `on_call_of_team` target.
+            $ref: '#/components/schemas/TeamRef'
+    MentionResolved:
+      type: object
+      description: One Mention an entry makes now, as the Destination's messenger writes it.
+      required:
+      - kind
+      - name
+      - linked
+      properties:
+        kind:
+          type: string
+          description: '`user`, a person, by the username of their Account link in the Destination''s Identity space,
+            else by their login; `group`, a messenger group or a Team mention, and on an outgoing webhook a Team by its
+            slug; `everyone`, the word of everyone in the chat.'
+          enum:
+          - user
+          - group
+          - everyone
+        name:
+          type: string
+        linked:
+          type: boolean
+          description: For a `user`, whether they have an Account link in the Destination's Identity space — one
+            without it is not mentioned (C-28.FR-3) — always true on an outgoing webhook, which mentions people as
+            data; true for the other kinds.
+    MentionResolution:
+      type: object
+      description: What an entry mentions now for one Team, or for no Team.
+      required:
+      - team
+      - mentions
+      properties:
+        team:
+          description: The Team of a Team or On-call target, one item per Team that is not deleted for the targets from
+            the label; null for the other targets.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+        mentions:
+          type: array
+          description: Empty when the entry mentions nobody now for it — a Team without a Team mention for the
+            Connection, a Team without a main Schedule or in a gap of it, a deleted User or Team, or a target the
+            Connection cannot mention now.
+          items:
+            $ref: '#/components/schemas/MentionResolved'
+    MentionEntry:
+      type: object
+      description: A Mention entry as read, with whether the Destination's Connection can mention its target now and
+        what it mentions now. An entry whose Connection lost the ability stays, reads `available` false with the reason,
+        and mentions nobody.
+      required:
+      - target
+      - events
+      - available
+      - unavailable_reason
+      - resolves_to
+      properties:
+        target:
+          $ref: '#/components/schemas/MentionTarget'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/MentionEvent'
+        available:
+          type: boolean
+        unavailable_reason:
+          description: Why the Connection cannot mention the target now; null while it can.
+          oneOf:
+          - $ref: '#/components/schemas/MentionUnavailableReason'
+          - type: 'null'
+        resolves_to:
+          type: array
+          items:
+            $ref: '#/components/schemas/MentionResolution'
     MentionSetting:
       type: object
       description: Whom to mention for one kind of Loud event. The default is nobody.
@@ -17222,7 +17385,6 @@ components:
       - connection_id
       - team_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17239,7 +17401,28 @@ components:
         channel_id:
           type: string
         mentions:
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — Mattermost has no `everyone` — and an entry whose target equals a stored one
+            is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with
+            `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored one, and a target
+            listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17260,7 +17443,6 @@ components:
       - name
       - connection_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17276,7 +17458,28 @@ components:
           type: string
           description: Telegram chat id or `@username` of the channel. Comments must be enabled on the channel.
         mentions:
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — Telegram takes only people and the On-call — and an entry whose target
+            equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is
+            refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored one, and
+            a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17297,7 +17500,6 @@ components:
       - name
       - connection_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17315,8 +17517,29 @@ components:
           description: The channel as its messenger names it, an opaque string of up to 512 characters; surrounding
             white space is trimmed.
         mentions:
-          description: Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — a Bridge takes the words of everyone its bridge declares in
+            `everyone_mentions`, groups and Teams only when it declares `group_mentions`, and any person — and an entry
+            whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User
+            or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a
+            stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17340,7 +17563,6 @@ components:
       - name
       - connection_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17359,9 +17581,29 @@ components:
             of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space.
             Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
         mentions:
-          description: Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with
-            `unsupported`.
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — Slack has no `all` and no `everyone`, and takes groups and Teams only while
+            the last check of its Connection found `usergroups:read`, a group with its `group_id` — and an entry whose
+            target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or
+            Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored
+            one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17380,7 +17622,6 @@ components:
       - type
       - name
       - mode
-      - mentions
       - limiter
       properties:
         type:
@@ -17403,7 +17644,28 @@ components:
           description: Required when `mode` is `template` or `both`.
           $ref: '#/components/schemas/WebhookTemplateConfig'
         mentions:
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — an outgoing webhook takes every target, as data — and an entry whose target
+            equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is
+            refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored one, and
+            a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17415,6 +17677,8 @@ components:
       type: object
       required:
       - id
+      - mentions
+      - mention_entries
       - health
       - routes
       - teams
@@ -17424,6 +17688,16 @@ components:
       properties:
         id:
           $ref: '#/components/schemas/PublicId'
+        mentions:
+          deprecated: true
+          description: The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5),
+            removed in 0.3.0.
+          $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: The Mention entries in order, each with what it mentions now.
+          items:
+            $ref: '#/components/schemas/MentionEntry'
         teams:
           type: array
           description: The Teams that name the Destination as a Destination of the Team, by name.
@@ -19153,8 +19427,9 @@ components:
       - test
     WebhookMentionTarget:
       type: object
-      description: A resolved Mention as data. `everyone` has no other fields, `group` has `name`, `user` has `id`, `name`
-        and `login`.
+      description: A resolved Mention as data (C-15.FR-11). `everyone` has no other fields, `group` has `name`, `user`
+        has `id`, `name` and `login` — the On-call of a Team is a `user` — and `team` has `slug` and `name`, one per
+        Team of the Alert Group for "Team from the label".
       required:
       - type
       properties:
@@ -19164,6 +19439,7 @@ components:
           - everyone
           - group
           - user
+          - team
         id:
           $ref: '#/components/schemas/NullablePublicId'
         name:
@@ -19171,6 +19447,10 @@ components:
           - string
           - 'null'
         login:
+          type:
+          - string
+          - 'null'
+        slug:
           type:
           - string
           - 'null'

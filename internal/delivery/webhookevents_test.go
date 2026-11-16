@@ -597,7 +597,7 @@ func TestWebhookEventsBody(t *testing.T) {
 		t.Errorf("alerts_added %+v", second)
 	}
 	if len(m.reqs) != 1 || m.reqs[0].DestinationType != delivery.TypeWebhook || m.reqs[0].Seq != 1 ||
-		m.reqs[0].ConnectionID != nil {
+		m.reqs[0].ConnectionID != nil || !m.reqs[0].At.Equal(business0) {
 		t.Errorf("mention requests %+v", m.reqs)
 	}
 	if r := e.db.webhookEvents[0].received; r == nil || !r.Equal(received) {

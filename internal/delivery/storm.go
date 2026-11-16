@@ -75,7 +75,8 @@ type storm struct {
 // which later logs once the dispatcher's transaction committed — and returns the Storm, or nil when there is none.
 func (s *Service) joinStorm(ctx context.Context, q queries, g *groups.Group, route dbgen.GetRouteDeliveryRow,
 	now time.Time, later func(func(ctx context.Context))) (*storm, error) {
-	joined, err := q.JoinStorm(ctx, dbgen.JoinStormParams{OrgID: s.orgID, RouteID: g.RouteID, Urgent: g.Urgent})
+	joined, err := q.JoinStorm(ctx, dbgen.JoinStormParams{OrgID: s.orgID, RouteID: g.RouteID, Urgent: g.Urgent,
+		AlertGroupID: g.ID})
 	if err == nil {
 		return &storm{id: joined.ID, started: joined.StartedAt, count: joined.AlertGroupCount,
 			urgent: joined.UrgentCount}, nil
@@ -92,10 +93,11 @@ func (s *Service) joinStorm(ctx context.Context, q queries, g *groups.Group, rou
 		return nil, nil
 	}
 	started, err := q.StartStorm(ctx, dbgen.StartStormParams{OrgID: s.orgID, RouteID: g.RouteID, Now: now,
-		Urgent: g.Urgent})
+		Urgent: g.Urgent, AlertGroupID: g.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Another transaction started it first and committed: join it.
-		joined, err := q.JoinStorm(ctx, dbgen.JoinStormParams{OrgID: s.orgID, RouteID: g.RouteID, Urgent: g.Urgent})
+		joined, err := q.JoinStorm(ctx, dbgen.JoinStormParams{OrgID: s.orgID, RouteID: g.RouteID, Urgent: g.Urgent,
+			AlertGroupID: g.ID})
 		if err != nil {
 			return nil, fmt.Errorf("join the storm of route %s: %w", route.PublicID, err)
 		}

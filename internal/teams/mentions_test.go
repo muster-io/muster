@@ -351,9 +351,14 @@ func TestMentionConnections(t *testing.T) {
 		"payments_team"}, {"Slack", "", true, "payments-team"}, {"Telegram", ReasonTelegramNoGroups, false, ""}}) {
 		t.Fatalf("mention connections %+v", got)
 	}
-	tm, ok, err := svc.ForConnection(t.Context(), created.ID, 63)
+	tm, ok, err := svc.ForConnection(t.Context(), nil, created.ID, 63)
 	if err != nil || !ok || tm != (TeamMention{Group: "payments-team", GroupID: slackPayTeam}) {
 		t.Fatalf("ForConnection slack = %+v, %v, %v", tm, ok, err)
+	}
+	// Through a caller's transaction, which the store's On runs the query in.
+	if tm, ok, err := svc.ForConnection(t.Context(), struct{ dbgen.DBTX }{}, created.ID, 63); err != nil || !ok ||
+		tm.Group != "payments-team" {
+		t.Fatalf("ForConnection in a transaction = %+v, %v, %v", tm, ok, err)
 	}
 
 	s.connections[connSlack].usergroupsRead = pgtype.Bool{Bool: false, Valid: true}
@@ -370,7 +375,7 @@ func TestMentionConnections(t *testing.T) {
 		t.Fatalf("team mentions %+v", got.Mentions)
 	}
 	for _, id := range []int64{63, 64, 61, 62, 99} {
-		if tm, ok, err := svc.ForConnection(t.Context(), created.ID, id); err != nil || ok || tm != (TeamMention{}) {
+		if tm, ok, err := svc.ForConnection(t.Context(), nil, created.ID, id); err != nil || ok || tm != (TeamMention{}) {
 			t.Errorf("ForConnection %d = %+v, %v, %v", id, tm, ok, err)
 		}
 	}
@@ -404,7 +409,7 @@ func TestMentionConnections(t *testing.T) {
 		t.Errorf("a Slack Connection never checked = %+v", got)
 	}
 	s.fail["GetTeamMention"] = errors.New("boom")
-	if _, _, err := svc.ForConnection(t.Context(), created.ID, 63); err == nil {
+	if _, _, err := svc.ForConnection(t.Context(), nil, created.ID, 63); err == nil {
 		t.Error("a failed read")
 	}
 	delete(s.fail, "GetTeamMention")
@@ -433,7 +438,7 @@ func TestDeleteRemovesMentions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := svc.ForConnection(t.Context(), created.ID, 61); !ok {
+	if _, ok, _ := svc.ForConnection(t.Context(), nil, created.ID, 61); !ok {
 		t.Fatal("no team mention before the deletion")
 	}
 	s.fail["DeleteTeamMentions"] = errors.New("boom")
@@ -447,7 +452,7 @@ func TestDeleteRemovesMentions(t *testing.T) {
 	if len(s.mentions[created.ID]) != 0 {
 		t.Fatalf("team mentions left %+v", s.mentions)
 	}
-	if _, ok, err := svc.ForConnection(t.Context(), created.ID, 61); ok || err != nil {
+	if _, ok, err := svc.ForConnection(t.Context(), nil, created.ID, 61); ok || err != nil {
 		t.Fatalf("ForConnection after the deletion = %v, %v", ok, err)
 	}
 }

@@ -300,8 +300,7 @@ func TestSaveBrokenWebhookProbes(t *testing.T) {
 	if _, err := e.s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); err != nil || len(probed) != 1 || probed[0] != 3 {
 		t.Fatalf("changed %v %v", err, probed)
 	}
-	set, _ := json.Marshal(in.Mentions)
-	e.store.rows[2].Mentions, e.store.rows[2].LimiterLimit, e.store.rows[2].LimiterPerSeconds = set, 5, 1
+	e.store.rows[2].LimiterLimit, e.store.rows[2].LimiterPerSeconds = 5, 1
 	e.store.rows[2].WebhookEventsConfig = in.Webhook.Events.JSON()
 	e.store.rows[2].Proxy, e.store.rows[2].ProxyPasswordSet = []byte(`{"enabled":false}`), false
 	sets := len(e.w.hookSets)

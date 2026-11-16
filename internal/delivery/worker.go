@@ -977,7 +977,8 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 				return err
 			}
 			loud, ms := publicationLoudness(row.PublicationLoud, row.StormID.Valid)
-			if a.targets, err = w.targets(ctx, tx, org, d, row.AlertGroupID, 0, loud, ms); err != nil {
+			if a.targets, err = w.targets(ctx, tx, org, d, row.AlertGroupID, row.StormID.Int64, 0, loud,
+				ms); err != nil {
 				return err
 			}
 		}
@@ -1012,7 +1013,8 @@ func unpublished(row dbgen.GetLeasedDeliveryRow) bool {
 }
 
 // publicationLoudness is the loudness and Mentions of a first Publication: Loud with new_alert_group when it comes
-// from `created`, a recovery finds its Alert Group firing or it is a Storm summary; Quiet otherwise — in a Destination
+// from `created` or a recovery finds its Alert Group firing, and with storm_started when it is a Storm summary
+// (C-28.FR-7); Quiet otherwise — in a Destination
 // added to the Route, after a Storm, late, published again after a deletion, or recovered while not firing
 // (C-11.FR-6, FR-11, FR-13, FR-14, FR-19).
 func publicationLoudness(loud pgtype.Bool, summary bool) (groups.Loudness, []groups.Mention) {

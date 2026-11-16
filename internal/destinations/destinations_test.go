@@ -107,18 +107,18 @@ func newStore() *fakeStore {
 	return &fakeStore{fail: map[string]error{}, rows: []dbgen.GetDestinationRow{
 		{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: "mattermost", Name: "ops", ConnectionPublicID: txt("CNAAAAAAAAAAA1"),
 			MattermostTeamID: txt("team"), MattermostChannelID: txt("chan"), Proxy: []byte(`{"enabled":false}`),
-			Mentions: []byte(`{}`), LimiterLimit: 30, LimiterPerSeconds: 60, Health: "healthy", CreatedAt: t0,
+			LimiterLimit: 30, LimiterPerSeconds: 60, Health: "healthy", CreatedAt: t0,
 			Version: 2},
 		{ID: 2, PublicID: "DSAAAAAAAAAAA2", Type: "telegram", Name: "alerts", ConnectionPublicID: txt("CNAAAAAAAAAAA2"),
 			TelegramChannelID: txt("@alerts"), TelegramChannelChatID: pgtype.Int8{Int64: -100100, Valid: true},
 			TelegramDiscussionChatID: pgtype.Int8{Int64: -100200, Valid: true},
-			Proxy:                    []byte(`{"enabled":false}`), Mentions: []byte(`{}`), LimiterLimit: 10, LimiterPerSeconds: 60,
+			Proxy:                    []byte(`{"enabled":false}`), LimiterLimit: 10, LimiterPerSeconds: 60,
 			Health: "broken", BrokenSince: since, BrokenReason: txt("chat not found"), CreatedAt: t0, Version: 1},
 		{ID: 3, PublicID: "DSAAAAAAAAAAA3", Type: "webhook", Name: "hook", WebhookMode: txt("events"),
 			WebhookEventsConfig: []byte(`{"url":"https://example.org","headers":[]}`),
 			Proxy:               []byte(`{"enabled":true,"type":"http","address":"proxy:3128","username":"u"}`),
 			ProxyPasswordSet:    true, ProxyPasswordUpdatedAt: since, SigningSecretSet: true,
-			SigningSecretUpdatedAt: since, Mentions: []byte(`{}`), LimiterLimit: 60, LimiterPerSeconds: 60,
+			SigningSecretUpdatedAt: since, LimiterLimit: 60, LimiterPerSeconds: 60,
 			Health: "healthy", TemplateErrorSince: since, TemplateError: txt("no value"), CreatedAt: t0, Version: 4},
 	}, routes: []dbgen.ListDestinationRoutesRow{{DestinationID: 1, PublicID: "RTAAAAAAAAAAA1", Name: "payments"}},
 		teams: []dbgen.ListDestinationTeamsRow{{DestinationID: 1, PublicID: "TMAAAAAAAAAAA1", Name: "Payments",
@@ -132,7 +132,7 @@ func bridgeRow() dbgen.GetDestinationRow {
 	since := pgtype.Timestamptz{Time: t0.Add(-time.Hour), Valid: true}
 	return dbgen.GetDestinationRow{ID: 4, PublicID: "DSAAAAAAAAAAA4", Type: "bridge", Name: "alerts-br",
 		ConnectionPublicID: txt("CNAAAAAAAAAAA3"), BridgeChannelID: txt("ch-alerts"), BridgeChannelName: txt("alerts"),
-		Proxy: []byte(`{"enabled":false}`), Mentions: []byte(`{}`), LimiterLimit: 30, LimiterPerSeconds: 60,
+		Proxy: []byte(`{"enabled":false}`), LimiterLimit: 30, LimiterPerSeconds: 60,
 		Health: "broken", BrokenSince: since, BrokenReason: txt("The bot is not a member of this channel."),
 		CreatedAt: t0, Version: 1}
 }
@@ -167,7 +167,7 @@ func slackRow() dbgen.GetDestinationRow {
 	since := pgtype.Timestamptz{Time: t0.Add(-time.Hour), Valid: true}
 	return dbgen.GetDestinationRow{ID: 5, PublicID: "DSAAAAAAAAAAA5", Type: "slack", Name: "alerts-sl",
 		ConnectionPublicID: txt("CNAAAAAAAAAAA8"), SlackChannelID: txt("C0FAKEALERTS"), SlackChannelName: txt("alerts"),
-		Proxy: []byte(`{"enabled":false}`), Mentions: []byte(`{}`), LimiterLimit: 30, LimiterPerSeconds: 60,
+		Proxy: []byte(`{"enabled":false}`), LimiterLimit: 30, LimiterPerSeconds: 60,
 		Health: "broken", BrokenSince: since, BrokenReason: txt("not_in_channel"), CreatedAt: t0, Version: 1}
 }
 

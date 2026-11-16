@@ -6,6 +6,8 @@ package schedules
 import (
 	"errors"
 	"testing"
+
+	"github.com/muster-io/muster/internal/schedules/dbgen"
 )
 
 // TestOnCallNow is C-27.FR-9: every Team by name, each with the On-call of its main Schedule now — the person, what
@@ -92,5 +94,43 @@ func TestOnCallNowJoinsOnePerson(t *testing.T) {
 		!p.Until.Equal(utc("2026-11-02T12:00:00Z")) || p.Next == nil || p.Next.User != nil ||
 		!p.Next.Start.Equal(utc("2026-11-02T12:00:00Z")) || !p.Next.End.Equal(utc("2026-11-04T00:00:00Z")) {
 		t.Errorf("current %+v until %v next %+v", p.Current, p.Until, p.Next)
+	}
+}
+
+// TestTeamOnCallAt is the On-call that a Mention entry mentions (C-27.FR-4, C-28.FR-3): the person on Shift in the
+// Team's main Schedule at the moment, none in a gap of it, for a Team without a main Schedule, or when a read fails.
+func TestTeamOnCallAt(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	if _, err := svc.Create(ctx, admin, gapInput("Main", "monday")); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok, err := svc.TeamOnCallAt(ctx, nil, 1, t0); err != nil || !ok || id != olga.ID {
+		t.Errorf("payments now = %d, %v, %v; want olga", id, ok, err)
+	}
+	if id, ok, err := svc.TeamOnCallAt(ctx, nil, 1, utc("2026-11-02T01:00:00Z")); err != nil || ok || id != 0 {
+		t.Errorf("payments in a gap = %d, %v, %v", id, ok, err)
+	}
+	// The Monday gap of the Days layer, from 2026-11-02T00:00Z to 2026-11-03T00:00Z, at its boundaries.
+	for at, want := range map[string]bool{"2026-11-01T23:59:00Z": true, "2026-11-01T23:59:59Z": true,
+		"2026-11-02T00:00:00Z": false, "2026-11-02T00:01:00Z": false, "2026-11-02T23:59:00Z": false,
+		"2026-11-03T00:00:00Z": true, "2026-11-03T00:01:00Z": true} {
+		if id, ok, err := svc.TeamOnCallAt(ctx, nil, 1, utc(at)); err != nil || ok != want || (ok && id != olga.ID) {
+			t.Errorf("payments at %s = %d, %v, %v; want on call %v", at, id, ok, err, want)
+		}
+	}
+	// Through a caller's transaction, which the store's On runs the queries in.
+	if id, ok, err := svc.TeamOnCallAt(ctx, struct{ dbgen.DBTX }{}, 1, t0); err != nil || !ok || id != olga.ID {
+		t.Errorf("payments in a transaction = %d, %v, %v", id, ok, err)
+	}
+	if _, ok, err := svc.TeamOnCallAt(ctx, nil, 2, t0); err != nil || ok {
+		t.Errorf("ops without a main schedule = %v, %v", ok, err)
+	}
+	for _, name := range []string{"GetTeamMainSchedule", "ListRotationLayers", "ListPeriodOverrides"} {
+		store.fail[name] = errBoom
+		if _, _, err := svc.TeamOnCallAt(ctx, nil, 1, t0); !errors.Is(err, errBoom) {
+			t.Errorf("%s fails = %v", name, err)
+		}
+		delete(store.fail, name)
 	}
 }

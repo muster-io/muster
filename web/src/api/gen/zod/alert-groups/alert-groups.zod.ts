@@ -467,7 +467,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).and(zod.object({
   "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined', 'page_not_delivered']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
-  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
+  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
   "kind": zod.enum(['status']),
   "from_status": zod.union([zod.literal('firing'),zod.literal('acknowledged'),zod.literal('snoozed'),zod.literal('resolved'),zod.literal(null)]).nullish(),
@@ -510,7 +510,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).and(zod.object({
   "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined', 'page_not_delivered']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
-  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
+  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
   "kind": zod.enum(['alerts']),
   "fingerprints": zod.array(zod.string()).optional(),
@@ -543,7 +543,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).and(zod.object({
   "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined', 'page_not_delivered']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
-  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
+  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
   "kind": zod.enum(['notes']),
   "note": zod.object({
@@ -576,7 +576,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).and(zod.object({
   "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined', 'page_not_delivered']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
-  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
+  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
   "kind": zod.enum(['timers']),
   "notice_number": zod.int().nullish(),
@@ -604,7 +604,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }),
   "error": zod.string().nullish().describe('Provider error text. Secrets, the Signing secret and tokens are masked. Untrusted: render as plain text.'),
   "loudness": zod.enum(['loud', 'quiet']),
-  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.')).describe('Mentions the delivery event carried (see the Loud and Quiet table of delivery events).')
+  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A symbolic Mention that each Destination turns into real Mentions.')).describe('Mentions the delivery event carried (see the Loud and Quiet table of delivery events).')
 })).and(zod.object({
   "kind": zod.enum(['delivery'])
 })),zod.object({
@@ -624,7 +624,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "system_event": zod.enum(['moved_to_default_route', 'muster_unavailable', 'fallback_template_used', 'template_value_missing', 'unknown_team_value', 'destination_joined']),
   "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined', 'page_not_delivered']).optional().describe('Set for lifecycle events of kind `system`.'),
   "loudness": zod.enum(['loud', 'quiet']).optional(),
-  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.')).optional(),
+  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A symbolic Mention that each Destination turns into real Mentions.')).optional(),
   "period_from": zod.iso.datetime({"offset":true}).nullish(),
   "period_to": zod.iso.datetime({"offset":true}).nullish(),
   "detail": zod.string().nullish(),
@@ -656,7 +656,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).and(zod.object({
   "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined', 'page_not_delivered']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
-  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
+  "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
   "kind": zod.enum(['escalation']),
   "paged_users": zod.array(zod.object({

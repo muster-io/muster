@@ -4,12 +4,21 @@
  */
 import type { DestinationHealth } from './destinationHealth';
 import type { EntityRef } from './entityRef';
+import type { MentionEntry } from './mentionEntry';
+import type { MentionSettings } from './mentionSettings';
 import type { PublicId } from './publicId';
 import type { TeamRef } from './teamRef';
 import type { TemplateErrorState } from './templateErrorState';
 
 export interface DestinationReadFields {
   id: PublicId;
+  /**
+     * The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
+     * @deprecated
+     */
+  mentions: MentionSettings;
+  /** The Mention entries in order, each with what it mentions now. */
+  mention_entries: MentionEntry[];
   /** The Teams that name the Destination as a Destination of the Team, by name. */
   teams: TeamRef[];
   /** The Team that owns the Destination, null when none does. */

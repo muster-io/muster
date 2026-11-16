@@ -436,10 +436,12 @@ func (c moveChecker) CheckChannel(ctx context.Context, in destinations.ChannelCh
 		Steps: []mattermost.Step{{Name: mattermost.StepToken, OK: true}}}}, nil
 }
 
-// anyMentions takes every Mention setting.
-type anyMentions struct{}
+// anyMentions takes every Mention setting, and reads and writes the Mention entries as mentions does.
+type anyMentions struct{ *mentions.Service }
 
-func (anyMentions) Validate(context.Context, string, mentions.Settings) error { return nil }
+func (anyMentions) Validate(context.Context, string, mentions.Settings, []mentions.EntryInput) error {
+	return nil
+}
 
 // moveLive is the footer runtime with a second Mattermost Connection B, where alice has an Account link, and the
 // destinations service that moves the Destination of the fixtures between Connections; the open Alert Group CcA,
@@ -467,7 +469,7 @@ func setupMoveLive(t *testing.T, s dbtest.Server) *moveLive {
 	}
 	m.saves = destinations.New(f.orgID, destinations.NewStore(f.d.Pool))
 	m.saves.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(f.d.Pool),
-		Audit: audit.NewWriter(f.logger, f.business), Business: f.business, Mentions: anyMentions{},
+		Audit: audit.NewWriter(f.logger, f.business), Business: f.business, Mentions: anyMentions{mentions.New(f.orgID, f.d.Pool)},
 		Mattermost: moveChecker{l: f.live}, Log: f.logger})
 	m.r = accountlinks.Requester{UserID: f.aliceID, UserPublicID: f.alice.Actor.PublicID, Actor: f.alice.Actor,
 		Transport: audit.TransportUI}
