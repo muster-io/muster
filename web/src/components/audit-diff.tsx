@@ -293,6 +293,24 @@ function teamField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
+/** The names of the changed fields of a Schedule. */
+function scheduleField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("schedule.fields.name");
+    case "/rotation_layers":
+      return t("schedule.layers.title");
+    case "/main":
+      return t("audit.fields.scheduleMain");
+    case "/gap_alert":
+      return t("audit.fields.scheduleGapAlert");
+    case "/time_zone":
+      return t("schedule.fields.timeZone");
+    default:
+      return undefined;
+  }
+}
+
 /** The names of the changed fields of the OIDC settings. */
 function oidcField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
@@ -378,6 +396,9 @@ export function fieldLabel(
       break;
     case "team":
       label = teamField(t, pointer);
+      break;
+    case "schedule":
+      label = scheduleField(t, pointer);
       break;
     default:
       break;

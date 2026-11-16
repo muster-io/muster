@@ -209,7 +209,7 @@ commands of Bridges, the UI and the API keep every action.
 | Thread reply | a Page by Mention | "Step {n}: {Mentions}, you are needed" and "Chain of the Route {Route} · On-call of {Team} {Schedule} · normal" (or "· important, again in {N} min") | C-32 |
 | Root message | not acknowledged while Escalation chains Page | "Assignees: {person} ({Team}), …" | C-29, C-32 |
 | Root message | acknowledged while Escalation chains ran | "Acknowledged by {user} ({Team}) · Escalation chains stopped" | C-29, C-32 |
-| Schedule page, "On call now" | warnings | "Gap: {from} – {to}" · "Disabled: @{login} in {Rotation layer}" · "@{login} is a Viewer" · "@{login} is not in the Team" · "Unreachable in {messenger}: no linked account." with "A call through the Notification gateway works." where it does | C-27 |
+| Schedule page, "On call now" | warnings | "Gap: {from} – {to}" · "Disabled: @{login} in {Rotation layer}" · "@{login} is a Viewer" · "@{login} is not in the Team" · "Unreachable in {messenger}: no linked account." with "A call through the Notification gateway works." where it does · "Unreachable in {Destination}: the bridge cannot mention people." · "Unreachable in {Destination}: the outgoing webhook has no reply in thread." · "Unreachable in {Destination}: not in the discussion group." | C-27 |
 | Schedule page, Overrides | always (hint) | "Any Responder of the Team; no messages." | C-27 |
 | Profile, Escalation steps, Notification rules | no Notification gateway exists | "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)" | C-30, C-31, C-32 |
 | Answer to a person in a call | an acknowledgement of an Alert Group someone owns · a resolved one | "Already taken by {name}" · "Already resolved" | C-30 |

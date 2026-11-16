@@ -24,9 +24,10 @@ files_touched:
   - web/src/components/override-form.test.tsx
   - web/src/lib/schedule-time.ts
   - web/src/lib/schedule-time.test.ts
-  - web/src/components/team-filter.tsx
   - web/src/routes/teams.index.tsx
   - web/src/components/audit-diff.tsx
+  - web/src/components/audit-diff.test.tsx
+  - web/src/test/fixtures/schedules.ts
   - web/src/lib/docs-links.json
   - web/src/components/docs-link.tsx
   - web/src/locales/en.json
