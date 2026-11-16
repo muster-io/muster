@@ -121,4 +121,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): the rules, the scenarios and every page in one file, 971925 bytes, about 242981 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): the rules, the scenarios and every page in one file, 978050 bytes, about 244512 tokens.

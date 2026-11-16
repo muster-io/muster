@@ -1244,6 +1244,13 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       field. The migration keeps `destinations.mentions` as it found it and 0.2.0 no longer writes it,
       except that a Destination created on 0.2.0 stores nobody there. It is expand only, and its down migration drops
       the entries and restores the settings as the column kept them.
+    - Migration 0044 adds what the Destination check of a Telegram Destination sees of the members of its discussion
+      group, for the warnings about [unreachable On-calls](https://muster-io.github.io/muster/latest/concepts/schedules.md#unreachable-on-calls): nothing is
+      known after the upgrade, so no On-call is warned about a discussion group until each Telegram Destination is
+      saved or checked again. It is expand only: a 0.1 replica, or one of a development image without it, reads and
+      writes neither column, and a check it runs leaves what the last check on 0.2.0 saw. A Telegram Destination that
+      such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
+      the old group until its next check: select **Check** on it once every replica runs 0.2.0.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -1746,6 +1753,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Muster, run `UPDATE schema_migrations SET version = 41, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`. Going back below 0042 loses every Team mention and what the checks found of the groups; once 0042
     is back, each Connection's next check finds the groups again, and the Team mentions are entered again.
+
+    Migration 0044 adds the two columns of what a Telegram Destination's check saw of its discussion group in one
+    transaction: a failure leaves nothing of it, but the schema recorded as dirty at version 44. To recover, with the
+    same database role as Muster, run `UPDATE schema_migrations SET version = 43, dirty = false;` and start the 0.2.0
+    replica again, or run `muster migrate`. Going back below 0044 loses what the checks saw, and with it the warnings
+    `not_in_discussion_group`; once 0044 is back, each Telegram Destination's next check finds them again.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -3770,7 +3783,12 @@ A Telegram Destination is the channel only: Muster finds its discussion group.
 
     - `getChat` on the channel: it exists and is a channel, and it names its discussion group;
     - `getChatMember` for the bot in the channel: an admin allowed to post and to edit messages;
-    - `getChatMember` for the bot in the discussion group: an admin there.
+    - `getChatMember` for the bot in the discussion group: an admin there;
+    - once those pass, `getChatMember` in the discussion group for each person of the Teams that name the Destination
+      with a Telegram Account link, the item **Members of the discussion group**, which always passes and names the
+      people outside the group, whom a Mention in a Thread does not notify
+      ([Unreachable On-calls](https://muster-io.github.io/muster/latest/concepts/schedules.md#unreachable-on-calls)). A new Destination has no Team yet, so
+      its save asks about nobody.
 
     A Destination that fails the check is not saved, and the check says what to fix:
 
@@ -3795,7 +3813,9 @@ A Telegram Destination is the channel only: Muster finds its discussion group.
 Muster keeps sending to that channel and that group: when comments are moved to another group later, or the
 `@username` to another channel, the check fails with "The channel or its discussion group changed since the
 Destination was saved. Save the Destination again." until you save it. **Check** on the Destination page runs the same
-check at any time, and `muster doctor` prints one line per Telegram Destination with its result. When Telegram refuses
+check at any time, and `muster doctor` prints one line per Telegram Destination with its result: a warning that names
+the people of its Teams outside the discussion group, and the same warning as **Check** when the channel or its
+discussion group changed since the Destination was saved. When Telegram refuses
 the bot later — for example, someone removed its admin rights — the Destination becomes **Broken**; Muster runs the
 same check every few minutes while nothing waits for the Destination, and ends the Broken state once the check passes
 again.
@@ -11303,6 +11323,56 @@ keep its gap alert off. With `by_default` it already is, as long as it is not it
 `getOnCallNow` lists every Team by name — or with `teams=mine` the Teams of the caller — with the On-call of its main
 Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
 within the next 14 days. A Team without a main Schedule has `no_schedule` true.
+
+## Unreachable On-calls
+
+A Mention of the On-call notifies them only where it reaches them. For each segment of the period in which someone is
+On-call, `getScheduleOnCall` lists a warning `unreachable` for each [Destination of their
+Team](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md) that a Mention of the person cannot reach, whatever its Severity condition, with the
+Destination, its `messenger` and the `reason`; `getOnCallNow` lists the same, for the On-call now, in `unreachable`.
+The warning changes nothing that Muster sends: it says ahead of time what a Mention would not do.
+
+`no_account_link`
+:   The person has no Account link where the Destination posts: a Mattermost, Slack or Bridge Destination needs a link
+    through its Connection, a Telegram one a Telegram link. The person links their account in their profile
+    ([Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md)); the warning goes once the link is made.
+
+`bridge_no_native_mentions`
+:   The bridge of a Bridge Destination does not declare `native_mentions` in its
+    [info](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#getinfo), or Muster has not read its info yet, so a Mention is the person's
+    name in plain text, which notifies nobody, linked or not. A bridge that renders Mentions declares it; check the
+    Connection again once it does.
+
+`webhook_no_thread_reply`
+:   An [outgoing webhook in template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md) has no **Reply in thread** request, so
+    the follow-ups that carry Mentions are never sent. Add the request; an outgoing webhook in events mode mentions
+    nobody and gets no warning.
+
+`not_in_discussion_group`
+:   The last Destination check of a Telegram Destination saw the person outside the discussion group of its channel,
+    and Telegram notifies only the members of the group about the replies in a Thread, a reply that mentions them
+    included. The person joins the discussion group
+    ([Join the discussion group](https://muster-io.github.io/muster/latest/messengers/telegram.md#join-the-discussion-group-and-mute-the-channel)), and
+    then someone selects **Check** on the Destination page, or saves the Destination.
+
+The check of a Telegram Destination — on save, on **Check** and in `muster doctor`, which prints the people it found
+outside the group without recording them — asks Telegram, with `getChatMember`, about every active person of the Teams
+that name the Destination who has a Telegram Account link and is not a Viewer (a disabled User or a Viewer is never
+On-call), and lists those outside the group in its item **Members of the discussion group**, which always passes. It
+makes one request per person, one after the other, limited by the Connection's limiter, not by the Destination's, as
+it sends nothing to the chat; on save and on **Check** it stops after 10 seconds
+(`destination.telegram.group_people_budget`), and `muster doctor` paces its requests at the Connection's limiter and
+stops after as long. A Team with hundreds of linked people may so leave some unasked.
+
+The warning is as old as the last check. A leave reaches Telegram's answer only some time later, about a minute, so a
+check right after someone left the group may still see them in it; check again later. A person the check could not
+tell — Telegram answered with an error, did not answer in time, or was not asked before the check stopped — keeps what
+the check before saw: the warning of someone who was outside the group stays until a check sees them in it, and
+someone never seen outside it gets no warning.
+
+One case the warning cannot see: the creator of the discussion group, who is anonymous there, was not notified of a
+Mention in a group they had muted, while an ordinary member who muted it was. The check sees the creator in the group,
+so they get no warning; a creator who is On-call should keep the discussion group unmuted.
 
 <!-- Source: https://muster-io.github.io/muster/latest/concepts/notification-rules.md -->
 # Notification rules

@@ -3356,7 +3356,12 @@ group, and Muster writes everything about an Alert Group after its Root message 
 <ul>
 <li><code>getChat</code> on the channel: it exists and is a channel, and it names its discussion group;</li>
 <li><code>getChatMember</code> for the bot in the channel: an admin allowed to post and to edit messages;</li>
-<li><code>getChatMember</code> for the bot in the discussion group: an admin there.</li>
+<li><code>getChatMember</code> for the bot in the discussion group: an admin there;</li>
+<li>once those pass, <code>getChatMember</code> in the discussion group for each person of the Teams that name the Destination
+  with a Telegram Account link, the item <strong>Members of the discussion group</strong>, which always passes and names the
+  people outside the group, whom a Mention in a Thread does not notify
+  (<a href="../../concepts/schedules/#unreachable-on-calls">Unreachable On-calls</a>). A new Destination has no Team yet, so
+  its save asks about nobody.</li>
 </ul>
 <p>A Destination that fails the check is not saved, and the check says what to fix:</p>
 <ul>
@@ -3381,7 +3386,9 @@ group, and Muster writes everything about an Alert Group after its Root message 
 <p>Muster keeps sending to that channel and that group: when comments are moved to another group later, or the
 <code>@username</code> to another channel, the check fails with "The channel or its discussion group changed since the
 Destination was saved. Save the Destination again." until you save it. <strong>Check</strong> on the Destination page runs the same
-check at any time, and <code>muster doctor</code> prints one line per Telegram Destination with its result. When Telegram refuses
+check at any time, and <code>muster doctor</code> prints one line per Telegram Destination with its result: a warning that names
+the people of its Teams outside the discussion group, and the same warning as <strong>Check</strong> when the channel or its
+discussion group changed since the Destination was saved. When Telegram refuses
 the bot later — for example, someone removed its admin rights — the Destination becomes <strong>Broken</strong>; Muster runs the
 same check every few minutes while nothing waits for the Destination, and ends the Broken state once the check passes
 again.</p>

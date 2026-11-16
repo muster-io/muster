@@ -1850,6 +1850,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#unreachable-on-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Unreachable On-calls
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3175,6 +3186,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#unreachable-on-calls" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Unreachable On-calls
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3341,6 +3363,49 @@ keep its gap alert off. With <code>by_default</code> it already is, as long as i
 <p><code>getOnCallNow</code> lists every Team by name — or with <code>teams=mine</code> the Teams of the caller — with the On-call of its main
 Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
 within the next 14 days. A Team without a main Schedule has <code>no_schedule</code> true.</p>
+<h2 id="unreachable-on-calls">Unreachable On-calls<a class="headerlink" href="#unreachable-on-calls" title="Permanent link">&para;</a></h2>
+<p>A Mention of the On-call notifies them only where it reaches them. For each segment of the period in which someone is
+On-call, <code>getScheduleOnCall</code> lists a warning <code>unreachable</code> for each <a href="../routing-to-teams/">Destination of their
+Team</a> that a Mention of the person cannot reach, whatever its Severity condition, with the
+Destination, its <code>messenger</code> and the <code>reason</code>; <code>getOnCallNow</code> lists the same, for the On-call now, in <code>unreachable</code>.
+The warning changes nothing that Muster sends: it says ahead of time what a Mention would not do.</p>
+<dl>
+<dt><code>no_account_link</code></dt>
+<dd>The person has no Account link where the Destination posts: a Mattermost, Slack or Bridge Destination needs a link
+through its Connection, a Telegram one a Telegram link. The person links their account in their profile
+(<a href="../../messengers/account-links/">Link your messenger accounts</a>); the warning goes once the link is made.</dd>
+<dt><code>bridge_no_native_mentions</code></dt>
+<dd>The bridge of a Bridge Destination does not declare <code>native_mentions</code> in its
+<a href="../../messengers/write-a-bridge/#getinfo">info</a>, or Muster has not read its info yet, so a Mention is the person's
+name in plain text, which notifies nobody, linked or not. A bridge that renders Mentions declares it; check the
+Connection again once it does.</dd>
+<dt><code>webhook_no_thread_reply</code></dt>
+<dd>An <a href="../../outgoing-webhooks/templates/">outgoing webhook in template mode</a> has no <strong>Reply in thread</strong> request, so
+the follow-ups that carry Mentions are never sent. Add the request; an outgoing webhook in events mode mentions
+nobody and gets no warning.</dd>
+<dt><code>not_in_discussion_group</code></dt>
+<dd>The last Destination check of a Telegram Destination saw the person outside the discussion group of its channel,
+and Telegram notifies only the members of the group about the replies in a Thread, a reply that mentions them
+included. The person joins the discussion group
+(<a href="../../messengers/telegram/#join-the-discussion-group-and-mute-the-channel">Join the discussion group</a>), and
+then someone selects <strong>Check</strong> on the Destination page, or saves the Destination.</dd>
+</dl>
+<p>The check of a Telegram Destination — on save, on <strong>Check</strong> and in <code>muster doctor</code>, which prints the people it found
+outside the group without recording them — asks Telegram, with <code>getChatMember</code>, about every active person of the Teams
+that name the Destination who has a Telegram Account link and is not a Viewer (a disabled User or a Viewer is never
+On-call), and lists those outside the group in its item <strong>Members of the discussion group</strong>, which always passes. It
+makes one request per person, one after the other, limited by the Connection's limiter, not by the Destination's, as
+it sends nothing to the chat; on save and on <strong>Check</strong> it stops after 10 seconds
+(<code>destination.telegram.group_people_budget</code>), and <code>muster doctor</code> paces its requests at the Connection's limiter and
+stops after as long. A Team with hundreds of linked people may so leave some unasked.</p>
+<p>The warning is as old as the last check. A leave reaches Telegram's answer only some time later, about a minute, so a
+check right after someone left the group may still see them in it; check again later. A person the check could not
+tell — Telegram answered with an error, did not answer in time, or was not asked before the check stopped — keeps what
+the check before saw: the warning of someone who was outside the group stays until a check sees them in it, and
+someone never seen outside it gets no warning.</p>
+<p>One case the warning cannot see: the creator of the discussion group, who is anonymous there, was not notified of a
+Mention in a group they had muted, while an ordinary member who muted it was. The check sees the creator in the group,
+so they get no warning; a creator who is On-call should keep the discussion group unmuted.</p>
 
 
 
