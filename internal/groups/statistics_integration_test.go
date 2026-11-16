@@ -236,7 +236,8 @@ func TestIntegrationActorStatistics(t *testing.T) {
 			{},
 		}
 		for i, r := range rows {
-			r.created, r.labels = start.Add(time.Duration(i)*time.Hour), map[string]string{"cluster": fmt.Sprintf("s%d", i)}
+			r.created = start.Add(time.Duration(i) * time.Hour)
+			r.labels = map[string]string{"cluster": fmt.Sprintf("s%d", i), "scope": "people"}
 			se.insert(t, r)
 		}
 		f := groups.Filter{Matchers: mustMatchers(t, `cluster=~"s.*"`)}
@@ -245,9 +246,11 @@ func TestIntegrationActorStatistics(t *testing.T) {
 		if got := people(t, e, f); !slices.Equal(got, want) {
 			t.Errorf("by people\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 		}
-		// The same with the = Matchers in SQL instead of Go.
-		if got := people(t, e, groups.Filter{}); !slices.Equal(got, want) {
-			t.Errorf("without matchers\n%s", strings.Join(got, "\n"))
+		// The same with an = Matcher, which SQL applies by containment instead of Go, and with no Matcher.
+		for _, f := range []groups.Filter{{Matchers: mustMatchers(t, `scope="people"`)}, {}} {
+			if got := people(t, e, f); !slices.Equal(got, want) {
+				t.Errorf("%v:\n%s", f.Matchers, strings.Join(got, "\n"))
+			}
 		}
 		// Two Alert Groups acknowledged before who made their first acknowledgement was recorded.
 		for i, d := range []time.Duration{time.Minute, 3 * time.Minute} {
@@ -499,7 +502,11 @@ func TestIntegrationStatisticsPlans(t *testing.T) {
 				Reopened: p.Reopened, TeamSet: p.TeamSet, TeamIds: p.TeamIds, Contains: p.Contains,
 				FirstAcknowledgedBy: p.FirstAcknowledgedBy, IdsSet: p.IdsSet, Ids: p.Ids}
 		}
-		for name, p := range map[string]dbgen.RouteStatisticsParams{"no filter": none, "every filter": all} {
+		// Every filter of SQL without the ids of the Matchers Go applies.
+		sql := all
+		sql.IdsSet, sql.Ids = false, []int64{}
+		for name, p := range map[string]dbgen.RouteStatisticsParams{"no filter": none, "every filter": all,
+			"every filter but the ids": sql} {
 			for _, c := range []struct {
 				query string
 				run   func()

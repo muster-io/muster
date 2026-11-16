@@ -5,6 +5,6 @@
 import type { PublicId } from './publicId';
 
 /**
- * Only the Alert Groups of these Routes (`public_id`); with `group_by=route` also the items.
+ * Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
  */
 export type StatisticsRouteParameter = PublicId[];

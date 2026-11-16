@@ -856,6 +856,16 @@ func TestAlertGroupActorStatisticsAPI(t *testing.T) {
 	if a := x.as(t, groupsReader, http.MethodGet, path+"?label=%3D%3D", ""); a.status != http.StatusBadRequest {
 		t.Errorf("a bad matcher = %d %s", a.status, a.body)
 	}
+	// A malformed id of a Route or an Integration is refused by the validation of the request, as on the statistics
+	// per subject.
+	for _, p := range []string{path + "?route=bad", path + "?integration=bad",
+		"/api/v1/alert-group-statistics?group_by=route&route=bad",
+		"/api/v1/alert-group-statistics?group_by=integration&integration=bad"} {
+		if a := x.as(t, groupsReader, http.MethodGet, p, ""); a.status != http.StatusBadRequest ||
+			!strings.Contains(string(a.body), `"pointer":"/query/`) {
+			t.Errorf("%s = %d %s", p, a.status, a.body)
+		}
+	}
 	for _, c := range []struct {
 		token, query, err string
 	}{

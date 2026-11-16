@@ -5,6 +5,6 @@
 import type { PublicId } from './publicId';
 
 /**
- * Only the Alert Groups with Alerts from these Integrations (`public_id`); with `group_by=integration` also the items, of those Integrations only.
+ * Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
  */
 export type StatisticsIntegrationParameter = PublicId[];

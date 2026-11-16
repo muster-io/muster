@@ -3,25 +3,25 @@
  * Do not edit manually.
  */
 import type { AgFirstAcknowledgedByParameter } from './agFirstAcknowledgedByParameter';
-import type { AgIntegrationParameter } from './agIntegrationParameter';
 import type { AgReopenedParameter } from './agReopenedParameter';
-import type { AgRouteParameter } from './agRouteParameter';
 import type { AgSeverityParameter } from './agSeverityParameter';
 import type { AgTeamParameter } from './agTeamParameter';
 import type { AgUrgentParameter } from './agUrgentParameter';
 import type { FromParameter } from './fromParameter';
 import type { LabelMatchersParameter } from './labelMatchersParameter';
+import type { StatisticsIntegrationParameter } from './statisticsIntegrationParameter';
+import type { StatisticsRouteParameter } from './statisticsRouteParameter';
 import type { ToParameter } from './toParameter';
 
 export type GetAlertGroupActorStatisticsParams = {
 /**
- * Only these Routes (`public_id`).
+ * Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
  */
-route?: AgRouteParameter;
+route?: StatisticsRouteParameter;
 /**
- * Only Alert Groups with Alerts from these Integrations (`public_id`).
+ * Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
  */
-integration?: AgIntegrationParameter;
+integration?: StatisticsIntegrationParameter;
 /**
  * Only these Severity levels.
  */

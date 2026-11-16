@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"slices"
@@ -4422,17 +4423,32 @@ func TestIntegrationTelegramDiscussionMembers(t *testing.T) {
 	})
 }
 
-// TestIntegrationFirstAcknowledgedBy runs 0045 over a database at 44 whose Timeline has a kept month, October, and a
-// month already dropped, July: up adds alert_groups.first_acknowledged_by_user_id with its foreign key and
-// alert_groups_first_acknowledged_by_check, both validated, and fills it from the earliest acknowledged entry of each
-// Alert Group with first_acknowledged_at whose Timeline is whole, with its created entry: one that Alice acknowledged
-// and Bob took over gets Alice; one whose Timeline partition was dropped gets nobody; one that Alice acknowledged in the
-// dropped month and Carol again, after an Unacknowledge, in the kept month gets nobody, not Carol; one never
-// acknowledged stays empty. The CHECK refuses the User of a first acknowledgement without its time, the foreign key an unknown User.
-// Down drops the column and the CHECK; up again fills it again (C-09.FR-27, C-09.AC-30).
+// TestIntegrationFirstAcknowledgedBy runs 0045 over a database at 44 with two Organizations, whose Timeline has a
+// kept month, October, and a month already dropped, July: up adds alert_groups.first_acknowledged_by_user_id with its
+// foreign key and alert_groups_first_acknowledged_by_check, both validated, and fills it from the earliest
+// acknowledged entry by (at, id) of each Alert Group with first_acknowledged_at whose Timeline is whole, with its
+// created entry, within its Organization (C-09.FR-27, C-09.AC-30):
+//   - F001, which Alice acknowledged and Bob took over, gets Alice;
+//   - F002, whose Timeline partition was dropped, gets nobody;
+//   - F003, which Alice acknowledged in the dropped month and Carol again, after an Unacknowledge, in the kept month,
+//     gets nobody, not Carol;
+//   - F004, never acknowledged, stays empty;
+//   - F005, which Alice acknowledged, unacknowledged and Carol acknowledged in the kept month, gets Alice;
+//   - F006, with two acknowledged entries at the same time, gets Bob, of the lower id;
+//   - F007 of the other Organization gets its own Dave, while F008, whose only acknowledged entry is one of the other
+//     Organization with its id, gets nobody.
+//
+// The CHECK refuses the User of a first acknowledgement without its time, the foreign key an unknown User; the fill run
+// again keeps a value already set. Down drops the column and the CHECK; up again fills it again.
 func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := newMigrationEnv(t, s, 44)
+		e.exec(t, `INSERT INTO organizations (public_id, name, time_zone, severity_label, severity_mapping,
+			severity_styles, critical_is_urgent, instance_labels, retention_stored_snapshots_days,
+			retention_alert_details_days, retention_alert_group_summaries_days, retention_audit_log_days, totp_required,
+			oidc_token_grace_seconds, created_at, updated_at)
+			VALUES ('RG0000000000BB', 'Other', 'UTC', 'severity', '[]', '[]', true, '{}', 14, 90, 730, 365, 'nobody',
+			604800, '2026-07-01', '2026-07-01')`)
 		for _, m := range []struct{ name, from, to string }{{"p202607", "2026-07-01", "2026-08-01"},
 			{"p202610", "2026-10-01", "2026-11-01"}} {
 			e.exec(t, `CREATE TABLE timeline_entries_`+m.name+` PARTITION OF timeline_entries
@@ -4440,31 +4456,35 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 		}
 		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
 			SELECT o.id, u.public_id, u.login, u.login, 'responder', 'local', 'active', '2026-07-01', '2026-07-01'
-			FROM organizations o, (VALUES ('SR0000000000A1', 'alice'), ('SR0000000000B1', 'bob'),
-				('SR0000000000C1', 'carol')) AS u (public_id, login)`)
+			FROM organizations o JOIN (VALUES ('RG0000000000AA', 'SR0000000000A1', 'alice'),
+				('RG0000000000AA', 'SR0000000000B1', 'bob'), ('RG0000000000AA', 'SR0000000000C1', 'carol'),
+				('RG0000000000BB', 'SR0000000000D1', 'dave')) AS u (org, public_id, login) ON u.org = o.public_id`)
 		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
 			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
 			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
 			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
-			SELECT id, 'RT0000000000F1', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', false, 60,
-				false, 60, 60, false, '2026-07-01', '2026-07-01'
+			SELECT id, 'RT0000000000F' || right(public_id, 1), 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10,
+				'en', false, 60, false, 60, 60, false, '2026-07-01', '2026-07-01'
 			FROM organizations`)
-		// AGF1 in October, acknowledged by Alice and taken over by Bob; AGF2 in July, acknowledged by Bob; AGF3 in July,
-		// acknowledged by Alice, unacknowledged in July and acknowledged by Carol in October; AGF4 in October, never
-		// acknowledged.
 		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
 			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
 			first_acknowledged_at, created_at, last_changed_at)
 			SELECT r.org_id, g.public_id, g.number, r.id, '{alertname}', '{}', sha256(g.public_id::bytea), 't', '{}',
 				'{}', '{}', 'firing', 'warning', false, g.first_ack, g.created, g.created
-			FROM routes r, (VALUES
-				('AG00000000F001', 1, timestamptz '2026-10-02 10:05:00+00', timestamptz '2026-10-02 10:00:00+00'),
-				('AG00000000F002', 2, timestamptz '2026-07-02 10:05:00+00', timestamptz '2026-07-02 10:00:00+00'),
-				('AG00000000F003', 3, timestamptz '2026-07-03 10:05:00+00', timestamptz '2026-07-03 10:00:00+00'),
-				('AG00000000F004', 4, NULL, timestamptz '2026-10-04 10:00:00+00'))
-				AS g (public_id, number, first_ack, created)`)
+			FROM routes r JOIN (VALUES
+				('RT0000000000FA', 'AG00000000F001', 1, timestamptz '2026-10-02 10:05:00+00', timestamptz '2026-10-02 10:00:00+00'),
+				('RT0000000000FA', 'AG00000000F002', 2, timestamptz '2026-07-02 10:05:00+00', timestamptz '2026-07-02 10:00:00+00'),
+				('RT0000000000FA', 'AG00000000F003', 3, timestamptz '2026-07-03 10:05:00+00', timestamptz '2026-07-03 10:00:00+00'),
+				('RT0000000000FA', 'AG00000000F004', 4, NULL, timestamptz '2026-10-04 10:00:00+00'),
+				('RT0000000000FA', 'AG00000000F005', 5, timestamptz '2026-10-05 10:05:00+00', timestamptz '2026-10-05 10:00:00+00'),
+				('RT0000000000FA', 'AG00000000F006', 6, timestamptz '2026-10-06 10:05:00+00', timestamptz '2026-10-06 10:00:00+00'),
+				('RT0000000000FB', 'AG00000000F007', 1, timestamptz '2026-10-07 10:05:00+00', timestamptz '2026-10-07 10:00:00+00'),
+				('RT0000000000FA', 'AG00000000F008', 7, timestamptz '2026-10-08 10:05:00+00', timestamptz '2026-10-08 10:00:00+00'))
+				AS g (route, public_id, number, first_ack, created) ON g.route = r.public_id`)
 		n := 0
-		entry := func(group, event, actor, at string) {
+		// entry records a status entry of the Alert Group, in the Organization of org when it is given, by the User of
+		// the login or by the system.
+		entry := func(group, event, actor, at string, org ...string) {
 			t.Helper()
 			n++
 			kind, user, transport := "user", any(nil), "ui"
@@ -4475,10 +4495,10 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 			}
 			if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO timeline_entries (org_id, public_id, alert_group_id,
 				at, kind, event, event_seq, loudness, actor_kind, actor_user_id, transport)
-				SELECT g.org_id, $1, g.id, $2, 'status', $3, $4, 'quiet', $5,
-					(SELECT id FROM users WHERE login = $6), $8
+				SELECT coalesce((SELECT id FROM organizations WHERE public_id = $9), g.org_id), $1, g.id, $2, 'status',
+					$3, $4, 'quiet', $5, (SELECT id FROM users WHERE login = $6), $8
 				FROM alert_groups g WHERE g.public_id = $7`, fmt.Sprintf("TE00000000F%03d", n), at, event, n, kind,
-				user, group, transport); err != nil {
+				user, group, transport, append(org, "")[0]); err != nil {
 				t.Fatalf("%s %s: %v", group, event, err)
 			}
 		}
@@ -4492,12 +4512,23 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 		entry("AG00000000F003", "unacknowledged", "alice", "2026-07-03 10:06:00+00")
 		entry("AG00000000F003", "acknowledged", "carol", "2026-10-01 09:00:00+00")
 		entry("AG00000000F004", "created", "", "2026-10-04 10:00:00+00")
+		entry("AG00000000F005", "created", "", "2026-10-05 10:00:00+00")
+		entry("AG00000000F005", "acknowledged", "alice", "2026-10-05 10:05:00+00")
+		entry("AG00000000F005", "unacknowledged", "bob", "2026-10-05 10:06:00+00")
+		entry("AG00000000F005", "acknowledged", "carol", "2026-10-05 10:07:00+00")
+		entry("AG00000000F006", "created", "", "2026-10-06 10:00:00+00")
+		entry("AG00000000F006", "acknowledged", "bob", "2026-10-06 10:05:00+00")
+		entry("AG00000000F006", "acknowledged", "carol", "2026-10-06 10:05:00+00")
+		entry("AG00000000F007", "created", "", "2026-10-07 10:00:00+00")
+		entry("AG00000000F007", "acknowledged", "dave", "2026-10-07 10:05:00+00")
+		entry("AG00000000F008", "created", "", "2026-10-08 10:00:00+00")
+		entry("AG00000000F008", "acknowledged", "dave", "2026-10-08 10:04:00+00", "RG0000000000BB")
 		// Retention dropped July.
 		e.exec(t, `DROP TABLE timeline_entries_p202607`)
 		firsts := func(t *testing.T) string {
 			t.Helper()
 			rows, err := e.d.Pool.Query(t.Context(), `SELECT g.public_id || '=' || coalesce(u.login, '-')
-				FROM alert_groups g LEFT JOIN users u ON u.id = g.first_acknowledged_by_user_id ORDER BY g.number`)
+				FROM alert_groups g LEFT JOIN users u ON u.id = g.first_acknowledged_by_user_id ORDER BY g.public_id`)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4518,13 +4549,14 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 				WHERE table_schema = current_schema() AND table_name = 'alert_groups'
 					AND column_name = 'first_acknowledged_by_user_id'`)
 		}
-		want := "AG00000000F001=alice AG00000000F002=- AG00000000F003=- AG00000000F004=-"
+		want := "AG00000000F001=alice AG00000000F002=- AG00000000F003=- AG00000000F004=- AG00000000F005=alice " +
+			"AG00000000F006=bob AG00000000F007=dave AG00000000F008=-"
 
 		if err := e.mm.Migrate(45); err != nil {
 			t.Fatalf("up to 45: %v", err)
 		}
 		if got := firsts(t); got != want {
-			t.Errorf("after up: %s, want %s", got, want)
+			t.Errorf("after up:\n%s\nwant\n%s", got, want)
 		}
 		if got := e.constraints(t, []string{"alert_groups"}, "alert_groups_first_acknowledged_by"); got !=
 			"alert_groups.alert_groups_first_acknowledged_by_check:true "+
@@ -4542,6 +4574,19 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23503" {
 			t.Errorf("an unknown user: %v", err)
 		}
+		// The fill of the third transaction, run again over a value already set, keeps it.
+		up, err := fs.ReadFile(migrationFiles, migrationsDir+"/0045_first_acknowledged_by.up.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fill := string(up[strings.Index(string(up), "UPDATE alert_groups g"):])
+		fill = fill[:strings.Index(fill, ";")+1]
+		e.exec(t, `UPDATE alert_groups SET first_acknowledged_by_user_id = (SELECT id FROM users WHERE login = 'carol')
+			WHERE public_id = 'AG00000000F001'`)
+		e.exec(t, fill)
+		if got, want := firsts(t), strings.Replace(want, "F001=alice", "F001=carol", 1); got != want {
+			t.Errorf("the fill again:\n%s\nwant\n%s", got, want)
+		}
 
 		e.step(t, -1)
 		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 44 {
@@ -4558,7 +4603,7 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 			t.Fatalf("up again: %v", err)
 		}
 		if got := firsts(t); got != want {
-			t.Errorf("up again: %s, want %s", got, want)
+			t.Errorf("up again:\n%s\nwant\n%s", got, want)
 		}
 	})
 }

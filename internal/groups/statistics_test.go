@@ -304,6 +304,10 @@ func TestActorStatistics(t *testing.T) {
 		Login: "deleted-12", Status: "deleted"}
 	h.db.accounts[21] = dbgen.ListServiceAccountRefsRow{ID: 21, PublicID: "SAAAAAAAAAAA21", Name: "robot",
 		Status: "deleted"}
+	h.db.users[13] = dbgen.ListUserRefsRow{ID: 13, PublicID: "SRAAAAAAAAAAB3", Name: "aaron", Login: "aaron",
+		Status: "active"}
+	h.db.users[14] = dbgen.ListUserRefsRow{ID: 14, PublicID: "SRAAAAAAAAAAB4", Name: "Robot", Login: "robot",
+		Status: "active"}
 	h.db.actorStats = []dbgen.ActorStatisticsRow{
 		{ServiceAccountID: i8(robotID), ResolvedCount: 1},
 		{AcknowledgedFirstCount: 2, AckMedian: 450.4, AckP95: 870.6},
@@ -312,6 +316,8 @@ func TestActorStatistics(t *testing.T) {
 		{ResolvedByUserID: i8(12), ResolvedCount: 1},
 		{AcknowledgedByUserID: i8(owner), AcknowledgedFirstCount: 3, AckMedian: 240, AckP95: 1644},
 		{ServiceAccountID: i8(21), ResolvedCount: 3},
+		{ResolvedByUserID: i8(13), ResolvedCount: 1},
+		{ResolvedByUserID: i8(14), ResolvedCount: 1},
 	}
 	from := t0.Add(-24 * time.Hour)
 	st, err := h.svc.ActorStatistics(t.Context(), Filter{From: &from})
@@ -331,15 +337,16 @@ func TestActorStatistics(t *testing.T) {
 		got = append(got, fmt.Sprintf("%s %d %d %d %s %s", name, it.AcknowledgedFirst, it.Resolved,
 			it.TimeToAcknowledge.Count, m, p))
 	}
+	// Regardless of case aaron comes before Deleted user 12, and Robot before robot by the exact name.
 	want := []string{"user/Alice/false 3 0 3 240 1644", "user/Bob/false 1 2 1 600 600",
-		"user/Deleted user 12/true 0 1 0 - -", "service_account/robot/false 0 1 0 - -",
-		"service_account/robot/true 0 3 0 - -", "unknown 2 0 2 450 871"}
+		"user/aaron/false 0 1 0 - -", "user/Deleted user 12/true 0 1 0 - -", "user/Robot/false 0 1 0 - -",
+		"service_account/robot/false 0 1 0 - -", "service_account/robot/true 0 3 0 - -", "unknown 2 0 2 450 871"}
 	if !slices.Equal(got, want) || !st.From.Equal(from) || !st.To.Equal(t0.Add(time.Microsecond)) {
 		t.Errorf("items\n%s\nwant\n%s\nperiod %v – %v", strings.Join(got, "\n"), strings.Join(want, "\n"), st.From,
 			st.To)
 	}
-	if st.Items[4].Actor.PublicID != "SAAAAAAAAAAA21" {
-		t.Errorf("same name, by public_id: %+v", st.Items[3:5])
+	if st.Items[6].Actor.PublicID != "SAAAAAAAAAAA21" {
+		t.Errorf("same name, by public_id: %+v", st.Items[5:7])
 	}
 	h.db.actorStats = nil
 	if st, err := h.svc.ActorStatistics(t.Context(), Filter{}); err != nil || st.Items == nil || len(st.Items) != 0 {

@@ -10374,11 +10374,11 @@ type Unprocessable = Problem
 
 // GetAlertGroupActorStatisticsParams defines parameters for GetAlertGroupActorStatistics.
 type GetAlertGroupActorStatisticsParams struct {
-	// Route Only these Routes (`public_id`).
-	Route *AgRoute `form:"route,omitempty" json:"route,omitempty"`
+	// Route Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
+	Route *StatisticsRoute `form:"route,omitempty" json:"route,omitempty"`
 
-	// Integration Only Alert Groups with Alerts from these Integrations (`public_id`).
-	Integration *AgIntegration `form:"integration,omitempty" json:"integration,omitempty"`
+	// Integration Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
+	Integration *StatisticsIntegration `form:"integration,omitempty" json:"integration,omitempty"`
 
 	// Severity Only these Severity levels.
 	Severity *AgSeverity `form:"severity,omitempty" json:"severity,omitempty"`
@@ -10461,10 +10461,10 @@ type GetAlertGroupStatisticsParams struct {
 	// GroupBy What one item stands for.
 	GroupBy GetAlertGroupStatisticsParamsGroupBy `form:"group_by" json:"group_by"`
 
-	// Route Only the Alert Groups of these Routes (`public_id`); with `group_by=route` also the items.
+	// Route Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
 	Route *StatisticsRoute `form:"route,omitempty" json:"route,omitempty"`
 
-	// Integration Only the Alert Groups with Alerts from these Integrations (`public_id`); with `group_by=integration` also the items, of those Integrations only.
+	// Integration Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
 	Integration *StatisticsIntegration `form:"integration,omitempty" json:"integration,omitempty"`
 
 	// Severity Only these Severity levels.

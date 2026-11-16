@@ -20,11 +20,11 @@ export type GetAlertGroupStatisticsParams = {
  */
 group_by: GetAlertGroupStatisticsGroupBy;
 /**
- * Only the Alert Groups of these Routes (`public_id`); with `group_by=route` also the items.
+ * Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
  */
 route?: StatisticsRouteParameter;
 /**
- * Only the Alert Groups with Alerts from these Integrations (`public_id`); with `group_by=integration` also the items, of those Integrations only.
+ * Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
  */
 integration?: StatisticsIntegrationParameter;
 /**

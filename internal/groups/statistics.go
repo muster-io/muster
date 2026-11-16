@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -276,8 +277,8 @@ var errUnknownActor = errors.New("the statistics name a user or service account 
 // ActorStatistics aggregates the Alert Groups that started in the period and match f by people (C-09.FR-28): per User
 // the Alert Groups they acknowledged first, with time to acknowledge, and those they resolved; per Service account
 // those it resolved; and the Alert Groups acknowledged whose first acknowledgement names nobody as an item without
-// an Actor, last. The items go by AcknowledgedFirst, most first, then by name and public_id; deleted Users and
-// Service accounts are marked Deactivated.
+// an Actor, last. The items go by AcknowledgedFirst, most first, then by name regardless of case, by name, and by
+// public_id; deleted Users and Service accounts are marked Deactivated.
 func (s *Service) ActorStatistics(ctx context.Context, f Filter) (ActorStatistics, error) {
 	sel, err := s.selection(ctx, f, s.clock.Now())
 	if err != nil {
@@ -319,8 +320,9 @@ func (s *Service) ActorStatistics(ctx context.Context, f Filter) (ActorStatistic
 		if a.Actor == nil || b.Actor == nil {
 			return cmp.Compare(boolRank(a.Actor == nil), boolRank(b.Actor == nil))
 		}
-		return cmp.Or(cmp.Compare(b.AcknowledgedFirst, a.AcknowledgedFirst), cmp.Compare(a.Actor.Name, b.Actor.Name),
-			cmp.Compare(a.Actor.PublicID, b.Actor.PublicID))
+		return cmp.Or(cmp.Compare(b.AcknowledgedFirst, a.AcknowledgedFirst),
+			cmp.Compare(strings.ToLower(a.Actor.Name), strings.ToLower(b.Actor.Name)),
+			cmp.Compare(a.Actor.Name, b.Actor.Name), cmp.Compare(a.Actor.PublicID, b.Actor.PublicID))
 	})
 	return out, nil
 }

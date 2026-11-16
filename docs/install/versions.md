@@ -223,11 +223,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
       the old group until its next check: select **Check** on it once every replica runs 0.2.0.
     - Migration 0045 records who made the first acknowledgement of each Alert Group, for the statistics by people.
-      For the Alert Groups acknowledged before the upgrade it fills it from the earliest `acknowledged` entry of their
-      Timeline, but only where the Timeline is still whole, its `created` entry kept (`retention.alert_details`): the
-      older Alert Groups, and those whose first acknowledgement a 0.1 replica made during the rolling update, name
-      nobody, and the statistics by people count them in the row "Unknown". Their time to acknowledge is kept as
-      before. It is expand only: a 0.1 replica neither reads nor writes the column, and leaves it as it is.
+      For the Alert Groups acknowledged before its fill commits it fills it from the earliest `acknowledged` entry of
+      their Timeline, but only where the Timeline is still whole, its `created` entry kept (`retention.alert_details`);
+      the older Alert Groups name nobody, and the statistics by people count them in the row "Unknown". It is expand
+      only: a 0.1 replica neither reads nor writes the column and leaves it as it is. A first acknowledgement that a
+      0.1 replica records before the fill commits is filled with the others; one it records after the fill committed,
+      while the rollout lasts, names nobody and counts as "Unknown" too. Their time to acknowledge is kept as before.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -745,8 +746,17 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     took 7 seconds for 200,000 Alert Groups, of which it filled 76,000, and 40 seconds for 1,000,000 Alert Groups with
     3.3 million kept Timeline entries, of which it filled 380,000: about 100 seconds per million filled Alert Groups,
     nearly all of it writing the rows. It runs under `statement_timeout = '5min'`, so an installation with more than
-    about 3 million acknowledged Alert Groups in its kept Timeline may reach the timeout. A failure leaves the schema
-    recorded as dirty at version 45. To recover, with the same database role as Muster:
+    about 3 million acknowledged Alert Groups in its kept Timeline may reach the timeout. Before the upgrade, this
+    counts at most the Alert Groups the fill writes, to predict its duration at about 100 seconds per million:
+
+    ```sql
+    SELECT count(*) FROM alert_groups g
+     WHERE g.first_acknowledged_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM timeline_entries c
+                    WHERE c.org_id = g.org_id AND c.alert_group_id = g.id AND c.event = 'created');
+    ```
+
+    A failure leaves the schema recorded as dirty at version 45. To recover, with the same database role as Muster:
 
     1. Check whether the first transaction took effect:
 
