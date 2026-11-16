@@ -206,9 +206,10 @@ A template that reads `.AlertGroup` without the branch fails for a summary as a 
 ## Mentions
 
 Muster does not know the chat's syntax for a Mention, so a Loud message carries its targets as data in `.Mentions`:
-each has `Type` (`everyone`, `group` or `user`) and, by type, `Everyone` (`all`, `channel` or `here`), `Name`, `ID` and
-`Login`. The trusted function `mention` renders a target as plain text — `@all` (or `@channel`, `@here` as the Mention
-settings chose), the group's name, or `@` and the login — for the template to wrap in the chat's syntax:
+each has `Type` (`everyone`, `group`, `user` or `team`) and, by type, `Everyone` (`all`, `channel`, `here` or
+`everyone`), `Name`, `ID` and `Login`, or a Team's `Slug` and `Name`. The trusted function `mention` renders a target as
+plain text — `@all` (or `@channel`, `@here`, `@everyone` as the Mention entries chose), the group's name, `@` and the
+login, or the Team's slug — for the template to wrap in the chat's syntax:
 
 ```
 {{ range .Mentions }}<{{ mention . }}> {{ end }}

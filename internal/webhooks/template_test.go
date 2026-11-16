@@ -166,13 +166,15 @@ func TestRefs(t *testing.T) {
 	}
 }
 
-// TestMention is `mention` in a request template (C-15.FR-11): everyone as @ and the choice of the settings, a group
-// by its name, a User as @ and the login; anything but a target of .Mentions is an error.
+// TestMention is `mention` in a request template (C-15.FR-11): everyone as @ and the word of its entry, a group by its
+// name, a User as @ and the login, a Team by its slug; anything but a target of .Mentions is an error.
 func TestMention(t *testing.T) {
 	targets := mentionsOf([]mentions.Target{{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere},
 		{Kind: mentions.TargetEveryone}, {Kind: mentions.TargetGroup, Group: "oncall"},
 		{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "SRA", Name: "Alice", Login: "alice"}},
-		{Kind: mentions.TargetUser}, {Kind: "other"}})
+		{Kind: mentions.TargetUser}, {Kind: "other"},
+		{Kind: mentions.TargetTeam, Team: &mentions.TeamTarget{Slug: "payments", Name: "Payments"}},
+		{Kind: mentions.TargetTeam}})
 	var got []string
 	for _, m := range targets {
 		s, err := mentionText(m)
@@ -181,8 +183,8 @@ func TestMention(t *testing.T) {
 		}
 		got = append(got, s)
 	}
-	if !slices.Equal(got, []string{"@here", "@all", "oncall", "@alice"}) || targets[3].ID != "SRA" ||
-		targets[3].Name != "Alice" {
+	if !slices.Equal(got, []string{"@here", "@all", "oncall", "@alice", "payments"}) || targets[3].ID != "SRA" ||
+		targets[3].Name != "Alice" || targets[4].Name != "Payments" || targets[4].Type != mentions.TargetTeam {
 		t.Errorf("mentions %v %+v", got, targets)
 	}
 	if _, err := mentionText("all"); err == nil {

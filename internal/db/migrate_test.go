@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (42)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (44)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":42`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":44`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":42`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":44`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (42)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (44)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":42`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":44`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -4216,6 +4216,208 @@ func TestIntegrationTeamMentions(t *testing.T) {
 		}
 		if err := insert(t, "CN0000000000S1", "payments-team", &usergroup); err != nil {
 			t.Errorf("up again: a Slack Team mention: %v", err)
+		}
+	})
+}
+
+// TestIntegrationMentionEntries runs 0043 over a database with a Destination of a Team, the delivery events of a Storm
+// summary in a partition, and settings that mention nobody: up converts the L1 settings into entries — the everyone
+// choice with storm_started where new_alert_group is among its kinds, then the Users — adds "Team {Team}" to a
+// Destination of the Team that names it in no entry, Telegram excepted, leaves destinations.mentions as it found it,
+// and swaps the Mention CHECK of delivery_events, validated on the parent and the partition, so that storm_started is
+// accepted; the CHECKs of the table refuse a target with the fields of another kind and an entry without events; down
+// drops the table, turns storm_started back into new_alert_group and restores the old CHECK; up again works. The
+// conversion itself is compared with mentions.FromSettings in internal/mentions.
+func TestIntegrationMentionEntries(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 42)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000AA', 'alice', 'Alice', 'responder', 'local', 'active', '2026-11-16', '2026-11-16'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000PA', 'Payments', 'payments', '2026-11-16', '2026-11-16' FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, telegram_bot_api_base_url,
+			telegram_update_mode, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit,
+			limiter_per_seconds, created_at, updated_at)
+			SELECT id, 'CN0000000000TG', 'telegram', 'tg', 'http://tg', 'long_polling', '\x01', 'k1', '2026-11-16', 1, 1,
+				'2026-11-16', '2026-11-16'
+			FROM organizations`)
+		nobody := `{"new_alert_group":{"everyone":"none","user_ids":[],"groups":[]},` +
+			`"new_alerts":{"everyone":"none","user_ids":[],"groups":[]},"reopen":{"everyone":"none","user_ids":[],` +
+			`"groups":[]},"ack_timeout":{"everyone":"none","user_ids":[],"groups":[]},"snooze_ended":{"everyone":` +
+			`"none","user_ids":[],"groups":[]},"rise_to_urgent":{"everyone":"none","user_ids":[],"groups":[]}}`
+		ac5 := strings.Replace(strings.Replace(nobody, `"new_alert_group":{"everyone":"none"`,
+			`"new_alert_group":{"everyone":"channel"`, 1), `"ack_timeout":{"everyone":"none","user_ids":[]`,
+			`"ack_timeout":{"everyone":"none","user_ids":["SR0000000000AA"]`, 1)
+		hook := func(publicID, mentions string) {
+			e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+				signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+				limiter_per_seconds, health, created_at, updated_at)
+				SELECT id, '`+publicID+`', 'webhook', '`+publicID+`', 'events', '{}', '\x00', 'k1', '2026-11-16',
+					'`+mentions+`', 1, 1, 'healthy', '2026-11-16', '2026-11-16'
+				FROM organizations`)
+		}
+		hook("DS0000000000A5", ac5)
+		hook("DS0000000000NB", nobody)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, connection_id, telegram_channel_id,
+			mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			SELECT o.id, 'DS0000000000TG', 'telegram', 'tg', c.id, '@alerts', '`+nobody+`', 1, 1, 'healthy',
+				'2026-11-16', '2026-11-16'
+			FROM organizations o JOIN connections c ON c.org_id = o.id`)
+		e.exec(t, `INSERT INTO team_destinations (org_id, team_id, destination_id, added_at)
+			SELECT d.org_id, t.id, d.id, '2026-11-16' FROM destinations d JOIN teams t ON t.org_id = d.org_id`)
+		e.exec(t, `CREATE TABLE delivery_events_p202611 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00')`)
+		event := func(publicID, mention string) error {
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO delivery_events (org_id, public_id, occurred_at,
+				destination_id, storm_id, kind, loudness, mentions)
+				SELECT id, $1, '2026-11-16 09:00:00+00', 1, 1, 'storm_summary', 'loud', ARRAY[$2]
+				FROM organizations`, publicID, mention)
+			return err
+		}
+		if err := event("DE0000000000A1", "new_alert_group"); err != nil {
+			t.Fatal(err)
+		}
+		if err := event("DE0000000000A2", "storm_started"); err == nil {
+			t.Error("storm_started was accepted before 0043")
+		}
+		const (
+			v1 = "delivery_events.delivery_events_mentions_check:true " +
+				"delivery_events_p202611.delivery_events_mentions_check:true"
+			v2 = "delivery_events.delivery_events_mentions_v2_check:true " +
+				"delivery_events_p202611.delivery_events_mentions_v2_check:true"
+		)
+		tables := []string{"delivery_events", "delivery_events_p202611"}
+		entries := func(t *testing.T) string {
+			t.Helper()
+			rows, err := e.d.Pool.Query(t.Context(), `SELECT d.public_id, e.position, e.target_kind,
+				coalesce(e.everyone, ''), coalesce(u.public_id, ''), coalesce(t.slug, ''), array_to_string(e.events, ',')
+				FROM mention_entries e JOIN destinations d ON d.id = e.destination_id
+				LEFT JOIN users u ON u.id = e.user_id LEFT JOIN teams t ON t.id = e.team_id
+				ORDER BY d.public_id, e.position`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var out []string
+			for rows.Next() {
+				var dest, kind, word, user, team, events string
+				var pos int
+				if err := rows.Scan(&dest, &pos, &kind, &word, &user, &team, &events); err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, fmt.Sprintf("%s/%d %s%s%s%s %s", dest, pos, kind, ":"+word, user, team, events))
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			return strings.Join(out, "; ")
+		}
+		all := "new_alert_group,new_alerts,reopen,ack_timeout,snooze_ended,rise_to_urgent,storm_started"
+		for round := range 2 {
+			e.step(t, 1)
+			if got := e.constraints(t, tables, "delivery_events_mentions"); got != v2 {
+				t.Errorf("after up %d: %s", round, got)
+			}
+			want := "DS0000000000A5/0 everyone:channel new_alert_group,storm_started; " +
+				"DS0000000000A5/1 user:SR0000000000AA ack_timeout; DS0000000000A5/2 team:payments " + all + "; " +
+				"DS0000000000NB/0 team:payments " + all
+			if got := entries(t); got != want {
+				t.Errorf("after up %d:\n%s\nwant\n%s", round, got, want)
+			}
+			if n := e.count(t, `SELECT count(*) FROM destinations WHERE public_id = 'DS0000000000A5'
+				AND mentions = '`+ac5+`'::jsonb`); n != 1 {
+				t.Errorf("after up %d: the L1 column changed", round)
+			}
+			if err := event(fmt.Sprintf("DE0000000000B%d", round), "storm_started"); err != nil {
+				t.Errorf("after up %d: %v", round, err)
+			}
+			for name, sql := range map[string]string{
+				"a user with a word": `INSERT INTO mention_entries (org_id, destination_id, position, target_kind,
+					everyone, user_id, events, created_at)
+					SELECT org_id, id, 9, 'user', 'here', (SELECT id FROM users), '{reopen}', '2026-11-16'
+					FROM destinations LIMIT 1`,
+				"no events": `INSERT INTO mention_entries (org_id, destination_id, position, target_kind, events,
+					created_at) SELECT org_id, id, 9, 'teams_from_label', '{}', '2026-11-16' FROM destinations LIMIT 1`,
+				"an unknown event": `INSERT INTO mention_entries (org_id, destination_id, position, target_kind,
+					events, created_at) SELECT org_id, id, 9, 'teams_from_label', '{reminder}', '2026-11-16'
+					FROM destinations LIMIT 1`,
+				"a position twice": `INSERT INTO mention_entries (org_id, destination_id, position, target_kind,
+					events, created_at) SELECT org_id, id, 0, 'teams_from_label', '{reopen}', '2026-11-16'
+					FROM destinations WHERE public_id = 'DS0000000000A5'`,
+			} {
+				if _, err := e.d.Pool.Exec(t.Context(), sql); err == nil {
+					t.Errorf("after up %d: %s was accepted", round, name)
+				}
+			}
+			if round == 1 {
+				break
+			}
+			e.step(t, -1)
+			if got := e.constraints(t, tables, "delivery_events_mentions"); got != v1 {
+				t.Errorf("after down: %s", got)
+			}
+			if n := e.count(t, `SELECT count(*) FROM information_schema.tables
+				WHERE table_name IN ('mention_entries', 'storm_alert_groups')`); n != 0 {
+				t.Errorf("after down: %d of mention_entries and storm_alert_groups are left", n)
+			}
+			if n := e.count(t, `SELECT count(*) FROM delivery_events WHERE 'new_alert_group' = ANY(mentions)`); n != 2 {
+				t.Errorf("after down: %d events with new_alert_group, want 2", n)
+			}
+		}
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 43 {
+			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
+// TestIntegrationTelegramDiscussionMembers runs 0044 over a database at 43 with a Destination: up adds
+// destinations.telegram_absent_user_ids and telegram_members_checked_at, null for the existing Destination, which take
+// the Users a check saw outside the discussion group and its time. Down drops both; up again works.
+func TestIntegrationTelegramDiscussionMembers(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 43)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000M1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-11-16', '{}', 1, 1,
+				'healthy', '2026-11-16', '2026-11-16'
+			FROM organizations`)
+		columns := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'destinations'
+					AND column_name IN ('telegram_absent_user_ids', 'telegram_members_checked_at')`)
+		}
+
+		if err := e.mm.Migrate(44); err != nil {
+			t.Fatalf("up to 44: %v", err)
+		}
+		if n := columns(t); n != 2 {
+			t.Errorf("after up: %d of the two columns", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM destinations
+			WHERE telegram_absent_user_ids IS NULL AND telegram_members_checked_at IS NULL`); n != 1 {
+			t.Errorf("after up: %d Destinations without a check of the members, want 1", n)
+		}
+		e.exec(t, `UPDATE destinations SET telegram_absent_user_ids = '{3,5}', telegram_members_checked_at = '2026-11-16'`)
+		if n := e.count(t, `SELECT count(*) FROM destinations WHERE telegram_absent_user_ids = '{3,5}'::bigint[]`); n != 1 {
+			t.Errorf("after up: %d Destinations with the absent Users", n)
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 43 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := columns(t); n != 0 {
+			t.Errorf("after down: %d of the two columns", n)
+		}
+
+		if err := e.mm.Migrate(44); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if n := columns(t); n != 2 {
+			t.Errorf("up again: %d of the two columns", n)
 		}
 	})
 }

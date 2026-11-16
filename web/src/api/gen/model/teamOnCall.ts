@@ -4,6 +4,7 @@
  */
 import type { EntityRef } from './entityRef';
 import type { OnCallNext } from './onCallNext';
+import type { OnCallReach } from './onCallReach';
 import type { ScheduleRef } from './scheduleRef';
 import type { TeamRef } from './teamRef';
 import type { UserRef } from './userRef';
@@ -28,4 +29,6 @@ export interface TeamOnCall {
   until: string | null;
   /** The segment that follows within `schedule.gap_view`, or null. */
   next: OnCallNext | null;
+  /** The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them. */
+  unreachable: OnCallReach[];
 }

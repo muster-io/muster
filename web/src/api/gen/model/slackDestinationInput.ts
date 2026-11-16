@@ -4,6 +4,7 @@
  */
 import type { DestinationButtonSet } from './destinationButtonSet';
 import type { Limiter } from './limiter';
+import type { MentionEntryInput } from './mentionEntryInput';
 import type { MentionSettings } from './mentionSettings';
 import type { NullablePublicId } from './nullablePublicId';
 import type { PublicId } from './publicId';
@@ -20,8 +21,16 @@ export interface SlackDestinationInput {
   connection_id: PublicId;
   /** The channel's id as Slack shows it in the channel's details — `C…`, or `G…` for a private channel of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space. Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`. */
   channel_id: string;
-  /** Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`. */
-  mentions: MentionSettings;
+  /**
+     * The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0 (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination's type — the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at pointers under `/mentions`; ignored when `mention_entries` is present.
+     * @deprecated
+     */
+  mentions?: MentionSettings;
+  /**
+     * The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — Slack has no `all` and no `everyone`, and takes groups and Teams only while the last check of its Connection found `usergroups:read`, a group with its `group_id` — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
+     * @maxItems 100
+     */
+  mention_entries?: MentionEntryInput[];
   /** The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`. */
   owning_team_id?: NullablePublicId | null;
   /** The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it. */

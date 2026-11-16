@@ -99,7 +99,8 @@ Once linked, a Mention of you in a message of that Connection names you by the n
 account, which a bridge with native mentions turns into its messenger's mention. The footer of a Root message you
 acknowledged, snoozed or resolved mentions you the same way when Muster posts it to a bridge with native mentions; an
 edit carries no Mentions, so there, and through any other bridge, the footer names you by that name. Without a link, a
-Mention is your Muster name as plain text, which notifies nobody. When you link, change or remove an account, the open
+Mention entry that names you leaves you out of the message, and a footer names you by your Muster name as plain text,
+which notifies nobody. When you link, change or remove an account, the open
 Root messages whose footer names you are edited Quietly to show the new link. When a Mattermost, Slack or Bridge
 Destination moves to another Connection, its open Root messages whose footer names you are edited once, Quietly, when
 you have a link in either Connection, so that the footer names you by your link of the new Connection, or by your

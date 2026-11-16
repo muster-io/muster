@@ -624,6 +624,70 @@ func testTeamInUseProblem(t *testing.T, x *testAPI, _ *fakeSchedules) {
 	}
 }
 
+// testUnreachableAPI is C-27.FR-8, FR-9 and C-27.AC-6 at the API: a warning unreachable has its person, the segment,
+// the Rotation layer of the segment, the Destination with its health, the messenger and the reason, and the other
+// kinds have null for the three; "On call now" marks the On-call unreachable in the same Destination, with an empty
+// list for a Team without a Schedule.
+func testUnreachableAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
+	since := t0.Add(-time.Hour)
+	reason := "403"
+	dest := schedules.DestinationRef{ID: 50, PublicID: "DSAAAAAAAAAAPN", Name: "payments-notice", Type: "mattermost",
+		Health: "broken", BrokenSince: &since, BrokenReason: &reason}
+	u := schedules.Unreachable{Destination: dest, Messenger: "mattermost", Reason: schedules.ReachNoAccountLink}
+	ref := fs.result.RotationLayers[0].RotationLayer
+	fs.result.Warnings = append(fs.result.Warnings, schedules.Warning{Kind: schedules.WarningUnreachable,
+		User: apiPetr, RotationLayer: &ref, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour), Unreachable: &u})
+	fs.onCall[1].Unreachable = []schedules.Unreachable{u}
+	a := x.as(t, schedulesViewer, http.MethodGet, "/api/v1/schedules/"+scheduleID+"/on-call", "")
+	var res struct {
+		Warnings []struct {
+			Kind          string
+			User          *struct{ Login string }
+			RotationLayer *struct{ Name string } `json:"rotation_layer"`
+			Start, End    *string
+			Destination   *struct {
+				ID, Name, Type string
+				Health         struct{ State, Since, Reason string }
+			}
+			Messenger, Reason *string
+		}
+	}
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || len(res.Warnings) != 4 {
+		t.Fatalf("on-call = %d %s", a.status, a.body)
+	}
+	for _, w := range res.Warnings[:3] {
+		if w.Destination != nil || w.Messenger != nil || w.Reason != nil {
+			t.Errorf("a warning %s with a reach %+v", w.Kind, w)
+		}
+	}
+	if w := res.Warnings[3]; w.Kind != "unreachable" || w.User.Login != "petr" || w.RotationLayer.Name !=
+		"Around the clock" || *w.Start != "2026-10-05T13:00:00Z" || *w.End != "2026-10-05T14:00:00Z" ||
+		w.Destination.ID != "DSAAAAAAAAAAPN" || w.Destination.Name != "payments-notice" ||
+		w.Destination.Type != "mattermost" || w.Destination.Health.State != "broken" ||
+		w.Destination.Health.Reason != "403" || *w.Messenger != "mattermost" || *w.Reason != "no_account_link" {
+		t.Errorf("unreachable %+v in %s", w, a.body)
+	}
+	a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/on-call-now", "")
+	var now struct {
+		Items []struct {
+			Unreachable []struct {
+				Destination struct{ ID string }
+				Messenger   string
+				Reason      string
+			}
+		}
+	}
+	decodeInto(t, a, &now)
+	if a.status != http.StatusOK || len(now.Items) != 4 || now.Items[0].Unreachable == nil ||
+		len(now.Items[0].Unreachable) != 0 || len(now.Items[1].Unreachable) != 1 ||
+		now.Items[1].Unreachable[0].Destination.ID != "DSAAAAAAAAAAPN" ||
+		now.Items[1].Unreachable[0].Messenger != "mattermost" || now.Items[1].Unreachable[0].Reason != "no_account_link" ||
+		!strings.Contains(string(a.body), `"unreachable":[]`) {
+		t.Errorf("on call now = %d %s", a.status, a.body)
+	}
+}
+
 // TestSchedules runs the tests of the Schedules API on one server, which is slow to build under the race detector;
 // each starts from a fresh fake.
 func TestSchedules(t *testing.T) {
@@ -634,7 +698,7 @@ func TestSchedules(t *testing.T) {
 	}{
 		{"schedules", testSchedulesAPI}, {"on-call", testScheduleOnCallAPI}, {"overrides", testScheduleOverridesAPI},
 		{"permissions", testSchedulesPermissions}, {"team in use", testTeamInUseProblem},
-		{"on call now", testOnCallNowAPI},
+		{"on call now", testOnCallNowAPI}, {"unreachable", testUnreachableAPI},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			*fs = *newFakeSchedules()

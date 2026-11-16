@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -64,6 +65,9 @@ func (f *fakeDB) JoinStorm(_ context.Context, arg dbgen.JoinStormParams) (dbgen.
 	if arg.Urgent {
 		st.urgentCount++
 	}
+	if !slices.Contains(st.members, arg.AlertGroupID) {
+		st.members = append(st.members, arg.AlertGroupID)
+	}
 	return dbgen.JoinStormRow{ID: st.id, StartedAt: st.started, AlertGroupCount: st.alertGroupCount,
 		UrgentCount: st.urgentCount}, nil
 }
@@ -77,7 +81,8 @@ func (f *fakeDB) StartStorm(_ context.Context, arg dbgen.StartStormParams) (dbge
 	if f.activeStorm(arg.RouteID) != nil {
 		return dbgen.StartStormRow{}, pgx.ErrNoRows
 	}
-	st := &fakeStorm{id: f.id(), route: arg.RouteID, started: arg.Now, alertGroupCount: 1}
+	st := &fakeStorm{id: f.id(), route: arg.RouteID, started: arg.Now, alertGroupCount: 1,
+		members: []int64{arg.AlertGroupID}}
 	if arg.Urgent {
 		st.urgentCount = 1
 	}
@@ -390,12 +395,15 @@ func (e *env) calmCheck(t *testing.T, st *fakeStorm) {
 
 // TestStorm is C-11.FR-6, FR-17 and AC-3 through the recorder: with 30 new Alert Groups within a minute on a Route
 // with route.storm_threshold 20, the first 20 get Root messages; the 21st starts a Storm, so the Destination gets one
-// Storm summary, Loud with new_alert_group, kept current with Quiet edits, and of the last 10 only the 3 Urgent ones
+// Storm summary, Loud with storm_started (C-28.FR-7) and the targets of the entries for it, resolved with the Storm,
+// kept current with Quiet edits that mention nobody, and of the last 10 only the 3 Urgent ones
 // are published; after delivery.storm_calm_period at or below the threshold the summary gets its final state in one
 // Quiet edit, the 5 of the last 10 still open are published as Quiet new messages, and the 2 resolved are never
 // published; muster_storm_active shows the Storm while it lasts.
 func TestStorm(t *testing.T) {
 	e := stormEnv(t)
+	m := &fakeMentioner{}
+	e.w.Mentions = m
 	urgent := map[int64]bool{23: true, 26: true, 29: true}
 	for i := int64(1); i <= 30; i++ {
 		e.business.Set(business0.Add(time.Duration(i) * time.Second))
@@ -420,7 +428,8 @@ func TestStorm(t *testing.T) {
 		switch {
 		case c.Method == deliverytest.MethodPublish && strings.HasPrefix(textOf(c), "Storm on Route payments"):
 			summaries++
-			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) ||
+			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{delivery.MentionStormStarted}) ||
+				len(c.Targets) != 1 || c.Targets[0].Everyone != mentions.EventStormStarted ||
 				!strings.Contains(textOf(c), "1 new Alert Groups, 0 Urgent") ||
 				c.Links != (outbound.Links{Destination: c.Destination.ID}) {
 				t.Errorf("summary %+v", c)
@@ -432,7 +441,7 @@ func TestStorm(t *testing.T) {
 			}
 		case c.Method == deliverytest.MethodUpdate:
 			edits++
-			if c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
+			if c.Loudness != groups.Quiet || len(c.Mentions) != 0 || len(c.Targets) != 0 {
 				t.Errorf("summary update %+v", c)
 			}
 		}
@@ -453,8 +462,15 @@ func TestStorm(t *testing.T) {
 	}
 	i := slices.IndexFunc(e.db.events, func(ev dbgen.InsertDeliveryEventParams) bool { return ev.Kind == "storm_summary" })
 	if ev := e.db.events[i]; ev.StormID.Int64 != st.id || ev.AlertGroupID.Valid || ev.Loudness != "loud" ||
-		!slices.Equal(ev.Mentions, []string{"new_alert_group"}) {
+		!slices.Equal(ev.Mentions, []string{"storm_started"}) {
 		t.Errorf("event %+v", ev)
+	}
+	// The first publication of the summary resolves the entries for storm_started with the Storm, whose Alert Groups
+	// give the Teams from the label and whose start the time of the On-call (C-28.FR-7).
+	j := slices.IndexFunc(m.reqs, func(r mentions.Request) bool { return r.StormID != 0 })
+	if j < 0 || m.reqs[j].StormID != st.id || m.reqs[j].AlertGroupID != 0 ||
+		!slices.Equal(m.reqs[j].Mentions, []string{mentions.EventStormStarted}) || !m.reqs[j].At.IsZero() {
+		t.Errorf("the summary's request %+v", m.reqs)
 	}
 	if err := errors.Join(e.svc.ExportStorms(t.Context()), e.svc.ExportQueue(t.Context())); err != nil {
 		t.Fatal(err)
@@ -613,6 +629,43 @@ func TestStormRace(t *testing.T) {
 	e.calmCheck(t, st)
 	if st.ended == nil || !st.calmSince.Equal(st.started) {
 		t.Errorf("ended %+v", st)
+	}
+}
+
+// TestStormMembers: the Alert Group that starts a Storm, each one that joins it and one that joins it after another
+// transaction started it first are recorded as the Alert Groups the Storm counts, and no other.
+func TestStormMembers(t *testing.T) {
+	// add is addGroup with a number other than the id, so that the id, not the number, is what gets recorded.
+	add := func(e *env, id int64) {
+		t.Helper()
+		e.db.groups[id] = &fakeGroup{id: id, publicID: fmt.Sprintf("AGAAAAAAAA%04d", id), number: id + 1000,
+			title: "g", status: "firing", route: routeID, created: e.business.Now()}
+		e.enqueue(t, e.view(id, groups.StatusFiring), groups.System, created())
+	}
+	e := stormEnv(t)
+	r := e.db.routes[routeID]
+	r.threshold = 1
+	e.db.routes[routeID] = r
+	add(e, 5001)
+	if len(e.db.storms) != 0 {
+		t.Fatal("a storm at the threshold")
+	}
+	add(e, 5002)
+	add(e, 5003)
+	if st := e.onlyStorm(t); !slices.Equal(st.members, []int64{5002, 5003}) || st.alertGroupCount != 2 {
+		t.Errorf("members %v of %d", st.members, st.alertGroupCount)
+	}
+
+	e = stormEnv(t)
+	e.db.routes[routeID] = r
+	add(e, 5101)
+	e.db.before["StartStorm"] = func() {
+		e.db.storms[99] = &fakeStorm{id: 99, route: routeID, started: e.business.Now(), alertGroupCount: 1,
+			members: []int64{5100}}
+	}
+	add(e, 5102)
+	if st := e.onlyStorm(t); !slices.Equal(st.members, []int64{5100, 5102}) || st.alertGroupCount != 2 {
+		t.Errorf("members after the race %v of %d", st.members, st.alertGroupCount)
 	}
 }
 

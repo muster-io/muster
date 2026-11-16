@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -41,6 +42,34 @@ const noMentions = `{"new_alert_group":{"everyone":"none","user_ids":[],"groups"
 	`"snooze_ended":{"everyone":"none","user_ids":[],"groups":[]},` +
 	`"rise_to_urgent":{"everyone":"here","user_ids":[],"groups":["sre"]}}`
 
+// inputEntries are the Mention entries a save of in writes, as internal/destinations sets them: the entries, else the
+// conversion of the L1 settings.
+func inputEntries(in destinations.Input) []mentions.Entry {
+	var list []mentions.EntryInput
+	if in.MentionEntries != nil {
+		list = *in.MentionEntries
+	} else {
+		list = mentions.FromSettings(in.Type, in.Mentions)
+	}
+	out := make([]mentions.Entry, len(list))
+	for i, e := range list {
+		if e.Events == nil {
+			e.Events = mentions.Events
+		}
+		out[i] = mentions.Entry{EntryInput: e, Available: true, ResolvesTo: []mentions.Resolution{}}
+	}
+	return out
+}
+
+// storedEntries are the entries of the L1 settings noMentions on a Destination of the type.
+func storedEntries(typ string) []mentions.Entry {
+	var set mentions.Settings
+	if err := json.Unmarshal([]byte(noMentions), &set); err != nil {
+		panic(err)
+	}
+	return inputEntries(destinations.Input{Type: typ, Mentions: set})
+}
+
 // fakeDestinations stands for internal/destinations: the Destinations in id order, filtered as the query filters,
 // and the deletions with who asked and the version they named.
 type fakeDestinations struct {
@@ -70,17 +99,14 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 	if f.saveErr != nil {
 		return destinations.Destination{}, f.saveErr
 	}
-	set, err := json.Marshal(in.Mentions)
-	if err != nil {
-		return destinations.Destination{}, err
-	}
+	set := inputEntries(in)
 	if in.Webhook != nil {
 		events, _ := json.Marshal(in.Webhook.Events)
 		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA8", Type: in.Type,
 			Name: in.Name, WebhookMode: &in.Webhook.Mode, EventsConfig: events,
 			Proxy:         destinations.Proxy{Enabled: in.Webhook.Proxy.Enabled, PasswordSet: in.Webhook.Proxy.Password.Given},
 			SigningSecret: destinations.SigningSecret{Set: true, UpdatedAt: &t0}, SigningSecretOnce: "whsec_once",
-			Mentions: set, LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds,
+			MentionEntries: set, LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds,
 			Health: destinations.Health{State: "healthy"}, Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
 		d.Buttons = fakeButtons(in, d.Buttons)
 		f.list = append(f.list, d)
@@ -89,7 +115,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 	if in.Bridge != nil {
 		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA6", Type: in.Type,
 			Name: in.Name, Connection: &in.Bridge.Connection, BridgeChannelID: &in.Bridge.ChannelID,
-			BridgeChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+			BridgeChannelName: ptr("alerts"), MentionEntries: set, LimiterLimit: in.Limiter.Limit,
 			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
 		d.Buttons = fakeButtons(in, d.Buttons)
@@ -99,7 +125,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 	if in.Slack != nil {
 		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA5", Type: in.Type,
 			Name: in.Name, Connection: &in.Slack.Connection, SlackChannelID: &in.Slack.ChannelID,
-			SlackChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+			SlackChannelName: ptr("alerts"), MentionEntries: set, LimiterLimit: in.Limiter.Limit,
 			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
 		d.Buttons = fakeButtons(in, d.Buttons)
@@ -111,7 +137,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 			Name: in.Name, Connection: &in.Telegram.Connection, TelegramChannelID: &in.Telegram.ChannelID,
 			TelegramChannelTitle: ptr("Muster alerts"), TelegramChannelChatID: ptr("-1001000000001"),
 			TelegramDiscussionGroupID:    ptr("-1001000000002"),
-			TelegramDiscussionGroupTitle: ptr("Muster alerts Chat"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+			TelegramDiscussionGroupTitle: ptr("Muster alerts Chat"), MentionEntries: set, LimiterLimit: in.Limiter.Limit,
 			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
 		d.Buttons = fakeButtons(in, d.Buttons)
@@ -121,7 +147,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 	d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA9", Type: in.Type,
 		Name: in.Name, Connection: &in.Mattermost.Connection, MattermostTeamID: &in.Mattermost.TeamID,
 		MattermostChannelID: &in.Mattermost.ChannelID, MattermostTeamName: ptr("dev"),
-		MattermostChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+		MattermostChannelName: ptr("alerts"), MentionEntries: set, LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 		Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
 	d.Buttons = fakeButtons(in, d.Buttons)
@@ -278,12 +304,12 @@ func newDestinationsAPI(t *testing.T) (*testAPI, *fakeDestinations, *fakeDeliver
 	fd := &fakeDestinations{list: []destinations.Destination{
 		{ID: 1, PublicID: mattermostID, Type: "mattermost", Name: "ops", Connection: ptr("CNAAAAAAAAAAA1"),
 			MattermostTeamID: ptr("team"), MattermostChannelID: ptr("chan"), MattermostChannelName: ptr("ops"),
-			Mentions: json.RawMessage(noMentions), LimiterLimit: 30, LimiterPerSeconds: 60,
+			MentionEntries: storedEntries("mattermost"), LimiterLimit: 30, LimiterPerSeconds: 60,
 			Health: destinations.Health{State: "healthy"}, Routes: []destinations.RouteRef{{PublicID: routeID,
 				Name: "payments"}}, CreatedAt: t0, Version: 2},
 		{ID: 2, PublicID: telegramID, Type: "telegram", Name: "alerts", Connection: ptr("CNAAAAAAAAAAA2"),
 			TelegramChannelID: ptr("@alerts"), TelegramDiscussionGroupID: ptr("-100200"),
-			Mentions: json.RawMessage(noMentions), LimiterLimit: 10, LimiterPerSeconds: 60,
+			MentionEntries: storedEntries("telegram"), LimiterLimit: 10, LimiterPerSeconds: 60,
 			Health: destinations.Health{State: "broken", Since: &since, Reason: ptr("chat not found")},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1},
 		{ID: 3, PublicID: webhookID, Type: "webhook", Name: "hook", WebhookMode: ptr("both"),
@@ -291,8 +317,8 @@ func newDestinationsAPI(t *testing.T) (*testAPI, *fakeDestinations, *fakeDeliver
 			TemplateConfig: json.RawMessage(`{"create":{"method":"POST","url":"https://example.org","headers":[],"body":"{}"},"update":{"method":"PUT","url":"https://example.org","headers":[],"body":"{}"}}`),
 			Proxy: destinations.Proxy{Enabled: true, Type: ptr("http"), Address: ptr("proxy:3128"), PasswordSet: true,
 				PasswordUpdatedAt: &since},
-			SigningSecret: destinations.SigningSecret{Set: true, UpdatedAt: &since, PreviousActiveSince: &since},
-			Mentions:      json.RawMessage(noMentions), LimiterLimit: 60, LimiterPerSeconds: 60,
+			SigningSecret:  destinations.SigningSecret{Set: true, UpdatedAt: &since, PreviousActiveSince: &since},
+			MentionEntries: storedEntries("webhook"), LimiterLimit: 60, LimiterPerSeconds: 60,
 			Health: destinations.Health{State: "healthy"}, Routes: []destinations.RouteRef{},
 			TemplateError: &destinations.TemplateError{Since: since, Error: "template: no value"}, CreatedAt: t0,
 			Version: 5},
@@ -362,15 +388,10 @@ func TestListDestinationsAPI(t *testing.T) {
 		t.Errorf("without destinations:read = %d", a.status)
 	}
 	fd.list = append(fd.list, destinations.Destination{ID: 4, PublicID: "DSAAAAAAAAAAA4", Type: "carrier-pigeon",
-		Mentions: json.RawMessage(noMentions)})
+		MentionEntries: storedEntries("mattermost")})
 	if a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations", ""); a.status !=
 		http.StatusInternalServerError {
 		t.Errorf("an unknown type = %d", a.status)
-	}
-	fd.list[3].Type, fd.list[3].Mentions = "mattermost", json.RawMessage(`[]`)
-	if a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/DSAAAAAAAAAAA4", ""); a.status !=
-		http.StatusInternalServerError {
-		t.Errorf("unreadable mentions = %d", a.status)
 	}
 	fd.list = fd.list[:3]
 	fd.err = errors.New("down")
@@ -1512,6 +1533,108 @@ func TestPreviewDestinationAPI(t *testing.T) {
 	} {
 		if call() == nil {
 			t.Error("a missing body or identity is not refused")
+		}
+	}
+}
+
+// TestDestinationMentionEntriesAPI is C-28.FR-1, FR-2 and FR-5 at the API: a body takes mention_entries, each target
+// with the fields of its kind and its events, all seven when omitted, and needs no mentions; a read gives the entries
+// with the User or Team they name, whether the Connection can mention them now with the reason, and what they mention
+// now, beside the L1 form computed from them; mention_unsupported is a 422 at the entry's target.
+func TestDestinationMentionEntriesAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	body := `{"type":"mattermost","name":"alerts","connection_id":"CNAAAAAAAAAAA1","team_id":"team-dev",` +
+		`"channel_id":"ch-alerts","limiter":{"limit":5,"per_seconds":1},"mention_entries":[` +
+		`{"target":{"kind":"on_call_of_teams_from_label"}},` +
+		`{"target":{"kind":"everyone","everyone":"here"},"events":["new_alert_group","storm_started"]},` +
+		`{"target":{"kind":"group","group":"payments-team","group_id":"S0FAKEPAYTEAM"}},` +
+		`{"target":{"kind":"user","user_id":"SR0000000000AL"}},{"target":{"kind":"team","team_id":"TM0000000000PA"}}]}`
+	a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+	if a.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	in := fd.saved[0]
+	want := []mentions.EntryInput{{Target: mentions.EntryTarget{Kind: mentions.TargetOnCallOfTeamsFromLabel}},
+		{Target: mentions.EntryTarget{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere},
+			Events: []string{mentions.KindNewAlertGroup, mentions.EventStormStarted}},
+		{Target: mentions.EntryTarget{Kind: mentions.TargetGroup, Group: "payments-team", GroupID: "S0FAKEPAYTEAM"}},
+		{Target: mentions.EntryTarget{Kind: mentions.TargetUser, UserID: "SR0000000000AL"}},
+		{Target: mentions.EntryTarget{Kind: mentions.TargetTeam, TeamID: "TM0000000000PA"}}}
+	if in.Mentions != nil || in.MentionEntries == nil || !reflect.DeepEqual(*in.MentionEntries, want) {
+		t.Errorf("input %+v %+v", in.Mentions, in.MentionEntries)
+	}
+	payments := &mentions.TeamRef{PublicID: "TM0000000000PA", Name: "Payments", Slug: "payments"}
+	fd.list[0].MentionEntries = []mentions.Entry{
+		{EntryInput: mentions.EntryInput{Target: mentions.EntryTarget{Kind: mentions.TargetEveryone,
+			Everyone: mentions.EveryoneEveryone}, Events: mentions.Events}, Available: false,
+			UnavailableReason: mentions.ReasonMessengerHasNoToken, ResolvesTo: []mentions.Resolution{{Mentions: []mentions.Resolved{}}}},
+		{EntryInput: mentions.EntryInput{Target: mentions.EntryTarget{Kind: mentions.TargetUser,
+			UserID: "SR0000000000AL"}, Events: []string{mentions.KindAckTimeout}},
+			User: &mentions.UserRef{PublicID: "SR0000000000AL", Name: "Alice", Login: "alice"}, Available: true,
+			ResolvesTo: []mentions.Resolution{{Mentions: []mentions.Resolved{{Kind: mentions.TargetUser,
+				Name: "alice", Linked: true}}}}},
+		{EntryInput: mentions.EntryInput{Target: mentions.EntryTarget{Kind: mentions.TargetTeam,
+			TeamID: "TM0000000000PA"}, Events: mentions.Events}, Team: payments, Available: true,
+			ResolvesTo: []mentions.Resolution{{Team: payments, Mentions: []mentions.Resolved{{Kind: mentions.TargetGroup,
+				Name: "payments_team", Linked: true}}}}},
+	}
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+mattermostID, "")
+	var read gen.MattermostDestination
+	decodeInto(t, a, &read)
+	if a.status != http.StatusOK || len(read.MentionEntries) != 3 {
+		t.Fatalf("read = %d %s", a.status, a.body)
+	}
+	e0, e1, e2 := read.MentionEntries[0], read.MentionEntries[1], read.MentionEntries[2]
+	if e0.Available || e0.UnavailableReason.MustGet() != gen.MentionUnavailableReason(mentions.ReasonMessengerHasNoToken) ||
+		*e0.Target.Everyone != "everyone" || len(e0.Events) != 7 || !e0.ResolvesTo[0].Team.IsNull() {
+		t.Errorf("everyone %s", a.body)
+	}
+	if e1.Target.User == nil || e1.Target.User.Name != "Alice" || e1.ResolvesTo[0].Mentions[0].Name != "alice" ||
+		!e1.UnavailableReason.IsNull() || *e1.Target.UserId != "SR0000000000AL" {
+		t.Errorf("user %s", a.body)
+	}
+	if e2.Target.Team == nil || e2.Target.Team.Slug != "payments" || e2.ResolvesTo[0].Team.MustGet().Slug !=
+		"payments" || e2.ResolvesTo[0].Mentions[0].Kind != gen.MentionResolvedKindGroup {
+		t.Errorf("team %s", a.body)
+	}
+	if read.Mentions.AckTimeout.UserIds[0] != "SR0000000000AL" || read.Mentions.NewAlertGroup.Everyone != "none" {
+		t.Errorf("the L1 form %+v", read.Mentions)
+	}
+	fd.saveErr = &mentions.FieldError{Pointer: "/mention_entries/1/target", Code: mentions.CodeMentionUnsupported,
+		Detail: "Telegram cannot mention everyone or groups."}
+	if errs := problemErrors(t, x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)); len(errs) !=
+		1 || errs[0]["code"] != "mention_unsupported" || errs[0]["pointer"] != "/mention_entries/1/target" {
+		t.Errorf("unsupported = %v", errs)
+	}
+}
+
+// TestDestinationCheckGroupPeopleAPI is the item discussion_group_members of a Telegram Destination's check at the API
+// (C-27.FR-8): it passes and names in absent_users the people the check saw outside the discussion group, an empty
+// list when there are none, and the other items have no absent_users.
+func TestDestinationCheckGroupPeopleAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	for _, absent := range [][]destinations.UserRef{
+		{{PublicID: "SRAAAAAAAAAAB0", Name: "Bob", Login: "bob", Deactivated: true}}, {}} {
+		fd.check = destinations.CheckResult{OK: true, Health: destinations.Health{State: "healthy"},
+			Items: []destinations.CheckItem{{Name: "bot_rights_group", OK: true},
+				{Name: "discussion_group_members", OK: true, AbsentUsers: absent}}}
+		a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA2/checks", "")
+		var res gen.DestinationCheckResult
+		decodeInto(t, a, &res)
+		if a.status != http.StatusOK || !res.Ok || len(res.Checks) != 2 || res.Checks[0].AbsentUsers != nil ||
+			res.Checks[1].Name != gen.DestinationCheckItemNameDiscussionGroupMembers || !res.Checks[1].Ok ||
+			res.Checks[1].AbsentUsers == nil || len(*res.Checks[1].AbsentUsers) != len(absent) {
+			t.Fatalf("check = %d %s", a.status, a.body)
+		}
+		if len(absent) == 1 {
+			u := (*res.Checks[1].AbsentUsers)[0]
+			if u.Id != "SRAAAAAAAAAAB0" || u.Name != "Bob" || u.Login == nil || *u.Login != "bob" || !u.Deactivated {
+				t.Errorf("absent %+v", u)
+			}
 		}
 	}
 }

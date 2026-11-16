@@ -11,8 +11,10 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -114,6 +116,15 @@ func (f *fakeWriter) InsertDestinationUpdate(context.Context, dbgen.InsertDestin
 
 func (f *fakeWriter) NotifyOpenGroupUpdates(context.Context, string) error { return errBoom }
 
+func (f *fakeWriter) ListTelegramGroupPeople(context.Context, dbgen.ListTelegramGroupPeopleParams) (
+	[]dbgen.ListTelegramGroupPeopleRow, error) {
+	return nil, errBoom
+}
+
+func (f *fakeWriter) SetTelegramAbsences(context.Context, dbgen.SetTelegramAbsencesParams) error {
+	return errBoom
+}
+
 // saveWriter is the database of the saves in memory: the Mattermost Connections that are not deleted, the inserted
 // and updated rows, the versions the locks read, the Audit log and the hints.
 type saveWriter struct {
@@ -140,6 +151,34 @@ type saveWriter struct {
 	// notifications on their channel.
 	updates []dbgen.InsertDestinationUpdateParams
 	woken   []string
+	// tgPeople are the people of the Teams of a Telegram Destination, by its id, and tgSeen what its checks recorded.
+	tgPeople map[int64][]dbgen.ListTelegramGroupPeopleRow
+	tgSeen   []dbgen.SetTelegramAbsencesParams
+	// tx counts the transactions; tgSeenTx and tgWriteTx are the transactions of the records of tgSeen and of the
+	// Telegram inserts and updates.
+	tx        int
+	tgSeenTx  []int
+	tgWriteTx []int
+}
+
+func (w *saveWriter) ListTelegramGroupPeople(_ context.Context, arg dbgen.ListTelegramGroupPeopleParams) (
+	[]dbgen.ListTelegramGroupPeopleRow, error) {
+	if err := w.fail["ListTelegramGroupPeople"]; err != nil {
+		return nil, err
+	}
+	if arg.OrgID != 1 {
+		return nil, nil
+	}
+	return w.tgPeople[arg.DestinationID], nil
+}
+
+func (w *saveWriter) SetTelegramAbsences(_ context.Context, arg dbgen.SetTelegramAbsencesParams) error {
+	if err := w.fail["SetTelegramAbsences"]; err != nil {
+		return err
+	}
+	w.tgSeen = append(w.tgSeen, arg)
+	w.tgSeenTx = append(w.tgSeenTx, w.tx)
+	return nil
 }
 
 func (w *saveWriter) LockOwningTeam(_ context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow,
@@ -179,7 +218,10 @@ func (w *saveWriter) NotifyOpenGroupUpdates(_ context.Context, channel string) e
 	return nil
 }
 
-func (w *saveWriter) InTx(_ context.Context, fn func(TxQueries) error) error { return fn(w) }
+func (w *saveWriter) InTx(_ context.Context, fn func(TxQueries) error) error {
+	w.tx++
+	return fn(w)
+}
 
 func (w *saveWriter) LockDestination(_ context.Context, arg dbgen.LockDestinationParams) (dbgen.LockDestinationRow,
 	error) {
@@ -243,6 +285,7 @@ func (w *saveWriter) InsertTelegramDestination(_ context.Context, arg dbgen.Inse
 		return 0, err
 	}
 	w.tgIns = append(w.tgIns, arg)
+	w.tgWriteTx = append(w.tgWriteTx, w.tx)
 	return int64(30 + len(w.tgIns)), nil
 }
 
@@ -251,6 +294,7 @@ func (w *saveWriter) UpdateTelegramDestination(_ context.Context, arg dbgen.Upda
 		return err
 	}
 	w.tgSets = append(w.tgSets, arg)
+	w.tgWriteTx = append(w.tgWriteTx, w.tx)
 	return nil
 }
 
@@ -374,12 +418,16 @@ func (c *fakeChecker) CheckChannel(ctx context.Context, in ChannelCheck) (Channe
 }
 
 // fakeTelegram stands for the Connections: the Destination check of a Telegram channel through the Connection
-// CNAAAAAAAAAAA2, by its channel.
+// CNAAAAAAAAAAA2, by its channel. With members a check that passes has the step discussion_group_members, which sees
+// outside the discussion group the people of the check whose Telegram user ids are in outside.
 type fakeTelegram struct {
-	calls []TelegramChannelCheck
-	links []outbound.Links
-	err   error
-	title string
+	calls   []TelegramChannelCheck
+	links   []outbound.Links
+	err     error
+	title   string
+	members bool
+	outside []int64
+	unknown []int64
 }
 
 func (c *fakeTelegram) CheckTelegramChannel(ctx context.Context, in TelegramChannelCheck) (TelegramChannelChecked,
@@ -417,11 +465,25 @@ func (c *fakeTelegram) CheckTelegramChannel(ctx context.Context, in TelegramChan
 	if title == "" {
 		title = "Muster alerts"
 	}
-	return TelegramChannelChecked{ConnectionID: 6, Check: telegram.DestinationCheck{
+	out := TelegramChannelChecked{ConnectionID: 6, Check: telegram.DestinationCheck{
 		Steps: []telegram.DestinationStep{ok(telegram.StepChannelExists), ok(telegram.StepDiscussionGroup),
 			ok(telegram.StepBotRightsChannel), ok(telegram.StepBotRightsGroup)},
 		ChannelID: -1001000000001, ChannelTitle: title, GroupID: -1001000000002, GroupTitle: "Muster alerts Chat",
-		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
+		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}
+	if c.members {
+		var absent, unknown []int64
+		for _, m := range in.People {
+			switch {
+			case slices.Contains(c.outside, m.TelegramID):
+				absent = append(absent, m.UserID)
+			case slices.Contains(c.unknown, m.TelegramID):
+				unknown = append(unknown, m.UserID)
+			}
+		}
+		out.Check.Steps = append(out.Check.Steps, telegram.DestinationStep{Name: telegram.StepDiscussionGroupMembers,
+			OK: true, Absent: absent, Unknown: unknown})
+	}
+	return out, nil
 }
 
 // fakeBridge stands for the Connections: the Destination check of a Bridge channel through the Connection
@@ -515,13 +577,69 @@ func (c *fakeSlack) CheckSlackChannel(ctx context.Context, in SlackChannelCheck)
 		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
 }
 
-// fakeMentions refuses the User SR0000000000ZZ, as mentions.Validate does for a User that does not exist.
-type fakeMentions struct{}
+// fakeMentions refuses the User SR0000000000ZZ, as mentions.Validate and ValidateEntries do for a User that does not
+// exist, and keeps the Mention entries of each Destination in memory; fail fails the calls by name.
+type fakeMentions struct {
+	entries   map[int64][]mentions.EntryInput
+	writes    []int64
+	validated int
+	fail      map[string]error
+}
 
-func (fakeMentions) Validate(_ context.Context, _ string, set mentions.Settings) error {
+func newFakeMentions() *fakeMentions {
+	return &fakeMentions{entries: map[int64][]mentions.EntryInput{}, fail: map[string]error{}}
+}
+
+func (f *fakeMentions) ValidateEntries(_ context.Context, c mentions.Check) ([]mentions.EntryInput, error) {
+	if err := f.fail["ValidateEntries"]; err != nil {
+		return nil, err
+	}
+	out := make([]mentions.EntryInput, len(c.Entries))
+	for i, e := range c.Entries {
+		if e.Target.UserID == "SR0000000000ZZ" {
+			return nil, &mentions.FieldError{Pointer: "/mention_entries/" + strconv.Itoa(i) + "/target/user_id",
+				Code: CodeUnknownID, Detail: "No such user."}
+		}
+		if e.Events == nil {
+			e.Events = slices.Clone(mentions.Events)
+		}
+		out[i] = e
+	}
+	return out, nil
+}
+
+func (f *fakeMentions) Entries(_ context.Context, _ mentions.DBTX, ds []mentions.EntryDestination) (
+	map[int64][]mentions.Entry, error) {
+	if err := f.fail["Entries"]; err != nil {
+		return nil, err
+	}
+	out := map[int64][]mentions.Entry{}
+	for _, d := range ds {
+		for _, e := range f.entries[d.ID] {
+			out[d.ID] = append(out[d.ID], mentions.Entry{EntryInput: e, Available: true,
+				ResolvesTo: []mentions.Resolution{}})
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeMentions) WriteEntries(_ context.Context, _ mentions.DBTX, destinationID int64,
+	entries []mentions.EntryInput, _ time.Time) error {
+	if err := f.fail["WriteEntries"]; err != nil {
+		return err
+	}
+	f.entries[destinationID] = slices.Clone(entries)
+	f.writes = append(f.writes, destinationID)
+	return nil
+}
+
+func (f *fakeMentions) Validate(_ context.Context, _ string, set mentions.Settings,
+	stored []mentions.EntryInput) error {
+	f.validated++
 	for _, ids := range set {
 		for _, id := range ids.UserIDs {
-			if id == "SR0000000000ZZ" {
+			kept := slices.ContainsFunc(stored, func(e mentions.EntryInput) bool { return e.Target.UserID == id })
+			if id == "SR0000000000ZZ" && !kept {
 				return &mentions.FieldError{Pointer: "/mentions/new_alerts/user_ids/0", Code: CodeUnknownID,
 					Detail: "No such user."}
 			}
@@ -542,7 +660,7 @@ func newSaver(t *testing.T) (*Service, *fakeStore, *saveWriter, *fakeChecker, *[
 	s := New(1, store)
 	logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
 	s.SetWriter(WriterConfig{Writer: w, Audit: audit.NewWriter(logger, clock.NewManual(t0)),
-		Business: clock.NewManual(t0), Mentions: fakeMentions{}, Mattermost: checker, Telegram: &fakeTelegram{},
+		Business: clock.NewManual(t0), Mentions: newFakeMentions(), Mattermost: checker, Telegram: &fakeTelegram{},
 		Bridge: &fakeBridge{}, Slack: &fakeSlack{}, Keyring: activeKeyring(t),
 		Templates: templates.New(clock.NewManual(t0), clock.Real{}),
 		Healthy: func(_ context.Context, id int64) error {
@@ -590,11 +708,13 @@ func TestCreateMattermost(t *testing.T) {
 		*d.MattermostChannelName != "alerts" || d.LimiterLimit != 5 || d.Health.State != "healthy" || d.Version != 1 {
 		t.Errorf("created %+v", d)
 	}
-	var set mentions.Settings
-	if err := json.Unmarshal(d.Mentions, &set); err != nil || set["new_alerts"].Everyone != "channel" {
-		t.Errorf("mentions %s", d.Mentions)
+	if want := []mentions.Entry{{EntryInput: mentions.EntryInput{Target: mentions.EntryTarget{
+		Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneChannel}, Events: []string{mentions.KindNewAlerts}},
+		Available: true, ResolvesTo: []mentions.Resolution{}}}; !reflect.DeepEqual(d.MentionEntries, want) {
+		t.Errorf("mention entries %+v", d.MentionEntries)
 	}
 	ins := w.inserted[0]
+	assertNobody(t, "mattermost", ins.Mentions)
 	if ins.ConnectionID.Int64 != 5 || ins.TeamName.String != "dev" || ins.ChannelName.String != "alerts" ||
 		ins.ChannelID.String != "ch-alerts" {
 		t.Errorf("inserted %+v", ins)
@@ -728,7 +848,6 @@ func TestUpdateMattermost(t *testing.T) {
 	// The same values again: the names are already stored, nothing is written.
 	store.rows[0].Name, store.rows[0].Version = "ops-renamed", 3
 	store.rows[0].MattermostTeamName, store.rows[0].MattermostChannelName = txt("dev"), txt("alerts")
-	store.rows[0].Mentions, _ = json.Marshal(mattermostInput("x", "chan").Mentions)
 	store.rows[0].LimiterLimit, store.rows[0].LimiterPerSeconds = 5, 1
 	store.rows[0].MattermostTeamID = txt("team-dev")
 	w.versions["DSAAAAAAAAAAA1"] = 3
@@ -1211,6 +1330,7 @@ func TestCreateWebhook(t *testing.T) {
 		t.Fatalf("checks %d, inserts %d", len(checker.calls), len(w.hooks))
 	}
 	got := w.hooks[0]
+	assertNobody(t, "webhook", got.Mentions)
 	if got.Name != "auto" || got.WebhookMode.String != "events" ||
 		string(got.WebhookEventsConfig) != `{"url":"http://127.0.0.1:18093/hook/auto","headers":[{"name":"Authorization","value":"Bearer {{ .Secrets.token }}"}]}` ||
 		string(got.Proxy) != `{"enabled":true,"type":"http","address":"proxy:3128","username":"u"}` ||
@@ -1330,8 +1450,7 @@ func TestUpdateWebhook(t *testing.T) {
 		t.Errorf("audit %+v", w.audit)
 	}
 	in.Webhook.Events.URL = "https://example.org"
-	set, _ := json.Marshal(in.Mentions)
-	store.rows[2].Mentions, store.rows[2].LimiterLimit, store.rows[2].LimiterPerSeconds = set, 5, 1
+	store.rows[2].LimiterLimit, store.rows[2].LimiterPerSeconds = 5, 1
 	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); err != nil || len(w.hookSets) != 1 {
 		t.Fatalf("unchanged save wrote %d (%v)", len(w.hookSets), err)
 	}
@@ -1402,6 +1521,7 @@ func TestCreateTelegram(t *testing.T) {
 		t.Errorf("created %+v", d)
 	}
 	ins := w.tgIns[0]
+	assertNobody(t, "telegram", ins.Mentions)
 	if ins.ConnectionID.Int64 != 6 || ins.ChannelID.String != "@muster_alerts" || ins.ChannelChatID.Int64 != -1001000000001 ||
 		ins.DiscussionChatID.Int64 != -1001000000002 || ins.ChannelTitle.String != "Muster alerts" ||
 		ins.DiscussionGroupTitle.String != "Muster alerts Chat" {
@@ -1510,7 +1630,6 @@ func TestUpdateTelegram(t *testing.T) {
 	// Stored as the check found it: the same save writes nothing; a new title is stored with a hint only.
 	r := &store.rows[1]
 	r.TelegramChannelID, r.Version, r.Health = txt("@muster_alerts"), 2, "healthy"
-	r.Mentions, _ = json.Marshal(telegramInput("x", "").Mentions)
 	r.LimiterLimit, r.LimiterPerSeconds = 5, 1
 	r.TelegramChannelChatID.Int64, r.TelegramDiscussionChatID.Int64 = -1001000000001, -1001000000002
 	r.TelegramChannelTitle, r.TelegramDiscussionGroupTitle = txt("Muster alerts"), txt("Muster alerts Chat")
@@ -1606,6 +1725,88 @@ func TestCheckTelegramDestination(t *testing.T) {
 	}
 }
 
+// TestTelegramGroupPeople is the step discussion_group_members of C-27.FR-8 in the saves and "Check": the check of a saved
+// Destination is given the people of its Teams with a Telegram Account link — a link whose Telegram user id is not a
+// number left out — and the item names those it saw outside the discussion group; a check that passes records them
+// with its time on the business clock, by Muster User id, and so does a save — a creation with nobody, since no Team
+// names a new Destination; a check that finds another group than the stored one records nothing. Failures to read the
+// people or to record them fail the check.
+func TestTelegramGroupPeople(t *testing.T) {
+	s, store, w, _, _ := newSaver(t)
+	tg := s.writer.Telegram.(*fakeTelegram)
+	tg.members, tg.outside, tg.unknown = true, []int64{9002}, []int64{9001}
+	ctx := t.Context()
+	store.rows[1].TelegramChannelID = txt("@muster_alerts")
+	store.rows[1].TelegramDiscussionChatID.Int64 = -1001000000002
+	w.tgPeople = map[int64][]dbgen.ListTelegramGroupPeopleRow{2: {
+		{ID: 11, PublicID: "SRAAAAAAAAAAA1", Name: "Alice", Login: "alice", ExternalID: "9001"},
+		{ID: 12, PublicID: "SRAAAAAAAAAAA2", Name: "Bob", Login: "bob", ExternalID: "9002"},
+		{ID: 13, PublicID: "SRAAAAAAAAAAA3", Name: "Carol", Login: "carol", ExternalID: "x"}}}
+	res, err := s.Check(ctx, "DSAAAAAAAAAAA2")
+	if err != nil || !res.OK || len(res.Items) != 5 {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	if it := res.Items[4]; it.Name != telegram.StepDiscussionGroupMembers || !it.OK ||
+		!slices.Equal(it.AbsentUsers, []UserRef{{PublicID: "SRAAAAAAAAAAA2", Name: "Bob", Login: "bob"}}) {
+		t.Errorf("item = %+v", it)
+	}
+	if c := tg.calls[len(tg.calls)-1]; !slices.Equal(c.People, []telegram.GroupPerson{{UserID: 11, TelegramID: 9001},
+		{UserID: 12, TelegramID: 9002}}) {
+		t.Errorf("members given = %+v", c.People)
+	}
+	if len(w.tgSeen) != 1 || !slices.Equal(w.tgSeen[0].AbsentUserIds, []int64{12}) ||
+		!slices.Equal(w.tgSeen[0].UnknownUserIds, []int64{11}) ||
+		!w.tgSeen[0].CheckedAt.Equal(t0) || w.tgSeen[0].ID != 2 || w.tgSeen[0].OrgID != 1 ||
+		w.tgSeen[0].GroupID != (pgtype.Int8{Int64: -1001000000002, Valid: true}) {
+		t.Errorf("recorded %+v", w.tgSeen)
+	}
+
+	// A check that found another group than the stored one fails, and its write names the group it read, which the
+	// stored one is not, so that it writes nothing (telegramGroupPeople of TestLive in internal/connections checks the
+	// SQL).
+	store.rows[1].TelegramDiscussionChatID.Int64 = -100200
+	if res, err := s.Check(ctx, "DSAAAAAAAAAAA2"); err != nil || res.OK || len(w.tgSeen) != 2 ||
+		w.tgSeen[1].GroupID.Int64 != -1001000000002 {
+		t.Errorf("another group = %+v, %v, recorded %+v", res, err, w.tgSeen)
+	}
+	store.rows[1].TelegramDiscussionChatID.Int64 = -1001000000002
+
+	// A save records the members in its transaction, after the update.
+	w.versions["DSAAAAAAAAAAA2"] = 1
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.tgSeen) != 3 || w.tgSeen[2].ID != 2 || !slices.Equal(w.tgSeen[2].AbsentUserIds, []int64{12}) ||
+		len(w.tgSets) == 0 || w.tgSeenTx[2] != w.tgWriteTx[len(w.tgWriteTx)-1] {
+		t.Errorf("recorded by a save %+v in %v, written in %v", w.tgSeen, w.tgSeenTx, w.tgWriteTx)
+	}
+	d, err := s.Create(ctx, saver, telegramInput("new", "@muster_alerts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := tg.calls[len(tg.calls)-1]; c.People != nil || len(w.tgSeen) != 4 || w.tgSeen[3].ID != d.ID ||
+		w.tgSeen[3].AbsentUserIds == nil || len(w.tgSeen[3].AbsentUserIds) != 0 || w.tgSeen[3].UnknownUserIds == nil ||
+		w.tgSeenTx[3] != w.tgWriteTx[len(w.tgWriteTx)-1] {
+		t.Errorf("a creation: members %+v, recorded %+v in %v", c.People, w.tgSeen, w.tgSeenTx)
+	}
+
+	for _, name := range []string{"ListTelegramGroupPeople", "SetTelegramAbsences"} {
+		w.fail[name] = errBoom
+		if _, err := s.Check(ctx, "DSAAAAAAAAAAA2"); !errors.Is(err, errBoom) {
+			t.Errorf("%s fails the check: %v", name, err)
+		}
+		if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); !errors.Is(
+			err, errBoom) {
+			t.Errorf("%s fails the save: %v", name, err)
+		}
+		delete(w.fail, name)
+	}
+	w.fail["SetTelegramAbsences"] = errBoom
+	if _, err := s.Create(ctx, saver, telegramInput("newer", "@muster_alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("SetTelegramAbsences fails the creation: %v", err)
+	}
+}
+
 func bridgeInput(name, channel string) Input {
 	in := mattermostInput(name, "")
 	in.Type, in.Mattermost = TypeBridge, nil
@@ -1646,6 +1847,7 @@ func TestCreateBridge(t *testing.T) {
 		t.Fatalf("inserts %+v", w.brIns)
 	}
 	ins := w.brIns[0]
+	assertNobody(t, "bridge", ins.Mentions)
 	if ins.ConnectionID.Int64 != 7 || ins.ChannelID.String != "ch-alerts" || ins.ChannelName.String != "alerts" ||
 		ins.Name != "alerts" || ins.LimiterLimit != 5 || ins.LimiterPerSeconds != 1 || !ins.Now.Equal(t0) ||
 		!bytes.Contains(ins.Mentions, []byte(`"new_alerts":{"everyone":"none"`)) {
@@ -1776,7 +1978,6 @@ func TestUpdateBridge(t *testing.T) {
 	}
 	// Stored as saved: the same save writes nothing; a new channel name is stored with a hint only.
 	r.Name, r.BridgeChannelID, r.Version, r.Health = "alerts", txt("ch-alerts-prod"), 2, "healthy"
-	r.Mentions, _ = json.Marshal(bridgeInput("x", "").Mentions)
 	r.LimiterLimit, r.LimiterPerSeconds = 5, 1
 	w.versions["DSAAAAAAAAAAA4"] = 2
 	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts", "ch-alerts-prod")); err != nil ||
@@ -1941,9 +2142,11 @@ func TestCreateSlack(t *testing.T) {
 		t.Fatalf("inserts %+v", w.slIns)
 	}
 	ins := w.slIns[0]
+	assertNobody(t, "slack", ins.Mentions)
 	if ins.ConnectionID.Int64 != 8 || ins.ChannelID.String != "C0FAKEALERTS" || ins.ChannelName.String != "alerts" ||
 		ins.Name != "alerts" || ins.LimiterLimit != 5 || ins.LimiterPerSeconds != 1 || !ins.Now.Equal(t0) ||
-		!bytes.Contains(ins.Mentions, []byte(`"new_alert_group":{"everyone":"here"`)) {
+		!bytes.Contains(ins.Mentions, []byte(`"new_alert_group":{"everyone":"none"`)) ||
+		len(d.MentionEntries) != 2 || d.MentionEntries[0].Target.Everyone != mentions.EveryoneHere {
 		t.Errorf("inserted %+v", ins)
 	}
 	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated ||
@@ -2082,7 +2285,6 @@ func TestUpdateSlack(t *testing.T) {
 	}
 	// Stored as saved: the same save writes nothing; a new channel name is stored with a hint only.
 	r.Name, r.SlackChannelID, r.Version, r.Health = "alerts", txt("C0FAKEPROD"), 2, "healthy"
-	r.Mentions, _ = json.Marshal(slackInput("x", "").Mentions)
 	r.LimiterLimit, r.LimiterPerSeconds = 5, 1
 	w.versions["DSAAAAAAAAAAA5"] = 2
 	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("alerts", "C0FAKEPROD")); err != nil ||
@@ -2344,5 +2546,189 @@ func TestBridgeGatewayOnly(t *testing.T) {
 	br.gatewayErr = errBoom
 	if _, err := s.Create(ctx, saver, bridgeInput("down", "ch-alerts")); !errors.Is(err, errBoom) {
 		t.Errorf("a failed read = %v", err)
+	}
+}
+
+// entry is a Mention entry of the target for the events.
+func entry(t mentions.EntryTarget, events ...string) mentions.EntryInput {
+	return mentions.EntryInput{Target: t, Events: events}
+}
+
+var (
+	everyoneHere    = mentions.EntryTarget{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere}
+	everyoneChannel = mentions.EntryTarget{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneChannel}
+	teamPayments    = mentions.EntryTarget{Kind: mentions.TargetTeam, TeamID: "TMAAAAAAAAAAA1"}
+	allEvents       = mentions.Events
+)
+
+// TestSaveMentionEntries is C-28.FR-1 and FR-5 in the saves of every type: mention_entries are validated and written
+// in the transaction, in order, and show in the diff of destination.updated; a request with both fields takes the
+// entries; one with the L1 settings alone is converted — on create as the 0.2.0 migration converts them, on update
+// replacing only the entries L1 can express, keeping the others after them, a Team and a Slack user group among them,
+// and the stored storm_started of a target present before and after — and one that sends back the L1 form it read
+// changes nothing; one with neither keeps the entries. A failing validation, write or read fails the save.
+func TestSaveMentionEntries(t *testing.T) {
+	s, store, w, _, _ := newSaver(t)
+	ctx := t.Context()
+	fm := s.writer.Mentions.(*fakeMentions)
+
+	in := mattermostInput("alerts", "ch-alerts")
+	in.MentionEntries = &[]mentions.EntryInput{{Target: mentions.EntryTarget{
+		Kind: mentions.TargetOnCallOfTeamsFromLabel}}, entry(everyoneHere, mentions.KindNewAlertGroup)}
+	d, err := s.Create(ctx, saver, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []mentions.EntryInput{{Target: mentions.EntryTarget{Kind: mentions.TargetOnCallOfTeamsFromLabel},
+		Events: allEvents}, entry(everyoneHere, mentions.KindNewAlertGroup)}
+	if !reflect.DeepEqual(fm.entries[d.ID], want) || !reflect.DeepEqual(mentions.Inputs(d.MentionEntries), want) {
+		t.Errorf("both fields on create: stored %+v, read %+v", fm.entries[d.ID], d.MentionEntries)
+	}
+	if !bytes.Contains(w.audit[len(w.audit)-1].Diff, []byte(`on_call_of_teams_from_label`)) {
+		t.Errorf("destination.created %s", w.audit[len(w.audit)-1].Diff)
+	}
+	none := mattermostInput("quiet", "ch-alerts")
+	none.Mentions = nil
+	writes := len(fm.writes)
+	if d, err := s.Create(ctx, saver, none); err != nil || len(d.MentionEntries) != 0 || len(fm.writes) != writes {
+		t.Errorf("neither field on create = %+v, %v, %d writes", d.MentionEntries, err, len(fm.writes)-writes)
+	}
+
+	// The Mattermost Destination DSAAAAAAAAAAA1 mentions Team payments and @channel for new Alerts.
+	fm.entries[1] = []mentions.EntryInput{entry(teamPayments, allEvents...),
+		entry(everyoneChannel, mentions.KindNewAlerts)}
+	stored := slices.Clone(fm.entries[1])
+	update := func(t *testing.T, in Input) Destination {
+		t.Helper()
+		w.versions["DSAAAAAAAAAAA1"] = store.rows[0].Version
+		d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.rows[0].Version = d.Version
+		store.rows[0].Name, store.rows[0].MattermostTeamID = d.Name, txt("team-dev")
+		store.rows[0].MattermostChannelID = txt(*d.MattermostChannelID)
+		store.rows[0].MattermostTeamName, store.rows[0].MattermostChannelName = txt("dev"), txt("alerts")
+		store.rows[0].LimiterLimit, store.rows[0].LimiterPerSeconds = 5, 1
+		return d
+	}
+	t.Run("the read sent back", func(t *testing.T) {
+		writes := len(fm.writes)
+		d := update(t, mattermostInput("ops", "chan"))
+		if !reflect.DeepEqual(fm.entries[1], stored) || len(fm.writes) != writes ||
+			!reflect.DeepEqual(mentions.Inputs(d.MentionEntries), stored) {
+			t.Errorf("entries %+v after %d writes", fm.entries[1], len(fm.writes)-writes)
+		}
+	})
+	t.Run("mentions alone", func(t *testing.T) {
+		in := mattermostInput("ops", "chan")
+		in.Mentions[mentions.KindNewAlertGroup] = mentions.Setting{Everyone: mentions.EveryoneHere,
+			UserIDs: []string{}, Groups: []string{}}
+		update(t, in)
+		want := []mentions.EntryInput{entry(everyoneHere, mentions.KindNewAlertGroup, mentions.EventStormStarted),
+			entry(everyoneChannel, mentions.KindNewAlerts), entry(teamPayments, allEvents...)}
+		if !reflect.DeepEqual(fm.entries[1], want) {
+			t.Errorf("entries %+v", fm.entries[1])
+		}
+		if last := w.audit[len(w.audit)-1]; last.Action != ActionUpdated ||
+			!bytes.Contains(last.Diff, []byte(`"/mention_entries`)) || bytes.Contains(last.Diff, []byte(`"/mentions`)) {
+			t.Errorf("destination.updated %s", last.Diff)
+		}
+	})
+	t.Run("a stored storm_started", func(t *testing.T) {
+		fm.entries[1] = []mentions.EntryInput{entry(everyoneHere, mentions.KindNewAlertGroup),
+			entry(everyoneChannel, mentions.EventStormStarted), entry(teamPayments, allEvents...)}
+		in := mattermostInput("ops", "chan")
+		in.Mentions[mentions.KindNewAlertGroup] = mentions.Setting{Everyone: mentions.EveryoneHere,
+			UserIDs: []string{}, Groups: []string{}}
+		in.Mentions[mentions.KindReopen] = mentions.Setting{Everyone: mentions.EveryoneHere, UserIDs: []string{},
+			Groups: []string{}}
+		update(t, in)
+		want := []mentions.EntryInput{entry(everyoneHere, mentions.KindNewAlertGroup, mentions.KindReopen),
+			entry(everyoneChannel, mentions.KindNewAlerts, mentions.EventStormStarted), entry(teamPayments, allEvents...)}
+		if !reflect.DeepEqual(fm.entries[1], want) {
+			t.Errorf("entries %+v", fm.entries[1])
+		}
+	})
+	t.Run("both fields", func(t *testing.T) {
+		in := mattermostInput("ops", "chan")
+		in.MentionEntries = &[]mentions.EntryInput{entry(teamPayments, mentions.KindReopen)}
+		update(t, in)
+		if !reflect.DeepEqual(fm.entries[1], []mentions.EntryInput{entry(teamPayments, mentions.KindReopen)}) {
+			t.Errorf("entries %+v", fm.entries[1])
+		}
+	})
+	t.Run("neither field", func(t *testing.T) {
+		in := mattermostInput("ops-renamed", "chan")
+		in.Mentions = nil
+		update(t, in)
+		if !reflect.DeepEqual(fm.entries[1], []mentions.EntryInput{entry(teamPayments, mentions.KindReopen)}) {
+			t.Errorf("entries %+v", fm.entries[1])
+		}
+	})
+
+	// The Slack Destination DSAAAAAAAAAAA5 keeps its user group when its L1 form changes.
+	withSlack(store, w)
+	group := mentions.EntryTarget{Kind: mentions.TargetGroup, Group: "payments-team", GroupID: "S0FAKEPAYTEAM"}
+	fm.entries[5] = []mentions.EntryInput{entry(group, allEvents...), entry(everyoneChannel, mentions.KindNewAlerts)}
+	sd, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("alerts", "C0FAKEALERTS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []mentions.EntryInput{entry(everyoneHere, mentions.KindNewAlertGroup, mentions.EventStormStarted),
+		entry(everyoneChannel, mentions.KindNewAlerts), entry(group, allEvents...)}; !reflect.DeepEqual(fm.entries[5],
+		want) || !reflect.DeepEqual(mentions.Inputs(sd.MentionEntries), want) {
+		t.Errorf("slack entries %+v", fm.entries[5])
+	}
+
+	// A User deleted since, as SR0000000000ZZ stands for: the read sent back changes nothing and is not validated; a
+	// change of another kind keeps the entry of that User (settled 2).
+	deleted := mentions.EntryTarget{Kind: mentions.TargetUser, UserID: "SR0000000000ZZ"}
+	fm.entries[1] = []mentions.EntryInput{entry(deleted, mentions.KindNewAlerts)}
+	form := mentions.L1Form(TypeMattermost, fm.entries[1])
+	back := mattermostInput("ops", "chan")
+	back.Mentions = form
+	validated, writes := fm.validated, len(fm.writes)
+	update(t, back)
+	if fm.validated != validated || len(fm.writes) != writes ||
+		!reflect.DeepEqual(fm.entries[1], []mentions.EntryInput{entry(deleted, mentions.KindNewAlerts)}) {
+		t.Errorf("the read sent back with a deleted user: %d validations, %d writes, %+v", fm.validated-validated,
+			len(fm.writes)-writes, fm.entries[1])
+	}
+	changed := mattermostInput("ops", "chan")
+	changed.Mentions = mentions.L1Form(TypeMattermost, fm.entries[1])
+	changed.Mentions[mentions.KindReopen] = mentions.Setting{Everyone: mentions.EveryoneChannel, UserIDs: []string{},
+		Groups: []string{}}
+	update(t, changed)
+	if want := []mentions.EntryInput{entry(everyoneChannel, mentions.KindReopen), entry(deleted,
+		mentions.KindNewAlerts)}; !reflect.DeepEqual(fm.entries[1], want) {
+		t.Errorf("another kind changed: %+v", fm.entries[1])
+	}
+
+	for _, name := range []string{"ValidateEntries", "WriteEntries", "Entries"} {
+		fm.fail[name] = errBoom
+		in := mattermostInput("ops", "chan")
+		in.MentionEntries = &[]mentions.EntryInput{entry(everyoneHere, mentions.KindNewAlertGroup)}
+		w.versions["DSAAAAAAAAAAA1"] = store.rows[0].Version
+		if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, in); !errors.Is(err, errBoom) {
+			t.Errorf("%s fails = %v", name, err)
+		}
+		delete(fm.fail, name)
+	}
+	in = mattermostInput("bad", "ch-alerts")
+	in.MentionEntries = &[]mentions.EntryInput{entry(mentions.EntryTarget{Kind: mentions.TargetUser,
+		UserID: "SR0000000000ZZ"})}
+	if _, err := s.Create(ctx, saver, in); !errors.As(err, new(*mentions.FieldError)) {
+		t.Errorf("an unknown user in an entry = %v", err)
+	}
+}
+
+// assertNobody checks that a creation stored the L1 default, nobody, in the L1 column, whatever its entries, for the
+// replicas of 0.1 of a rolling update (C-28.FR-5).
+func assertNobody(t *testing.T, what string, stored []byte) {
+	t.Helper()
+	want, _ := json.Marshal(mentions.Nobody())
+	if !bytes.Equal(stored, want) {
+		t.Errorf("%s: the L1 column %s, want %s", what, stored, want)
 	}
 }

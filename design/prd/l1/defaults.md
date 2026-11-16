@@ -150,7 +150,7 @@ Other lifecycle values:
 | `lookup_table.size_max` | 50 columns and 10,000 rows per Lookup table; a name or a column name up to 200 characters, the description up to 2,000, a key or a value up to 4,096; above that `422` (`too_long`) | built in | C-12 | P-46 |
 | `template.lookups_per_render` | 100 rows read by `lookup` in one render; the 101st is a template error | built in | C-12 | P-47 |
 | `lookup_table.page_max` | 50 Lookup tables per page of `listLookupTables`, since each carries its rows; a larger `limit` is lowered to it | built in | C-12 | P-48 |
-| `destination.mentions` | nobody, for every kind of Loud event; from 0.2.0 an empty list of Mention entries, and a Destination of a Team gets the entry "Team {Team}" for every Loud event, Telegram excepted (C-28.FR-6); the L1 settings move into entries unchanged (C-28.FR-5) | Destination | C-12, C-28 | decided |
+| `destination.mentions` | nobody, for every kind of Loud event; from 0.2.0 an empty list of Mention entries, and a Destination of a Team gets the entry "Team {Team}" for every Loud event, Telegram excepted and unless the Destination already has 100 Mention entries (C-28.FR-6); the L1 settings move into entries unchanged (C-28.FR-5) | Destination | C-12, C-28 | decided |
 | `organization.buttons` | all: every button — Acknowledge, Resolve, each Snooze duration, durations added to a Route later included, and both Snooze presets — until an Admin lists the buttons | Organization | C-28 | decided |
 | `destination.buttons` | as in the Organization (`organization.buttons`) | Destination | C-28 | decided |
 | `message.compact_alerts_listed` | 5 values of the distinguishing label, then "…and K more" (C-29.FR-3) | built in | C-29 | P-83 |
@@ -164,6 +164,7 @@ Other lifecycle values:
 | `destination.mattermost.limiter` | the same as its Connection's (Mattermost limits per client address, not per channel, [F-030](../../facts.md#rate-limit-and-server-settings)) | Destination | C-13 | decided |
 | `connection.telegram.limiter` | 15 messages/s | Connection | C-14 | P-28 |
 | `destination.telegram.limiter` | 10 requests/min, sends and edits together, in the channel and its discussion group (half of Telegram's measured limit of about 20 per minute per chat, [F-016](../../facts.md#limits)) | Destination | C-14 | decided |
+| `destination.telegram.group_people_budget` | 10 s for the step `discussion_group_members` of a Telegram Destination check, on save, on "Check" and in `muster doctor`; the people not reached by then stay unknown and keep the verdict of the check before | built in | C-27 | decided |
 | `connection.telegram.update_mode` | long polling | Connection | C-14 | decided |
 | `connection.telegram.bot_api_base_url` | `https://api.telegram.org` | Connection | C-14 | decided |
 | `telegram.copy_wait` | 60 s for the automatic copy of a post | built in | C-14 | P-30 |

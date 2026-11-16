@@ -2,6 +2,9 @@
 -- Copyright The Muster Authors
 
 -- Destinations (C-11.FR-18): reading every type with its health and Routes. Secrets are read only as their status.
+-- The L1 Mention settings in destinations.mentions are neither read nor written after 0043, except that a creation
+-- stores the L1 default, nobody, for the replicas of 0.1 of a rolling update (C-28.FR-5); the Mention entries are
+-- internal/mentions'.
 
 -- ListDestinations reads a page of the Destinations that are not deleted, in id order after a cursor, filtered by
 -- type, health, the public_id of a Route that is not deleted, and the public_id of the Team that owns them or a User
@@ -13,7 +16,7 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
-       d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
+       d.signing_secret_updated_at, d.previous_signing_secret_since, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
        d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
        t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, d.buttons,
@@ -49,7 +52,7 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
-       d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
+       d.signing_secret_updated_at, d.previous_signing_secret_since, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
        d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
        t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, d.buttons,
@@ -138,7 +141,7 @@ RETURNING id;
 UPDATE destinations
 SET name = @name, connection_id = @connection_id, mattermost_team_id = @team_id,
     mattermost_channel_id = @channel_id, mattermost_team_name = @team_name, mattermost_channel_name = @channel_name,
-    mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
+    limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
     buttons = sqlc.narg('buttons')::jsonb,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
@@ -173,10 +176,46 @@ UPDATE destinations
 SET name = @name, connection_id = @connection_id, telegram_channel_id = @channel_id,
     telegram_channel_chat_id = @channel_chat_id, telegram_discussion_chat_id = @discussion_chat_id,
     telegram_channel_title = @channel_title, telegram_discussion_group_title = @discussion_group_title,
-    mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
+    limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
     buttons = sqlc.narg('buttons')::jsonb,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id AND type = 'telegram';
+
+-- ListTelegramGroupPeople lists the active Users who are not Viewers — whom a Schedule never makes On-call — in a
+-- Team that is not deleted and names the Destination (C-26.FR-1), with a Telegram Account link — the Identity space
+-- telegram, which every Telegram Connection shares — and the Telegram user id of the link, by name: the people whose
+-- membership of the discussion group the Destination check reads (C-27.FR-8).
+-- name: ListTelegramGroupPeople :many
+SELECT u.id, u.public_id, u.name, u.login, al.external_id
+FROM users u
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id AND al.identity_space = 'telegram'
+WHERE u.org_id = @org_id AND u.status = 'active' AND u.role <> 'viewer'
+  AND EXISTS (SELECT 1
+              FROM team_destinations td
+              JOIN teams t ON t.org_id = td.org_id AND t.id = td.team_id AND t.deleted_at IS NULL
+              JOIN team_users tu ON tu.org_id = td.org_id AND tu.team_id = td.team_id
+              WHERE td.org_id = @org_id AND td.destination_id = @destination_id AND tu.user_id = u.id)
+ORDER BY lower(u.name), u.id;
+
+-- SetTelegramAbsences records what the Destination check of a Telegram Destination that is not deleted saw of its
+-- discussion group (C-27.FR-8): the Users it saw outside the group, and those of the Users stored as outside it whom
+-- it could not tell — not asked, or not answered definitively — so that a check that could not confirm a person keeps
+-- the absence a check saw before, while a definitive "in the group" ends it; and when, on the business clock. It writes
+-- only while the stored group is the one the check read, so that a slow check does not overwrite a save that moved the
+-- Destination to another group. It is not a change of the configuration: no version, no updated_at.
+-- name: SetTelegramAbsences :exec
+UPDATE destinations
+SET telegram_absent_user_ids = ARRAY(
+        SELECT a.user_id
+        FROM (SELECT unnest(@absent_user_ids::bigint[]) AS user_id
+              UNION
+              (SELECT unnest(coalesce(telegram_absent_user_ids, '{}'::bigint[]))
+               INTERSECT
+               SELECT unnest(@unknown_user_ids::bigint[]))) AS a
+        ORDER BY a.user_id),
+    telegram_members_checked_at = @checked_at::timestamptz
+WHERE org_id = @org_id AND id = @id AND type = 'telegram' AND deleted_at IS NULL
+  AND telegram_discussion_chat_id = @group_id;
 
 -- LockBridgeConnection takes the Bridge Connection that is not deleted in share mode for the save of one of its
 -- Destinations, as LockMattermostConnection does.
@@ -204,7 +243,7 @@ RETURNING id;
 -- name: UpdateBridgeDestination :exec
 UPDATE destinations
 SET name = @name, connection_id = @connection_id, bridge_channel_id = @channel_id,
-    bridge_channel_name = @channel_name, mentions = @mentions, limiter_limit = @limiter_limit,
+    bridge_channel_name = @channel_name, limiter_limit = @limiter_limit,
     limiter_per_seconds = @limiter_per_seconds, buttons = sqlc.narg('buttons')::jsonb,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id AND type = 'bridge';
@@ -235,7 +274,7 @@ RETURNING id;
 -- name: UpdateSlackDestination :exec
 UPDATE destinations
 SET name = @name, connection_id = @connection_id, slack_channel_id = @channel_id,
-    slack_channel_name = @channel_name, mentions = @mentions, limiter_limit = @limiter_limit,
+    slack_channel_name = @channel_name, limiter_limit = @limiter_limit,
     limiter_per_seconds = @limiter_per_seconds, buttons = sqlc.narg('buttons')::jsonb,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id AND type = 'slack';
@@ -272,7 +311,7 @@ SET name = @name, webhook_mode = @webhook_mode, webhook_events_config = sqlc.nar
                                      ELSE proxy_password_key_id END,
     proxy_password_updated_at = CASE WHEN @password_given::boolean THEN @now::timestamptz
                                      ELSE proxy_password_updated_at END,
-    mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
+    limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id AND type = 'webhook';
 

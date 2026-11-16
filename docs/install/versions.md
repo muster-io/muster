@@ -204,6 +204,24 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Team mentions, which no read shows and the Team's next save of its Team mentions replaces, and a new bot token or
       server URL it saves keeps what the last check found of the old bot's groups until the Connection is checked again
       on 0.2.0.
+    - Migration 0043 turns the Mention settings of every Destination into
+      [Mention entries](../concepts/mentions.md#upgrading-from-01) with the same effect: each target chosen for a kind
+      of Loud event becomes one entry for those kinds, and an entry for `new_alert_group` also applies to the start of
+      a Storm, as the Storm summary of 0.1 mentioned. A Destination that mentioned nobody has no entries, and a
+      Destination of a Team gets the entry "Team {Team}", Telegram excepted. Until 0.3.0 the API still returns the
+      Mention settings as the deprecated field `mentions`, computed from the entries — the same Users and groups for
+      each kind, listed in the order of the first kind that lists each — and a request with `mentions` and without
+      `mention_entries` is still converted, replacing only the entries that 0.1 could express; 0.3.0 removes the
+      field. The migration keeps `destinations.mentions` as it found it and 0.2.0 no longer writes it,
+      except that a Destination created on 0.2.0 stores nobody there. It is expand only, and its down migration drops
+      the entries and restores the settings as the column kept them.
+    - Migration 0044 adds what the Destination check of a Telegram Destination sees of the members of its discussion
+      group, for the warnings about [unreachable On-calls](../concepts/schedules.md#unreachable-on-calls): nothing is
+      known after the upgrade, so no On-call is warned about a discussion group until each Telegram Destination is
+      saved or checked again. It is expand only: a 0.1 replica, or one of a development image without it, reads and
+      writes neither column, and a check it runs leaves what the last check on 0.2.0 saw. A Telegram Destination that
+      such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
+      the old group until its next check: select **Check** on it once every replica runs 0.2.0.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -282,7 +300,13 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     this version. The same holds for a change of a Route's language, Snooze durations or templates, or of a Link rule
     or a Lookup table, saved on a 0.1 replica or on one of a development image without migration 0039, and for a
     rename of a User or a Service account or a change of an Account link made on one without migration 0040, and for a
-    change of a Destination's Connection saved on one without migration 0041. A 0.1
+    change of a Destination's Connection saved on one without migration 0041. A 0.1 replica mentions by the Mention
+    settings of 0.1, which migration 0043 keeps, and ignores the Mention entries until it stops: a change of the
+    Mentions saved during the rollout reaches the messages that a 0.1 replica sends only after the rollout, and a
+    Destination created during it mentions nobody there. A change of the Mentions saved through the API of a 0.1
+    replica writes only the column, which 0.2.0 never reads, and is lost. Change the Mentions after every replica runs
+    0.2.0. An Alert Group that a 0.1 replica counts against a Storm during the rollout is not recorded among the Alert
+    Groups of the Storm, so its Teams add no Mentions to the first publication of the Storm's summary. A 0.1
     replica ignores Severity conditions and Team Destinations: until the rollout ends, the Alert Groups it changes go to every
     Destination of their Route, whatever its condition, and not to the Destinations of their Teams, and it records no
     `destination_joined`. Set Severity conditions, the Destinations of Teams and "Also
@@ -700,6 +724,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Muster, run `UPDATE schema_migrations SET version = 41, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`. Going back below 0042 loses every Team mention and what the checks found of the groups; once 0042
     is back, each Connection's next check finds the groups again, and the Team mentions are entered again.
+
+    Migration 0044 adds the two columns of what a Telegram Destination's check saw of its discussion group in one
+    transaction: a failure leaves nothing of it, but the schema recorded as dirty at version 44. To recover, with the
+    same database role as Muster, run `UPDATE schema_migrations SET version = 43, dirty = false;` and start the 0.2.0
+    replica again, or run `muster migrate`. Going back below 0044 loses what the checks saw, and with it the warnings
+    `not_in_discussion_group`; once 0044 is back, each Telegram Destination's next check finds them again.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

@@ -1,31 +1,37 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package mentions holds the Mention settings of C-12.FR-8 and FR-12: whom a Destination mentions for each kind of
-// Loud event — nobody, everyone in the chat with the word its messenger offers, chosen Users or messenger groups —
-// validated per Destination type, Telegram and Bridges taking nobody and chosen Users only (C-22.FR-3), Slack no
-// Mention of all and no messenger groups (C-24.FR-6), and the
-// resolution of a Loud message's symbolic Mentions into targets: the Destination's setting for a kind, the Owner the
-// lifecycle event recorded, or its previous Owner. A User is named by the username of their Account link in the
-// Destination's identity space — through a Bridge by the link's messenger user id and display name (C-22.FR-16), and
-// in Slack by the link's user id as <@id>, which its adapter renders (C-24.FR-6) — otherwise by the Muster display
-// name, which mentions nobody; the footer of a message names its user the same way (C-12.FR-12). Storing the
-// settings is the Destination's, and rendering a target in a messenger's syntax is its adapter's.
+// Package mentions holds whom a Destination mentions. From 0.2.0 that is its Mention entries (C-28.FR-1): an ordered
+// list, each entry one target — everyone in the chat with a word, a person, a messenger group, a Team, the Teams of the
+// Alert Group, or the On-call of a Team or of each Team of the Alert Group — and the Loud events it applies to, limited
+// to what the Destination's Connection can mention (C-28.FR-2), with the L1 Mention settings of C-12.FR-8 derived from
+// them and converted into them until 0.3.0 (C-28.FR-5). It resolves the symbolic Mentions of a Loud message into
+// targets (C-28.FR-3, FR-4): the entries for its event — a person by their Account link in the Destination's identity
+// space and left out without one, a Team by its Team mention for the Connection and nobody without one, the On-call by
+// the Team's main Schedule at the moment of the event — and the Owner the lifecycle event recorded or its previous
+// Owner, named as L1 named them. A User is named by the username of their Account link in the Destination's identity
+// space — through a Bridge by the link's messenger user id and display name (C-22.FR-16), and in Slack by the link's
+// user id as <@id>, which its adapter renders (C-24.FR-6) — otherwise by the Muster display name, which mentions
+// nobody; the footer of a message names its user the same way (C-12.FR-12). It imports neither internal/schedules nor
+// internal/teams: the On-call and the Team mentions come through the interfaces it declares, which internal/runtime
+// wires (ADR-0016). Storing a Destination is internal/destinations', and rendering a target in a messenger's syntax is
+// its adapter's.
 package mentions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/mentions/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -103,6 +109,9 @@ type FieldError struct {
 	Pointer string
 	Code    string
 	Detail  string
+	// extra marks a field a target of its kind does not have there, which yields to the refusal of the target as a
+	// whole when the Connection cannot mention it.
+	extra bool
 }
 
 func (e *FieldError) Error() string {
@@ -114,19 +123,67 @@ type DBTX = dbgen.DBTX
 
 // Queries are the queries of the package.
 type Queries interface {
-	GetDestinationMentions(ctx context.Context, arg dbgen.GetDestinationMentionsParams) ([]byte, error)
+	ListMentionEntries(ctx context.Context, arg dbgen.ListMentionEntriesParams) ([]dbgen.ListMentionEntriesRow, error)
+	DeleteMentionEntries(ctx context.Context, arg dbgen.DeleteMentionEntriesParams) error
+	InsertMentionEntries(ctx context.Context, arg dbgen.InsertMentionEntriesParams) error
+	ResolveEntryUsers(ctx context.Context, arg dbgen.ResolveEntryUsersParams) ([]dbgen.ResolveEntryUsersRow, error)
+	ResolveEntryTeams(ctx context.Context, arg dbgen.ResolveEntryTeamsParams) ([]dbgen.ResolveEntryTeamsRow, error)
+	ListLiveTeams(ctx context.Context, orgID int64) ([]dbgen.ListLiveTeamsRow, error)
+	GetMentionConnection(ctx context.Context, arg dbgen.GetMentionConnectionParams) (dbgen.GetMentionConnectionRow,
+		error)
+	ListAlertGroupTeams(ctx context.Context, arg dbgen.ListAlertGroupTeamsParams) ([]dbgen.ListAlertGroupTeamsRow,
+		error)
+	ListStormTeams(ctx context.Context, arg dbgen.ListStormTeamsParams) ([]dbgen.ListStormTeamsRow, error)
+	LockEntryDestination(ctx context.Context, arg dbgen.LockEntryDestinationParams) (dbgen.LockEntryDestinationRow,
+		error)
+	BumpEntryDestination(ctx context.Context, arg dbgen.BumpEntryDestinationParams) error
+	GetMentionEventAt(ctx context.Context, arg dbgen.GetMentionEventAtParams) (time.Time, error)
+	GetPublicationEventAt(ctx context.Context, arg dbgen.GetPublicationEventAtParams) (time.Time, error)
+	GetStormStartedAt(ctx context.Context, arg dbgen.GetStormStartedAtParams) (time.Time, error)
 	GetEventOwners(ctx context.Context, arg dbgen.GetEventOwnersParams) (dbgen.GetEventOwnersRow, error)
 	ListMentionUsers(ctx context.Context, arg dbgen.ListMentionUsersParams) ([]dbgen.ListMentionUsersRow, error)
 	ListLiveUserPublicIDs(ctx context.Context, arg dbgen.ListLiveUserPublicIDsParams) ([]string, error)
 	ListFooterUsers(ctx context.Context, arg dbgen.ListFooterUsersParams) ([]dbgen.ListFooterUsersRow, error)
 }
 
-// Service validates Mention settings, resolves Mentions and names users for the Organization.
+// OnCalls is the On-call of a Team (C-27.FR-4), declared by its consumer; *schedules.Service implements it, and
+// internal/runtime wires it. TeamOnCallAt is the User on Shift in the main Schedule of the Team teamID at t, by id, and
+// false for a Team without a main Schedule or in a gap of it, read through db — the transaction of the resolution, so
+// that it takes no second connection of the pool while the caller holds one — or the main pool for a nil one.
+type OnCalls interface {
+	TeamOnCallAt(ctx context.Context, db DBTX, teamID int64, t time.Time) (int64, bool, error)
+}
+
+// TeamMention is the Team mention that mentions a Team through a Connection (C-25.FR-8): the group and, for a Slack
+// Connection, the user group's id.
+type TeamMention struct {
+	Group   string
+	GroupID string
+}
+
+// TeamMentions are the Team mentions of the Teams (C-25.FR-8), declared by their consumer; *teams.Service implements
+// them, and internal/runtime wires them. ForConnection is the Team mention of the Team teamID for the Connection
+// connectionID, false when there is none that the Connection can carry now, read through db as OnCalls reads.
+type TeamMentions interface {
+	ForConnection(ctx context.Context, db DBTX, teamID, connectionID int64) (TeamMention, bool, error)
+}
+
+// Service validates Mention entries and settings, resolves Mentions and names users for the Organization.
 type Service struct {
 	orgID int64
 	db    DBTX
 	// queries are the queries over a pool or a transaction; tests replace them.
-	queries func(DBTX) Queries
+	queries      func(DBTX) Queries
+	onCalls      OnCalls
+	teamMentions TeamMentions
+	business     clock.Clock
+}
+
+// Wire gives the Service the On-call of the Teams, their Team mentions and the business clock, on which a read says
+// what an entry mentions now and a request without a time takes the On-call; without them a Team and an On-call
+// mention nobody.
+func (s *Service) Wire(onCalls OnCalls, teamMentions TeamMentions, business clock.Clock) {
+	s.onCalls, s.teamMentions, s.business = onCalls, teamMentions, business
 }
 
 // New is the Service of the Organization orgID over the main pool db.
@@ -187,9 +244,10 @@ func refusal(destinationType string, groups bool) string {
 
 // Validate refuses Mention settings that a Destination of the type cannot take (C-12.FR-8, C-22.FR-3, C-24.FR-6): every
 // kind is present; everyone is none, channel, all or here, only none for Telegram and Bridges, and not all for Slack;
-// user_ids name Users that exist and are not deleted; groups are Mattermost group names, and none for Telegram,
-// Bridges and Slack. Outgoing webhooks take every choice, as data.
-func (s *Service) Validate(ctx context.Context, destinationType string, set Settings) error {
+// user_ids name Users that exist and are not deleted, or that an entry of stored, the Destination's entries before the
+// save, names, so that a read sent back with a User deleted since is not refused for it (C-28.FR-5, settled 2); groups
+// are Mattermost group names, and none for Telegram, Bridges and Slack. Outgoing webhooks take every choice, as data.
+func (s *Service) Validate(ctx context.Context, destinationType string, set Settings, stored []EntryInput) error {
 	for name := range set {
 		if !slices.Contains(Kinds, name) {
 			return &FieldError{Pointer: "/mentions/" + name, Code: CodeInvalidFormat,
@@ -252,7 +310,7 @@ func (s *Service) Validate(ctx context.Context, destinationType string, set Sett
 		return fmt.Errorf("read the users of the mention settings: %w", err)
 	}
 	for _, r := range refs {
-		if !slices.Contains(live, r.id) {
+		if !slices.Contains(live, r.id) && !kept(stored, EntryTarget{Kind: TargetUser, UserID: r.id}) {
 			return &FieldError{Pointer: r.pointer, Code: CodeUnknownID, Detail: "No such user."}
 		}
 	}
@@ -260,22 +318,35 @@ func (s *Service) Validate(ctx context.Context, destinationType string, set Sett
 }
 
 // Request is the Mentions of one Loud message to resolve: its Destination — id, type and Connection — its Alert
-// Group and the lifecycle event it carries, 0 for none, and the symbolic Mentions.
+// Group, or for the first publication of a Storm summary its Storm, the lifecycle event it carries, 0 for none, the
+// business time of the event, at which the On-call is taken — zero to have Resolve read it (eventAt) — and the symbolic
+// Mentions.
 type Request struct {
 	DestinationID   int64
 	DestinationType string
 	ConnectionID    *int64
 	AlertGroupID    int64
+	StormID         int64
 	Seq             int64
+	At              time.Time
 	Mentions        []string
 }
 
-// Target is one Mention for an adapter to render: everyone in the chat with the word, a messenger group, or a User.
+// Target is one Mention for an adapter to render: everyone in the chat with the word, a messenger group — a Team
+// mention among them — with a Slack user group's id, a User, or for an outgoing webhook a Team as data (C-15.FR-11).
 type Target struct {
-	Kind     string `json:"kind"`
-	Everyone string `json:"everyone,omitempty"`
-	Group    string `json:"group,omitempty"`
-	User     *User  `json:"user,omitempty"`
+	Kind     string      `json:"kind"`
+	Everyone string      `json:"everyone,omitempty"`
+	Group    string      `json:"group,omitempty"`
+	GroupID  string      `json:"group_id,omitempty"`
+	User     *User       `json:"user,omitempty"`
+	Team     *TeamTarget `json:"team,omitempty"`
+}
+
+// TeamTarget is a Team as an outgoing webhook receives it: its slug and name.
+type TeamTarget struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
 }
 
 // User is a User as a Mention names them: public_id, display name, login, and the username, the messenger's user id
@@ -317,54 +388,381 @@ func IdentitySpace(destinationType string, connection *int64) string {
 	return ""
 }
 
+// part is one thing an entry mentions: the word of everyone, a group with a Slack user group's id, a Team as an
+// outgoing webhook receives it, or a User by id.
+type part struct {
+	everyone string
+	group    string
+	groupID  string
+	team     *TeamRef
+	user     int64
+}
+
+// partGroup is what an entry mentions for one Team, nil for the targets that name none.
+type partGroup struct {
+	team  *TeamRef
+	parts []part
+}
+
+// onCall is the On-call of a Team at the resolver's time: the User's id, or none.
+type onCall struct {
+	user int64
+	ok   bool
+}
+
+// teamMention is a Team mention for a Connection, or none.
+type teamMention struct {
+	mention TeamMention
+	ok      bool
+}
+
+// resolver expands entries at one time through one set of queries, reading each Connection, On-call, Team mention and
+// the Teams that are not deleted once.
+type resolver struct {
+	s        *Service
+	ctx      context.Context
+	db       DBTX
+	q        Queries
+	at       time.Time
+	conns    map[string]Connection
+	onCalls  map[int64]onCall
+	mentions map[[2]int64]teamMention
+	live     []TeamRef
+	liveRead bool
+}
+
+func (s *Service) newResolver(ctx context.Context, db DBTX, q Queries, at time.Time) *resolver {
+	return &resolver{s: s, ctx: ctx, db: db, q: q, at: at, conns: map[string]Connection{}, onCalls: map[int64]onCall{},
+		mentions: map[[2]int64]teamMention{}}
+}
+
+// connection is what the Connection of a Destination of the type, by id or public_id, can mention; none for an
+// outgoing webhook.
+func (r *resolver) connection(destinationType string, id *int64, publicID string) (Connection, error) {
+	if destinationType == TypeWebhook {
+		return Connection{}, nil
+	}
+	key := "p" + publicID
+	if id != nil {
+		key = "i" + strconv.FormatInt(*id, 10)
+	}
+	if c, ok := r.conns[key]; ok {
+		return c, nil
+	}
+	c, err := r.s.connection(r.ctx, r.q, id, publicID)
+	if err != nil {
+		return Connection{}, err
+	}
+	r.conns[key] = c
+	return c, nil
+}
+
+// liveTeams are the Teams that are not deleted, by name, for a read of the targets from the label.
+func (r *resolver) liveTeams() ([]TeamRef, error) {
+	if r.liveRead {
+		return r.live, nil
+	}
+	rows, err := r.q.ListLiveTeams(r.ctx, r.s.orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list the teams for the mention entries: %w", err)
+	}
+	for _, t := range rows {
+		r.live = append(r.live, TeamRef{ID: t.ID, PublicID: t.PublicID, Name: t.Name, Slug: t.Slug})
+	}
+	r.liveRead = true
+	return r.live, nil
+}
+
+// teamParts is what a Team mentions in a Destination of the type on the Connection c: through a messenger its Team
+// mention for the Connection, nobody without one — never its On-call (C-28.FR-3) — and for an outgoing webhook the Team
+// itself, as data (C-15.FR-11).
+func (r *resolver) teamParts(destinationType string, c Connection, t TeamRef) ([]part, error) {
+	if destinationType == TypeWebhook {
+		team := t
+		return []part{{team: &team}}, nil
+	}
+	if r.s.teamMentions == nil || c.ID == 0 {
+		return nil, nil
+	}
+	key := [2]int64{t.ID, c.ID}
+	m, ok := r.mentions[key]
+	if !ok {
+		tm, found, err := r.s.teamMentions.ForConnection(r.ctx, r.db, t.ID, c.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read the team mention of %s: %w", t.PublicID, err)
+		}
+		m = teamMention{mention: tm, ok: found}
+		r.mentions[key] = m
+	}
+	if !m.ok {
+		return nil, nil
+	}
+	return []part{{group: m.mention.Group, groupID: m.mention.GroupID}}, nil
+}
+
+// onCallParts is the On-call of the Team's main Schedule at the resolver's time, nobody without one or in a gap
+// (C-27.FR-4, C-28.FR-3).
+func (r *resolver) onCallParts(t TeamRef) ([]part, error) {
+	if r.s.onCalls == nil || r.at.IsZero() {
+		return nil, nil
+	}
+	o, ok := r.onCalls[t.ID]
+	if !ok {
+		user, found, err := r.s.onCalls.TeamOnCallAt(r.ctx, r.db, t.ID, r.at)
+		if err != nil {
+			return nil, fmt.Errorf("read the on-call of %s: %w", t.PublicID, err)
+		}
+		o = onCall{user: user, ok: found}
+		r.onCalls[t.ID] = o
+	}
+	if !o.ok {
+		return nil, nil
+	}
+	return []part{{user: o.user}}, nil
+}
+
+// expand is what the entry e of a Destination of the type on the Connection c mentions, for each Team: the targets from
+// the label for each of labelTeams. An entry the Connection cannot mention now, or one that names a deleted User or
+// Team, mentions nobody.
+func (r *resolver) expand(destinationType string, c Connection, e Entry, labelTeams []TeamRef) ([]partGroup, error) {
+	available, _ := Can(destinationType, c, e.Target)
+	var out []partGroup
+	perTeam := func(t TeamRef, onCall bool) error {
+		g := partGroup{team: &t}
+		var err error
+		switch {
+		case !available || t.Deleted:
+		case onCall:
+			g.parts, err = r.onCallParts(t)
+		default:
+			g.parts, err = r.teamParts(destinationType, c, t)
+		}
+		out = append(out, g)
+		return err
+	}
+	switch e.Target.Kind {
+	case TargetEveryone:
+		g := partGroup{}
+		if available {
+			g.parts = []part{{everyone: e.Target.Everyone}}
+		}
+		out = append(out, g)
+	case TargetUser:
+		g := partGroup{}
+		if e.User != nil && !e.User.Deleted {
+			g.parts = []part{{user: e.User.ID}}
+		}
+		out = append(out, g)
+	case TargetGroup:
+		g := partGroup{}
+		if available {
+			g.parts = []part{{group: e.Target.Group, groupID: e.Target.GroupID}}
+		}
+		out = append(out, g)
+	case TargetTeam, TargetOnCallOfTeam:
+		if e.Team == nil {
+			out = append(out, partGroup{})
+			break
+		}
+		if err := perTeam(*e.Team, e.Target.Kind == TargetOnCallOfTeam); err != nil {
+			return nil, err
+		}
+	case TargetTeamsFromLabel, TargetOnCallOfTeamsFromLabel:
+		for _, t := range labelTeams {
+			if err := perTeam(t, e.Target.Kind == TargetOnCallOfTeamsFromLabel); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
+}
+
+// users reads the Users that are not deleted among ids with their Account link in the identity space, by id.
+func (r *resolver) users(space string, ids []int64) (map[int64]dbgen.ListMentionUsersRow, error) {
+	out := map[int64]dbgen.ListMentionUsersRow{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.q.ListMentionUsers(r.ctx, dbgen.ListMentionUsersParams{OrgID: r.s.orgID, IdentitySpace: space,
+		Ids: ids, PublicIds: []string{}})
+	if err != nil {
+		return nil, fmt.Errorf("read the users of the mentions: %w", err)
+	}
+	for _, u := range rows {
+		out[u.ID] = u
+	}
+	return out, nil
+}
+
+// spaceOf is the identity space of a Destination of the type on the Connection c.
+func spaceOf(destinationType string, c Connection) string {
+	if c.ID == 0 {
+		return IdentitySpace(destinationType, nil)
+	}
+	return IdentitySpace(destinationType, &c.ID)
+}
+
+// describe sets on each entry of a Destination of the type on the Connection c whether c can mention it now and what
+// it mentions now (MentionEntry.resolves_to): a person by the username of their Account link, else their login, with
+// whether they have one — always on an outgoing webhook, which mentions people as data — a group or a Team mention by
+// its name, a Team of an outgoing webhook by its slug, and the targets from the label for each Team that is not
+// deleted.
+func (r *resolver) describe(destinationType string, c Connection, list []Entry) error {
+	groups := make([][]partGroup, len(list))
+	var ids []int64
+	for i := range list {
+		e := &list[i]
+		e.Available, e.UnavailableReason = Can(destinationType, c, e.Target)
+		var label []TeamRef
+		if e.Target.Kind == TargetTeamsFromLabel || e.Target.Kind == TargetOnCallOfTeamsFromLabel {
+			var err error
+			if label, err = r.liveTeams(); err != nil {
+				return err
+			}
+		}
+		g, err := r.expand(destinationType, c, *e, label)
+		if err != nil {
+			return err
+		}
+		groups[i] = g
+		for _, pg := range g {
+			for _, p := range pg.parts {
+				if p.user != 0 {
+					ids = append(ids, p.user)
+				}
+			}
+		}
+	}
+	users, err := r.users(spaceOf(destinationType, c), ids)
+	if err != nil {
+		return err
+	}
+	for i := range list {
+		list[i].ResolvesTo = make([]Resolution, 0, len(groups[i]))
+		for _, pg := range groups[i] {
+			res := Resolution{Team: pg.team, Mentions: []Resolved{}}
+			for _, p := range pg.parts {
+				switch {
+				case p.everyone != "":
+					res.Mentions = append(res.Mentions, Resolved{Kind: TargetEveryone, Name: p.everyone, Linked: true})
+				case p.group != "":
+					res.Mentions = append(res.Mentions, Resolved{Kind: TargetGroup, Name: p.group, Linked: true})
+				case p.team != nil:
+					res.Mentions = append(res.Mentions, Resolved{Kind: TargetGroup, Name: p.team.Slug, Linked: true})
+				case p.user != 0:
+					u, ok := users[p.user]
+					if !ok {
+						continue
+					}
+					linked := u.Linked || destinationType == TypeWebhook
+					name := u.Login
+					if u.Linked && u.Username != "" {
+						name = u.Username
+					}
+					res.Mentions = append(res.Mentions, Resolved{Kind: TargetUser, Name: name, Linked: linked})
+				}
+			}
+			list[i].ResolvesTo = append(list[i].ResolvesTo, res)
+		}
+	}
+	return nil
+}
+
+// labelTeams are the Teams that "from the label" names for the request: those of the Alert Group (C-25.FR-6), or for
+// the first publication of a Storm summary those of the Alert Groups the Storm counts (C-28.FR-7).
+func (s *Service) labelTeams(ctx context.Context, q Queries, org int64, r Request) ([]TeamRef, error) {
+	var out []TeamRef
+	switch {
+	case r.StormID != 0:
+		rows, err := q.ListStormTeams(ctx, dbgen.ListStormTeamsParams{OrgID: org, StormID: r.StormID})
+		if err != nil {
+			return nil, fmt.Errorf("read the teams of storm %d: %w", r.StormID, err)
+		}
+		for _, t := range rows {
+			out = append(out, TeamRef{ID: t.ID, PublicID: t.PublicID, Name: t.Name, Slug: t.Slug})
+		}
+	case r.AlertGroupID != 0:
+		rows, err := q.ListAlertGroupTeams(ctx, dbgen.ListAlertGroupTeamsParams{OrgID: org,
+			AlertGroupID: r.AlertGroupID})
+		if err != nil {
+			return nil, fmt.Errorf("read the teams of alert group %d: %w", r.AlertGroupID, err)
+		}
+		for _, t := range rows {
+			out = append(out, TeamRef{ID: t.ID, PublicID: t.PublicID, Name: t.Name, Slug: t.Slug})
+		}
+	}
+	return out, nil
+}
+
 // Resolve turns the symbolic Mentions of a Loud message into its targets in the Organization org, reading through
-// db (C-12.FR-8): a kind of Loud event into the Destination's setting for it — everyone, its groups, its Users — the
-// Owner into the Owner the lifecycle event recorded, or the Owner it released, and the previous Owner into the one a
-// Takeover replaced. A Reopen into acknowledged carries only the Owner, by the lifecycle event table. Duplicates are
-// left out, and so are the choices the Destination's type does not offer.
+// db (C-28.FR-3, FR-4, FR-7): the Loud events among them into the Destination's entries that apply to any of them, in
+// the entries' order — everyone with its word, a group by its name, a person by their Account link in the
+// Destination's identity space and left out without one, a Team by its Team mention for the Connection and nobody
+// without one, "Team from the label" by the Team mention of each Team of the Alert Group, the On-call of a Team by its
+// main Schedule at the time of the request, nobody without one or in a gap, and the same for each Team of the Alert
+// Group; for the first publication of a Storm summary the Teams of the Alert Groups the Storm counts. An entry that the
+// Connection cannot mention now mentions nobody. An outgoing webhook takes every target as data, a person without an
+// Account link and a Team as itself included (C-15.FR-11). The Owner turns into the Owner the lifecycle event recorded,
+// or the Owner it released, and the previous Owner into the one a Takeover replaced, named as L1 named them, without a
+// link by their display name. Each person and group is mentioned once.
 func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([]Target, error) {
 	if len(r.Mentions) == 0 {
 		return nil, nil
 	}
 	q := s.q(db)
-	set, err := s.settings(ctx, q, org, r)
-	if err != nil {
-		return nil, err
-	}
 	owner, previous, err := s.owners(ctx, q, org, r)
 	if err != nil {
 		return nil, err
 	}
-	var ids []int64
-	var publicIDs []string
+	var events []string
 	for _, m := range r.Mentions {
-		switch m {
-		case Owner:
-			ids = appendID(ids, owner)
-		case PreviousOwner:
-			ids = appendID(ids, previous)
-		default:
-			for _, id := range set[m].UserIDs {
-				if n, err := publicid.Parse(publicid.User, id); err == nil {
-					publicIDs = append(publicIDs, n)
-				}
-			}
+		if slices.Contains(Events, m) && !slices.Contains(events, m) {
+			events = append(events, m)
 		}
 	}
-	users := map[string]User{}
-	byID := map[int64]string{}
-	if len(ids) > 0 || len(publicIDs) > 0 {
-		rows, err := q.ListMentionUsers(ctx, dbgen.ListMentionUsersParams{OrgID: org,
-			IdentitySpace: IdentitySpace(r.DestinationType, r.ConnectionID), Ids: orEmpty(ids),
-			PublicIds: orEmpty(publicIDs)})
-		if err != nil {
-			return nil, fmt.Errorf("read the users of the mentions: %w", err)
+	at := r.At
+	if at.IsZero() && len(events) > 0 {
+		if at, err = s.eventAt(ctx, q, org, r); err != nil {
+			return nil, err
 		}
-		for _, u := range rows {
-			users[u.PublicID] = User{PublicID: u.PublicID, Name: u.Name, Login: u.Login, Username: u.Username,
-				ExternalID: u.ExternalID, DisplayName: u.DisplayName}
-			byID[u.ID] = u.PublicID
+	}
+	rs := s.newResolver(ctx, db, q, at)
+	var parts []part
+	var named []bool // whether each part is named by an entry, whose people need an Account link
+	var conn Connection
+	if len(events) > 0 {
+		if parts, named, conn, err = s.entryParts(ctx, rs, org, r, events); err != nil {
+			return nil, err
 		}
+	}
+	// The Owner's and the previous Owner's places among the parts: at their places in the symbolic Mentions, the
+	// entries at the place of the first Loud event.
+	var ordered []part
+	var byEntry []bool
+	placed := false
+	for _, m := range r.Mentions {
+		switch {
+		case m == Owner && owner != nil:
+			ordered, byEntry = append(ordered, part{user: *owner}), append(byEntry, false)
+		case m == PreviousOwner && previous != nil:
+			ordered, byEntry = append(ordered, part{user: *previous}), append(byEntry, false)
+		case slices.Contains(events, m) && !placed:
+			ordered, byEntry = append(ordered, parts...), append(byEntry, named...)
+			placed = true
+		}
+	}
+	var ids []int64
+	for _, p := range ordered {
+		if p.user != 0 {
+			ids = append(ids, p.user)
+		}
+	}
+	if conn.ID == 0 && r.ConnectionID != nil {
+		conn.ID = *r.ConnectionID
+	}
+	users, err := rs.users(spaceOf(r.DestinationType, conn), ids)
+	if err != nil {
+		return nil, err
 	}
 	var out []Target
 	add := func(t Target) {
@@ -372,83 +770,131 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 			out = append(out, t)
 		}
 	}
-	addUser := func(publicID string) {
-		if u, ok := users[publicID]; ok {
-			add(Target{Kind: TargetUser, User: &u})
-		}
-	}
-	for _, m := range r.Mentions {
-		switch m {
-		case Owner, PreviousOwner:
-			id := owner
-			if m == PreviousOwner {
-				id = previous
+	for i, p := range ordered {
+		switch {
+		case p.everyone != "":
+			add(Target{Kind: TargetEveryone, Everyone: p.everyone})
+		case p.group != "":
+			add(Target{Kind: TargetGroup, Group: p.group, GroupID: p.groupID})
+		case p.team != nil:
+			add(Target{Kind: TargetTeam, Team: &TeamTarget{Slug: p.team.Slug, Name: p.team.Name}})
+		case p.user != 0:
+			u, ok := users[p.user]
+			if !ok || (byEntry[i] && !u.Linked && r.DestinationType != TypeWebhook) {
+				continue
 			}
-			if id != nil {
-				addUser(byID[*id])
-			}
-			continue
-		}
-		st := set[m]
-		if st.Everyone != "" && st.Everyone != EveryoneNone && everyoneOffered(r.DestinationType, st.Everyone) {
-			add(Target{Kind: TargetEveryone, Everyone: st.Everyone})
-		}
-		if groupsOffered(r.DestinationType) {
-			for _, g := range st.Groups {
-				add(Target{Kind: TargetGroup, Group: g})
-			}
-		}
-		for _, id := range st.UserIDs {
-			if n, err := publicid.Parse(publicid.User, id); err == nil {
-				addUser(n)
-			}
+			add(Target{Kind: TargetUser, User: &User{PublicID: u.PublicID, Name: u.Name, Login: u.Login,
+				Username: u.Username, ExternalID: u.ExternalID, DisplayName: u.DisplayName}})
 		}
 	}
 	return out, nil
+}
+
+// entryParts are what the Destination's entries that apply to any of the events mention, in their order, each marked
+// as named by an entry, and the Destination's Connection.
+func (s *Service) entryParts(ctx context.Context, rs *resolver, org int64, r Request, events []string) ([]part,
+	[]bool, Connection, error) {
+	all, err := s.listEntriesOf(ctx, rs.q, org, r.DestinationID)
+	if err != nil {
+		return nil, nil, Connection{}, err
+	}
+	var list []Entry
+	label := false
+	for _, e := range all {
+		if slices.ContainsFunc(e.Events, func(ev string) bool { return slices.Contains(events, ev) }) {
+			list = append(list, e)
+			label = label || e.Target.Kind == TargetTeamsFromLabel || e.Target.Kind == TargetOnCallOfTeamsFromLabel
+		}
+	}
+	if len(list) == 0 {
+		return nil, nil, Connection{}, nil
+	}
+	conn, err := rs.connection(r.DestinationType, r.ConnectionID, "")
+	if err != nil {
+		return nil, nil, Connection{}, err
+	}
+	var teams []TeamRef
+	if label {
+		if teams, err = s.labelTeams(ctx, rs.q, org, r); err != nil {
+			return nil, nil, Connection{}, err
+		}
+	}
+	var parts []part
+	for _, e := range list {
+		groups, err := rs.expand(r.DestinationType, conn, e, teams)
+		if err != nil {
+			return nil, nil, Connection{}, err
+		}
+		for _, g := range groups {
+			parts = append(parts, g.parts...)
+		}
+	}
+	named := make([]bool, len(parts))
+	for i := range named {
+		named[i] = true
+	}
+	return parts, named, conn, nil
+}
+
+// listEntriesOf reads the entries of one Destination of the Organization org through q.
+func (s *Service) listEntriesOf(ctx context.Context, q Queries, org, destinationID int64) ([]Entry, error) {
+	rows, err := q.ListMentionEntries(ctx, dbgen.ListMentionEntriesParams{OrgID: org,
+		DestinationIds: []int64{destinationID}})
+	if err != nil {
+		return nil, fmt.Errorf("read the mention entries of destination %d: %w", destinationID, err)
+	}
+	out := make([]Entry, len(rows))
+	for i, row := range rows {
+		out[i] = entryOf(row)
+	}
+	return out, nil
+}
+
+// eventAt is the business time of the event the request carries, at which its On-call is taken (C-28.FR-3), read
+// through q so that a retry or a send the limiter delayed takes the same: the Timeline entry of its lifecycle event;
+// for a first Publication, the latest of the Alert Group's creation and its destination_joined in the Destination;
+// for the first publication of a Storm summary, the start of the Storm; the business clock's now when none is found.
+func (s *Service) eventAt(ctx context.Context, q Queries, org int64, r Request) (time.Time, error) {
+	var at time.Time
+	var err error
+	switch {
+	case r.StormID != 0:
+		at, err = q.GetStormStartedAt(ctx, dbgen.GetStormStartedAtParams{OrgID: org, ID: r.StormID})
+	case r.AlertGroupID != 0 && r.Seq != 0:
+		at, err = q.GetMentionEventAt(ctx, dbgen.GetMentionEventAtParams{OrgID: org, AlertGroupID: r.AlertGroupID,
+			EventSeq: r.Seq})
+	case r.AlertGroupID != 0:
+		at, err = q.GetPublicationEventAt(ctx, dbgen.GetPublicationEventAtParams{OrgID: org,
+			AlertGroupID: r.AlertGroupID, DestinationID: r.DestinationID})
+	default:
+		return s.now(), nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s.now(), nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read the time of the event of the mentions: %w", err)
+	}
+	return at.UTC(), nil
 }
 
 func same(a, b Target) bool {
 	if a.Kind != b.Kind {
 		return false
 	}
-	if a.Kind == TargetUser {
+	switch a.Kind {
+	case TargetUser:
 		return a.User.PublicID == b.User.PublicID
+	case TargetTeam:
+		return a.Team.Slug == b.Team.Slug
+	case TargetGroup:
+		// A Slack user group is the same whatever handle names it: a Team mention and a group entry of one id.
+		if a.GroupID != "" || b.GroupID != "" {
+			return a.GroupID == b.GroupID
+		}
+		return a.Group == b.Group
 	}
-	return a.Everyone == b.Everyone && a.Group == b.Group
-}
-
-func appendID(ids []int64, id *int64) []int64 {
-	if id == nil {
-		return ids
-	}
-	return append(ids, *id)
-}
-
-func orEmpty[T any](s []T) []T {
-	if s == nil {
-		return []T{}
-	}
-	return s
-}
-
-// settings reads the Destination's Mention settings when a Mention names a kind; a kind it does not set mentions
-// nobody.
-func (s *Service) settings(ctx context.Context, q Queries, org int64, r Request) (Settings, error) {
-	if !slices.ContainsFunc(r.Mentions, func(m string) bool { return slices.Contains(Kinds, m) }) {
-		return Settings{}, nil
-	}
-	b, err := q.GetDestinationMentions(ctx, dbgen.GetDestinationMentionsParams{OrgID: org, ID: r.DestinationID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Settings{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read the mention settings of destination %d: %w", r.DestinationID, err)
-	}
-	set := Settings{}
-	if err := json.Unmarshal(b, &set); err != nil {
-		return nil, fmt.Errorf("read the mention settings of destination %d: %w", r.DestinationID, err)
-	}
-	return set, nil
+	return a.Everyone == b.Everyone
 }
 
 // owners reads the Owner and the previous Owner the lifecycle event recorded, when a Mention names one. The Owner is

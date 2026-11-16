@@ -1009,11 +1009,13 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
 			return routing.RestampAlerts(ctx, tx, orgID, alertIDs, routeID)
 		}})
-	// Lookup tables and Link rules give every Alert Group its links (C-12.FR-9); Mention settings name users by their
-	// Account links (C-12.FR-8, FR-12).
+	// Lookup tables and Link rules give every Alert Group its links (C-12.FR-9); Mention entries name users by their
+	// Account links (C-12.FR-8, FR-12), Teams by their Team mentions and the On-call by the Teams' main Schedules on the
+	// business clock (C-28.FR-3), which mentions imports neither for (ADR-0016).
 	linkService := links.New(links.Config{OrgID: orgID, Store: p.db.LinksStore(), Audit: w, Business: p.clocks.Business,
 		Real: p.clocks.Real, PublicURL: p.cfg.PublicURL.String(), Log: p.log})
 	p.mentions = mentions.New(orgID, p.db.MessagesDB())
+	p.mentions.Wire(p.schedules, p.teams, p.clocks.Business)
 	p.groups.SetLinks(linkService.ForGroup)
 	// Messages are rendered in the sandbox, with the buttons signed by the Keyring (C-12, ADR-0012); Route templates
 	// are dry-run on save.

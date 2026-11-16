@@ -184,6 +184,28 @@ func TestBodyFields(t *testing.T) {
 	}
 }
 
+// TestMentionTargetTeams is C-15.FR-11 revised for L2: in outgoing webhook data a Team is a target of the type team
+// with its slug and name — "Team from the label" one such target per Team of the Alert Group, as Resolve gives them —
+// and the On-call of a Team a user target; two mentions of everyone are one target, which has only its type.
+func TestMentionTargetTeams(t *testing.T) {
+	got := MentionTargets([]mentions.Target{
+		{Kind: mentions.TargetTeam, Team: &mentions.TeamTarget{Slug: "payments", Name: "Payments"}},
+		{Kind: mentions.TargetTeam, Team: &mentions.TeamTarget{Slug: "search", Name: "Search"}},
+		{Kind: mentions.TargetTeam},
+		{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "SRAAAAAAAAAAA7", Name: "Alice Smith",
+			Login: "alice"}},
+		{Kind: mentions.TargetEveryone, Everyone: "here"}, {Kind: mentions.TargetEveryone, Everyone: "channel"}})
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"type":"team","name":"Payments","slug":"payments"},{"type":"team","name":"Search","slug":"search"},` +
+		`{"type":"user","id":"SRAAAAAAAAAAA7","name":"Alice Smith","login":"alice"},{"type":"everyone"}]`
+	if string(b) != want {
+		t.Errorf("targets %s, want %s", b, want)
+	}
+}
+
 // bodyTeams are the Teams of the Alert Groups of the tests by id: payments and the deleted search for #412.
 var bodyTeams = map[int64][]dbgen.ListBodyTeamsRow{21: {
 	{PublicID: "TM0000000000PA", Name: "Payments", Slug: "payments"},

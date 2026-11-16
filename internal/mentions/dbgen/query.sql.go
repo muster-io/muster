@@ -7,34 +7,43 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getDestinationMentions = `-- name: GetDestinationMentions :one
-
-
-SELECT mentions
-FROM destinations
-WHERE org_id = $1 AND id = $2
+const bumpEntryDestination = `-- name: BumpEntryDestination :exec
+UPDATE destinations
+SET version = version + 1, updated_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3
 `
 
-type GetDestinationMentionsParams struct {
+type BumpEntryDestinationParams struct {
+	Now   time.Time
 	OrgID int64
 	ID    int64
 }
 
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright The Muster Authors
-// Mentions (C-12.FR-8, FR-12, C-22.FR-16, C-24.FR-6): the Mention settings of a Destination, the Owners a lifecycle
-// event recorded, the Users a Mention names with the username, the messenger's user id and the display name of their
-// Account link in an identity space, and the names of the user a footer names.
-// GetDestinationMentions reads the Mention settings of a Destination.
-func (q *Queries) GetDestinationMentions(ctx context.Context, arg GetDestinationMentionsParams) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getDestinationMentions, arg.OrgID, arg.ID)
-	var mentions []byte
-	err := row.Scan(&mentions)
-	return mentions, err
+// BumpEntryDestination gives a Destination whose entries a Team changed a new version.
+func (q *Queries) BumpEntryDestination(ctx context.Context, arg BumpEntryDestinationParams) error {
+	_, err := q.db.Exec(ctx, bumpEntryDestination, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const deleteMentionEntries = `-- name: DeleteMentionEntries :exec
+DELETE FROM mention_entries
+WHERE org_id = $1 AND destination_id = $2
+`
+
+type DeleteMentionEntriesParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+// DeleteMentionEntries removes the Mention entries of a Destination, before a save writes them again.
+func (q *Queries) DeleteMentionEntries(ctx context.Context, arg DeleteMentionEntriesParams) error {
+	_, err := q.db.Exec(ctx, deleteMentionEntries, arg.OrgID, arg.DestinationID)
+	return err
 }
 
 const getEventOwners = `-- name: GetEventOwners :one
@@ -61,6 +70,207 @@ func (q *Queries) GetEventOwners(ctx context.Context, arg GetEventOwnersParams) 
 	var i GetEventOwnersRow
 	err := row.Scan(&i.OwnerUserID, &i.PreviousOwnerUserID)
 	return i, err
+}
+
+const getMentionConnection = `-- name: GetMentionConnection :one
+SELECT c.id, c.public_id, c.type, coalesce(c.slack_usergroups_read, false)::boolean AS usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger,
+       (CASE jsonb_typeof(c.bridge_info->'capabilities'->'everyone_mentions')
+            WHEN 'array' THEN ARRAY(SELECT jsonb_array_elements_text(c.bridge_info->'capabilities'->'everyone_mentions'))
+            ELSE '{}'::text[] END)::text[] AS everyone_mentions
+FROM connections c
+WHERE c.org_id = $1 AND c.deleted_at IS NULL
+  AND (c.id = $2::bigint OR c.public_id = $3::text)
+`
+
+type GetMentionConnectionParams struct {
+	OrgID    int64
+	ID       pgtype.Int8
+	PublicID pgtype.Text
+}
+
+type GetMentionConnectionRow struct {
+	ID               int64
+	PublicID         string
+	Type             string
+	UsergroupsRead   bool
+	GroupMentions    bool
+	Messenger        bool
+	EveryoneMentions []string
+}
+
+// GetMentionConnection reads what a Connection that is not deleted can mention, by its id or its public_id: its
+// type, whether the last check of a Slack Connection found usergroups:read, and from a Bridge's stored info whether it
+// declares group mentions, the role messenger and the mentions of everyone it declares.
+func (q *Queries) GetMentionConnection(ctx context.Context, arg GetMentionConnectionParams) (GetMentionConnectionRow, error) {
+	row := q.db.QueryRow(ctx, getMentionConnection, arg.OrgID, arg.ID, arg.PublicID)
+	var i GetMentionConnectionRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Type,
+		&i.UsergroupsRead,
+		&i.GroupMentions,
+		&i.Messenger,
+		&i.EveryoneMentions,
+	)
+	return i, err
+}
+
+const getMentionEventAt = `-- name: GetMentionEventAt :one
+SELECT at
+FROM timeline_entries
+WHERE org_id = $1 AND alert_group_id = $2 AND event_seq = $3::bigint
+LIMIT 1
+`
+
+type GetMentionEventAtParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	EventSeq     int64
+}
+
+// GetMentionEventAt reads when a lifecycle event of an Alert Group happened, at which its On-call is taken.
+func (q *Queries) GetMentionEventAt(ctx context.Context, arg GetMentionEventAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getMentionEventAt, arg.OrgID, arg.AlertGroupID, arg.EventSeq)
+	var at time.Time
+	err := row.Scan(&at)
+	return at, err
+}
+
+const getPublicationEventAt = `-- name: GetPublicationEventAt :one
+SELECT at
+FROM timeline_entries
+WHERE org_id = $1 AND alert_group_id = $2
+  AND (event = 'created' OR (event = 'destination_joined' AND destination_id = $3::bigint))
+ORDER BY at DESC
+LIMIT 1
+`
+
+type GetPublicationEventAtParams struct {
+	OrgID         int64
+	AlertGroupID  int64
+	DestinationID int64
+}
+
+// GetPublicationEventAt reads when the first Publication of an Alert Group in a Destination was requested Loudly: the
+// latest of its creation and its destination_joined in the Destination.
+func (q *Queries) GetPublicationEventAt(ctx context.Context, arg GetPublicationEventAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getPublicationEventAt, arg.OrgID, arg.AlertGroupID, arg.DestinationID)
+	var at time.Time
+	err := row.Scan(&at)
+	return at, err
+}
+
+const getStormStartedAt = `-- name: GetStormStartedAt :one
+SELECT started_at
+FROM storms
+WHERE org_id = $1 AND id = $2
+`
+
+type GetStormStartedAtParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// GetStormStartedAt reads when a Storm started, the time of the first publication of its Storm summaries.
+func (q *Queries) GetStormStartedAt(ctx context.Context, arg GetStormStartedAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getStormStartedAt, arg.OrgID, arg.ID)
+	var started_at time.Time
+	err := row.Scan(&started_at)
+	return started_at, err
+}
+
+const insertMentionEntries = `-- name: InsertMentionEntries :exec
+INSERT INTO mention_entries (org_id, destination_id, position, target_kind, everyone, user_id, group_name,
+                             slack_usergroup_id, team_id, events, created_at)
+SELECT $1, $2, e.position, e.kind, nullif(e.everyone, ''), nullif(e.user_id, 0),
+       nullif(e.group_name, ''), nullif(e.usergroup_id, ''), nullif(e.team_id, 0),
+       string_to_array(e.events, ','), $3::timestamptz
+FROM (SELECT unnest($4::integer[]) AS position, unnest($5::text[]) AS kind,
+             unnest($6::text[]) AS everyone, unnest($7::bigint[]) AS user_id,
+             unnest($8::text[]) AS group_name, unnest($9::text[]) AS usergroup_id,
+             unnest($10::bigint[]) AS team_id, unnest($11::text[]) AS events) AS e
+`
+
+type InsertMentionEntriesParams struct {
+	OrgID         int64
+	DestinationID int64
+	Now           time.Time
+	Positions     []int32
+	Kinds         []string
+	Everyones     []string
+	UserIds       []int64
+	GroupNames    []string
+	UsergroupIds  []string
+	TeamIds       []int64
+	Events        []string
+}
+
+// InsertMentionEntries adds Mention entries to a Destination at the positions given; an empty text or a zero id is
+// the null of a field the kind does not have.
+func (q *Queries) InsertMentionEntries(ctx context.Context, arg InsertMentionEntriesParams) error {
+	_, err := q.db.Exec(ctx, insertMentionEntries,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.Now,
+		arg.Positions,
+		arg.Kinds,
+		arg.Everyones,
+		arg.UserIds,
+		arg.GroupNames,
+		arg.UsergroupIds,
+		arg.TeamIds,
+		arg.Events,
+	)
+	return err
+}
+
+const listAlertGroupTeams = `-- name: ListAlertGroupTeams :many
+SELECT t.id, t.public_id, t.name, t.slug
+FROM alert_group_teams agt
+JOIN teams t ON t.org_id = agt.org_id AND t.id = agt.team_id
+WHERE agt.org_id = $1 AND agt.alert_group_id = $2 AND t.deleted_at IS NULL
+ORDER BY lower(t.name), t.id
+`
+
+type ListAlertGroupTeamsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type ListAlertGroupTeamsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+}
+
+// ListAlertGroupTeams reads the Teams of an Alert Group that are not deleted, by name (C-25.FR-6).
+func (q *Queries) ListAlertGroupTeams(ctx context.Context, arg ListAlertGroupTeamsParams) ([]ListAlertGroupTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listAlertGroupTeams, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlertGroupTeamsRow{}
+	for rows.Next() {
+		var i ListAlertGroupTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listFooterUsers = `-- name: ListFooterUsers :many
@@ -122,6 +332,46 @@ func (q *Queries) ListFooterUsers(ctx context.Context, arg ListFooterUsersParams
 	return items, nil
 }
 
+const listLiveTeams = `-- name: ListLiveTeams :many
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = $1 AND deleted_at IS NULL
+ORDER BY lower(name), id
+`
+
+type ListLiveTeamsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+}
+
+// ListLiveTeams reads the Teams that are not deleted, by name, for what the entries from the label mention now.
+func (q *Queries) ListLiveTeams(ctx context.Context, orgID int64) ([]ListLiveTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listLiveTeams, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLiveTeamsRow{}
+	for rows.Next() {
+		var i ListLiveTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLiveUserPublicIDs = `-- name: ListLiveUserPublicIDs :many
 SELECT public_id
 FROM users
@@ -154,9 +404,97 @@ func (q *Queries) ListLiveUserPublicIDs(ctx context.Context, arg ListLiveUserPub
 	return items, nil
 }
 
+const listMentionEntries = `-- name: ListMentionEntries :many
+
+
+SELECT e.destination_id, e.position, e.target_kind, coalesce(e.everyone, '')::text AS everyone,
+       coalesce(e.group_name, '')::text AS group_name, coalesce(e.slack_usergroup_id, '')::text AS slack_usergroup_id,
+       e.events, e.user_id, coalesce(u.public_id, '')::text AS user_public_id, coalesce(u.name, '')::text AS user_name,
+       coalesce(u.login, '')::text AS user_login, coalesce(u.status = 'deleted', false)::boolean AS user_deleted,
+       e.team_id, coalesce(t.public_id, '')::text AS team_public_id, coalesce(t.name, '')::text AS team_name,
+       coalesce(t.slug, '')::text AS team_slug, (t.deleted_at IS NOT NULL)::boolean AS team_deleted
+FROM mention_entries e
+LEFT JOIN users u ON u.org_id = e.org_id AND u.id = e.user_id
+LEFT JOIN teams t ON t.org_id = e.org_id AND t.id = e.team_id
+WHERE e.org_id = $1 AND e.destination_id = ANY($2::bigint[])
+ORDER BY e.destination_id, e.position
+`
+
+type ListMentionEntriesParams struct {
+	OrgID          int64
+	DestinationIds []int64
+}
+
+type ListMentionEntriesRow struct {
+	DestinationID    int64
+	Position         int32
+	TargetKind       string
+	Everyone         string
+	GroupName        string
+	SlackUsergroupID string
+	Events           []string
+	UserID           pgtype.Int8
+	UserPublicID     string
+	UserName         string
+	UserLogin        string
+	UserDeleted      bool
+	TeamID           pgtype.Int8
+	TeamPublicID     string
+	TeamName         string
+	TeamSlug         string
+	TeamDeleted      bool
+}
+
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright The Muster Authors
+// Mentions (C-12.FR-8, FR-12, C-22.FR-16, C-24.FR-6, C-28.FR-1 to FR-7): the Mention entries of Destinations, what a
+// Connection can mention, the Teams of an Alert Group and of a Storm, the Owners a lifecycle event recorded, the Users a
+// Mention names with the username, the messenger's user id and the display name of their Account link in an identity
+// space, and the names of the user a footer names.
+// ListMentionEntries reads the Mention entries of the Destinations, in their order, each with the User and the Team it
+// names, deleted ones included.
+func (q *Queries) ListMentionEntries(ctx context.Context, arg ListMentionEntriesParams) ([]ListMentionEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listMentionEntries, arg.OrgID, arg.DestinationIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMentionEntriesRow{}
+	for rows.Next() {
+		var i ListMentionEntriesRow
+		if err := rows.Scan(
+			&i.DestinationID,
+			&i.Position,
+			&i.TargetKind,
+			&i.Everyone,
+			&i.GroupName,
+			&i.SlackUsergroupID,
+			&i.Events,
+			&i.UserID,
+			&i.UserPublicID,
+			&i.UserName,
+			&i.UserLogin,
+			&i.UserDeleted,
+			&i.TeamID,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.TeamSlug,
+			&i.TeamDeleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMentionUsers = `-- name: ListMentionUsers :many
 SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username,
-       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name
+       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name,
+       (al.user_id IS NOT NULL)::boolean AS linked
 FROM users u
 LEFT JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id
                           AND al.identity_space = $1::text
@@ -180,10 +518,12 @@ type ListMentionUsersRow struct {
 	Username    string
 	ExternalID  string
 	DisplayName string
+	Linked      bool
 }
 
 // ListMentionUsers reads the Users that are not deleted among the ids and the public_ids, with the username, the
-// messenger's user id and the display name of their Account link in the identity space, empty without one.
+// messenger's user id and the display name of their Account link in the identity space, empty without one, and whether
+// they have one.
 func (q *Queries) ListMentionUsers(ctx context.Context, arg ListMentionUsersParams) ([]ListMentionUsersRow, error) {
 	rows, err := q.db.Query(ctx, listMentionUsers,
 		arg.IdentitySpace,
@@ -206,7 +546,166 @@ func (q *Queries) ListMentionUsers(ctx context.Context, arg ListMentionUsersPara
 			&i.Username,
 			&i.ExternalID,
 			&i.DisplayName,
+			&i.Linked,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStormTeams = `-- name: ListStormTeams :many
+SELECT DISTINCT t.id, t.public_id, t.name, t.slug, lower(t.name) AS sort_name
+FROM storm_alert_groups sag
+JOIN alert_group_teams agt ON agt.org_id = sag.org_id AND agt.alert_group_id = sag.alert_group_id
+JOIN teams t ON t.org_id = agt.org_id AND t.id = agt.team_id
+WHERE sag.org_id = $1 AND sag.storm_id = $2 AND t.deleted_at IS NULL
+ORDER BY sort_name, t.id
+`
+
+type ListStormTeamsParams struct {
+	OrgID   int64
+	StormID int64
+}
+
+type ListStormTeamsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+	SortName string
+}
+
+// ListStormTeams reads the Teams that are not deleted of the Alert Groups a Storm counts, by name, for the first
+// publication of its Storm summary (C-28.FR-7): those storm_alert_groups records as the Storm starts and joins.
+func (q *Queries) ListStormTeams(ctx context.Context, arg ListStormTeamsParams) ([]ListStormTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listStormTeams, arg.OrgID, arg.StormID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStormTeamsRow{}
+	for rows.Next() {
+		var i ListStormTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.SortName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockEntryDestination = `-- name: LockEntryDestination :one
+SELECT id, public_id, name, type
+FROM destinations
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR NO KEY UPDATE
+`
+
+type LockEntryDestinationParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockEntryDestinationRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Type     string
+}
+
+// LockEntryDestination locks a Destination that is not deleted, for the entry a Team adds to it (C-28.FR-6).
+func (q *Queries) LockEntryDestination(ctx context.Context, arg LockEntryDestinationParams) (LockEntryDestinationRow, error) {
+	row := q.db.QueryRow(ctx, lockEntryDestination, arg.OrgID, arg.ID)
+	var i LockEntryDestinationRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Type,
+	)
+	return i, err
+}
+
+const resolveEntryTeams = `-- name: ResolveEntryTeams :many
+SELECT id, public_id, (deleted_at IS NOT NULL)::boolean AS deleted
+FROM teams
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+`
+
+type ResolveEntryTeamsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ResolveEntryTeamsRow struct {
+	ID       int64
+	PublicID string
+	Deleted  bool
+}
+
+// ResolveEntryTeams reads the Teams among the public_ids, deleted ones included, for the entries of a save.
+func (q *Queries) ResolveEntryTeams(ctx context.Context, arg ResolveEntryTeamsParams) ([]ResolveEntryTeamsRow, error) {
+	rows, err := q.db.Query(ctx, resolveEntryTeams, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveEntryTeamsRow{}
+	for rows.Next() {
+		var i ResolveEntryTeamsRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Deleted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveEntryUsers = `-- name: ResolveEntryUsers :many
+SELECT id, public_id, (status = 'deleted')::boolean AS deleted
+FROM users
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+`
+
+type ResolveEntryUsersParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ResolveEntryUsersRow struct {
+	ID       int64
+	PublicID string
+	Deleted  bool
+}
+
+// ResolveEntryUsers reads the Users among the public_ids, deleted ones included, for the entries of a save.
+func (q *Queries) ResolveEntryUsers(ctx context.Context, arg ResolveEntryUsersParams) ([]ResolveEntryUsersRow, error) {
+	rows, err := q.db.Query(ctx, resolveEntryUsers, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveEntryUsersRow{}
+	for rows.Next() {
+		var i ResolveEntryUsersRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Deleted); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

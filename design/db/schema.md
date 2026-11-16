@@ -104,7 +104,14 @@
   after a change of its Connection, C-12.FR-12) and
   [`0042_team_mentions`](../../internal/db/migrations/0042_team_mentions.up.sql)
   (the Team mentions, `team_mentions`, and what a check of a Connection found of its groups,
-  `connections.slack_usergroups_read` and `connections.mattermost_groups_read`, C-25.FR-8, C-24.FR-1, FR-2, S-139), in
+  `connections.slack_usergroups_read` and `connections.mattermost_groups_read`, C-25.FR-8, C-24.FR-1, FR-2, S-139) and
+  [`0043_mention_entries`](../../internal/db/migrations/0043_mention_entries.up.sql)
+  (the Mention entries, `mention_entries`, the conversion of the L1 Mention settings into them, the Alert Groups
+  each Storm counts, `storm_alert_groups`, and the Mention `storm_started` of `delivery_events`, C-28.FR-1, FR-5,
+  FR-7, S-140) and
+  [`0044_telegram_discussion_members`](../../internal/db/migrations/0044_telegram_discussion_members.up.sql)
+  (what the last Destination check of a Telegram Destination saw of the members of its discussion group,
+  `destinations.telegram_absent_user_ids` and `destinations.telegram_members_checked_at`, C-27.FR-8, S-164), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -207,7 +214,8 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 of the Teams, `team_idp_entries` (0030), the Destinations of the Teams, `team_destinations` (0032), and the contacts at
 Notification gateways with their codes, `gateway_contacts` and `gateway_contact_codes` (0033), and the calls through
 them, `gateway_calls` and `gateway_call_items` (0034), the Notification rules of the Users, `notification_rules`
-(0037), and the Team mentions, `team_mentions` (0042), which makes 78 tables.
+(0037), the Team mentions, `team_mentions` (0042), and the Mention entries of the Destinations, `mention_entries`,
+and the Alert Groups each Storm counts, `storm_alert_groups` (0043), which makes 80 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -216,7 +224,7 @@ them, `gateway_calls` and `gateway_call_items` (0034), the Notification rules of
 | Organization | `organizations`, `outbound_policies`, `alert_group_counters` | organization; `alert_group_counters` only `groups` | — |
 | Users and sign-in | `users`, `user_totp`, `user_recovery_codes`, `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests`, `oidc_settings`, `oidc_checks` | users / auth | expired rows pruned |
 | API tokens | `service_accounts`, `api_tokens`, `api_token_permissions` | users / auth | — |
-| Messengers | `connections`, `destinations`, `destination_secrets`, `account_links`, `account_link_requests`, `bridge_events_seen` | destinations, account links, connections; `teams` clears `destinations.owning_team_id` when it deletes the Team | expired requests and handled Bridge event ids pruned |
+| Messengers | `connections`, `destinations`, `destination_secrets`, `mention_entries`, `account_links`, `account_link_requests`, `bridge_events_seen` | destinations, account links, connections; `teams` clears `destinations.owning_team_id` when it deletes the Team; `mention_entries` mentions, called by destinations at a save and by teams when a Team names a Destination | expired requests and handled Bridge event ids pruned; `mention_entries` with their Destination's row |
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing, and `groups`, which only adds | 90 days after resolution, batched delete; `alert_teams` with its Alert |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
@@ -226,7 +234,7 @@ them, `gateway_calls` and `gateway_call_items` (0034), the Notification rules of
 | Paging | `notification_rules` | notificationrules; users deletes a deleted user's row through the Notification rules | with "Reset to the Organization's rules" or the User's deletion |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
-| Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
+| Timers and Storms | `timers`, `storms`, `storm_alert_groups` | `groups`, timers, delivery; `storm_alert_groups` delivery, as a Storm starts and joins | queue rows deleted when done; `storm_alert_groups` with its Storm or its Alert Group |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
 | Request log | `request_log` | requestlog | newest `request_log.max_records` per owner and `request_log.max_age`; batched `DELETE` every minute |
 | Links | `lookup_tables`, `lookup_table_entries`, `link_rules`, `link_rule_matchers` | messages | — |
@@ -427,6 +435,8 @@ erDiagram
     alert_groups ||--o{ timers : schedules
     storms ||--o{ timers : "calm check"
     routes ||--o{ storms : "has"
+    storms ||--o{ storm_alert_groups : counts
+    alert_groups ||--o{ storm_alert_groups : "counted by"
     alert_groups |o--o{ alert_groups : "firing again after"
     routes |o--o{ alert_groups : "moved from"
 
@@ -501,6 +511,7 @@ erDiagram
     destinations ||--o{ route_destinations : "used by"
     connections |o--o{ destinations : "posts through"
     destinations ||--o{ destination_secrets : holds
+    destinations ||--o{ mention_entries : "mentions through"
     alert_groups ||--o{ deliveries : "desired state"
     storms |o--o{ deliveries : "summary or held"
     destinations ||--o{ deliveries : "reconciled to"
@@ -554,11 +565,12 @@ erDiagram
         bigint connection_id FK "type-checked"
         text telegram_channel_id "the only Telegram setting"
         bigint telegram_discussion_chat_id "found by the check"
+        bigint_array telegram_absent_user_ids "Users outside the discussion group"
         text bridge_channel_id "as its messenger names it"
         text slack_channel_id "C… or G…, as entered"
         text webhook_mode "events template both"
         bytea signing_secret_ciphertext "Secret"
-        jsonb mentions
+        jsonb mentions "L1, not written from 0043"
         text health "healthy broken"
         timestamptz next_probe_at
         timestamptz deleted_at "secrets wiped after final edits"
@@ -957,7 +969,19 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   Signing secret on every outgoing webhook that is not deleted, because it is generated at creation. A Telegram
   Destination stores only its channel as entered (`telegram_channel_id`); the numeric channel id, the channel's linked
   discussion group (`getChat` → `linked_chat_id`, in `telegram_discussion_chat_id`) and their titles are learned by the
-  Destination check. A Bridge Destination stores its channel id as its messenger names it (`bridge_channel_id`, an
+  Destination check. **Members of the discussion group** (migration 0044, C-27.FR-8): `telegram_absent_user_ids` holds
+  the `users.id` — Muster User ids, not Telegram user ids — of the active people of the Teams that name the
+  Destination who are not Viewers, with a Telegram Account link, whom the Destination checks saw outside its discussion
+  group (`getChatMember` answered `left`, `kicked`, `restricted` with `is_member` false, or `400` `Bad Request:
+  PARTICIPANT_ID_INVALID`, F-128), and `telegram_members_checked_at` when the last check ran, on the business clock.
+  Each check writes the people it saw outside the group and keeps, of those stored, the ones it could not tell — not
+  asked before its deadline or a refused request, or not answered definitively — so that only a definitive answer
+  that a person is in the group ends their absence. Both are null until a check on a replica with 0044 sets them and
+  for the other types; the check of a save, of "Check" and of nothing else writes them, only for a Telegram Destination
+  that is not deleted and only while its stored discussion group is the one the check read, and the Schedules read
+  them for their warnings `not_in_discussion_group`. It is not a change of the configuration: it bumps no `version`
+  and writes no Audit log entry.
+  A Bridge Destination stores its channel id as its messenger names it (`bridge_channel_id`, an
   opaque string of up to 512 characters) and the channel's name its Destination check (`checkChannel`) answered
   (`bridge_channel_name`). A Slack Destination stores its channel id as entered (`slack_channel_id`, `C…` or `G…`) and
   the channel's name its Destination check (`conversations.info`) answered (`slack_channel_name`); its `CHECK` leaves
@@ -965,7 +989,10 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   Destination (C-25.FR-2, migration 0022), with the partial index `destinations_owning_team_idx` on
   `(org_id, owning_team_id)` for the filters by Team; it never makes the Destination one of the Team's Destinations.
   **Health**: `health`, `broken_since`, `broken_cause` (`fatal` or `unavailable`), `broken_reason` (masked) and
-  `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the Mention settings per kind of Loud event.
+  `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the L1 Mention settings per kind of Loud event:
+  from migration 0043 it keeps what the migration found and is not written, except that a Destination created from
+  0.2.0 on stores the L1 default, nobody, so that a replica of 0.1 of a rolling update mentions by it as before;
+  0.3.0 drops it (C-28.FR-5).
   `buttons` (migration 0023, C-28.FR-8, `destination.buttons`) is the Destination's own button set, an array of the
   items of `organizations.buttons`, or null — the default, which a replica of 0.1 writes — for "As in the
   Organization"; a `CHECK` keeps it an array. Only messenger Destinations set it: an outgoing webhook sends no buttons.
@@ -978,6 +1005,26 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   `destination_secrets` rows — are wiped. An outgoing webhook in events mode has no Root message: its pending
   `webhook_events` end as `not_delivered`, no final event is sent and its secrets are wiped at once. The row stays for
   the deliveries, events and Audit log entries that point at it.
+- **`mention_entries`** (migration 0043, C-28.FR-1) — the Mention entries of a Destination, in `position` order (unique
+  `(destination_id, position)`), each one target and the Loud events it applies to: `target_kind` — `everyone` with
+  `everyone` (`channel`, `here`, `all` or `everyone`), `user` with `user_id`, `group` with `group_name` and, for a Slack
+  user group, `slack_usergroup_id`, `team` and `on_call_of_team` with `team_id`, and `teams_from_label` and
+  `on_call_of_teams_from_label` with none — and `events`, a non-empty subset of the seven Loud events
+  (`new_alert_group`, `new_alerts`, `reopen`, `ack_timeout`, `snooze_ended`, `rise_to_urgent`, `storm_started`);
+  `mention_entries_target_check` gives each kind exactly its fields. Written only by `mentions`: a save of the
+  Destination replaces them as a whole in its transaction, after the Destination's row, and a Team that names the
+  Destination as one of its Destinations adds "Team {Team}" after the others, locking the Destination's row `FOR NO
+  KEY UPDATE` after the Team's and before the Team's membership lock, the order of a deletion of the Destination, and
+  giving it a new `version`. What a target names is not checked against the Connection here: `mentions` refuses a new
+  target the Connection cannot mention, and an entry whose Connection later lost the ability, or whose User or Team
+  was deleted (`user_id` and `team_id` are foreign keys to the soft-deleted rows), stays and mentions nobody. Deleted
+  with the Destination's row (`ON DELETE CASCADE`), which a soft deletion keeps. Indexes `mention_entries_team_idx`
+  `(org_id, team_id)` and `mention_entries_user_idx` `(org_id, user_id)`. The up migration converts the L1 settings
+  of every Destination — each everyone choice other than `none` that L1 took on the type, each chosen User, each group
+  on Mattermost and outgoing webhooks, one entry for the kinds it was chosen for with `storm_started` where
+  `new_alert_group` is among them, in the order everyone, Users, groups — as `mentions.FromSettings` converts a request
+  with the L1 form until 0.3.0, and gives each Destination of a Team (`team_destinations`) other than a Telegram one
+  "Team {Team}" for every event when no entry names that Team.
 - **`destination_secrets`** — the named Secrets of an outgoing webhook, referenced as `{{ .Secrets.<name> }}`; the name
   is checked to be a template identifier.
 - **`account_links`** — a new, replaced or removed link, and a link made again whose username or display name
@@ -1356,6 +1403,16 @@ Serves C-09.FR-12, C-11.FR-6, C-17; [ADR-0006](../adr/0006-postgresql-only-stora
   notice or Reminder of an Alert Group (C-17.FR-9) is read from here.
 - **`storms`** — a Storm per Route (`started_at`, `calm_since`, `ended_at`, counts); at most one active per Route. Storm
   summaries and the Alert Groups they stand for are delivery rows (4.11).
+- **`storm_alert_groups`** (migration 0043, C-28.FR-7) — the Alert Groups a Storm counts, primary key
+  `(storm_id, alert_group_id)`: the one that started it and each one that joined it, written by delivery in the same
+  statement as the count (`StartStorm`, `JoinStorm`, a data-modifying CTE), so that the rows match
+  `storms.alert_group_count`. No column links a Storm to the Alert Groups it counts: `deliveries.held_by_storm_id` is
+  per Destination, never set on Urgent Alert Groups and cleared at hand-over, and the Route and creation time of an
+  Alert Group do not tell the counted ones from the others. The first publication of a Storm summary reads the Teams
+  of these Alert Groups for "Team from the label" and "On-call of the Team from the label". Deleted with its Storm or
+  its Alert Group (`ON DELETE CASCADE`); index `storm_alert_groups_alert_group_idx` `(alert_group_id)` serves the
+  cascade of the retention of Alert Groups. Storms started before 0043, and Alert Groups that 0.1 replicas count
+  during a rolling update, have no row.
 
 ### 4.11 Delivery
 
@@ -1474,7 +1531,10 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   `(org_id, alert_group_id, occurred_at, id)`. The `kind` CHECK is widened on the partitioned parent: migration 0010
   adds `delivery_events_kind_v2_check` `NOT VALID`, which adds it to every partition, validates it in a second
   transaction, which recurses to every partition on PostgreSQL 14 and 17 alike, and drops the old
-  `delivery_events_kind_check` in a third, each under the migration's `lock_timeout`.
+  `delivery_events_kind_check` in a third, each under the migration's `lock_timeout`. The `mentions` CHECK takes
+  `storm_started` from migration 0043, the Mention of the first publication of a Storm summary (C-28.FR-7), in the same
+  three steps (`delivery_events_mentions_v2_check`); its down migration turns `storm_started` back into
+  `new_alert_group`, which an L1 summary carried, and restores `delivery_events_mentions_check`.
 - **`telegram_post_copies`** — the Telegram Thread mapping buffer: the automatic copy of a channel post in the
   discussion group, keyed by `(connection_id, channel_chat_id, channel_message_id)`, written by whichever replica sees
   the update (the Leader's poller or the webhook) — before or after the send call returns — and learned from the copy or

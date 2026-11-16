@@ -229,6 +229,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   or the symbolic name `channel`, `here`, `all` or `everyone`, placed by the same marker, which a bridge that declares
   them renders as its messenger's mention (C-25.FR-8, C-28.FR-2). A linked person on a bridge without `native_mentions`
   is still sent and shown by the plain name, and the Timeline records that the Mention was not delivered (C-28.FR-3).
+  _Revised for L2 (2026-11-16, #572):_ a person whom a Mention entry names without an Account link is left out of the
+  message (C-28.FR-3); only the Owner's Mentions, the footer and the Assignees (named like the footer's users,
+  C-32.FR-12) name them by display name as text.
 - **C-22.FR-17** The Destination test and preview of C-16 apply: "Send test message" makes one `postMessage` of the
   kind `test`, marked "🧪 Test message", through the interactive path, and a press on it is answered "This is a test
   message; nothing was changed"; "Preview" shows the envelope as Muster would post it.
@@ -386,6 +389,9 @@ Checked against the fake bridge, unless an acceptance statement names the exampl
 - **C-22.AC-20** A Destination that mentions Alice for new Alert Groups posts a Loud Root message whose `mentions` hold
   the `external_id` and `display_name` of her link and whose body starts with her marker; without a link she is named as
   text with no marker; a Bridge Destination whose Mention settings name everyone in the chat is refused.
+  _Revised for L2 (2026-11-16, #572):_ a person whom a Mention entry names without an Account link is left out of the
+  message (C-28.FR-3); only the Owner's Mentions, the footer and the Assignees (named like the footer's users,
+  C-32.FR-12) name them by display name as text.
 - **C-22.AC-21** The Bridge Connection page shows the check with what the bridge offers, the push secret field and the
   callback address only in push mode; the Bridge Destination form saves a channel id and shows the channel's name from
   its check; the profile links an account through a Bridge Connection by token and, where offered, by a code with the

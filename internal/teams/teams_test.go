@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/teams/dbgen"
@@ -96,6 +97,8 @@ type fakeStore struct {
 	// connections are the Connections by public_id, and mentions the Team mentions of each Team (mentions_test.go).
 	connections map[string]*fakeConnection
 	mentions    map[int64][]fakeMention
+	// mentionEntries are the Mention entries of each Destination, by its id (C-28.FR-6).
+	mentionEntries map[int64][]mentions.EntryInput
 }
 
 // fakeDestination is a row of destinations as the Destinations of a Team read it.
@@ -708,6 +711,34 @@ func (s *fakeStore) ListTeamDestinations(_ context.Context, arg dbgen.ListTeamDe
 		out = append(out, rows...)
 	}
 	return out, nil
+}
+
+func (s *fakeStore) AddTeamEntry(_ context.Context, org, destinationID, teamID int64, teamPublicID string,
+	_ time.Time) (mentions.TeamEntry, bool, error) {
+	if err := s.fail["AddTeamEntry"]; err != nil || org != orgID {
+		return mentions.TeamEntry{}, false, err
+	}
+	for publicID, d := range s.destinations {
+		if d.id != destinationID || d.deleted || d.typ == "telegram" || teamID == 0 {
+			continue
+		}
+		before := s.mentionEntries[d.id]
+		for _, e := range before {
+			if e.Target.Kind == mentions.TargetTeam && e.Target.TeamID == teamPublicID {
+				return mentions.TeamEntry{}, false, nil
+			}
+		}
+		entry := mentions.EntryInput{Target: mentions.EntryTarget{Kind: mentions.TargetTeam, TeamID: teamPublicID},
+			Events: slices.Clone(mentions.Events)}
+		if s.mentionEntries == nil {
+			s.mentionEntries = map[int64][]mentions.EntryInput{}
+		}
+		s.mentionEntries[d.id] = append(slices.Clone(before), entry)
+		s.seq = append(s.seq, fmt.Sprintf("entry %d", d.id))
+		return mentions.TeamEntry{PublicID: publicID, Name: d.name, Before: append([]mentions.EntryInput{}, before...),
+			After: s.mentionEntries[d.id]}, true, nil
+	}
+	return mentions.TeamEntry{}, false, nil
 }
 
 func (s *fakeStore) ResolveTeamDestinations(_ context.Context, arg dbgen.ResolveTeamDestinationsParams) (
@@ -1868,7 +1899,7 @@ func TestTeamDestinationsRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(s.seq, []string{"upsert", "row team_evaluation"}) {
+	if !slices.Equal(s.seq, []string{"entry 52", "upsert", "row team_evaluation"}) {
 		t.Errorf("the creation: %v", s.seq)
 	}
 	lock := fmt.Sprintf("lock %d", created.ID)
@@ -1878,11 +1909,11 @@ func TestTeamDestinationsRows(t *testing.T) {
 		want    []string
 	}{
 		{"an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionBelowCritical},
-			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{lock, "upsert",
+			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{"entry 51", lock, "upsert",
 			"row team_destinations 51"}},
 		{"a condition changed and an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN",
 			Condition: ConditionAny}, {DestinationID: "DS0000000000PC", Condition: ConditionCritical},
-			{DestinationID: "DS0000000000SN", Condition: ConditionAny}}, []string{lock,
+			{DestinationID: "DS0000000000SN", Condition: ConditionAny}}, []string{"entry 53", lock,
 			"upsert", "row team_destinations 52", "row team_destinations 53"}},
 		{"entries removed", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}},
 			[]string{lock, "delete", "row team_destinations -"}},
@@ -1976,5 +2007,97 @@ func TestTeamDropsDeletedDestinations(t *testing.T) {
 	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
 		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC"}}}); !errors.Is(err, errBoom) {
 		t.Errorf("a failing drop: %v", err)
+	}
+}
+
+// TestTeamMentionEntry is C-28.FR-6 and AC-8: naming a Destination of the Team adds the Mention entry "Team {Team}"
+// for every Loud event to each Destination it did not name before and that has no entry naming the Team, recorded as
+// destination.updated with the save's actor and the change of its mention_entries, with the Destination's hint, before
+// the Team's membership lock; a Telegram Destination gets none; one the Team already named, or that has the entry, gets
+// nothing more, even after an Admin removed it there; after an Admin removed it, naming the Destination again adds it
+// again. A failing addition fails the save.
+func TestTeamMentionEntry(t *testing.T) {
+	svc, s := newService(t)
+	s.destinations = map[string]*fakeDestination{
+		"DS0000000000PC": {id: 51, name: "payments-critical", typ: "mattermost", health: "healthy"},
+		"DS0000000000PN": {id: 52, name: "payments-notice", typ: "slack", health: "healthy"},
+		"DS0000000000TG": {id: 53, name: "payments-telegram", typ: "telegram", health: "healthy"},
+		"DS0000000000HK": {id: 54, name: "payments-hook", typ: "webhook", health: "healthy"},
+	}
+	all := []DestinationEntry{{DestinationID: "DS0000000000PC"}, {DestinationID: "DS0000000000PN"},
+		{DestinationID: "DS0000000000TG"}}
+	created, err := svc.Create(t.Context(), by, Input{Name: "Payments", Slug: "payments", DestinationEntries: &all})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updates []string
+	for _, a := range s.audit {
+		if a.Action == actionDestinationUpdated {
+			updates = append(updates, a.ResourcePublicID.String+" "+string(a.Diff))
+		}
+	}
+	entry := `{"target":{"kind":"team","team_id":"` + created.PublicID + `"},"events":["new_alert_group",` +
+		`"new_alerts","reopen","ack_timeout","snooze_ended","rise_to_urgent","storm_started"]}`
+	if len(updates) != 2 || !strings.HasPrefix(updates[0], "DS0000000000PC ") ||
+		!strings.Contains(updates[0], `"pointer":"/mention_entries"`) || !strings.Contains(updates[0], entry) ||
+		!strings.HasPrefix(updates[1], "DS0000000000PN ") {
+		t.Fatalf("destination.updated %v", updates)
+	}
+	if len(s.mentionEntries[53]) != 0 {
+		t.Errorf("the Telegram Destination got %+v", s.mentionEntries[53])
+	}
+	hints := 0
+	for _, h := range s.hints {
+		if h.Type == hintDestination {
+			hints++
+		}
+	}
+	if hints != 2 {
+		t.Errorf("%d destination hints, want 2: %+v", hints, s.hints)
+	}
+
+	// The Admin removes the entry of payments-critical; naming the Destinations again adds it there only.
+	s.mentionEntries[51] = nil
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN"}}}); err != nil {
+		t.Fatal(err)
+	}
+	s.seq = nil
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN"}, {DestinationID: "DS0000000000PC"},
+			{DestinationID: "DS0000000000HK"}}}); err != nil {
+		t.Fatal(err)
+	}
+	lock := fmt.Sprintf("lock %d", created.ID)
+	if len(s.seq) < 3 || s.seq[0] != "entry 51" || s.seq[1] != "entry 54" || s.seq[2] != lock {
+		t.Errorf("the order of the save: %v", s.seq)
+	}
+	if len(s.mentionEntries[51]) != 1 || len(s.mentionEntries[52]) != 1 || len(s.mentionEntries[54]) != 1 {
+		t.Errorf("entries after naming again %+v", s.mentionEntries)
+	}
+
+	// The Admin removes the entry of payments-notice, which the Team still names; a save that changes the Team's other
+	// Destinations does not add it again.
+	s.mentionEntries[52] = nil
+	s.seq = nil
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN"},
+			{DestinationID: "DS0000000000PC"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.mentionEntries[52]) != 0 || slices.Contains(s.seq, "entry 52") {
+		t.Errorf("a Destination the Team kept got its entry again: %+v %v", s.mentionEntries[52], s.seq)
+	}
+
+	s.fail["AddTeamEntry"] = errBoom
+	if _, err := svc.Create(t.Context(), by, Input{Name: "Other", Slug: "other",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC"}}}); !errors.Is(err, errBoom) {
+		t.Errorf("a failing addition = %v", err)
+	}
+	delete(s.fail, "AddTeamEntry")
+	s.fail["InsertAuditEntry"] = errBoom
+	if _, err := svc.Create(t.Context(), by, Input{Name: "Third", Slug: "third",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC"}}}); !errors.Is(err, errBoom) {
+		t.Errorf("a failing audit = %v", err)
 	}
 }

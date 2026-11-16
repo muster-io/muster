@@ -5,7 +5,8 @@
 // version of every page of the navigation of mkdocs.yml, byte for byte its source; the specifications api/openapi.yaml
 // and api/bridge.yaml under api/; llms-full.txt, every page in the order of the navigation with its relative links made
 // absolute; and llms.txt, rendered from the template docs/llms.txt.tmpl, whose functions take every value from its
-// source. Every link names the version given by -version under the site_url of mkdocs.yml. make docs runs it after the
+// source; a template "full" in its file is written into llms-full.txt, before the pages, and not into llms.txt, which
+// stays an index. Every link names the version given by -version under the site_url of mkdocs.yml. make docs runs it after the
 // build. It fails, naming the file, when a page of the navigation does not exist or has no title, when the template
 // names a page, an anchor, a phrase, a setting or an enum that its source no longer has, when a link of either file
 // outside code is still relative or does not resolve under the site, when llms.txt links out of the site other than to
@@ -38,6 +39,7 @@ const (
 	fullName         = "llms-full.txt"
 	maxLLMSBytes     = 32 << 10
 	maxFullBytes     = 1 << 20
+	maxNoteRunes     = 100
 	bytesPerToken    = 4
 	repositoryPrefix = "https://github.com/muster-io/"
 )
@@ -174,18 +176,25 @@ func generate(o options) (string, []string) {
 		ids:      map[string]map[string]bool{},
 	}
 	var llms, full string
+	var tmpl *template.Template
+	var guide string
 	if g.load() {
 		g.copySources()
-		full = g.fullText()
+		tmpl = g.parseTemplate()
+	}
+	if len(g.problems) == 0 {
+		guide = g.renderGuide(tmpl)
+		full = g.fullText(guide)
 	}
 	if len(g.problems) == 0 {
 		g.write(g.fullPath(), []byte(full))
-		llms = g.render(len(full))
+		llms = g.render(tmpl, len(full))
 	}
 	if len(g.problems) == 0 {
 		g.write(g.llmsPath(), []byte(llms))
 		g.checkLinks(g.llmsPath(), llms, true)
 		g.checkLinks(g.fullPath(), full, false)
+		g.checkLinks(g.fullPath(), guide, true)
 		if len(llms) > maxLLMSBytes {
 			g.problem("%s: %d bytes; it must be at most 32 KiB (%d bytes)", g.llmsPath(), len(llms), maxLLMSBytes)
 		}
@@ -365,11 +374,17 @@ func (g *generator) copySources() {
 	}
 }
 
-// fullText is llms-full.txt: every page in the order of the navigation after the line with its URL.
-func (g *generator) fullText() string {
+// fullText is llms-full.txt: the guide that the template defines as "full", if it does, then every page in the order
+// of the navigation after the line with its URL.
+func (g *generator) fullText(guide string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Muster documentation, version %s\n\n", g.version)
-	fmt.Fprintf(&b, "The index of this text, with the rules for AI agents, is %s%s.\n", g.base, llmsName)
+	fmt.Fprintf(&b, "The index of this text is %s%s; the rules for AI agents follow it.\n", g.base, llmsName)
+	if guide != "" {
+		b.WriteString("\n")
+		b.WriteString(strings.Trim(guide, "\n"))
+		b.WriteString("\n")
+	}
 	for _, p := range g.pages {
 		found := len(g.problems)
 		text := g.absoluteLinks(p)
@@ -668,12 +683,16 @@ func resolveLink(base, page, target string) (string, bool) {
 	return base + p + rest, true
 }
 
-// render executes the template of llms.txt.
-func (g *generator) render(fullBytes int) string {
+// guideName is the template that the file of the template may define for llms-full.txt alone: the rules and the
+// scenarios, which llms.txt, an index, leaves out.
+const guideName = "full"
+
+// parseTemplate parses the template of llms.txt, with the functions that take every value from its source.
+func (g *generator) parseTemplate() *template.Template {
 	src, err := os.ReadFile(g.abs(g.template))
 	if err != nil {
 		g.problem("%s: %v", g.template, short(err))
-		return ""
+		return nil
 	}
 	t, err := template.New(g.template).Option("missingkey=error").Funcs(template.FuncMap{
 		"page":    g.pageURL,
@@ -685,14 +704,35 @@ func (g *generator) render(fullBytes int) string {
 	}).Parse(string(src))
 	if err != nil {
 		g.problem("%s", strings.TrimPrefix(err.Error(), "template: "))
+		return nil
+	}
+	return t
+}
+
+type templateData struct {
+	Version, Base         string
+	FullBytes, FullTokens int
+}
+
+// renderGuide executes the template "full" of the file, when it defines one: the part that only llms-full.txt holds.
+// It runs before the size of llms-full.txt is known, so it has .Version and .Base only; .FullBytes and .FullTokens are 0.
+func (g *generator) renderGuide(t *template.Template) string {
+	guide := t.Lookup(guideName)
+	if guide == nil {
 		return ""
 	}
-	data := struct {
-		Version, Base         string
-		FullBytes, FullTokens int
-	}{g.version, g.base, fullBytes, fullBytes / bytesPerToken}
 	var b strings.Builder
-	if err := t.Execute(&b, data); err != nil {
+	if err := guide.Execute(&b, templateData{Version: g.version, Base: g.base}); err != nil {
+		g.problem("%s", strings.TrimPrefix(err.Error(), "template: "))
+		return ""
+	}
+	return b.String()
+}
+
+// render executes the template of llms.txt.
+func (g *generator) render(t *template.Template, fullBytes int) string {
+	var b strings.Builder
+	if err := t.Execute(&b, templateData{g.version, g.base, fullBytes, fullBytes / bytesPerToken}); err != nil {
 		g.problem("%s", strings.TrimPrefix(err.Error(), "template: "))
 		return ""
 	}
@@ -899,10 +939,26 @@ func (g *generator) mapItems(b *strings.Builder, items []*item, level int) {
 		}
 		fmt.Fprintf(b, "- [%s](%s%s)", it.page.title, g.base, it.page.path)
 		if it.page.description != "" {
-			fmt.Fprintf(b, ": %s", it.page.description)
+			fmt.Fprintf(b, ": %s", note(it.page.description))
 		}
 		b.WriteString("\n")
 	}
+}
+
+// note is the one-line note of a page in the map: its description, cut at a word before maxNoteRunes characters and
+// ended with an ellipsis when it is longer, so that llms.txt stays an index; the page and llms-full.txt have the rest.
+func note(description string) string {
+	r := []rune(description)
+	if len(r) <= maxNoteRunes {
+		return description
+	}
+	cut := string(r[:maxNoteRunes])
+	if r[maxNoteRunes] != ' ' {
+		if i := strings.LastIndexByte(cut, ' '); i > 0 {
+			cut = cut[:i]
+		}
+	}
+	return strings.TrimRight(cut, " ,;:—-") + "…"
 }
 
 func mapHeading(b *strings.Builder, level int, title string) {

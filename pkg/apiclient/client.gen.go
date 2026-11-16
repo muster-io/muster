@@ -855,13 +855,14 @@ func (e DestinationButtonSetSource) Valid() bool {
 
 // Defines values for DestinationCheckItemName.
 const (
-	DestinationCheckItemNameBotInChannel     DestinationCheckItemName = "bot_in_channel"
-	DestinationCheckItemNameBotRightsChannel DestinationCheckItemName = "bot_rights_channel"
-	DestinationCheckItemNameBotRightsGroup   DestinationCheckItemName = "bot_rights_group"
-	DestinationCheckItemNameChannel          DestinationCheckItemName = "channel"
-	DestinationCheckItemNameChannelExists    DestinationCheckItemName = "channel_exists"
-	DestinationCheckItemNameDiscussionGroup  DestinationCheckItemName = "discussion_group"
-	DestinationCheckItemNameToken            DestinationCheckItemName = "token"
+	DestinationCheckItemNameBotInChannel           DestinationCheckItemName = "bot_in_channel"
+	DestinationCheckItemNameBotRightsChannel       DestinationCheckItemName = "bot_rights_channel"
+	DestinationCheckItemNameBotRightsGroup         DestinationCheckItemName = "bot_rights_group"
+	DestinationCheckItemNameChannel                DestinationCheckItemName = "channel"
+	DestinationCheckItemNameChannelExists          DestinationCheckItemName = "channel_exists"
+	DestinationCheckItemNameDiscussionGroup        DestinationCheckItemName = "discussion_group"
+	DestinationCheckItemNameDiscussionGroupMembers DestinationCheckItemName = "discussion_group_members"
+	DestinationCheckItemNameToken                  DestinationCheckItemName = "token"
 )
 
 // Valid indicates whether the value is a known member of the DestinationCheckItemName enum.
@@ -878,6 +879,8 @@ func (e DestinationCheckItemName) Valid() bool {
 	case DestinationCheckItemNameChannelExists:
 		return true
 	case DestinationCheckItemNameDiscussionGroup:
+		return true
+	case DestinationCheckItemNameDiscussionGroupMembers:
 		return true
 	case DestinationCheckItemNameToken:
 		return true
@@ -1549,6 +1552,39 @@ func (e MattermostDestinationInputType) Valid() bool {
 	}
 }
 
+// Defines values for MentionEvent.
+const (
+	MentionEventAckTimeout    MentionEvent = "ack_timeout"
+	MentionEventNewAlertGroup MentionEvent = "new_alert_group"
+	MentionEventNewAlerts     MentionEvent = "new_alerts"
+	MentionEventReopen        MentionEvent = "reopen"
+	MentionEventRiseToUrgent  MentionEvent = "rise_to_urgent"
+	MentionEventSnoozeEnded   MentionEvent = "snooze_ended"
+	MentionEventStormStarted  MentionEvent = "storm_started"
+)
+
+// Valid indicates whether the value is a known member of the MentionEvent enum.
+func (e MentionEvent) Valid() bool {
+	switch e {
+	case MentionEventAckTimeout:
+		return true
+	case MentionEventNewAlertGroup:
+		return true
+	case MentionEventNewAlerts:
+		return true
+	case MentionEventReopen:
+		return true
+	case MentionEventRiseToUrgent:
+		return true
+	case MentionEventSnoozeEnded:
+		return true
+	case MentionEventStormStarted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MentionName.
 const (
 	MentionNameAckTimeout    MentionName = "ack_timeout"
@@ -1559,6 +1595,7 @@ const (
 	MentionNameReopen        MentionName = "reopen"
 	MentionNameRiseToUrgent  MentionName = "rise_to_urgent"
 	MentionNameSnoozeEnded   MentionName = "snooze_ended"
+	MentionNameStormStarted  MentionName = "storm_started"
 )
 
 // Valid indicates whether the value is a known member of the MentionName enum.
@@ -1579,6 +1616,29 @@ func (e MentionName) Valid() bool {
 	case MentionNameRiseToUrgent:
 		return true
 	case MentionNameSnoozeEnded:
+		return true
+	case MentionNameStormStarted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MentionResolvedKind.
+const (
+	MentionResolvedKindEveryone MentionResolvedKind = "everyone"
+	MentionResolvedKindGroup    MentionResolvedKind = "group"
+	MentionResolvedKindUser     MentionResolvedKind = "user"
+)
+
+// Valid indicates whether the value is a known member of the MentionResolvedKind enum.
+func (e MentionResolvedKind) Valid() bool {
+	switch e {
+	case MentionResolvedKindEveryone:
+		return true
+	case MentionResolvedKindGroup:
+		return true
+	case MentionResolvedKindUser:
 		return true
 	default:
 		return false
@@ -1603,6 +1663,87 @@ func (e MentionSettingEveryone) Valid() bool {
 	case MentionSettingEveryoneHere:
 		return true
 	case MentionSettingEveryoneNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MentionTargetEveryone.
+const (
+	MentionTargetEveryoneAll      MentionTargetEveryone = "all"
+	MentionTargetEveryoneChannel  MentionTargetEveryone = "channel"
+	MentionTargetEveryoneEveryone MentionTargetEveryone = "everyone"
+	MentionTargetEveryoneHere     MentionTargetEveryone = "here"
+)
+
+// Valid indicates whether the value is a known member of the MentionTargetEveryone enum.
+func (e MentionTargetEveryone) Valid() bool {
+	switch e {
+	case MentionTargetEveryoneAll:
+		return true
+	case MentionTargetEveryoneChannel:
+		return true
+	case MentionTargetEveryoneEveryone:
+		return true
+	case MentionTargetEveryoneHere:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MentionTargetInputEveryone.
+const (
+	MentionTargetInputEveryoneAll      MentionTargetInputEveryone = "all"
+	MentionTargetInputEveryoneChannel  MentionTargetInputEveryone = "channel"
+	MentionTargetInputEveryoneEveryone MentionTargetInputEveryone = "everyone"
+	MentionTargetInputEveryoneHere     MentionTargetInputEveryone = "here"
+)
+
+// Valid indicates whether the value is a known member of the MentionTargetInputEveryone enum.
+func (e MentionTargetInputEveryone) Valid() bool {
+	switch e {
+	case MentionTargetInputEveryoneAll:
+		return true
+	case MentionTargetInputEveryoneChannel:
+		return true
+	case MentionTargetInputEveryoneEveryone:
+		return true
+	case MentionTargetInputEveryoneHere:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MentionTargetKind.
+const (
+	MentionTargetKindEveryone               MentionTargetKind = "everyone"
+	MentionTargetKindGroup                  MentionTargetKind = "group"
+	MentionTargetKindOnCallOfTeam           MentionTargetKind = "on_call_of_team"
+	MentionTargetKindOnCallOfTeamsFromLabel MentionTargetKind = "on_call_of_teams_from_label"
+	MentionTargetKindTeam                   MentionTargetKind = "team"
+	MentionTargetKindTeamsFromLabel         MentionTargetKind = "teams_from_label"
+	MentionTargetKindUser                   MentionTargetKind = "user"
+)
+
+// Valid indicates whether the value is a known member of the MentionTargetKind enum.
+func (e MentionTargetKind) Valid() bool {
+	switch e {
+	case MentionTargetKindEveryone:
+		return true
+	case MentionTargetKindGroup:
+		return true
+	case MentionTargetKindOnCallOfTeam:
+		return true
+	case MentionTargetKindOnCallOfTeamsFromLabel:
+		return true
+	case MentionTargetKindTeam:
+		return true
+	case MentionTargetKindTeamsFromLabel:
+		return true
+	case MentionTargetKindUser:
 		return true
 	default:
 		return false
@@ -2539,6 +2680,30 @@ func (e ProxyType) Valid() bool {
 	case ProxyTypeHttps:
 		return true
 	case ProxyTypeSocks5:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReachReason.
+const (
+	BridgeNoNativeMentions ReachReason = "bridge_no_native_mentions"
+	NoAccountLink          ReachReason = "no_account_link"
+	NotInDiscussionGroup   ReachReason = "not_in_discussion_group"
+	WebhookNoThreadReply   ReachReason = "webhook_no_thread_reply"
+)
+
+// Valid indicates whether the value is a known member of the ReachReason enum.
+func (e ReachReason) Valid() bool {
+	switch e {
+	case BridgeNoNativeMentions:
+		return true
+	case NoAccountLink:
+		return true
+	case NotInDiscussionGroup:
+		return true
+	case WebhookNoThreadReply:
 		return true
 	default:
 		return false
@@ -3917,6 +4082,7 @@ func (e WebhookEventName) Valid() bool {
 const (
 	WebhookMentionTargetTypeEveryone WebhookMentionTargetType = "everyone"
 	WebhookMentionTargetTypeGroup    WebhookMentionTargetType = "group"
+	WebhookMentionTargetTypeTeam     WebhookMentionTargetType = "team"
 	WebhookMentionTargetTypeUser     WebhookMentionTargetType = "user"
 )
 
@@ -3926,6 +4092,8 @@ func (e WebhookMentionTargetType) Valid() bool {
 	case WebhookMentionTargetTypeEveryone:
 		return true
 	case WebhookMentionTargetTypeGroup:
+		return true
+	case WebhookMentionTargetTypeTeam:
 		return true
 	case WebhookMentionTargetTypeUser:
 		return true
@@ -4766,7 +4934,11 @@ type BridgeDestination struct {
 	// Limiter `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.
+	// MentionEntries The Mention entries in order, each with what it mentions now.
+	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
 	Name     string          `json:"name"`
 
@@ -4800,9 +4972,13 @@ type BridgeDestinationInput struct {
 	// Limiter `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.
-	Mentions MentionSettings `json:"mentions"`
-	Name     string          `json:"name"`
+	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — a Bridge takes the words of everyone its bridge declares in `everyone_mentions`, groups and Teams only when it declares `group_mentions`, and any person — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
+	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
+
+	// Mentions The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0 (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination's type — the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at pointers under `/mentions`; ignored when `mention_entries` is present.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Mentions *MentionSettings `json:"mentions,omitempty"`
+	Name     string           `json:"name"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
 	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
@@ -5281,6 +5457,9 @@ type DestinationButtonSetSource string
 
 // DestinationCheckItem defines model for DestinationCheckItem.
 type DestinationCheckItem struct {
+	// AbsentUsers Set with `discussion_group_members` only, omitted otherwise — the people `getChatMember` answered as outside the discussion group (`left`, `kicked`, `restricted` and not a member, or `400` `Bad Request: PARTICIPANT_ID_INVALID`), by name; a person whose call failed otherwise is not named. Telegram shows a leave only a while after it, about a minute.
+	AbsentUsers *[]UserRef `json:"absent_users,omitempty"`
+
 	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; Slack `channel`: `token_invalid` — Slack refused the bot token, `missing_scope` — the bot token lacks a scope `conversations.info` needs, which `missing_scopes` lists, `channel_not_found` — no such channel, a deleted one, or a private channel the bot is not in, `channel_archived`, `bot_not_in_channel` — `message` says "Invite the bot to the channel: /invite @{bot}", and `request_failed` for any other error of Slack's, which `message` names; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 	Code nullable.Nullable[NullableDestinationCheckCode] `json:"code,omitempty"`
 
@@ -5290,12 +5469,12 @@ type DestinationCheckItem struct {
 	// MissingScopes Set with the code `missing_scope` (Slack `channel`), omitted otherwise — the scopes Slack named as needed (`needed` of its answer), which clients name in their own words; `message` names them in English.
 	MissingScopes *[]string `json:"missing_scopes,omitempty"`
 
-	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member.
+	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside (C-27.FR-8).
 	Name DestinationCheckItemName `json:"name"`
 	Ok   bool                     `json:"ok"`
 }
 
-// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member.
+// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside (C-27.FR-8).
 type DestinationCheckItemName string
 
 // DestinationCheckResult defines model for DestinationCheckResult.
@@ -5383,6 +5562,13 @@ type DestinationReadFields struct {
 
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
+
+	// MentionEntries The Mention entries in order, each with what it mentions now.
+	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Mentions MentionSettings `json:"mentions"`
 
 	// OwningTeam The Team that owns the Destination, null when none does.
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
@@ -6193,7 +6379,11 @@ type MattermostDestination struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
+	// MentionEntries The Mention entries in order, each with what it mentions now.
+	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
 	Name     string          `json:"name"`
 
@@ -6227,9 +6417,13 @@ type MattermostDestinationInput struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
-	Mentions MentionSettings `json:"mentions"`
-	Name     string          `json:"name"`
+	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — Mattermost has no `everyone` — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
+	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
+
+	// Mentions The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0 (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination's type — the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at pointers under `/mentions`; ignored when `mention_entries` is present.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Mentions *MentionSettings `json:"mentions,omitempty"`
+	Name     string           `json:"name"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
 	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
@@ -6282,8 +6476,55 @@ type MeUpdate struct {
 	TimeZone nullable.Nullable[string]           `json:"time_zone,omitempty"`
 }
 
+// MentionEntry A Mention entry as read, with whether the Destination's Connection can mention its target now and what it mentions now. An entry whose Connection lost the ability stays, reads `available` false with the reason, and mentions nobody.
+type MentionEntry struct {
+	Available  bool                `json:"available"`
+	Events     []MentionEvent      `json:"events"`
+	ResolvesTo []MentionResolution `json:"resolves_to"`
+
+	// Target The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.
+	Target MentionTarget `json:"target"`
+
+	// UnavailableReason Why the Connection cannot mention the target now; null while it can.
+	UnavailableReason nullable.Nullable[MentionUnavailableReason] `json:"unavailable_reason"`
+}
+
+// MentionEntryInput A Mention entry as written (C-28.FR-1).
+type MentionEntryInput struct {
+	// Events The Loud events the entry applies to, each once; all seven when omitted.
+	Events *[]MentionEvent `json:"events,omitempty"`
+
+	// Target The target of a Mention entry, with the fields of its kind only; another field is refused with `422` `invalid_format` at it, and a missing one with `required`.
+	Target MentionTargetInput `json:"target"`
+}
+
+// MentionEvent A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).
+type MentionEvent string
+
 // MentionName A symbolic Mention that each Destination turns into real Mentions.
 type MentionName string
+
+// MentionResolution What an entry mentions now for one Team, or for no Team.
+type MentionResolution struct {
+	// Mentions Empty when the entry mentions nobody now for it — a Team without a Team mention for the Connection, a Team without a main Schedule or in a gap of it, a deleted User or Team, or a target the Connection cannot mention now.
+	Mentions []MentionResolved `json:"mentions"`
+
+	// Team The Team of a Team or On-call target, one item per Team that is not deleted for the targets from the label; null for the other targets.
+	Team nullable.Nullable[TeamRef] `json:"team"`
+}
+
+// MentionResolved One Mention an entry makes now, as the Destination's messenger writes it.
+type MentionResolved struct {
+	// Kind `user`, a person, by the username of their Account link in the Destination's Identity space, else by their login; `group`, a messenger group or a Team mention, and on an outgoing webhook a Team by its slug; `everyone`, the word of everyone in the chat.
+	Kind MentionResolvedKind `json:"kind"`
+
+	// Linked For a `user`, whether they have an Account link in the Destination's Identity space — one without it is not mentioned (C-28.FR-3) — always true on an outgoing webhook, which mentions people as data; true for the other kinds.
+	Linked bool   `json:"linked"`
+	Name   string `json:"name"`
+}
+
+// MentionResolvedKind `user`, a person, by the username of their Account link in the Destination's Identity space, else by their login; `group`, a messenger group or a Team mention, and on an outgoing webhook a Team by its slug; `everyone`, the word of everyone in the chat.
+type MentionResolvedKind string
 
 // MentionSetting Whom to mention for one kind of Loud event. The default is nobody.
 type MentionSetting struct {
@@ -6320,6 +6561,63 @@ type MentionSettings struct {
 	// SnoozeEnded Whom to mention for one kind of Loud event. The default is nobody.
 	SnoozeEnded MentionSetting `json:"snooze_ended"`
 }
+
+// MentionTarget The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.
+type MentionTarget struct {
+	// Everyone With `everyone` only, the word of the messenger.
+	Everyone *MentionTargetEveryone `json:"everyone,omitempty"`
+
+	// Group With `group` only, the group's name without `@` — 1 to 64 letters, digits, `.`, `_` and `-`, starting with a letter or a digit, the handle of a Slack user group; any text but empty for an outgoing webhook.
+	Group *string `json:"group,omitempty"`
+
+	// GroupId With `group` only, the Slack user group's id (`S` followed by digits and capital letters), from `listConnectionGroups`, required on Slack and refused on the other types.
+	GroupId *string `json:"group_id,omitempty"`
+
+	// Kind Whom a Mention entry names (C-28.FR-1): everyone in the chat (`everyone`), a person (`user`), a messenger group (`group`), a Team (`team`), the Teams of the Alert Group (`teams_from_label`), the On-call of a Team's main Schedule (`on_call_of_team`), and the On-call of each Team of the Alert Group (`on_call_of_teams_from_label`).
+	Kind MentionTargetKind `json:"kind"`
+
+	// Team The Team of a `team` or `on_call_of_team` target.
+	Team *TeamRef `json:"team,omitempty"`
+
+	// TeamId With `team` and `on_call_of_team` only.
+	TeamId *PublicId `json:"team_id,omitempty"`
+
+	// User The User of a `user` target.
+	User *UserRef `json:"user,omitempty"`
+
+	// UserId With `user` only.
+	UserId *PublicId `json:"user_id,omitempty"`
+}
+
+// MentionTargetEveryone With `everyone` only, the word of the messenger.
+type MentionTargetEveryone string
+
+// MentionTargetInput The target of a Mention entry, with the fields of its kind only; another field is refused with `422` `invalid_format` at it, and a missing one with `required`.
+type MentionTargetInput struct {
+	// Everyone With `everyone` only, the word of the messenger.
+	Everyone *MentionTargetInputEveryone `json:"everyone,omitempty"`
+
+	// Group With `group` only, the group's name without `@` — 1 to 64 letters, digits, `.`, `_` and `-`, starting with a letter or a digit, the handle of a Slack user group; any text but empty for an outgoing webhook.
+	Group *string `json:"group,omitempty"`
+
+	// GroupId With `group` only, the Slack user group's id (`S` followed by digits and capital letters), from `listConnectionGroups`, required on Slack and refused on the other types.
+	GroupId *string `json:"group_id,omitempty"`
+
+	// Kind Whom a Mention entry names (C-28.FR-1): everyone in the chat (`everyone`), a person (`user`), a messenger group (`group`), a Team (`team`), the Teams of the Alert Group (`teams_from_label`), the On-call of a Team's main Schedule (`on_call_of_team`), and the On-call of each Team of the Alert Group (`on_call_of_teams_from_label`).
+	Kind MentionTargetKind `json:"kind"`
+
+	// TeamId With `team` and `on_call_of_team` only.
+	TeamId *PublicId `json:"team_id,omitempty"`
+
+	// UserId With `user` only.
+	UserId *PublicId `json:"user_id,omitempty"`
+}
+
+// MentionTargetInputEveryone With `everyone` only, the word of the messenger.
+type MentionTargetInputEveryone string
+
+// MentionTargetKind Whom a Mention entry names (C-28.FR-1): everyone in the chat (`everyone`), a person (`user`), a messenger group (`group`), a Team (`team`), the Teams of the Alert Group (`teams_from_label`), the On-call of a Team's main Schedule (`on_call_of_team`), and the On-call of each Team of the Alert Group (`on_call_of_teams_from_label`).
+type MentionTargetKind string
 
 // MentionUnavailableReason Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.
 type MentionUnavailableReason string
@@ -6754,6 +7052,17 @@ type OnCallNext struct {
 // OnCallNow "On call now": the On-call of each Team, by the Team's name.
 type OnCallNow struct {
 	Items []TeamOnCall `json:"items"`
+}
+
+// OnCallReach A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).
+type OnCallReach struct {
+	Destination DestinationRef `json:"destination"`
+
+	// Messenger The messenger of the Destination — the type of its Connection, or `webhook`.
+	Messenger DestinationType `json:"messenger"`
+
+	// Reason Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
+	Reason ReachReason `json:"reason"`
 }
 
 // OnCallSegment A segment of the Result, with the person On-call in it, or nobody in a gap.
@@ -7226,6 +7535,9 @@ type QueueDepth struct {
 	Destination EntityRef `json:"destination"`
 	Queued      int       `json:"queued"`
 }
+
+// ReachReason Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
+type ReachReason string
 
 // RelatedAlertGroup defines model for RelatedAlertGroup.
 type RelatedAlertGroup struct {
@@ -7929,24 +8241,35 @@ type ScheduleRef struct {
 
 // ScheduleWarning defines model for ScheduleWarning.
 type ScheduleWarning struct {
-	// End The end of the gap, cut to the period; null for another kind.
+	// Destination The Destination of the Team that a Mention of the person cannot reach; null for another kind.
+	Destination nullable.Nullable[DestinationRef] `json:"destination"`
+
+	// End The end of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
 	End nullable.Nullable[time.Time] `json:"end"`
 
-	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
+	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with the `messenger` and the `reason` (C-27.FR-8).
 	Kind ScheduleWarningKind `json:"kind"`
 
-	// OverrideId A `public_id` in the format of `PublicId`, or null.
-	OverrideId    nullable.Nullable[NullablePublicId] `json:"override_id"`
-	RotationLayer nullable.Nullable[EntityRef]        `json:"rotation_layer"`
+	// Messenger The messenger of `destination` — the type of its Connection, or `webhook` for an outgoing webhook; null for another kind.
+	Messenger nullable.Nullable[DestinationType] `json:"messenger"`
 
-	// Start The start of the gap, cut to the period; null for another kind.
+	// OverrideId The Override that is skipped, or for `unreachable` the one that makes the person On-call in the segment; null otherwise.
+	OverrideId nullable.Nullable[NullablePublicId] `json:"override_id"`
+
+	// Reason Why a Mention of the person cannot reach `destination`; null for another kind.
+	Reason nullable.Nullable[ReachReason] `json:"reason"`
+
+	// RotationLayer The Rotation layer of the Shifts that are skipped, or for `unreachable` the one whose Shift makes the person On-call in the segment; null otherwise.
+	RotationLayer nullable.Nullable[EntityRef] `json:"rotation_layer"`
+
+	// Start The start of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
 	Start nullable.Nullable[time.Time] `json:"start"`
 
 	// User Null for a gap.
 	User nullable.Nullable[UserRef] `json:"user"`
 }
 
-// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
+// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with the `messenger` and the `reason` (C-27.FR-8).
 type ScheduleWarningKind string
 
 // SecretStatus What a read shows instead of a Secret. The value itself is never returned.
@@ -8331,7 +8654,11 @@ type SlackDestination struct {
 	// Limiter `destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.
+	// MentionEntries The Mention entries in order, each with what it mentions now.
+	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
 	Name     string          `json:"name"`
 
@@ -8365,9 +8692,13 @@ type SlackDestinationInput struct {
 	// Limiter `destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.
-	Mentions MentionSettings `json:"mentions"`
-	Name     string          `json:"name"`
+	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — Slack has no `all` and no `everyone`, and takes groups and Teams only while the last check of its Connection found `usergroups:read`, a group with its `group_id` — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
+	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
+
+	// Mentions The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0 (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination's type — the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at pointers under `/mentions`; ignored when `mention_entries` is present.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Mentions *MentionSettings `json:"mentions,omitempty"`
+	Name     string           `json:"name"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
 	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
@@ -8774,6 +9105,9 @@ type TeamOnCall struct {
 	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 	Team TeamRef `json:"team"`
 
+	// Unreachable The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them.
+	Unreachable []OnCallReach `json:"unreachable"`
+
 	// Until The end of the current segment — the On-call's, or the gap's; null when it lasts beyond `schedule.gap_view` and without a Schedule.
 	Until nullable.Nullable[time.Time] `json:"until"`
 
@@ -8940,7 +9274,11 @@ type TelegramDestination struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
+	// MentionEntries The Mention entries in order, each with what it mentions now.
+	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
 	Name     string          `json:"name"`
 
@@ -8974,9 +9312,13 @@ type TelegramDestinationInput struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
-	Mentions MentionSettings `json:"mentions"`
-	Name     string          `json:"name"`
+	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — Telegram takes only people and the On-call — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
+	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
+
+	// Mentions The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0 (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination's type — the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at pointers under `/mentions`; ignored when `mention_entries` is present.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Mentions *MentionSettings `json:"mentions,omitempty"`
+	Name     string           `json:"name"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
 	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
@@ -9622,7 +9964,11 @@ type WebhookDestination struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
+	// MentionEntries The Mention entries in order, each with what it mentions now.
+	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings        `json:"mentions"`
 	Mode     WebhookDestinationMode `json:"mode"`
 	Name     string                 `json:"name"`
@@ -9662,8 +10008,12 @@ type WebhookDestinationBase struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
-	Mentions MentionSettings            `json:"mentions"`
+	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — an outgoing webhook takes every target, as data — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
+	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
+
+	// Mentions The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0 (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination's type — the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at pointers under `/mentions`; ignored when `mention_entries` is present.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Mentions *MentionSettings           `json:"mentions,omitempty"`
 	Mode     WebhookDestinationBaseMode `json:"mode"`
 	Name     string                     `json:"name"`
 
@@ -9689,8 +10039,12 @@ type WebhookDestinationInput struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
-	// Mentions Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
-	Mentions MentionSettings             `json:"mentions"`
+	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — an outgoing webhook takes every target, as data — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
+	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
+
+	// Mentions The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0 (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination's type — the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at pointers under `/mentions`; ignored when `mention_entries` is present.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Mentions *MentionSettings            `json:"mentions,omitempty"`
 	Mode     WebhookDestinationInputMode `json:"mode"`
 	Name     string                      `json:"name"`
 
@@ -9730,12 +10084,13 @@ type WebhookEventsConfig struct {
 	Url string `json:"url"`
 }
 
-// WebhookMentionTarget A resolved Mention as data. `everyone` has no other fields, `group` has `name`, `user` has `id`, `name` and `login`.
+// WebhookMentionTarget A resolved Mention as data (C-15.FR-11). `everyone` has no other fields, `group` has `name`, `user` has `id`, `name` and `login` — the On-call of a Team is a `user` — and `team` has `slug` and `name`, one per Team of the Alert Group for "Team from the label".
 type WebhookMentionTarget struct {
 	// Id A `public_id` in the format of `PublicId`, or null.
 	Id    nullable.Nullable[NullablePublicId] `json:"id,omitempty"`
 	Login nullable.Nullable[string]           `json:"login,omitempty"`
 	Name  nullable.Nullable[string]           `json:"name,omitempty"`
+	Slug  nullable.Nullable[string]           `json:"slug,omitempty"`
 	Type  WebhookMentionTargetType            `json:"type"`
 }
 
@@ -14353,7 +14708,7 @@ type ClientInterface interface {
 
 	// GetOnCallNow Read who is On-call now in each Team
 	//
-	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 	//
 	// Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
 	GetOnCallNow(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -14649,7 +15004,7 @@ type ClientInterface interface {
 
 	// GetScheduleOnCall Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 	GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -17998,7 +18353,7 @@ func (c *Client) CheckOidcSettings(ctx context.Context, reqEditors ...RequestEdi
 
 // GetOnCallNow Read who is On-call now in each Team
 //
-// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 //
 // Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
 func (c *Client) GetOnCallNow(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -18674,7 +19029,7 @@ func (c *Client) UpdateSchedule(ctx context.Context, scheduleId ScheduleId, para
 
 // GetScheduleOnCall Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 func (c *Client) GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -30960,7 +31315,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetOnCallNowWithResponse Read who is On-call now in each Team
 	//
-	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -31296,7 +31651,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -50731,7 +51086,7 @@ func (c *ClientWithResponses) CheckOidcSettingsWithResponse(ctx context.Context,
 
 // GetOnCallNowWithResponse Read who is On-call now in each Team
 //
-// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -51295,7 +51650,7 @@ func (c *ClientWithResponses) UpdateScheduleWithResponse(ctx context.Context, sc
 
 // GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each Destination of the Schedule's Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Returns a wrapper object for the known response body format(s).
 //

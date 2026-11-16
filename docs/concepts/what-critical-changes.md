@@ -33,8 +33,8 @@ The end of a Snooze or of an acknowledgement on a rise
 :   When a rise in Severity level makes an Alert Group Urgent, it ends a Snooze, unless the Snooze was set while the
     Alert Group was already Urgent. It also removes the acknowledgement where the Route's setting "Rise to Urgent
     removes the acknowledgement" (`route.urgent_rise_removes_ack`) is on, which it is by default. The Alert Group is
-    Firing again, and the change is Loud, with the reason. It Mentions the Owner it removed and the people of the
-    `rise_to_urgent` Mention setting of each Destination ([Loud and Quiet](loud-and-quiet.md#which-changes-are-loud),
+    Firing again, and the change is Loud, with the reason. It Mentions the Owner it removed and the Destination's
+    Mention entries for `rise_to_urgent` ([Loud and Quiet](loud-and-quiet.md#which-changes-are-loud),
     [Statuses and commands](statuses-and-commands.md#transitions-muster-makes-on-its-own)). A rise that changes
     nothing else is Quiet.
 

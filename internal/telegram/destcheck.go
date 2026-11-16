@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/outbound"
@@ -19,7 +21,19 @@ const (
 	StepDiscussionGroup  = "discussion_group"
 	StepBotRightsChannel = "bot_rights_channel"
 	StepBotRightsGroup   = "bot_rights_group"
+	// StepDiscussionGroupMembers follows the others on save, on "Check" and in muster doctor, never in the Broken
+	// probe: which people of the Destination's Teams are outside its discussion group (C-27.FR-8).
+	StepDiscussionGroupMembers = "discussion_group_members"
 )
+
+// GroupPeopleBudget is destination.telegram.group_people_budget: it bounds the step discussion_group_members of a
+// check on save, on "Check" and in muster doctor, besides the budget of each of its requests: the people it has not
+// reached by then stay unknown.
+const GroupPeopleBudget = 10 * time.Second
+
+// descriptionParticipantInvalid is how Telegram answers getChatMember in the discussion group about a person who was
+// never in it, with 400 (F-128).
+const descriptionParticipantInvalid = "PARTICIPANT_ID_INVALID"
 
 // The messages of the steps that failed; the two of the discussion group are those of reference.md.
 const (
@@ -53,13 +67,24 @@ const (
 func MessageGroupNotAdmin(group string) string { return fmt.Sprintf(messageGroupNotAdmin, group) }
 
 // DestinationStep is one step of a Destination check: whether it passed, and when it failed the message for the
-// person, in English, its code, which clients translate, and the outcome for delivery.
+// person, in English, its code, which clients translate, and the outcome for delivery. The step
+// discussion_group_members names in Absent the Muster User ids of the people it saw outside the discussion group, and
+// in Unknown those it could not tell: not asked, or not answered definitively.
 type DestinationStep struct {
 	Name    string
 	OK      bool
 	Message string
 	Code    string
 	Outcome delivery.Outcome
+	Absent  []int64
+	Unknown []int64
+}
+
+// GroupPerson is a person whose membership of the discussion group the step discussion_group_members reads: their
+// Muster User id and the Telegram user id of their Account link.
+type GroupPerson struct {
+	UserID     int64
+	TelegramID int64
 }
 
 // DestinationCheck is the result of a Destination check: the steps that ran; once the channel was read its numeric id
@@ -76,6 +101,17 @@ type DestinationCheck struct {
 
 // OK reports whether every step passed.
 func (c DestinationCheck) OK() bool { return c.Outcome.Kind == delivery.OutcomeOK }
+
+// GroupPeople reports whether the check ran the step discussion_group_members, with the Muster User ids it saw outside
+// the discussion group and those it could not tell.
+func (c DestinationCheck) GroupPeople() (absent, unknown []int64, ok bool) {
+	for _, st := range c.Steps {
+		if st.Name == StepDiscussionGroupMembers {
+			return st.Absent, st.Unknown, true
+		}
+	}
+	return nil, nil, false
+}
 
 // Moved reports whether a check that passed found another channel or discussion group than the ids stored with the
 // Destination, 0 for one not known: comments were linked to another group, or the @username moved to another channel.
@@ -234,4 +270,73 @@ func isAnswered(r Result) bool {
 		code = r.Status
 	}
 	return code == http.StatusBadRequest || code == http.StatusForbidden || code == http.StatusNotFound
+}
+
+// CheckGroupPeople adds to a Destination check that passed its step discussion_group_members (C-27.FR-8):
+// getChatMember of the discussion group for each of the people, one after the other through run. Those it
+// answers left or kicked, restricted and not a member, or 400 PARTICIPANT_ID_INVALID — a subscriber of the channel who
+// was never in the group (F-128) — are outside it; creator, administrator and member are in it, an anonymous admin
+// included, and so is restricted with is_member. Any other answer or failure leaves that person unknown, and once run
+// refuses a request, such as one that gets no limiter token, or ctx is done, the people not asked yet are unknown too:
+// the step always passes, and its caller keeps what an earlier check saw of the unknown. A leave reaches the answer
+// only a while after it, about a minute for left (F-128), so a check right after a leave may still see the person in
+// the group. A check that failed is returned as it is.
+func CheckGroupPeople(ctx context.Context, c *Client, run Runner, check DestinationCheck,
+	people []GroupPerson) DestinationCheck {
+	if !check.OK() {
+		return check
+	}
+	group := strconv.FormatInt(check.GroupID, 10)
+	absent, unknown := []int64{}, []int64{}
+	for i, p := range people {
+		if ctx.Err() != nil {
+			unknown = appendIDs(unknown, people[i:])
+			break
+		}
+		var m ChatMember
+		r, err := read(ctx, run, func(ctx context.Context, class outbound.Class) Result {
+			var r Result
+			m, r = c.GetChatMember(ctx, class, group, p.TelegramID)
+			return r
+		})
+		if err != nil {
+			unknown = appendIDs(unknown, people[i:])
+			break
+		}
+		switch in, known := membership(m, r); {
+		case !known:
+			unknown = append(unknown, p.UserID)
+		case !in:
+			absent = append(absent, p.UserID)
+		}
+	}
+	check.Steps = append(check.Steps, DestinationStep{Name: StepDiscussionGroupMembers, OK: true, Absent: absent,
+		Unknown: unknown})
+	return check
+}
+
+func appendIDs(ids []int64, people []GroupPerson) []int64 {
+	for _, p := range people {
+		ids = append(ids, p.UserID)
+	}
+	return ids
+}
+
+// membership is whether the answer of getChatMember says that the person is in the group, and whether it says it at
+// all: a status it names, or the 400 PARTICIPANT_ID_INVALID of a person never in the group (F-128).
+func membership(m ChatMember, r Result) (in, known bool) {
+	if !r.OK() {
+		invalid := isAnswered(r) && (r.Code == http.StatusBadRequest || r.Status == http.StatusBadRequest) &&
+			strings.Contains(r.Description, descriptionParticipantInvalid)
+		return false, invalid
+	}
+	switch m.Status {
+	case StatusCreator, StatusAdministrator, StatusMember:
+		return true, true
+	case StatusLeft, StatusKicked:
+		return false, true
+	case StatusRestricted:
+		return m.IsMember, true
+	}
+	return false, false
 }

@@ -6,7 +6,9 @@ package connections_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -514,15 +516,39 @@ func TestTelegramDestinationsDoctor(t *testing.T) {
 	e.store.tgTargets[8] = memTGTarget{connection: c.ID, channel: "@no_comments"}
 	e.store.tgTargets[9] = memTGTarget{connection: revoked.ID, channel: "@muster_alerts"}
 	e.store.tgTargets[10] = memTGTarget{connection: 999, channel: "@muster_alerts"}
+	e.store.tgTargets[11] = memTGTarget{connection: c.ID, channel: "@muster_alerts",
+		people: []dbgen.ListTelegramDestinationPeopleRow{{ID: 1, Login: "alice", ExternalID: "5001"},
+			{ID: 2, Login: "bob", ExternalID: "5002"}, {ID: 3, Login: "carol", ExternalID: "not-a-number"},
+			{ID: 4, Login: "dora", ExternalID: "5004"}}}
+	// The same people, of a Destination whose stored group is another than the one its check finds: the warning of
+	// "Check", and no step.
+	e.store.tgTargets[12] = memTGTarget{connection: c.ID, channel: "@muster_alerts", groupID: -100999,
+		people: e.store.tgTargets[11].people}
+	if err := e.tg.SetMember(faketelegram.GroupID, 5001, faketelegram.Member{Status: faketelegram.StatusMember}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.tg.SetMember(faketelegram.GroupID, 5004, faketelegram.Member{ErrorCode: 400,
+		Description: "Bad Request: user not found"}); err != nil {
+		t.Fatal(err)
+	}
 	got := findings(t, e.svc, e.store)
 	want := "connection tg: ok\nconnection revoked: get_me: " + telegram.MessageTokenInvalid + "\n" +
 		"destination tg-dest-7: ok\n" +
 		"destination tg-dest-8: discussion_group: " + telegram.MessageNoComments + "\n" +
 		"destination tg-dest-9: its Connection failed its check: get_me: " + telegram.MessageTokenInvalid + "\n" +
-		"destination tg-dest-10: its Connection is deleted"
+		"destination tg-dest-10: its Connection is deleted\n" +
+		"destination tg-dest-11: warning: people of its Teams outside its discussion group, whom Mentions do not " +
+		"reach: bob; people of its Teams whom Telegram did not answer about: dora\n" +
+		"destination tg-dest-12: warning: discussion_group: " + telegram.MessageMoved
 	if got != want {
 		t.Fatalf("findings:\n%s", got)
 	}
+	down := errors.New("down")
+	e.store.fail["ListTelegramDestinationPeople"] = down
+	if _, err := e.svc.Doctor(t.Context(), e.store, time.Second); !errors.Is(err, down) {
+		t.Errorf("the members failing = %v", err)
+	}
+	delete(e.store.fail, "ListTelegramDestinationPeople")
 	for _, r := range e.tg.Requests() {
 		if strings.Contains(r.Path, "/sendMessage") || strings.Contains(r.Path, "/editMessageText") {
 			t.Fatalf("the doctor sent a message: %s", r.Path)
@@ -535,6 +561,68 @@ func TestTelegramDestinationsDoctor(t *testing.T) {
 	found, err := e.svc.Doctor(t.Context(), e.store, 300*time.Millisecond)
 	if err != nil || found[2].OK() || !strings.HasPrefix(found[2].Message, "bot_rights_channel: ") {
 		t.Fatalf("slow = %+v %v", found, err)
+	}
+}
+
+// TestDoctorGroupPeoplePacing: muster doctor's step discussion_group_members makes one getChatMember per person, no
+// sooner than the interval of the Connection's limiter after the one before — 100 ms for 10 requests a second — and
+// within destination.telegram.group_people_budget: past it the people not asked yet are unknown, which its warning
+// names apart from the people outside the group.
+func TestDoctorGroupPeoplePacing(t *testing.T) {
+	e := newTGEnv(t)
+	in := e.input("tg", connections.ModeLongPolling)
+	in.Limiter = connections.Limiter{Limit: 10, PerSeconds: 1}
+	c, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var people []dbgen.ListTelegramDestinationPeopleRow
+	for i := range 5 {
+		people = append(people, dbgen.ListTelegramDestinationPeopleRow{ID: int64(i + 1),
+			Login: fmt.Sprintf("p%d", i+1), ExternalID: strconv.Itoa(6001 + i)})
+	}
+	e.store.tgTargets[7] = memTGTarget{connection: c.ID, channel: "@muster_alerts", people: people}
+	asked := func() []int64 {
+		t.Helper()
+		var at []int64
+		for _, r := range e.tg.Requests() {
+			if strings.HasSuffix(r.Path, "/getChatMember") && strings.Contains(r.Body, `"user_id":60`) {
+				at = append(at, r.AtMs)
+			}
+		}
+		return at
+	}
+	warning := func() string {
+		t.Helper()
+		found, err := e.svc.Doctor(t.Context(), e.store, 2*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return found[len(found)-1].Warning
+	}
+	e.tg.ResetRequests()
+	if got := warning(); got != "people of its Teams outside its discussion group, whom Mentions do not reach: "+
+		"p1, p2, p3, p4, p5" {
+		t.Errorf("paced: %q", got)
+	}
+	at := asked()
+	if len(at) != 5 {
+		t.Fatalf("asked %d times", len(at))
+	}
+	for i := 1; i < len(at); i++ {
+		if gap := at[i] - at[i-1]; gap < 95 {
+			t.Errorf("request %d came %d ms after the one before, want 100", i+1, gap)
+		}
+	}
+	// Past a budget of 150 ms the third person is not asked: they and the rest are unknown.
+	connections.SetGroupPeopleBudget(e.svc, 150*time.Millisecond)
+	e.tg.ResetRequests()
+	if got := warning(); got != "people of its Teams outside its discussion group, whom Mentions do not reach: "+
+		"p1, p2; people of its Teams whom Telegram did not answer about: p3, p4, p5" {
+		t.Errorf("past the budget: %q", got)
+	}
+	if n := len(asked()); n != 2 {
+		t.Errorf("asked %d times past the budget", n)
 	}
 }
 
@@ -601,8 +689,31 @@ func TestCheckTelegramChannel(t *testing.T) {
 	if err != nil || res.ConnectionID != c.ID || !res.Check.OK() || res.Check.GroupID != faketelegram.GroupID {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
+	if absent, _, ok := res.Check.GroupPeople(); !ok || len(absent) != 0 {
+		t.Errorf("the members of nobody = %v %v", absent, ok)
+	}
+	// The step discussion_group_members reads the people of the check through the same path (C-27.FR-8).
+	if err := e.tg.SetMember(faketelegram.GroupID, 5001, faketelegram.Member{Status: faketelegram.StatusMember}); err != nil {
+		t.Fatal(err)
+	}
+	// The steps of C-14.FR-14 are limited by the Destination; the members step by the Connection alone, so that it
+	// takes no token of the Destination's bucket.
 	subjects := len(e.path.subjects)
 	dest := int64(4)
+	res, err = e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
+		Destination: &dest, ChannelID: "@muster_alerts", People: []telegram.GroupPerson{{UserID: 1, TelegramID: 5001},
+			{UserID: 2, TelegramID: 5002}}})
+	if absent, _, ok := res.Check.GroupPeople(); err != nil || !ok || !slices.Equal(absent, []int64{2}) ||
+		len(e.path.subjects)-subjects != 6 {
+		t.Fatalf("members = %v %v, %v, %d requests", absent, ok, err, len(e.path.subjects)-subjects)
+	}
+	for i, s := range e.path.subjects[subjects:] {
+		if byDestination := s.Destination != nil && s.Destination.ID == 4; byDestination != (i < 4) ||
+			(i >= 4 && (s.Connection == nil || *s.Connection != c.ID)) {
+			t.Errorf("request %d limited by %+v", i, s)
+		}
+	}
+	subjects = len(e.path.subjects)
 	res, err = e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
 		Destination: &dest, ChannelID: "@no_comments"})
 	if err != nil || res.Check.OK() || len(e.path.subjects) == subjects {

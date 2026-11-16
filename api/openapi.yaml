@@ -3919,7 +3919,9 @@ paths:
         On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings
         about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and
         Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut
-        to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock''s now and
+        to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each
+        Destination of the Schedule''s Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The
+        period is from `from` to `to`, by default the business clock''s now and
         `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at
         `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it,
         else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the
@@ -4205,8 +4207,9 @@ paths:
       summary: Read who is On-call now in each Team
       description: '"On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the
         On-call of its main Schedule at the business clock''s now with the Rotation layer that decides it, until when,
-        and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule
-        has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.'
+        and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the
+        Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has
+        `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.'
       x-permission: schedules:read
       x-listener: app
       security:
@@ -13365,7 +13368,9 @@ components:
     ScheduleWarningKind:
       type: string
       description: '`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is
-        a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.'
+        a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its
+        `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with
+        the `messenger` and the `reason` (C-27.FR-8).'
       enum:
       - disabled
       - viewer
@@ -13381,6 +13386,9 @@ components:
       - override_id
       - start
       - end
+      - destination
+      - messenger
+      - reason
       properties:
         kind:
           $ref: '#/components/schemas/ScheduleWarningKind'
@@ -13390,23 +13398,72 @@ components:
           - $ref: '#/components/schemas/UserRef'
           - type: 'null'
         rotation_layer:
+          description: The Rotation layer of the Shifts that are skipped, or for `unreachable` the one whose Shift makes
+            the person On-call in the segment; null otherwise.
           oneOf:
           - $ref: '#/components/schemas/EntityRef'
           - type: 'null'
         override_id:
           $ref: '#/components/schemas/NullablePublicId'
+          description: The Override that is skipped, or for `unreachable` the one that makes the person On-call in the
+            segment; null otherwise.
         start:
-          description: The start of the gap, cut to the period; null for another kind.
+          description: The start of the gap, or of the segment of `unreachable`, cut to the period; null for another
+            kind.
           type:
           - string
           - 'null'
           format: date-time
         end:
-          description: The end of the gap, cut to the period; null for another kind.
+          description: The end of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
           type:
           - string
           - 'null'
           format: date-time
+        destination:
+          description: The Destination of the Team that a Mention of the person cannot reach; null for another kind.
+          oneOf:
+          - $ref: '#/components/schemas/DestinationRef'
+          - type: 'null'
+        messenger:
+          description: The messenger of `destination` — the type of its Connection, or `webhook` for an outgoing
+            webhook; null for another kind.
+          oneOf:
+          - $ref: '#/components/schemas/DestinationType'
+          - type: 'null'
+        reason:
+          description: Why a Mention of the person cannot reach `destination`; null for another kind.
+          oneOf:
+          - $ref: '#/components/schemas/ReachReason'
+          - type: 'null'
+    ReachReason:
+      type: string
+      description: 'Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link`
+        — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or
+        Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare
+        `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing
+        webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination
+        check of a Telegram Destination saw the person outside the discussion group of its channel.'
+      enum:
+      - no_account_link
+      - bridge_no_native_mentions
+      - webhook_no_thread_reply
+      - not_in_discussion_group
+    OnCallReach:
+      type: object
+      description: A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).
+      required:
+      - destination
+      - messenger
+      - reason
+      properties:
+        destination:
+          $ref: '#/components/schemas/DestinationRef'
+        messenger:
+          $ref: '#/components/schemas/DestinationType'
+          description: The messenger of the Destination — the type of its Connection, or `webhook`.
+        reason:
+          $ref: '#/components/schemas/ReachReason'
     ScheduleOnCall:
       type: object
       description: The Result of a Schedule over a period, with what it is made of.
@@ -13467,6 +13524,7 @@ components:
       - rotation_layer
       - until
       - next
+      - unreachable
       properties:
         team:
           $ref: '#/components/schemas/TeamRef'
@@ -13501,6 +13559,12 @@ components:
           oneOf:
           - $ref: '#/components/schemas/OnCallNext'
           - type: 'null'
+        unreachable:
+          type: array
+          description: The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by
+            the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them.
+          items:
+            $ref: '#/components/schemas/OnCallReach'
     OnCallNext:
       type: object
       description: The segment of a Schedule's Result after the current one, cut to `schedule.gap_view`.
@@ -14786,6 +14850,7 @@ components:
       - ack_timeout
       - snooze_ended
       - rise_to_urgent
+      - storm_started
     TimelineKind:
       type: string
       enum:
@@ -17058,6 +17123,168 @@ components:
           - type: 'null'
         severity_condition:
           $ref: '#/components/schemas/SeverityCondition'
+    MentionEvent:
+      type: string
+      description: 'A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also
+        applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to
+        critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).'
+      enum:
+      - new_alert_group
+      - new_alerts
+      - reopen
+      - ack_timeout
+      - snooze_ended
+      - rise_to_urgent
+      - storm_started
+    MentionTargetKind:
+      type: string
+      description: 'Whom a Mention entry names (C-28.FR-1): everyone in the chat (`everyone`), a person (`user`), a
+        messenger group (`group`), a Team (`team`), the Teams of the Alert Group (`teams_from_label`), the On-call of a
+        Team''s main Schedule (`on_call_of_team`), and the On-call of each Team of the Alert Group
+        (`on_call_of_teams_from_label`).'
+      enum:
+      - everyone
+      - user
+      - group
+      - team
+      - teams_from_label
+      - on_call_of_team
+      - on_call_of_teams_from_label
+    MentionTargetInput:
+      type: object
+      description: The target of a Mention entry, with the fields of its kind only; another field is refused with `422`
+        `invalid_format` at it, and a missing one with `required`.
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/MentionTargetKind'
+        everyone:
+          type: string
+          description: With `everyone` only, the word of the messenger.
+          enum:
+          - channel
+          - here
+          - all
+          - everyone
+        user_id:
+          description: With `user` only.
+          $ref: '#/components/schemas/PublicId'
+        group:
+          type: string
+          description: With `group` only, the group's name without `@` — 1 to 64 letters, digits, `.`, `_` and `-`,
+            starting with a letter or a digit, the handle of a Slack user group; any text but empty for an outgoing
+            webhook.
+          example: payments_team
+        group_id:
+          type: string
+          description: With `group` only, the Slack user group's id (`S` followed by digits and capital letters), from
+            `listConnectionGroups`, required on Slack and refused on the other types.
+          example: S0FAKEPAYTEAM
+        team_id:
+          description: With `team` and `on_call_of_team` only.
+          $ref: '#/components/schemas/PublicId'
+    MentionEntryInput:
+      type: object
+      description: A Mention entry as written (C-28.FR-1).
+      required:
+      - target
+      properties:
+        target:
+          $ref: '#/components/schemas/MentionTargetInput'
+        events:
+          type: array
+          description: The Loud events the entry applies to, each once; all seven when omitted.
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MentionEvent'
+    MentionTarget:
+      description: The target of a Mention entry as read, with the User or the Team it names; a deleted User reads
+        `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.
+      allOf:
+      - $ref: '#/components/schemas/MentionTargetInput'
+      - type: object
+        properties:
+          user:
+            description: The User of a `user` target.
+            $ref: '#/components/schemas/UserRef'
+          team:
+            description: The Team of a `team` or `on_call_of_team` target.
+            $ref: '#/components/schemas/TeamRef'
+    MentionResolved:
+      type: object
+      description: One Mention an entry makes now, as the Destination's messenger writes it.
+      required:
+      - kind
+      - name
+      - linked
+      properties:
+        kind:
+          type: string
+          description: '`user`, a person, by the username of their Account link in the Destination''s Identity space,
+            else by their login; `group`, a messenger group or a Team mention, and on an outgoing webhook a Team by its
+            slug; `everyone`, the word of everyone in the chat.'
+          enum:
+          - user
+          - group
+          - everyone
+        name:
+          type: string
+        linked:
+          type: boolean
+          description: For a `user`, whether they have an Account link in the Destination's Identity space — one
+            without it is not mentioned (C-28.FR-3) — always true on an outgoing webhook, which mentions people as
+            data; true for the other kinds.
+    MentionResolution:
+      type: object
+      description: What an entry mentions now for one Team, or for no Team.
+      required:
+      - team
+      - mentions
+      properties:
+        team:
+          description: The Team of a Team or On-call target, one item per Team that is not deleted for the targets from
+            the label; null for the other targets.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+        mentions:
+          type: array
+          description: Empty when the entry mentions nobody now for it — a Team without a Team mention for the
+            Connection, a Team without a main Schedule or in a gap of it, a deleted User or Team, or a target the
+            Connection cannot mention now.
+          items:
+            $ref: '#/components/schemas/MentionResolved'
+    MentionEntry:
+      type: object
+      description: A Mention entry as read, with whether the Destination's Connection can mention its target now and
+        what it mentions now. An entry whose Connection lost the ability stays, reads `available` false with the reason,
+        and mentions nobody.
+      required:
+      - target
+      - events
+      - available
+      - unavailable_reason
+      - resolves_to
+      properties:
+        target:
+          $ref: '#/components/schemas/MentionTarget'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/MentionEvent'
+        available:
+          type: boolean
+        unavailable_reason:
+          description: Why the Connection cannot mention the target now; null while it can.
+          oneOf:
+          - $ref: '#/components/schemas/MentionUnavailableReason'
+          - type: 'null'
+        resolves_to:
+          type: array
+          items:
+            $ref: '#/components/schemas/MentionResolution'
     MentionSetting:
       type: object
       description: Whom to mention for one kind of Loud event. The default is nobody.
@@ -17222,7 +17449,6 @@ components:
       - connection_id
       - team_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17239,7 +17465,28 @@ components:
         channel_id:
           type: string
         mentions:
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — Mattermost has no `everyone` — and an entry whose target equals a stored one
+            is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with
+            `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored one, and a target
+            listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17260,7 +17507,6 @@ components:
       - name
       - connection_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17276,7 +17522,28 @@ components:
           type: string
           description: Telegram chat id or `@username` of the channel. Comments must be enabled on the channel.
         mentions:
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — Telegram takes only people and the On-call — and an entry whose target
+            equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is
+            refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored one, and
+            a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17297,7 +17564,6 @@ components:
       - name
       - connection_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17315,8 +17581,29 @@ components:
           description: The channel as its messenger names it, an opaque string of up to 512 characters; surrounding
             white space is trimmed.
         mentions:
-          description: Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — a Bridge takes the words of everyone its bridge declares in
+            `everyone_mentions`, groups and Teams only when it declares `group_mentions`, and any person — and an entry
+            whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User
+            or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a
+            stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17340,7 +17627,6 @@ components:
       - name
       - connection_id
       - channel_id
-      - mentions
       - limiter
       properties:
         type:
@@ -17359,9 +17645,29 @@ components:
             of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space.
             Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
         mentions:
-          description: Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with
-            `unsupported`.
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — Slack has no `all` and no `everyone`, and takes groups and Teams only while
+            the last check of its Connection found `usergroups:read`, a group with its `group_id` — and an entry whose
+            target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or
+            Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored
+            one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17380,7 +17686,6 @@ components:
       - type
       - name
       - mode
-      - mentions
       - limiter
       properties:
         type:
@@ -17403,7 +17708,28 @@ components:
           description: Required when `mode` is `template` or `both`.
           $ref: '#/components/schemas/WebhookTemplateConfig'
         mentions:
+          deprecated: true
+          description: 'The Mention settings of L1 (C-12.FR-8), deprecated since 0.2.0 and removed in 0.3.0
+            (C-28.FR-5). In a read, computed from the `mention_entries` that L1 can express on the Destination''s type —
+            the everyone choices, chosen Users and messenger groups L1 took there, for the six kinds of L1 — so that the
+            other entries are not seen in it. In a request it is optional: when a request has no `mention_entries`, it
+            sets them by the conversion of the 0.2.0 migration — on create they are its result; on update it replaces
+            the entries that L1 can express, keeps the others after them, keeps the `storm_started` of a target present
+            before and after, and changes nothing when it equals the stored form — validated as L1 validated it, at
+            pointers under `/mentions`; ignored when `mention_entries` is present.'
           $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: 'The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies
+            to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the
+            Destination''s Connection cannot mention is refused with `422` `mention_unsupported` at
+            `/mention_entries/{i}/target` — an outgoing webhook takes every target, as data — and an entry whose target
+            equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is
+            refused with `unknown_id` at its `user_id` or `team_id` unless the entry''s target equals a stored one, and
+            a target listed twice with `duplicate` at `/mention_entries/{i}/target`.'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MentionEntryInput'
         owning_team_id:
           description: The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
@@ -17415,6 +17741,8 @@ components:
       type: object
       required:
       - id
+      - mentions
+      - mention_entries
       - health
       - routes
       - teams
@@ -17424,6 +17752,16 @@ components:
       properties:
         id:
           $ref: '#/components/schemas/PublicId'
+        mentions:
+          deprecated: true
+          description: The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5),
+            removed in 0.3.0.
+          $ref: '#/components/schemas/MentionSettings'
+        mention_entries:
+          type: array
+          description: The Mention entries in order, each with what it mentions now.
+          items:
+            $ref: '#/components/schemas/MentionEntry'
         teams:
           type: array
           description: The Teams that name the Destination as a Destination of the Team, by name.
@@ -17883,7 +18221,10 @@ components:
             `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message
             says to make the bot an admin there). Bridge: `channel`, the bridge''s `checkChannel` — whether the bot can
             post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is
-            not archived and has the bot as a member.'
+            not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which
+            always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with
+            a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside
+            (C-27.FR-8).'
           enum:
           - token
           - bot_in_channel
@@ -17892,6 +18233,7 @@ components:
           - bot_rights_channel
           - bot_rights_group
           - channel
+          - discussion_group_members
         ok:
           type: boolean
         message:
@@ -17908,6 +18250,14 @@ components:
             needed (`needed` of its answer), which clients name in their own words; `message` names them in English.
           items:
             type: string
+        absent_users:
+          type: array
+          description: 'Set with `discussion_group_members` only, omitted otherwise — the people `getChatMember`
+            answered as outside the discussion group (`left`, `kicked`, `restricted` and not a member, or `400` `Bad
+            Request: PARTICIPANT_ID_INVALID`), by name; a person whose call failed otherwise is not named. Telegram shows
+            a leave only a while after it, about a minute.'
+          items:
+            $ref: '#/components/schemas/UserRef'
     NullableDestinationCheckCode:
       type:
       - string
@@ -19153,8 +19503,9 @@ components:
       - test
     WebhookMentionTarget:
       type: object
-      description: A resolved Mention as data. `everyone` has no other fields, `group` has `name`, `user` has `id`, `name`
-        and `login`.
+      description: A resolved Mention as data (C-15.FR-11). `everyone` has no other fields, `group` has `name`, `user`
+        has `id`, `name` and `login` — the On-call of a Team is a `user` — and `team` has `slug` and `name`, one per
+        Team of the Alert Group for "Team from the label".
       required:
       - type
       properties:
@@ -19164,6 +19515,7 @@ components:
           - everyone
           - group
           - user
+          - team
         id:
           $ref: '#/components/schemas/NullablePublicId'
         name:
@@ -19171,6 +19523,10 @@ components:
           - string
           - 'null'
         login:
+          type:
+          - string
+          - 'null'
+        slug:
           type:
           - string
           - 'null'

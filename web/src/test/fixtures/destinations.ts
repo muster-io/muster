@@ -24,6 +24,8 @@ type DestinationOverrides<T extends { type: string }> = Partial<Omit<T, "type">>
 function readFields(): Omit<DestinationReadFields, "id"> {
   return {
     owning_team: null,
+    mentions: defaultMentions(),
+    mention_entries: [],
     health: { state: "healthy" },
     routes: [],
     teams: [],

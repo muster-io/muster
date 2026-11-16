@@ -174,6 +174,24 @@ func TestIntegrationSchedules(t *testing.T) {
 				t.Errorf("On-call at %s = %s, want %s", at, got, want)
 			}
 		}
+		// TeamOnCallAt, by the Team, gives the same person, through a caller's transaction as through the pool; a
+		// transaction that has ended shows that the queries run in it.
+		tx, err := e.d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id, ok, err := e.svc.TeamOnCallAt(ctx, tx, e.team.ID, berlin(t, "2026-11-04 21:00")); err != nil || !ok ||
+			id == 0 {
+			t.Errorf("TeamOnCallAt in a transaction = %d, %v, %v", id, ok, err)
+		}
+		_ = tx.Rollback(ctx)
+		if _, _, err := e.svc.TeamOnCallAt(ctx, tx, e.team.ID, berlin(t, "2026-11-04 21:00")); err == nil {
+			t.Error("TeamOnCallAt through an ended transaction read through the pool")
+		}
+		if id, ok, err := e.svc.TeamOnCallAt(ctx, nil, e.team.ID, berlin(t, "2026-11-04 21:00")); err != nil || !ok ||
+			id == 0 {
+			t.Errorf("TeamOnCallAt through the pool = %d, %v, %v", id, ok, err)
+		}
 		if _, err := e.svc.Create(ctx, admin, schedules.Input{TeamID: e.team.PublicID, Name: "MAIN"}); !errors.Is(err,
 			schedules.ErrNameTaken) {
 			t.Errorf("a name taken = %v", err)

@@ -209,15 +209,22 @@ type Requests interface {
 	Desired(ctx context.Context, db dbgen.DBTX, destinationID int64, st RequestState) ([]byte, error)
 }
 
+// MentionStormStarted is the symbolic Mention of the first publication of a Storm summary, which only the Mention
+// entries for storm_started apply to (C-28.FR-7, C-11.FR-6 revised for L2); an L1 summary carried new_alert_group.
+const MentionStormStarted = groups.Mention(mentions.EventStormStarted)
+
 // Mentioner resolves the symbolic Mentions of a Loud message into the targets of its Destination (C-12.FR-8), reading
 // through the transaction of the call's preparation; declared by its consumer, *mentions.Service implements it.
 type Mentioner interface {
 	Resolve(ctx context.Context, db mentions.DBTX, org int64, r mentions.Request) ([]mentions.Target, error)
 }
 
-// targets are the targets of a call of the Destination d about the Alert Group group and its lifecycle event seq:
-// none for a Quiet one, without Mentions or without a Mentioner.
-func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Destination, group, seq int64,
+// targets are the targets of a call of the Destination d about the Alert Group group and its lifecycle event seq, or
+// about the Storm storm of a Storm summary (C-28.FR-3, FR-7): none for a Quiet one, without Mentions or without a
+// Mentioner. The request carries no time: the Mentioner takes the On-call at the time of the event, which it reads in
+// the transaction db, so that a send the limiter delayed or a retry mentions the On-call of the event, not of the
+// attempt.
+func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Destination, group, storm, seq int64,
 	loud groups.Loudness, ms []groups.Mention) ([]mentions.Target, error) {
 	if w.Mentions == nil || loud != groups.Loud || len(ms) == 0 {
 		return nil, nil
@@ -227,7 +234,7 @@ func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Des
 		names[i] = string(m)
 	}
 	out, err := w.Mentions.Resolve(ctx, db, org, mentions.Request{DestinationID: d.ID, DestinationType: d.Type,
-		ConnectionID: d.Connection, AlertGroupID: group, Seq: seq, Mentions: names})
+		ConnectionID: d.Connection, AlertGroupID: group, StormID: storm, Seq: seq, Mentions: names})
 	if err != nil {
 		return nil, fmt.Errorf("resolve the mentions: %w", err)
 	}
