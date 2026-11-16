@@ -28,6 +28,7 @@ import {
   fakeIntegration,
   fam,
   notify,
+  removeNamed,
   signInAdmin,
   TEAM_SPEC_PASSWORD,
 } from "../support";
@@ -135,7 +136,10 @@ function shop(alertname: string, extra: Record<string, string>) {
 
 /** Runs a command of the Alert Group as a person. */
 async function run(who: Api | undefined, id: string, command: string): Promise<void> {
-  await who?.call(
+  if (who === undefined) {
+    throw new Error("no signed-in person for the command");
+  }
+  await who.call(
     "POST",
     `/api/v1/alert-groups/${id}/${command}`,
     command === "resolve" ? {} : undefined,
@@ -366,6 +370,7 @@ test("Alert Groups in each status, their commands, the list and the Statistics",
       [{ label: "namespace", op: "=", value: "payments" }],
     );
     await ensureTeam(admin, "search", [], [{ label: "service", op: "=", value: "search" }]);
+    await removeNamed(admin, "/api/v1/service-accounts", "terraform");
     const sa = await admin.call<{ id: string }>("POST", "/api/v1/service-accounts", {
       name: "terraform",
       role: "responder",

@@ -232,17 +232,6 @@ are split in your time zone. Everyone who can read Alert Groups sees every view 
 The period counts the Alert Groups that **started** in it, not those that were open during it. Choose the **Period** —
 **Last 7 days**, **Last 30 days**, **Last 90 days** or **Custom**.
 
-### Filters
-
-The page takes these filters of the Alert Group list, and they apply to every view and stay when you change the view:
-**Routes**, **Integrations**, **Severity**, **Urgent**, **Team**, **Reopened** and **Label filters**. It adds one of its
-own, **Acknowledged first by**: **Anyone**, **Me** or a User; a Service account cannot be chosen, because it cannot
-acknowledge. The page has no status tabs and no search. The view, the period and the filters are in the address of the
-page, so a link shares exactly what you see.
-
-In **By route**, **By integration** and **By team**, the Routes, Integrations or Teams you choose in their own filter
-are also the rows of the table.
-
 1. Open **Statistics**. Choose the **Period** and the view, and add filters to narrow it.
 
     ![Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments](../assets/screenshots/concepts/alert-groups/06-statistics.png){ .screenshot }
@@ -251,6 +240,17 @@ are also the rows of the table.
    day (**Per day**).
 
     ![The Alert Groups per day of start of the Route payments](../assets/screenshots/concepts/alert-groups/07-statistics-days.png){ .screenshot }
+
+### Filters
+
+The page takes these filters of the Alert Group list, and they apply to every view and stay when you change the view:
+**Routes**, **Integrations**, **Severity**, **Urgent**, **Team** (a Team or **My Teams**), **Reopened** and
+**Label filters**. It adds one of its own, **Acknowledged first by**: **Anyone**, **Me** or a User; a Service account
+cannot be chosen, because it cannot acknowledge. The page has no status tabs and no search. The view, the period and the filters are in the address of the
+page, so a link shares exactly what you see.
+
+In **By route**, **By integration** and **By team**, the Routes, Integrations or Teams you choose in their own filter
+are also the rows of the table.
 
 ### By team
 
@@ -299,7 +299,7 @@ The row **Unknown** holds the Alert Groups that were acknowledged but whose firs
 those acknowledged before 0.2.0 whose Timeline was already removed, wholly or in part (`retention.alert_details`), and
 those first acknowledged while Muster was being updated by a rolling update. It is always the last row, whatever the
 sorting, and it has no **Resolved**. It is there so that **Acknowledged first** adds up over the rows to the number of
-Alert Groups that were acknowledged, which is the count of **Time to acknowledge** in **By route**. The row is not shown
+Alert Groups that were acknowledged, which is the **Acknowledged** column of **By route**. The row is not shown
 when it has no Alert Groups, nor when **Acknowledged first by** is set.
 
 ## How long Alert Groups are kept
