@@ -244,10 +244,10 @@ The period counts the Alert Groups that **started** in it, not those that were o
 ### Filters
 
 The page takes these filters of the Alert Group list, and they apply to every view and stay when you change the view:
-**Routes**, **Integrations**, **Severity**, **Urgent**, **Team** (a Team or **My Teams**), **Reopened** and
-**Label filters**. It adds one of its own, **Acknowledged first by**: **Anyone**, **Me** or a User; a Service account
-cannot be chosen, because it cannot acknowledge. The page has no status tabs and no search. The view, the period and the filters are in the address of the
-page, so a link shares exactly what you see.
+**Routes**, **Integrations**, **Severity**, **Urgent**, **Team** (a Team or **My Teams**), **Reopened** and **Label
+filters**. It adds one of its own, **Acknowledged first by**: **Anyone**, **Me** or a User; a Service account cannot be
+chosen, because it cannot acknowledge. The page has no status tabs and no search. The view, the period and the filters
+are in the address of the page, so a link shares exactly what you see.
 
 In **By route**, **By integration** and **By team**, the Routes, Integrations or Teams you choose in their own filter
 are also the rows of the table.
