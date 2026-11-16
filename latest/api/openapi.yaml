@@ -53,8 +53,8 @@ tags:
 - name: Routes
   description: Routes, Matchers, Group key previews, profiles and suggestions.
 - name: Teams
-  description: Teams, the people in them and their Working hours. A Team owns Routes and Destinations and grants no
-    access of its own.
+  description: Teams, the people in them and their Working hours. A Team owns Routes, Destinations and Escalation chains
+    and grants no access of its own.
 - name: Schedules
   description: Schedules of the Teams with their Rotation layers and Overrides, and their On-call and Result. Shifts and
     Overrides send no message.
@@ -72,6 +72,9 @@ tags:
   description: Template preview and dry run.
 - name: Account links
   description: Ties between Users and messenger accounts. Started only from a signed-in web session.
+- name: Escalation chains
+  description: Escalation chains of Pages, waits, calls, webhooks and repeats, which Routes and Teams name with a Severity
+    condition. A chain is configuration until chains run.
 - name: Notification gateways
   description: The contacts of people at Notification gateways — Bridge Connections in the role `gateway` that call or
     text people — added and confirmed with a code only by their person, from the web session, and seen and removed by
@@ -3564,8 +3567,8 @@ paths:
       summary: Delete a Team
       description: Removes the Team's people and Working hours and leaves the Routes and Destinations it owned without an
         owner, each with a new `version`; the Team stays, marked deleted, for what names it, and its slug is free at once.
-        A Team that has Schedules, and from the Escalation chains on one that owns chains, is refused with `409`
-        `team_in_use`, which names them in `in_use_by`.
+        A Team that has Schedules or owns Escalation chains is refused with `409` `team_in_use`, which names them in
+        `in_use_by`; its `chain_entries` are removed with it.
       x-permission: teams:write
       x-listener: app
       security:
@@ -4241,6 +4244,206 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /escalation-chains:
+    get:
+      operationId: listEscalationChains
+      tags:
+      - Escalation chains
+      summary: List Escalation chains
+      description: The Escalation chains by name, each with its steps, the Routes and Teams that name it, the Destinations
+        it writes in and its warnings. Every Role reads them.
+      x-permission: escalation-chains:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/OwningTeamQuery'
+      - name: q
+        in: query
+        description: Case-insensitive match on the name.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: A page of Escalation chains.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationChainList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      operationId: createEscalationChain
+      tags:
+      - Escalation chains
+      summary: Create an Escalation chain
+      description: 'A chain with a name unique in the Organization ignoring case (`409` `name_taken`), a description, an
+        optional owning Team and its ordered steps within `escalation.limits` (C-32.FR-1, FR-3). Each step takes the
+        fields of its kind only (see `EscalationStepInput`). A person a `page_people` or `call` step names who is a
+        Viewer or disabled is refused with `422` `not_pageable` at `/steps/{i}/user_ids/{j}`, with the `reason`. A chain
+        runs nothing until a Route or a Team names it and chains run.'
+      x-permission: escalation-chains:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalationChainInput'
+      responses:
+        '201':
+          description: The created Escalation chain.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationChain'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /escalation-chains/{escalation_chain_id}:
+    get:
+      operationId: getEscalationChain
+      tags:
+      - Escalation chains
+      summary: Read an Escalation chain
+      x-permission: escalation-chains:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/EscalationChainId'
+      responses:
+        '200':
+          description: The Escalation chain.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationChain'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    put:
+      operationId: updateEscalationChain
+      tags:
+      - Escalation chains
+      summary: Update an Escalation chain
+      description: Replaces the name and the steps; an omitted `description` or `owning_team_id` keeps the stored one,
+        and `owning_team_id` null clears it. Requires `If-Match`; a stale ETag gets `412`. The people, the Notification
+        gateway and the Destination that the stored steps name pass as they are, so that a chain whose person was
+        disabled, whose gateway or whose Destination was deleted since can still be saved; what the save adds is
+        checked. A change applies to the runs that start after it (P-73).
+      x-permission: escalation-chains:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/EscalationChainId'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalationChainInput'
+      responses:
+        '200':
+          description: The updated Escalation chain.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationChain'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    delete:
+      operationId: deleteEscalationChain
+      tags:
+      - Escalation chains
+      summary: Delete an Escalation chain
+      description: Deletes the chain with its steps. A chain that a Route or a Team names is refused with `409`
+        `chain_in_use`, which names them in `in_use_by`.
+      x-permission: escalation-chains:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/EscalationChainId'
+      - $ref: '#/components/parameters/IfMatchOptional'
+      responses:
+        '204':
+          description: The Escalation chain was deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
   /alert-groups:
@@ -9306,6 +9509,13 @@ components:
       description: Connection `public_id`.
       schema:
         $ref: '#/components/schemas/PublicId'
+    EscalationChainId:
+      name: escalation_chain_id
+      in: path
+      required: true
+      description: Escalation chain `public_id`.
+      schema:
+        $ref: '#/components/schemas/PublicId'
     DestinationId:
       name: destination_id
       in: path
@@ -9766,7 +9976,7 @@ components:
             $ref: '#/components/schemas/EntityRef'
         in_use_by:
           type: array
-          description: Set on `team_in_use` and `schedule_in_use`; the objects that hold the resource, each with its kind,
+          description: Set on `team_in_use`, `schedule_in_use` and `chain_in_use`; the objects that hold the resource, each with its kind,
             `public_id` and name.
           items:
             $ref: '#/components/schemas/InUseRef'
@@ -9906,8 +10116,9 @@ components:
             stored `info` declares only the role `gateway`, and cannot be a Destination.
         - code: not_pageable
           description: The person may not be Paged — a Viewer, a disabled User or a User who is not in the Team, as
-            `reason` says — where a Rotation layer adds them (`/rotation_layers/{i}/user_ids/{j}`) or an Override makes
-            them take a Shift (`/user_id`).
+            `reason` says — where a Rotation layer adds them (`/rotation_layers/{i}/user_ids/{j}`), an Override makes
+            them take a Shift (`/user_id`) or an Escalation step adds them (`/steps/{i}/user_ids/{j}`, `viewer` or
+            `disabled`).
         - code: one_of_required
           description: Exactly one of several fields must be given, such as `until`, `no_end` or `preset` of a Snooze, or
             the parameters `connection` and `destination` of `listRequestLog`, of which it takes one, or `run` alone.
@@ -9956,8 +10167,11 @@ components:
             direct message to the account with `cannot_dm_bot`, `user_not_found`, or `channel_not_found` for its user
             id (`startSlackLink`). The pointer is `/handle`.
         - code: gateway_required
-          description: A call of a Notification rule, or the state `call` of a User's rules, while no Notification
-            gateway exists; the pointer is the action's or `/gateway_id`.
+          description: A call of a Notification rule, the state `call` of a User's rules, or a `call` Escalation step,
+            while no Notification gateway exists; the pointer is the action's, the step's or `/gateway_id`.
+        - code: webhook_events_required
+          description: A `webhook` Escalation step names a Destination that is not an outgoing webhook in the mode
+            `events` or `both`; the pointer is the step's `destination_id`.
         - code: contact_required
           description: A call of a User's Notification rules, or their state `call`, through a Notification gateway at
             which the User has no confirmed contact; the pointer is the action's or `/gateway_id`.
@@ -10015,6 +10229,8 @@ components:
           description: An Override by someone who is neither in the Schedule's Team nor an Admin.
         - code: schedule_in_use
           description: An Escalation step names the Schedule; `in_use_by` names the chains.
+        - code: chain_in_use
+          description: A Route or a Team names the Escalation chain (`deleteEscalationChain`); `in_use_by` names them.
         - code: override_ended
           description: The Override has ended, so it can be neither changed nor deleted.
         - code: builtin_immutable
@@ -10309,6 +10525,8 @@ components:
         | `schedules:read` (Schedules, Rotation layers, Overrides and the On-call) | yes | yes | yes |
         | `schedules:write` (Schedules and Rotation layers, and a Team's main Schedule) | yes | no | no |
         | `schedule-overrides:write` (Overrides, when the caller is in the Team or is an Admin) | yes | yes | no |
+        | `escalation-chains:read` (Escalation chains with their steps) | yes | yes | yes |
+        | `escalation-chains:write` (Escalation chains with their steps; naming a chain on a Route needs `routes:write`, on a Team `teams:write`) | yes | no | no |
         | `stored-snapshots:read` | yes | no | no |
         | `users:read`, `users:write`, `oidc:read`, `oidc:write`, `service-accounts:read`, `service-accounts:write`, `organization:read`, `organization:write` | yes | no | no |
         | `audit-log:read`, `system-status:read` | yes | no | no |
@@ -10353,6 +10571,8 @@ components:
       - schedules:read
       - schedules:write
       - schedule-overrides:write
+      - escalation-chains:read
+      - escalation-chains:write
     Transport:
       type: string
       description: How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge
@@ -12675,6 +12895,16 @@ components:
             `duplicate`, at the entry's `destination_id`. A change reaches the open Alert Groups at their next change.
           items:
             $ref: '#/components/schemas/DestinationEntry'
+        chain_entries:
+          type: array
+          maxItems: 50
+          description: The Escalation chains of the Team (C-32.FR-2), each once with its Severity condition, which run on
+            the Alert Groups of the Team where their Route runs the Teams' chains (`run_team_chains`). Replaced as a
+            whole; omit it on an update to keep the entries, and a creation without it has none. A chain that is
+            unknown is refused with `422` `unknown_id`, and one named twice with `duplicate`, at the entry's
+            `chain_id`. Needs `teams:write` only.
+          items:
+            $ref: '#/components/schemas/ChainEntry'
         team_mentions:
           type: array
           maxItems: 100
@@ -12820,6 +13050,8 @@ components:
         - idp_entries
         - destination_entries
         - destinations
+        - chain_entries
+        - chains
         - team_mentions
         - mention_connections
         - user_count
@@ -12833,6 +13065,11 @@ components:
             description: The Destinations of the Team's `destination_entries`, by name, with their health.
             items:
               $ref: '#/components/schemas/DestinationRef'
+          chains:
+            type: array
+            description: The Escalation chains of the Team's `chain_entries`, by name.
+            items:
+              $ref: '#/components/schemas/EscalationChainRef'
           team_mentions:
             type: array
             description: The Team mentions of Connections that are not deleted, by Connection name.
@@ -13675,6 +13912,8 @@ components:
           enum:
           - schedule
           - escalation_chain
+          - route
+          - team
         id:
           $ref: '#/components/schemas/PublicId'
         name:
@@ -13740,6 +13979,15 @@ components:
             `destination_entries` it is ignored. Removed in 0.3.0.
           items:
             $ref: '#/components/schemas/PublicId'
+        chain_entries:
+          type: array
+          maxItems: 50
+          description: The Escalation chains of the Route (C-32.FR-2), each once with its Severity condition. Replaced as
+            a whole; omit it on an update to keep the entries, and a creation without it has none. A chain that is
+            unknown is refused with `422` `unknown_id`, and one named twice with `duplicate`, at the entry's
+            `chain_id`. Needs `routes:write` only. Chains run nothing until Escalation chains run.
+          items:
+            $ref: '#/components/schemas/ChainEntry'
         deliver_to_teams:
           type: boolean
           description: '"Also to the Teams from the label" (`route.deliver_to_teams`, C-26.FR-2): an Alert Group of the
@@ -13787,7 +14035,7 @@ components:
         `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE`
         Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN`
         Connection, `CR` check run, `DE` delivery
-        event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
+        event, `DS` Destination, `EC` Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
         access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service
         account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup
         table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses
@@ -13831,6 +14079,8 @@ components:
         - is_default
         - destination_entries
         - destination_ids
+        - chain_entries
+        - chains
         - deliver_to_teams
         - run_team_chains
         - destinations
@@ -13859,6 +14109,11 @@ components:
             description: The Route's Destinations with their health, for the Broken warning.
             items:
               $ref: '#/components/schemas/DestinationRef'
+          chains:
+            type: array
+            description: The Escalation chains of the Route's `chain_entries`, by name.
+            items:
+              $ref: '#/components/schemas/EscalationChainRef'
           template_error:
             description: Set while a template of the Route keeps failing.
             $ref: '#/components/schemas/TemplateErrorState'
@@ -15715,7 +15970,7 @@ components:
         |---|---|---|
         | `alert-group` | the Alert Group `public_id` | It changed (status, Alerts, Timeline, delivery state): refresh its page and any list row. |
         | `alert-groups` | null | New Alert Groups may match the current list filters or counts: the UI announces "N new". |
-        | `integration`, `route`, `connection`, `destination`, `team`, `schedule` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
+        | `integration`, `route`, `connection`, `destination`, `team`, `schedule`, `escalation-chain` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
         | `organization` | null | Organization settings changed. |
         | `system-notices`, `system-status` | null | The Organization-wide notices, or the System status, changed. |
         | `account-links` | the Account link `public_id`, or null when several changed at once | An Account link of the signed-in user appeared, changed or disappeared. |
@@ -15731,6 +15986,7 @@ components:
           - destination
           - team
           - schedule
+          - escalation-chain
           - organization
           - system-notices
           - system-status
@@ -17220,6 +17476,327 @@ components:
         severity_condition:
           $ref: '#/components/schemas/SeverityCondition'
           description: Omitted, `any`.
+    ChainEntry:
+      type: object
+      description: An Escalation chain that a Route or a Team names, with its Severity condition (C-32.FR-2), checked
+        against the Severity level of the Alert Group.
+      required:
+      - chain_id
+      properties:
+        chain_id:
+          $ref: '#/components/schemas/PublicId'
+        severity_condition:
+          $ref: '#/components/schemas/SeverityCondition'
+          description: Omitted, `any`.
+    EscalationChainRef:
+      type: object
+      description: An Escalation chain by name, with its owning Team.
+      required:
+      - id
+      - name
+      - owning_team
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+        owning_team:
+          description: The Team that owns the chain, null when none does.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+    EscalationStepKind:
+      type: string
+      description: 'The kind of an Escalation step (C-32.FR-3): Page the On-call of a Schedule (`page_on_call`), Page
+        chosen people (`page_people`), Page a whole Team or everyone in the chat (`page_team`), call through a
+        Notification gateway (`call`), wait (`wait`), send to an outgoing webhook (`webhook`) and repeat from an earlier
+        step (`repeat`).'
+      enum:
+      - page_on_call
+      - page_people
+      - page_team
+      - call
+      - wait
+      - webhook
+      - repeat
+    PageImportance:
+      type: string
+      description: How a step Pages a person, which runs their Notification rule of that name (C-31.FR-3).
+      enum:
+      - normal
+      - important
+    EscalationStepInput:
+      type: object
+      description: 'An Escalation step with the fields of its kind only; a field another kind takes is refused with `422`
+        `unsupported` at it, and a missing one with `required`. `page_on_call` takes `schedule_id`, a Schedule of any
+        Team, and `importance`; `page_people` takes `user_ids` and `importance`; `page_team` takes `team_id` — the
+        chain''s owning Team when omitted, and required when the chain has none — or `everyone`; `call` takes
+        `call_target` with `schedule_id` (`on_call`) or `user_ids` (`people`), and `gateway_id`; `wait` takes
+        `wait_seconds`; `webhook` takes `destination_id`; `repeat` takes `repeat_from` and `repeat_times`. The steps
+        that Page or send — every kind but `wait` and `repeat` — also take `working_hours_only` and
+        `severity_condition`. An id that names nothing is refused with `422` `unknown_id` at it.'
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/EscalationStepKind'
+        importance:
+          description: With `page_on_call` and `page_people`; omitted, `normal`.
+          $ref: '#/components/schemas/PageImportance'
+        schedule_id:
+          description: With `page_on_call`, and with `call` and the `call_target` `on_call`.
+          $ref: '#/components/schemas/PublicId'
+        user_ids:
+          type: array
+          maxItems: 50
+          description: With `page_people`, and with `call` and the `call_target` `people`; at least one, each once. A
+            Viewer or a disabled User that the save adds is refused with `422` `not_pageable` at
+            `/steps/{i}/user_ids/{j}`, with the `reason`; one the stored steps already name passes, and is skipped at
+            run time while they may not be Paged (C-32.FR-14).
+          items:
+            $ref: '#/components/schemas/PublicId'
+        team_id:
+          description: With `page_team`, the Team whose Team mention the step writes; omit it, and `everyone`, for the
+            chain's owning Team.
+          $ref: '#/components/schemas/PublicId'
+        everyone:
+          type: string
+          description: With `page_team` instead of `team_id`, the word for everyone in the chat.
+          enum:
+          - channel
+          - here
+          - all
+          - everyone
+        call_target:
+          type: string
+          description: With `call`, whom it calls — the On-call of `schedule_id` or the people of `user_ids`.
+          enum:
+          - on_call
+          - people
+        gateway_id:
+          description: With `call`, the Notification gateway it calls through, required while several exist; omitted
+            while one exists, it is that one, which the read names. A call step while no Notification gateway exists is
+            refused with `422` `gateway_required` at the step (C-30.FR-9).
+          $ref: '#/components/schemas/PublicId'
+        wait_seconds:
+          type: integer
+          description: With `wait`, a whole number of minutes from 1 to 1,440 (`escalation.limits`) — a multiple of 60
+            from 60 to 86400 — else `422` `out_of_range` at it.
+        destination_id:
+          description: With `webhook`, an outgoing webhook Destination in the mode `events` or `both`, else `422`
+            `webhook_events_required` at it.
+          $ref: '#/components/schemas/PublicId'
+        repeat_from:
+          type: integer
+          description: With `repeat`, the number of an earlier step, from 1, to go back to; else `422` `out_of_range`.
+        repeat_times:
+          type: integer
+          description: With `repeat`, how many times it goes back, from 1 to 10 (`escalation.limits`).
+        working_hours_only:
+          type: boolean
+          description: With the steps that Page or send; omitted, false. True makes the step only in the Working hours
+            of the chain's owning Team, else the Organization's (C-25.FR-9).
+        severity_condition:
+          description: With the steps that Page or send; omitted, `any`.
+          $ref: '#/components/schemas/SeverityCondition'
+    EscalationStep:
+      allOf:
+      - $ref: '#/components/schemas/EscalationStepInput'
+      - type: object
+        description: A step as read, with the fields of its kind and the objects they name.
+        required:
+        - number
+        properties:
+          number:
+            type: integer
+            description: The step's number, from 1, which `repeat_from` and the warnings use.
+          schedule:
+            description: The Schedule of `schedule_id`.
+            $ref: '#/components/schemas/ScheduleRef'
+          users:
+            type: array
+            description: The people of `user_ids`, in their order.
+            items:
+              $ref: '#/components/schemas/UserRef'
+          team:
+            description: With `page_team` without `everyone`, the Team it Pages — the one `team_id` names, else the
+              chain's owning Team.
+            $ref: '#/components/schemas/TeamRef'
+          gateway:
+            description: The Notification gateway of `gateway_id`, deleted ones included.
+            $ref: '#/components/schemas/EntityRef'
+          destination:
+            description: The Destination of `destination_id`, deleted ones included.
+            $ref: '#/components/schemas/EntityRef'
+    EscalationChainInput:
+      type: object
+      required:
+      - name
+      - steps
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Unique in the Organization, ignoring case.
+        description:
+          type: string
+          maxLength: 2000
+          description: Omit it on an update to keep it.
+        owning_team_id:
+          description: The Team that owns the chain (C-25.FR-2), whose Working hours its steps use; `null` clears it, and
+            an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
+          $ref: '#/components/schemas/NullablePublicId'
+        steps:
+          type: array
+          description: The steps in their order, at most 20 (`escalation.limits`, else `422` `out_of_range` at `/steps`),
+            replaced as a whole.
+          items:
+            $ref: '#/components/schemas/EscalationStepInput'
+    EscalationChainRouteReferrer:
+      type: object
+      required:
+      - route
+      - severity_condition
+      properties:
+        route:
+          $ref: '#/components/schemas/EntityRef'
+        severity_condition:
+          $ref: '#/components/schemas/SeverityCondition'
+    EscalationChainTeamReferrer:
+      type: object
+      required:
+      - team
+      - severity_condition
+      properties:
+        team:
+          $ref: '#/components/schemas/TeamRef'
+        severity_condition:
+          $ref: '#/components/schemas/SeverityCondition'
+    EscalationChainReferrers:
+      type: object
+      description: The Routes and the Teams that are not deleted and name the chain, by name, each with its Severity
+        condition.
+      required:
+      - routes
+      - teams
+      properties:
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationChainRouteReferrer'
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationChainTeamReferrer'
+    EscalationChainWarningKind:
+      type: string
+      description: 'What the chain or one of its steps cannot do (C-32.FR-17): `everyone_unsupported`, a `page_team`
+        step whose Team mention or word for everyone the Connection of one of the chain''s Destinations cannot mention,
+        such as a Telegram Destination; `gateway_deleted`, a `call` step whose Notification gateway was deleted or is no
+        Notification gateway any more; `destination_deleted`, a `webhook` step whose Destination was deleted;
+        `team_deleted`, a `page_team` step whose Team — the one it names, else the chain''s owning Team — was deleted;
+        `pages_nobody`, a chain none of whose steps Pages anyone — no `page_on_call`, `page_people`, `page_team` or
+        `call` step, such as an empty chain or one of waits, repeats and webhooks — the only warning of the chain as a
+        whole, with `step` null.'
+      enum:
+      - everyone_unsupported
+      - gateway_deleted
+      - destination_deleted
+      - team_deleted
+      - pages_nobody
+    EscalationChainWarning:
+      type: object
+      required:
+      - kind
+      - step
+      - destination
+      - reason
+      properties:
+        kind:
+          $ref: '#/components/schemas/EscalationChainWarningKind'
+        step:
+          type:
+          - integer
+          - 'null'
+          description: The number of the step; null with `pages_nobody`, which concerns the chain as a whole.
+        destination:
+          description: With `everyone_unsupported`, the Destination that cannot mention; with `destination_deleted`,
+            the deleted Destination; null with the other kinds.
+          oneOf:
+          - $ref: '#/components/schemas/EntityRef'
+          - type: 'null'
+        reason:
+          description: With `everyone_unsupported`, why the Connection cannot mention; null otherwise.
+          oneOf:
+          - $ref: '#/components/schemas/MentionUnavailableReason'
+          - type: 'null'
+    EscalationChain:
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - owning_team_id
+      - owning_team
+      - steps
+      - referrers
+      - destinations
+      - warnings
+      - created_at
+      - etag
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+        description:
+          type: string
+        owning_team_id:
+          $ref: '#/components/schemas/NullablePublicId'
+        owning_team:
+          description: The Team that owns the chain, null when none does.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationStep'
+        referrers:
+          $ref: '#/components/schemas/EscalationChainReferrers'
+        destinations:
+          type: array
+          description: The Destinations the chain writes in, by name, with their health — those of the Routes and of
+            the Teams that name it (C-32.FR-8), as configured.
+          items:
+            $ref: '#/components/schemas/DestinationRef'
+        warnings:
+          type: array
+          description: What the chain cannot do — `pages_nobody` first — then what its steps cannot do, by step.
+          items:
+            $ref: '#/components/schemas/EscalationChainWarning'
+        created_at:
+          type: string
+          format: date-time
+        etag:
+          type: string
+          readOnly: true
+          description: The same value as the `ETag` header; send it as `If-Match` on the next update.
+    EscalationChainList:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EscalationChain'
+        next_cursor:
+          type:
+          - string
+          - 'null'
     DeliveryEntry:
       type: object
       description: An entry that reached a Destination of an Alert Group (C-26.FR-3, FR-4), with the condition it had

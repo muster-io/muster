@@ -767,6 +767,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       too. A change that a 0.1 replica makes to an Alert Group the fill is writing waits until the fill commits; should
       the two ever deadlock, PostgreSQL ends one of them, and a failed fill is recovered as described below. Their time
       to acknowledge is kept as before.
+    - Migration 0046 adds the [Escalation chains](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md), their steps and the chains that
+      Routes and Teams name, none after the upgrade, and the Permissions `escalation-chains:read`, which every Role
+      gets, and `escalation-chains:write`, which Admins get. Roles get them at once; a Personal access token keeps the
+      Permissions it was issued with, so issue a new one to reach the Escalation chains. It is expand only: a replica
+      without it reads and writes none of them, and no chain runs on 0.2.0 before a later version.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -1338,6 +1343,13 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Going back below 0045 loses who made each first acknowledgement; once 0045 is back, it is filled again from the
     Timeline that is still whole, and the Alert Groups acknowledged since then whose Timeline was removed count as
     "Unknown".
+
+    Migration 0046 adds the Escalation chains and their Permissions in one transaction: a failure leaves nothing of it,
+    but the schema recorded as dirty at version 46. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 45, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0046 loses every Escalation chain with its steps and the chains that Routes and
+    Teams name, and Personal access tokens lose the Permissions `escalation-chains:read` and `escalation-chains:write`;
+    the Audit log keeps its entries about chains.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

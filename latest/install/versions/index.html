@@ -1534,6 +1534,8 @@
       
         
       
+        
+      
     
     
     
@@ -1863,6 +1865,33 @@
     
   
   Notification rules
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/escalation-chains/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Escalation chains
 
     
   </span>
@@ -3399,6 +3428,11 @@ critical, and a Route raises the level of its Alert Groups with its
   too. A change that a 0.1 replica makes to an Alert Group the fill is writing waits until the fill commits; should
   the two ever deadlock, PostgreSQL ends one of them, and a failed fill is recovered as described below. Their time
   to acknowledge is kept as before.</li>
+<li>Migration 0046 adds the <a href="../../concepts/escalation-chains/">Escalation chains</a>, their steps and the chains that
+  Routes and Teams name, none after the upgrade, and the Permissions <code>escalation-chains:read</code>, which every Role
+  gets, and <code>escalation-chains:write</code>, which Admins get. Roles get them at once; a Personal access token keeps the
+  Permissions it was issued with, so issue a new one to reach the Escalation chains. It is expand only: a replica
+  without it reads and writes none of them, and no chain runs on 0.2.0 before a later version.</li>
 </ul>
 <p><strong>Slack apps get an optional scope.</strong> Team mentions in Slack need the bot scope <code>usergroups:read</code>, which the
 <a href="../../messengers/slack/#create-the-app-from-a-manifest">manifest</a> now has. A Slack app installed before 0.2.0 keeps
@@ -3972,6 +4006,12 @@ counts at most the Alert Groups the fill writes, to predict its duration at abou
 <p>Going back below 0045 loses who made each first acknowledgement; once 0045 is back, it is filled again from the
 Timeline that is still whole, and the Alert Groups acknowledged since then whose Timeline was removed count as
 "Unknown".</p>
+<p>Migration 0046 adds the Escalation chains and their Permissions in one transaction: a failure leaves nothing of it,
+but the schema recorded as dirty at version 46. To recover, with the same database role as Muster, run
+<code>UPDATE schema_migrations SET version = 45, dirty = false;</code> and start the 0.2.0 replica again, or run
+<code>muster migrate</code>. Going back below 0046 loses every Escalation chain with its steps and the chains that Routes and
+Teams name, and Personal access tokens lose the Permissions <code>escalation-chains:read</code> and <code>escalation-chains:write</code>;
+the Audit log keeps its entries about chains.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
