@@ -175,7 +175,7 @@ G0=$(NEW s0); CLOCK 300; DO $G0 acknowledge "${AL[@]}"; DO $G0 acknowledge "${BO
 DO $G0 acknowledge "${CA[@]}"
 FIRST $G0                                                                                     # alice|300
 curl -s -X DELETE $FAM/groups/s0/alerts/a > /dev/null; NOTIFY s0 '{"reason":"resolved"}'
-PUTA s0 a '{"labels":{"cluster":"s0","severity":"warning"}}'; NOTIFY s0 '{"reason":"new alerts"}'
+PUTA s0 b '{"labels":{"cluster":"s0","severity":"warning"}}'; NOTIFY s0 '{"reason":"new alerts"}'   # a new Alert of the key
 GET $G0 | jq -c '{status, o: .owner.login, reopen_count}'                                    # {"status":"acknowledged","o":"carol","reopen_count":1}
 FIRST $G0                                                                                     # alice|300
 PEOPLE "label=cluster%3D%22s0%22&from=$FROM" "${A[@]}"                                       # [{"n":"alice","a":1,"r":0}]
