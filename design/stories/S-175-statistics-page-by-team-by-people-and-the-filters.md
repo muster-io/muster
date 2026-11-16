@@ -35,7 +35,7 @@ acceptance:
   - "At 1280 × 800 and at 360 × 740, in English and in Russian, every view with the filters open has no horizontal scrolling of the page (`statistics.spec.ts`, as today); every new text exists in English and Russian."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 568
 ---
 
 # S-175. The views By Team and By people and the filters of every view on the statistics page (FE)

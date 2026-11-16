@@ -15,7 +15,7 @@ acceptance:
   - "[C-09.FR-31] The section has screenshots of By team and of By people with the row of a Service account; `make docs-screenshots GUIDES=alert-groups` takes them, every image has its alternative text, and `make docs-check` passes."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 569
 ---
 
 # S-176. Documentation: statistics By Team and By people, the first acknowledgement and the filters

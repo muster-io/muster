@@ -42,7 +42,7 @@ acceptance:
   - "The web UI builds and type-checks against the regenerated client, with `group_by` widened, and the statistics page still shows By route and By integration as before; the views By Team and By people are S-175's."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 567
 ---
 
 # S-174. Who made the first acknowledgement, filled from the Timeline, and the statistics By Team and By people with the filters of every view (BE)
