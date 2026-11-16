@@ -58,9 +58,19 @@ func (s *memStore) ListTelegramDestinations(_ context.Context, org int64) ([]dbg
 		d := s.tgTargets[id]
 		out = append(out, dbgen.ListTelegramDestinationsRow{ID: id, PublicID: fmt.Sprintf("DS%012d", id),
 			Name: fmt.Sprintf("tg-dest-%d", id), ConnectionID: pgtype.Int8{Int64: d.connection, Valid: true},
-			TelegramChannelID: pgtype.Text{String: d.channel, Valid: true}})
+			TelegramChannelID:        pgtype.Text{String: d.channel, Valid: true},
+			TelegramDiscussionChatID: pgtype.Int8{Int64: d.groupID, Valid: d.groupID != 0}})
 	}
 	return out, nil
+}
+
+// ListTelegramDestinationPeople lists the members of the Destination of tgTargets.
+func (s *memStore) ListTelegramDestinationPeople(_ context.Context, arg dbgen.ListTelegramDestinationPeopleParams) (
+	[]dbgen.ListTelegramDestinationPeopleRow, error) {
+	if err := s.fail["ListTelegramDestinationPeople"]; err != nil || arg.OrgID != 1 {
+		return nil, err
+	}
+	return s.tgTargets[arg.DestinationID].people, nil
 }
 
 // ListBridgeDestinations names each Destination of brTargets br-dest-<id>.

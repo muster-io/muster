@@ -181,6 +181,42 @@ SET name = @name, connection_id = @connection_id, telegram_channel_id = @channel
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id AND type = 'telegram';
 
+-- ListTelegramGroupPeople lists the active Users who are not Viewers — whom a Schedule never makes On-call — in a
+-- Team that is not deleted and names the Destination (C-26.FR-1), with a Telegram Account link — the Identity space
+-- telegram, which every Telegram Connection shares — and the Telegram user id of the link, by name: the people whose
+-- membership of the discussion group the Destination check reads (C-27.FR-8).
+-- name: ListTelegramGroupPeople :many
+SELECT u.id, u.public_id, u.name, u.login, al.external_id
+FROM users u
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id AND al.identity_space = 'telegram'
+WHERE u.org_id = @org_id AND u.status = 'active' AND u.role <> 'viewer'
+  AND EXISTS (SELECT 1
+              FROM team_destinations td
+              JOIN teams t ON t.org_id = td.org_id AND t.id = td.team_id AND t.deleted_at IS NULL
+              JOIN team_users tu ON tu.org_id = td.org_id AND tu.team_id = td.team_id
+              WHERE td.org_id = @org_id AND td.destination_id = @destination_id AND tu.user_id = u.id)
+ORDER BY lower(u.name), u.id;
+
+-- SetTelegramAbsences records what the Destination check of a Telegram Destination that is not deleted saw of its
+-- discussion group (C-27.FR-8): the Users it saw outside the group, and those of the Users stored as outside it whom
+-- it could not tell — not asked, or not answered definitively — so that a check that could not confirm a person keeps
+-- the absence a check saw before, while a definitive "in the group" ends it; and when, on the business clock. It writes
+-- only while the stored group is the one the check read, so that a slow check does not overwrite a save that moved the
+-- Destination to another group. It is not a change of the configuration: no version, no updated_at.
+-- name: SetTelegramAbsences :exec
+UPDATE destinations
+SET telegram_absent_user_ids = ARRAY(
+        SELECT a.user_id
+        FROM (SELECT unnest(@absent_user_ids::bigint[]) AS user_id
+              UNION
+              (SELECT unnest(coalesce(telegram_absent_user_ids, '{}'::bigint[]))
+               INTERSECT
+               SELECT unnest(@unknown_user_ids::bigint[]))) AS a
+        ORDER BY a.user_id),
+    telegram_members_checked_at = @checked_at::timestamptz
+WHERE org_id = @org_id AND id = @id AND type = 'telegram' AND deleted_at IS NULL
+  AND telegram_discussion_chat_id = @group_id;
+
 -- LockBridgeConnection takes the Bridge Connection that is not deleted in share mode for the save of one of its
 -- Destinations, as LockMattermostConnection does.
 -- name: LockBridgeConnection :one

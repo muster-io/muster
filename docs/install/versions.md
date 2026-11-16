@@ -215,6 +215,13 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       field. The migration keeps `destinations.mentions` as it found it and 0.2.0 no longer writes it,
       except that a Destination created on 0.2.0 stores nobody there. It is expand only, and its down migration drops
       the entries and restores the settings as the column kept them.
+    - Migration 0044 adds what the Destination check of a Telegram Destination sees of the members of its discussion
+      group, for the warnings about [unreachable On-calls](../concepts/schedules.md#unreachable-on-calls): nothing is
+      known after the upgrade, so no On-call is warned about a discussion group until each Telegram Destination is
+      saved or checked again. It is expand only: a 0.1 replica, or one of a development image without it, reads and
+      writes neither column, and a check it runs leaves what the last check on 0.2.0 saw. A Telegram Destination that
+      such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
+      the old group until its next check: select **Check** on it once every replica runs 0.2.0.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -717,6 +724,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Muster, run `UPDATE schema_migrations SET version = 41, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`. Going back below 0042 loses every Team mention and what the checks found of the groups; once 0042
     is back, each Connection's next check finds the groups again, and the Team mentions are entered again.
+
+    Migration 0044 adds the two columns of what a Telegram Destination's check saw of its discussion group in one
+    transaction: a failure leaves nothing of it, but the schema recorded as dirty at version 44. To recover, with the
+    same database role as Muster, run `UPDATE schema_migrations SET version = 43, dirty = false;` and start the 0.2.0
+    replica again, or run `muster migrate`. Going back below 0044 loses what the checks saw, and with it the warnings
+    `not_in_discussion_group`; once 0044 is back, each Telegram Destination's next check finds them again.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

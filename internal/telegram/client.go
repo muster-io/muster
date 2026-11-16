@@ -271,17 +271,24 @@ type ChatInfo struct {
 	LinkedChatID int64 `json:"linked_chat_id,omitempty"`
 }
 
-// The statuses of a chat member that may write to the chat as an admin.
+// The statuses of a chat member that may write to the chat as an admin, of one who is in it, of one restricted there —
+// a member or not, by is_member — and of one who is not in it.
 const (
 	StatusCreator       = "creator"
 	StatusAdministrator = "administrator"
+	StatusMember        = "member"
+	StatusRestricted    = "restricted"
+	StatusLeft          = "left"
+	StatusKicked        = "kicked"
 )
 
-// ChatMember is a membership as getChatMember answers it; the rights to post and edit are named for channels only.
+// ChatMember is a membership as getChatMember answers it; the rights to post and edit are named for channels only, and
+// is_member for a restricted member only.
 type ChatMember struct {
 	Status          string `json:"status"`
 	CanPostMessages bool   `json:"can_post_messages"`
 	CanEditMessages bool   `json:"can_edit_messages"`
+	IsMember        bool   `json:"is_member"`
 }
 
 // GetChat reads the chat named by an id or an @username.

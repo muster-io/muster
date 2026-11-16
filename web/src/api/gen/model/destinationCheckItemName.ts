@@ -4,7 +4,7 @@
  */
 
 /**
- * One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member.
+ * One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside (C-27.FR-8).
  */
 export type DestinationCheckItemName = typeof DestinationCheckItemName[keyof typeof DestinationCheckItemName];
 
@@ -17,4 +17,5 @@ export const DestinationCheckItemName = {
   bot_rights_channel: 'bot_rights_channel',
   bot_rights_group: 'bot_rights_group',
   channel: 'channel',
+  discussion_group_members: 'discussion_group_members',
 } as const;

@@ -8,23 +8,46 @@ depends_on: [S-121, S-132, S-133]
 covers: [C-27.FR-8, C-27.FR-9, C-27.FR-14, C-27.AC-6]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0031_telegram_discussion_members.up.sql
-  - internal/db/migrations/0031_telegram_discussion_members.down.sql
+  - internal/db/migrations/0044_telegram_discussion_members.up.sql
+  - internal/db/migrations/0044_telegram_discussion_members.down.sql
   - design/db/schema.md
+  - docs/install/versions.md
+  - design/prd/l1/defaults.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/schedules/reach.go
   - internal/schedules/reach_test.go
+  - internal/schedules/reach_integration_test.go
   - internal/schedules/result.go
   - internal/schedules/oncallnow.go
   - internal/schedules/oncallnow_test.go
+  - internal/schedules/overrides.go
+  - internal/schedules/schedules.go
   - internal/schedules/query.sql
   - internal/api/schedules.go
   - internal/api/schedules_test.go
+  - internal/api/destinations.go
+  - internal/api/destinations_test.go
+  - internal/telegram/client.go
   - internal/telegram/destcheck.go
   - internal/telegram/destcheck_test.go
-  - internal/destinations/destinations.go
+  - internal/destinations/write.go
+  - internal/destinations/write_test.go
   - internal/destinations/query.sql
+  - internal/connections/telegram.go
+  - internal/connections/telegram_test.go
+  - internal/connections/doctor.go
+  - internal/connections/doctor_test.go
+  - internal/connections/connections_test.go
+  - internal/connections/live_test.go
+  - internal/connections/connections.go
+  - internal/connections/export_test.go
+  - test/e2e/telegram_test.go
+  - web/e2e/telegram-destination.spec.ts
+  - docs/messengers/telegram.md
+  - internal/connections/query.sql
+  - internal/archlint/secretleak.go
+  - internal/doctor/doctor_test.go
   - internal/fakes/faketelegram/chats.go
   - internal/fakes/faketelegram/faketelegram_test.go
   - test/e2e/schedule_reach_test.go
@@ -36,7 +59,7 @@ files_touched:
 acceptance:
   - "[C-27.FR-8, C-27.AC-6] An On-call without a Mattermost Account link for the Connection of a Mattermost Destination of their Team has, in `getScheduleOnCall`, a warning `unreachable` with the person, the Destination, the messenger `mattermost` and the reason `no_account_link` for the current segment and for each segment of the next `schedule.gap_view` in which they are On-call, and `getOnCallNow` marks the Team's On-call `unreachable` with the same; an On-call with the link has none (`reach_test.go`, `oncallnow_test.go`, `schedule_reach_test.go`)."
   - "[C-27.FR-8] The reasons follow the Destination: `no_account_link` for a Mattermost, Slack, Telegram or Bridge Destination without the person's Account link in the Identity space of its Connection; `bridge_no_native_mentions` for a Bridge Destination whose bridge does not declare `native_mentions`; `webhook_no_thread_reply` for an outgoing webhook Destination in template mode without a \"reply in thread\" request; `not_in_discussion_group` for a Telegram Destination whose last Destination check saw the person outside its discussion group; an outgoing webhook in events mode has no warning (`reach_test.go`)."
-  - "[C-27.FR-8] The Destination check of a Telegram Destination of a Team calls `getChatMember` of its discussion group for each person of the Teams that name it who has a Telegram Account link for its Connection, records as not members, with the time of the check, the Muster Users it answers with the status `left` or `kicked` or with `400` `Bad Request: PARTICIPANT_ID_INVALID` (F-128), and passes with the item `discussion_group_members` whose `absent_users` names them; any other failed `getChatMember` call of one person leaves that person unknown and does not fail the check (`destcheck_test.go`)."
+  - "[C-27.FR-8] The Destination check of a Telegram Destination of a Team calls `getChatMember` of its discussion group for each active User who is not a Viewer of the Teams that name it with a Telegram Account link (the Identity space `telegram`), records as outside the group, with the time of the check, the Muster Users it answers with the status `left`, `kicked` or `restricted` with `is_member` false, or with `400` `Bad Request: PARTICIPANT_ID_INVALID` (F-128), and passes with the item `discussion_group_members` whose `absent_users` names them; any other answer or failed call of one person, and the people not asked before the step's deadline, leave that person unknown, which keeps the verdict of the check before, and do not fail the check (`destcheck_test.go`, `write_test.go`, `live_test.go`)."
   - "[C-27.FR-9] `getOnCallNow` gives each Team's On-call `unreachable` ({`destination`, `messenger`, `reason`}[]) for the current segment (`oncallnow_test.go`)."
   - "[C-27.FR-14] Concepts → Schedules has \"Unreachable On-calls\" with each reason and what to do about it; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -68,41 +91,65 @@ issue: 453
 
 - **Spec** (`api/openapi.yaml`, changed first, then generated):
   - `ScheduleWarning.kind` gains `unreachable`, with `destination` (`DestinationRef`), `messenger`
-    (`ConnectionType`, or `webhook`), `reason` (`ReachReason`: `no_account_link`, `bridge_no_native_mentions`,
-    `webhook_no_thread_reply`, `not_in_discussion_group`), `start` and `end` (the segment).
+    (`DestinationType`: the type of the Destination's Connection, or `webhook`), `reason` (`ReachReason`:
+    `no_account_link`, `bridge_no_native_mentions`, `webhook_no_thread_reply`, `not_in_discussion_group`), `start` and
+    `end` (the segment).
   - `TeamOnCall` gains `unreachable` (`OnCallReach`[] {`destination`, `messenger`, `reason`}); a gap that follows is
     S-133's `next` with `user` null.
   - `DestinationCheckItem.name` gains `discussion_group_members`, and `DestinationCheckItem` gains `absent_users`
     (`UserRef`[]), set with that step only.
-- **Schema** (migration `0031_telegram_discussion_members`, expand only; `schema.md` §4.5):
+- **Schema** (migration `0044_telegram_discussion_members`, expand only; `schema.md` §4.5; its upgrade and recovery
+  notes in `docs/install/versions.md`):
   `destinations.telegram_absent_user_ids bigint[]` — Muster `users.id` of the people the check saw outside the
   discussion group, not Telegram user ids — and `destinations.telegram_members_checked_at timestamptz`, set by a
-  Telegram Destination check and null for the other types. The down migration drops them.
+  Telegram Destination check and null for the other types; writing them bumps no version and records no Audit log
+  entry. The down migration drops them.
 - **Reach** (`internal/schedules/reach.go`): for a person and a Team, the Destinations of the Team (`team_destinations`,
   S-121) and, for each, whether a Mention of the person reaches it — the Account link in the Destination's Identity
-  space (`mentions.IdentitySpace`), the bridge's `native_mentions` from the Connection's `info`, the outgoing webhook's
+  space (`mentions.IdentitySpace`; a messenger Destination without a Connection warns of nothing), the bridge's
+  `native_mentions` from the Connection's `info` (an `info` never read warns too, since delivery then renders plain
+  names), the outgoing webhook's
   mode and "reply in thread" request, and the Telegram Destination's `telegram_absent_user_ids`. `result.go` adds the
   `unreachable` warnings to the Result of a period, one per person, Destination and segment; `oncallnow.go` adds them to
   the current segment. Read-only: it changes nothing anywhere. The Destinations of a Team are the Team's part of the
-  reach rule of S-121 (`routing.Reach`), read in SQL, so `reach_test.go` also loads the vectors of
+  reach rule of S-121 (`routing.Reach`), read in SQL, so `reach_integration_test.go` (`TestIntegrationReachVectors`,
+  on PostgreSQL, since the rule is read in SQL) loads the vectors of
   `internal/routing/testdata/reach/` (S-121), the one set of cases of who an Alert Group reaches, seeds the Team entries
   of each vector, and checks that the Destinations it finds for the Team are those the vectors name for the Team at any
   level, conditions aside, since an On-call is warned about every Destination of their Team (plan review, M4).
 - **Telegram Destination check** (`internal/telegram/destcheck.go`): after its steps of C-14.FR-14 pass, on save, on
   "Check" and in `muster doctor` — never as the Broken probe — the step `discussion_group_members` calls `getChatMember`
-  of the discussion group for each User with a Telegram Account link for the Connection who is in a Team that names the
-  Destination (settled 1), through the interactive client class like the other steps, and stores the people whose status
-  is `left` or `kicked`, and those it answers `400` `Bad Request: PARTICIPANT_ID_INVALID`, as Telegram answers a
-  subscriber of the channel who was never in the discussion group (F-128); any other error leaves the person unknown.
-  `creator`, `administrator` and `member` count as in the group, an admin with `is_anonymous` included, and `restricted`
-  by its `is_member`, as the Bot API reference documents (not seen in F-128). A leave reaches the answer only after a
-  while — `member` about 20 s after it, `left` about 70 s after (F-128) — so a check just after a leave may still see
-  the person in the group, until the next check. The step always passes. `internal/destinations` stores the result.
+  of the discussion group for each User with a Telegram Account link who is in a Team that names the Destination
+  (settled 1) — an active User who is not a Viewer, since a disabled User or a Viewer is never On-call, with the link of
+  the Identity space `telegram`, which every Telegram Connection shares and a Mention through the Destination's
+  Connection uses — one after the other, in the interactive client class on save and "Check", limited by the Connection
+  alone and not by the Destination, since `getChatMember` sends nothing to the chat and the Destination's bucket is for
+  its sends and edits (F-016), and in the background class in `muster doctor`, each call with its own timeout there and
+  paced at the Connection's limiter; the step stops after `destination.telegram.group_people_budget` (built in,
+  `defaults.md`; `telegram.GroupPeopleBudget` in the code), on save, on "Check" and in `muster doctor`, so its cost is
+  one request per person within that budget; it
+  stores the people whose status is `left` or `kicked`, and those it answers `400` `Bad Request:
+  PARTICIPANT_ID_INVALID`, as Telegram answers a subscriber of the channel who was never in the discussion group
+  (F-128); any other error leaves the person unknown. `creator`, `administrator` and `member` count as in the group, an
+  admin with `is_anonymous` included, and `restricted` by its `is_member`, as the Bot API reference documents (not seen
+  in F-128). A leave reaches the answer only after a while — `member` about 20 s after it, `left` about 70 s after
+  (F-128) — so a check just after a leave may still see the person in the group, until the next check. The step always
+  passes; a request its runner refuses, such as one without a limiter token, or the deadline leaves the people not asked
+  yet unknown. An unknown person keeps the verdict of the check before: the stored set is the people seen outside plus
+  those stored before whom the check could not tell, so that only a definitive "in the group" ends an absence;
+  `absent_users` names only the people this check saw outside. `internal/destinations` reads the people and stores the
+  result in the save's transaction and on "Check", only while the stored discussion group is the one the check read, so
+  that a check of another group, which fails until a save, or a slow one overtaken by a save that moved the Destination,
+  writes nothing; the item names them in `absent_users`. `internal/connections` runs the step after the other steps for
+  the Destination write path and in `muster doctor`, which records nothing, warns about a Destination whose group moved
+  with the message of "Check" and reads no members there, and warns naming the people outside the group.
 - **Fake Telegram server** (`internal/fakes/faketelegram/chats.go`): in a supergroup, such as a discussion group,
   `getChatMember` answers a person who is not one of the fake's bots and has no membership there with `400`
   `Bad Request: PARTICIPANT_ID_INVALID` (F-128) instead of `left` as today; a channel keeps answering `left`, which no
   fact checked, and the fake's bots keep their answers (F-003). `PUT /_fake/chats/{chat}/members/{user}` sets a
-  person's membership, `left` included, which `getChatMember` answers at once.
+  person's membership, `left` included, which `getChatMember` answers at once — also `restricted` with `is_member`, an
+  admin with `is_anonymous`, or an `error_code` with a `description` to answer instead, a failure of one person's call
+  that `/_fake/faults`, which matches every `getChatMember` of the bot, cannot aim at.
 - **AGENTS.md**: the paragraph on development mode names the answers of `getChatMember` and `PUT
   /_fake/chats/{chat}/members/{user}` of the fake Telegram server.
 - **Imports** (ADR-0016): `schedules` imports `mentions` for `IdentitySpace`; `mentions` never imports `schedules`
@@ -111,7 +158,7 @@ issue: 453
   gains the case `discussion_group_members` with the text "Members of the discussion group" / «Участники группы
   обсуждения» in `en.json` and `ru.json`; `ReachReason` and the `unreachable` warnings meet no exhaustive switch until
   S-135 and S-136 show them.
-- **Settings**: `schedule.gap_view`.
+- **Settings**: `schedule.gap_view`; the built-in `destination.telegram.group_people_budget`, new in `defaults.md`.
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/schedules.md` — "Unreachable On-calls": the reasons, linking an account in the
   profile, a bridge that declares `native_mentions`, the "reply in thread" request of an outgoing webhook, joining the
@@ -123,7 +170,7 @@ issue: 453
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up.
 2. Write the reach and add it to the Result and "On call now"; add the spec. Check: `make generate-check`;
    `reach_test.go` covers every Destination type and reason, a Team with no Destination and a person On-call in two
-   segments; `oncallnow_test.go`.
+   segments; `reach_integration_test.go` the vectors of `internal/routing/testdata/reach/`; `oncallnow_test.go`.
 3. Add the step of the Telegram Destination check and the fake's answers. Check: `destcheck_test.go`,
    `faketelegram_test.go`.
 4. Write `test/e2e/schedule_reach_test.go` and the documentation. Check: the Verification below; `make docs-check`.
@@ -173,8 +220,9 @@ None open. Settled:
 ## Notes
 
 - Suggested commit: `feat(schedules): warn about on-calls whom the team's destinations cannot mention`.
-- Migration `0031` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request (S-131's Notes).
+- Migration `0044`: the story map's `0031` was taken long before this story was worked; master ended at `0042` and
+  `0043` is S-140's, worked at the same time, so the merges are ordered and the later one renumbers if needed (S-131's
+  Notes). Until `0043` is on master, `TestMigrationsContiguous` fails here by design.
 - Split from S-133 at the contract boundary of C-27.FR-8: the gaps and their alert need no messenger, the reach needs
   every Destination type. It takes the next free ID, S-164, and keeps its place after S-133 in the story map.
 - The warning never changes delivery: a Mention entry of the On-call still records "Mention not delivered" (S-165) when

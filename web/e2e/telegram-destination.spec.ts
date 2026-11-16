@@ -5,7 +5,7 @@
 // Verification steps 5 to 8 of their story. The Admin picks "Example Telegram" and a channel only: @no_comments is
 // refused because comments are not enabled, @muster_alerts while the bot is a plain member of the discussion group, and
 // nothing is saved; once the bot is an admin there, the Destination is saved and shows the channel and the discussion
-// group it found. "Check" lists the four Telegram checks. A Route sends an Alert Group there; with the copy of its post
+// group it found. "Check" lists the five Telegram checks. A Route sends an Alert Group there; with the copy of its post
 // deleted in the fake, the next Thread reply goes unattached and the Alert Group's Delivery section says so. A reader
 // of Russian sees the Destination and the Delivery section at phone width. No page scrolls sideways at 360 px; no
 // Content Security Policy violation.
@@ -224,7 +224,7 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
     "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
   );
 
-  // 7. "Check" → the four Telegram checks, all ok → "Check passed".
+  // 7. "Check" → the four Telegram checks and the members of the discussion group, all ok → "Check passed".
   await page.getByRole("button", { name: "Check", exact: true }).click();
   await expect(page.getByTestId("destination-check-summary")).toHaveText("Check passed");
   await expect(page.getByTestId("destination-check-item")).toHaveText([
@@ -232,6 +232,7 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
     "Discussion group: ok",
     "Bot rights in the channel: ok",
     "Bot rights in the discussion group: ok",
+    "Members of the discussion group: ok",
   ]);
   await shot(page, "telegram-destination-check");
   // A failing check shows its message in the list.
@@ -367,6 +368,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
     "Группа обсуждения: успешно",
     "Права бота в канале: успешно",
     "Права бота в группе обсуждения: успешно",
+    "Участники группы обсуждения: успешно",
   ]);
   await expectNoHorizontalScroll(page);
   await shot(page, "telegram-destination-ru-360");

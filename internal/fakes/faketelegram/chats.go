@@ -42,9 +42,15 @@ const (
 	StatusCreator       = "creator"
 	StatusAdministrator = "administrator"
 	StatusMember        = "member"
+	StatusRestricted    = "restricted"
 	StatusLeft          = "left"
 	StatusKicked        = "kicked"
 )
+
+// DescriptionParticipantInvalid is how getChatMember in a supergroup answers, with 400, about a person who is not one
+// of the fake's bots and has no membership there: a subscriber of the channel who was never in its discussion group
+// (F-128).
+const DescriptionParticipantInvalid = "Bad Request: PARTICIPANT_ID_INVALID"
 
 // The accounts whose notifications the fake records (F-012): member joined the discussion group and subscribed to the
 // channel; subscriber only subscribed to the channel.
@@ -91,11 +97,17 @@ type Chat struct {
 	LinkedChatID int64  `json:"linked_chat_id,omitempty"`
 }
 
-// Member is a member of a chat as getChatMember answers it, without its user.
+// Member is a member of a chat as getChatMember answers it, without its user: is_member for a restricted member and
+// is_anonymous for an admin. With ErrorCode set getChatMember answers that error with Description instead, a failure
+// the scripted faults cannot aim at one person.
 type Member struct {
 	Status          string `json:"status"`
 	CanPostMessages bool   `json:"can_post_messages,omitempty"`
 	CanEditMessages bool   `json:"can_edit_messages,omitempty"`
+	IsMember        *bool  `json:"is_member,omitempty"`
+	IsAnonymous     bool   `json:"is_anonymous,omitempty"`
+	ErrorCode       int    `json:"error_code,omitempty"`
+	Description     string `json:"description,omitempty"`
 }
 
 // Message is a message of a chat, as GET /_fake/messages lists it: one the bot sent, the automatic copy of a channel
@@ -375,16 +387,23 @@ func (f *Fake) putChat(w http.ResponseWriter, r *http.Request) {
 	fakeserver.WriteJSON(w, http.StatusOK, got)
 }
 
-// putMember sets a membership: {"status", "can_post_messages", "can_edit_messages"}.
+// putMember sets a membership, which getChatMember answers at once: {"status", "can_post_messages",
+// "can_edit_messages", "is_member", "is_anonymous"}, or {"error_code", "description"} for an error to answer instead.
 func (f *Fake) putMember(w http.ResponseWriter, r *http.Request) {
 	var m Member
 	if err := decodeControl(w, r, &m); err != nil {
 		return
 	}
-	switch m.Status {
-	case StatusCreator, StatusAdministrator, StatusMember, StatusLeft, StatusKicked:
+	switch {
+	case m.ErrorCode != 0 && (m.ErrorCode < 400 || m.ErrorCode > 599 || m.Description == ""):
+		fakeserver.WriteError(w, http.StatusBadRequest, "error_code is between 400 and 599, with a description")
+		return
+	case m.ErrorCode != 0:
+	case m.Status == StatusCreator, m.Status == StatusAdministrator, m.Status == StatusMember,
+		m.Status == StatusRestricted, m.Status == StatusLeft, m.Status == StatusKicked:
 	default:
-		fakeserver.WriteError(w, http.StatusBadRequest, "status is creator, administrator, member, left or kicked")
+		fakeserver.WriteError(w, http.StatusBadRequest,
+			"status is creator, administrator, member, restricted, left or kicked")
 		return
 	}
 	user, err := strconv.ParseInt(r.PathValue("user"), 10, 64)
@@ -427,7 +446,9 @@ type chatMember struct {
 }
 
 // getChatMember answers a membership. The calling bot outside a supergroup gets 403 (F-003); outside a channel it is
-// left (F-001), which is also how a bot added to a channel without admin rights stays.
+// left (F-001), which is also how a bot added to a channel without admin rights stays. In a supergroup a person who is
+// not one of the fake's bots and has no membership there gets 400 PARTICIPANT_ID_INVALID (F-128); in a channel such a
+// person is left. A membership with an error answers that error.
 func (f *Fake) getChatMember(w http.ResponseWriter, p params, caller int64) {
 	user, ok, err := p.int("user_id")
 	if err != nil || !ok {
@@ -439,16 +460,25 @@ func (f *Fake) getChatMember(w http.ResponseWriter, p params, caller int64) {
 	ch, found := c.resolve(chatParam(p))
 	var m, bot Member
 	var kind string
+	var known bool
 	if found {
 		m, bot, kind = c.member(ch.ID, user), c.member(ch.ID, caller), ch.Type
+		_, known = c.members[ch.ID][user]
 	}
 	c.mu.Unlock()
+	_, isBot := botUser(user)
 	switch {
 	case !found:
 		writeFailure(w, http.StatusBadRequest, DescriptionChatNotFound)
 		return
 	case kind == TypeSupergroup && (bot.Status == StatusLeft || bot.Status == StatusKicked):
 		writeFailure(w, http.StatusForbidden, strings.Replace(descriptionNotMember, "%s", kind, 1))
+		return
+	case m.ErrorCode != 0:
+		writeFailure(w, m.ErrorCode, m.Description)
+		return
+	case kind == TypeSupergroup && !known && !isBot:
+		writeFailure(w, http.StatusBadRequest, DescriptionParticipantInvalid)
 		return
 	}
 	u := User{ID: user}
@@ -457,6 +487,14 @@ func (f *Fake) getChatMember(w http.ResponseWriter, p params, caller int64) {
 	}
 	if m.Status != StatusAdministrator {
 		m.CanPostMessages, m.CanEditMessages = false, false
+	}
+	if m.Status != StatusRestricted {
+		m.IsMember = nil
+	} else if m.IsMember == nil {
+		m.IsMember = new(bool)
+	}
+	if m.Status != StatusCreator && m.Status != StatusAdministrator {
+		m.IsAnonymous = false
 	}
 	writeOK(w, chatMember{Member: m, User: u})
 }

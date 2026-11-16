@@ -313,13 +313,29 @@ FROM destinations d
 JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
 WHERE d.org_id = @org_id AND d.id = @destination_id AND d.type = 'telegram' AND c.deleted_at IS NULL;
 
--- ListTelegramDestinations lists the Telegram Destinations that are not deleted, in id order, with their Connection
--- and channel, for muster doctor.
+-- ListTelegramDestinations lists the Telegram Destinations that are not deleted, in id order, with their Connection,
+-- channel and stored discussion group, for muster doctor.
 -- name: ListTelegramDestinations :many
-SELECT id, public_id, name, connection_id, telegram_channel_id
+SELECT id, public_id, name, connection_id, telegram_channel_id, telegram_discussion_chat_id
 FROM destinations
 WHERE org_id = @org_id AND type = 'telegram' AND deleted_at IS NULL
 ORDER BY id;
+
+-- ListTelegramDestinationPeople lists the active Users who are not Viewers — whom a Schedule never makes On-call — in
+-- a Team that is not deleted and names the Telegram Destination (C-26.FR-1), with a Telegram Account link, with the
+-- Telegram user id of the link, by name: the people whose membership of its discussion group muster doctor reads
+-- (C-27.FR-8).
+-- name: ListTelegramDestinationPeople :many
+SELECT u.id, u.login, al.external_id
+FROM users u
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id AND al.identity_space = 'telegram'
+WHERE u.org_id = @org_id AND u.status = 'active' AND u.role <> 'viewer'
+  AND EXISTS (SELECT 1
+              FROM team_destinations td
+              JOIN teams t ON t.org_id = td.org_id AND t.id = td.team_id AND t.deleted_at IS NULL
+              JOIN team_users tu ON tu.org_id = td.org_id AND tu.team_id = td.team_id
+              WHERE td.org_id = @org_id AND td.destination_id = @destination_id AND tu.user_id = u.id)
+ORDER BY lower(u.name), u.id;
 
 -- GetBridgeDestinationTarget reads where a Bridge Destination posts — its channel id as the messenger names it — with
 -- the Connection it posts through, that Connection's secrets as stored and its version, which its client is cached for.

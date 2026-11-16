@@ -109,6 +109,7 @@ type memTGTarget struct {
 	connection         int64
 	channel            string
 	channelID, groupID int64
+	people             []dbgen.ListTelegramDestinationPeopleRow
 }
 
 // memBRTarget is a Bridge or a Slack Destination: its Connection and its channel id.

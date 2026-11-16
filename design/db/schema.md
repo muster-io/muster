@@ -108,7 +108,10 @@
   [`0043_mention_entries`](../../internal/db/migrations/0043_mention_entries.up.sql)
   (the Mention entries, `mention_entries`, the conversion of the L1 Mention settings into them, the Alert Groups
   each Storm counts, `storm_alert_groups`, and the Mention `storm_started` of `delivery_events`, C-28.FR-1, FR-5,
-  FR-7, S-140), in
+  FR-7, S-140) and
+  [`0044_telegram_discussion_members`](../../internal/db/migrations/0044_telegram_discussion_members.up.sql)
+  (what the last Destination check of a Telegram Destination saw of the members of its discussion group,
+  `destinations.telegram_absent_user_ids` and `destinations.telegram_members_checked_at`, C-27.FR-8, S-164), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -562,6 +565,7 @@ erDiagram
         bigint connection_id FK "type-checked"
         text telegram_channel_id "the only Telegram setting"
         bigint telegram_discussion_chat_id "found by the check"
+        bigint_array telegram_absent_user_ids "Users outside the discussion group"
         text bridge_channel_id "as its messenger names it"
         text slack_channel_id "C… or G…, as entered"
         text webhook_mode "events template both"
@@ -965,7 +969,19 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   Signing secret on every outgoing webhook that is not deleted, because it is generated at creation. A Telegram
   Destination stores only its channel as entered (`telegram_channel_id`); the numeric channel id, the channel's linked
   discussion group (`getChat` → `linked_chat_id`, in `telegram_discussion_chat_id`) and their titles are learned by the
-  Destination check. A Bridge Destination stores its channel id as its messenger names it (`bridge_channel_id`, an
+  Destination check. **Members of the discussion group** (migration 0044, C-27.FR-8): `telegram_absent_user_ids` holds
+  the `users.id` — Muster User ids, not Telegram user ids — of the active people of the Teams that name the
+  Destination who are not Viewers, with a Telegram Account link, whom the Destination checks saw outside its discussion
+  group (`getChatMember` answered `left`, `kicked`, `restricted` with `is_member` false, or `400` `Bad Request:
+  PARTICIPANT_ID_INVALID`, F-128), and `telegram_members_checked_at` when the last check ran, on the business clock.
+  Each check writes the people it saw outside the group and keeps, of those stored, the ones it could not tell — not
+  asked before its deadline or a refused request, or not answered definitively — so that only a definitive answer
+  that a person is in the group ends their absence. Both are null until a check on a replica with 0044 sets them and
+  for the other types; the check of a save, of "Check" and of nothing else writes them, only for a Telegram Destination
+  that is not deleted and only while its stored discussion group is the one the check read, and the Schedules read
+  them for their warnings `not_in_discussion_group`. It is not a change of the configuration: it bumps no `version`
+  and writes no Audit log entry.
+  A Bridge Destination stores its channel id as its messenger names it (`bridge_channel_id`, an
   opaque string of up to 512 characters) and the channel's name its Destination check (`checkChannel`) answered
   (`bridge_channel_name`). A Slack Destination stores its channel id as entered (`slack_channel_id`, `C…` or `G…`) and
   the channel's name its Destination check (`conversations.info`) answered (`slack_channel_name`); its `CHECK` leaves

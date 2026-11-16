@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (43)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (44)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":43`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":44`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":43`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":44`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (43)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (44)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":43`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":44`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -4367,6 +4367,57 @@ func TestIntegrationMentionEntries(t *testing.T) {
 		}
 		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 43 {
 			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
+// TestIntegrationTelegramDiscussionMembers runs 0044 over a database at 43 with a Destination: up adds
+// destinations.telegram_absent_user_ids and telegram_members_checked_at, null for the existing Destination, which take
+// the Users a check saw outside the discussion group and its time. Down drops both; up again works.
+func TestIntegrationTelegramDiscussionMembers(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 43)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000M1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-11-16', '{}', 1, 1,
+				'healthy', '2026-11-16', '2026-11-16'
+			FROM organizations`)
+		columns := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'destinations'
+					AND column_name IN ('telegram_absent_user_ids', 'telegram_members_checked_at')`)
+		}
+
+		if err := e.mm.Migrate(44); err != nil {
+			t.Fatalf("up to 44: %v", err)
+		}
+		if n := columns(t); n != 2 {
+			t.Errorf("after up: %d of the two columns", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM destinations
+			WHERE telegram_absent_user_ids IS NULL AND telegram_members_checked_at IS NULL`); n != 1 {
+			t.Errorf("after up: %d Destinations without a check of the members, want 1", n)
+		}
+		e.exec(t, `UPDATE destinations SET telegram_absent_user_ids = '{3,5}', telegram_members_checked_at = '2026-11-16'`)
+		if n := e.count(t, `SELECT count(*) FROM destinations WHERE telegram_absent_user_ids = '{3,5}'::bigint[]`); n != 1 {
+			t.Errorf("after up: %d Destinations with the absent Users", n)
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 43 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := columns(t); n != 0 {
+			t.Errorf("after down: %d of the two columns", n)
+		}
+
+		if err := e.mm.Migrate(44); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if n := columns(t); n != 2 {
+			t.Errorf("up again: %d of the two columns", n)
 		}
 	})
 }

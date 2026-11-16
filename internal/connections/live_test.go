@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +166,7 @@ func TestLive(t *testing.T) {
 		t.Run("demoRename", e.demoRename)
 		t.Run("telegram", e.telegram)
 		t.Run("telegramDestinations", e.telegramDestinations)
+		t.Run("telegramGroupPeople", e.telegramGroupPeople)
 		t.Run("bridge_event_claim", e.bridgeEventClaim)
 		t.Run("slack", e.slack)
 	})
@@ -462,6 +464,146 @@ func (e *liveEnv) telegramDestinations(t *testing.T) {
 	}
 	if err := e.conns.Delete(ctx, by, c.PublicID, nil); !errors.Is(err, connections.ErrInUse) {
 		t.Fatalf("delete in use = %v", err)
+	}
+}
+
+// telegramGroupPeople is the step discussion_group_members of C-27.FR-8 on the real store and the real limiters: a
+// Telegram Destination with the default limiter, 10 requests a minute, of a Team with 10 active people linked to
+// Telegram and a disabled one; "Check" asks getChatMember about each active person — not the disabled one — although
+// the Destination's bucket would last for 6 requests after the steps of C-14.FR-14, since the step takes its tokens
+// from the Connection's bucket alone; the people the fake answers 400 PARTICIPANT_ID_INVALID are absent, and the
+// Destination stores them, but not once a save moved it to another group than the one the check read.
+func (e *liveEnv) telegramGroupPeople(t *testing.T) {
+	ctx := t.Context()
+	f := faketelegram.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	c, err := e.conns.Create(ctx, by, connections.Input{Type: connections.TypeTelegram, Name: "live-tg-members",
+		BotAPIBaseURL: f.URL(), UpdateMode: connections.ModeLongPolling, BotToken: keyring.Replace("777001:live-mem"),
+		Limiter: connections.Limiter{Limit: 100, PerSeconds: 60}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := e.dests.Create(ctx, destinations.Requester{Actor: by.Actor, Transport: by.Transport},
+		destinations.Input{Type: destinations.TypeTelegram, Name: "live-tg-members", Mentions: quiet(),
+			Limiter:  destinations.Limiter{Limit: 10, PerSeconds: 60},
+			Telegram: &destinations.TelegramInput{Connection: c.PublicID, ChannelID: "@muster_alerts"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := e.d.Pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	exec(`INSERT INTO teams (org_id, public_id, name, slug, own_working_hours, created_at, updated_at)
+		VALUES ($1, 'TM00000000MEMB', 'members', 'members', false, $2, $2)`, e.orgID, t0)
+	exec(`INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+		SELECT $1, id, $2, 'any', $3 FROM teams WHERE public_id = 'TM00000000MEMB'`, e.orgID, d.ID, t0)
+	var want []string
+	for i := range 11 {
+		status, tg := "active", int64(9001+i)
+		if i == 10 {
+			status = "disabled"
+		}
+		id := fmt.Sprintf("%012d", i+1)
+		exec(`WITH u AS (INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+				VALUES ($1, 'SR' || $2, 'm' || $2, 'm' || $2, 'responder', 'local', $3, $4, $4) RETURNING id),
+			tu AS (INSERT INTO team_users (org_id, team_id, user_id, by_hand, created_at)
+				SELECT $1, t.id, u.id, true, $4 FROM teams t, u WHERE t.public_id = 'TM00000000MEMB')
+			INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username,
+				created_at)
+			SELECT $1, 'AK' || $2, u.id, 'telegram', $5, $6, 'm' || $2, $4 FROM u`, e.orgID, id, status, t0, c.ID,
+			strconv.FormatInt(tg, 10))
+		if i%2 == 0 && i < 10 {
+			if err := f.SetMember(faketelegram.GroupID, tg, faketelegram.Member{Status: faketelegram.StatusMember}); err != nil {
+				t.Fatal(err)
+			}
+		} else if i < 10 {
+			want = append(want, "m"+id)
+		}
+	}
+	f.ResetRequests()
+	res, err := e.dests.Check(ctx, d.PublicID)
+	if err != nil || !res.OK {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	last := res.Items[len(res.Items)-1]
+	var absent []string
+	for _, u := range last.AbsentUsers {
+		absent = append(absent, u.Login)
+	}
+	if last.Name != telegram.StepDiscussionGroupMembers || !slices.Equal(absent, want) {
+		t.Errorf("absent %v, want %v", absent, want)
+	}
+	var asked []string
+	for _, r := range f.Requests() {
+		if strings.HasSuffix(r.Path, "/getChatMember") && strings.Contains(r.Body, `"chat_id":-1001000000002`) &&
+			!strings.Contains(r.Body, fmt.Sprintf(`"user_id":%d`, faketelegram.BotID)) {
+			asked = append(asked, r.Body)
+		}
+	}
+	if len(asked) != 10 || slices.ContainsFunc(asked, func(b string) bool { return strings.Contains(b, "9011") }) {
+		t.Errorf("asked about %d people: %v", len(asked), asked)
+	}
+	var tokens float64
+	if err := e.d.Pool.QueryRow(ctx, `SELECT tokens FROM rate_limit_buckets WHERE subject_kind = 'destination'
+		AND subject_id = $1`, d.ID).Scan(&tokens); err != nil || tokens < 5.5 {
+		t.Errorf("the Destination's bucket after the check: %v tokens, %v", tokens, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND cardinality(telegram_absent_user_ids) = 5
+		AND telegram_members_checked_at IS NOT NULL`, d.ID); n != 1 {
+		t.Errorf("stored %d", n)
+	}
+	// The checks below would wait for the tokens that the default limiters refill slowly; each starts with full buckets.
+	refill := func() {
+		t.Helper()
+		exec(`UPDATE rate_limit_buckets SET tokens = 10 WHERE subject_kind = 'destination' AND subject_id = $1`, d.ID)
+		exec(`UPDATE rate_limit_buckets SET tokens = 100 WHERE subject_kind = 'connection' AND subject_id = $1`, c.ID)
+	}
+	refill()
+	// A check that cannot tell an absent person — Telegram answers another error about m000000000002 — keeps their
+	// absence while the item names only who it saw outside; a definitive "in the group" ends it.
+	if err := f.SetMember(faketelegram.GroupID, 9002, faketelegram.Member{ErrorCode: 400,
+		Description: "Bad Request: user not found"}); err != nil {
+		t.Fatal(err)
+	}
+	stored := func() []string {
+		t.Helper()
+		var logins []string
+		if err := e.d.Pool.QueryRow(ctx, `SELECT array(SELECT u.login FROM users u
+			WHERE u.id = ANY(d.telegram_absent_user_ids) ORDER BY u.login) FROM destinations d WHERE d.id = $1`,
+			d.ID).Scan(&logins); err != nil {
+			t.Fatal(err)
+		}
+		return logins
+	}
+	if res, err := e.dests.Check(ctx, d.PublicID); err != nil || !res.OK ||
+		len(res.Items[len(res.Items)-1].AbsentUsers) != 4 || !slices.Equal(stored(), want) {
+		t.Errorf("an unknown answer: %+v, %v, stored %v", res.Items, err, stored())
+	}
+	if err := f.SetMember(faketelegram.GroupID, 9002, faketelegram.Member{Status: faketelegram.StatusMember}); err != nil {
+		t.Fatal(err)
+	}
+	refill()
+	if res, err := e.dests.Check(ctx, d.PublicID); err != nil || !res.OK ||
+		!slices.Equal(stored(), want[1:]) {
+		t.Errorf("a member again: %v, stored %v", err, stored())
+	}
+	// A save moved the Destination to another group while a check read the old one: the check fails and its write,
+	// which names the group it read, leaves what the save stored.
+	exec(`UPDATE destinations SET telegram_discussion_chat_id = -100999, telegram_absent_user_ids = '{42}'
+		WHERE id = $1`, d.ID)
+	refill()
+	if res, err := e.dests.Check(ctx, d.PublicID); err != nil || res.OK {
+		t.Fatalf("a check of a moved group = %+v, %v", res, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND telegram_absent_user_ids = '{42}'`,
+		d.ID); n != 1 {
+		t.Error("a check of another group than the stored one overwrote the members")
 	}
 }
 
