@@ -8,7 +8,7 @@
 ## Start here
 
 - [`api/openapi.yaml`](https://muster-io.github.io/muster/latest/api/openapi.yaml) is the HTTP API and [`api/bridge.yaml`](https://muster-io.github.io/muster/latest/api/bridge.yaml) the Bridge protocol; where a page and a specification disagree, the specification wins.
-- The rules for agents (the error classes, waits, presses, idempotency, edit windows and when a bridge is finished) and the scenarios, each the pages to read in order and what finishes it, are at the top of [the full text](https://muster-io.github.io/muster/latest/llms-full.txt), before the text of every page.
+- The rules for agents (the error classes, waits, presses, idempotency, edit windows and when a bridge is finished) and the scenarios, each the pages to read in order and what finishes it, are in [the guide for agents](https://muster-io.github.io/muster/latest/llms-full-guide.txt); read it before the pages.
 
 ## Document map
 
@@ -121,4 +121,15 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): the rules, the scenarios and every page in one file, 978050 bytes, about 244512 tokens.
+The full text, one file per section of the document map; [`llms-full.txt`](https://muster-io.github.io/muster/latest/llms-full.txt) lists them.
+
+- [Home, Quick start, First alert in a messenger](https://muster-io.github.io/muster/latest/llms-full-home.txt): 3 pages, about 7237 tokens.
+- [Install](https://muster-io.github.io/muster/latest/llms-full-install.txt): 3 pages, about 21432 tokens.
+- [Configure](https://muster-io.github.io/muster/latest/llms-full-configure.txt): 3 pages, about 12690 tokens.
+- [Integrations](https://muster-io.github.io/muster/latest/llms-full-integrations.txt): 3 pages, about 11363 tokens.
+- [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, about 59671 tokens.
+- [Outgoing webhooks](https://muster-io.github.io/muster/latest/llms-full-outgoing-webhooks.txt): 3 pages, about 11571 tokens.
+- [Sign-in](https://muster-io.github.io/muster/latest/llms-full-sign-in.txt): 5 pages, about 11234 tokens.
+- [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 12 pages, about 43411 tokens.
+- [Operations](https://muster-io.github.io/muster/latest/llms-full-operations.txt): 26 pages, about 31455 tokens.
+- [Reference](https://muster-io.github.io/muster/latest/llms-full-reference.txt): 8 pages, about 31827 tokens.

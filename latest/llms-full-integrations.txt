@@ -1,0 +1,724 @@
+# Muster documentation, version latest: Integrations
+
+This file holds the full text of the section Integrations. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text; the rules for AI agents are in https://muster-io.github.io/muster/latest/llms-full-guide.txt.
+
+<!-- Source: https://muster-io.github.io/muster/latest/integrations/alertmanager.md -->
+# Connect Alertmanager
+
+Muster receives alerts from Alertmanager through an Alertmanager receiver with a webhook. Each delivery is a
+**Snapshot** of one Alertmanager group: every alert of the Alertmanager group that still fires, and its resolves. Muster stores each request exactly as
+received, answers `202` once it is written, and processes it afterwards.
+
+In the examples, `MUSTER_INGEST_URL` is `https://ingest.muster.example.org`.
+
+## One Integration per Alertmanager cluster
+
+Create one **Integration** for each Alertmanager cluster that sends to Muster. An HA pair — two or more Alertmanager
+instances that gossip with each other — is **one** cluster and gets **one** Integration: both instances send the same
+notifications, and Muster folds their copies together within the Integration's duplicate window. Two independent
+Alertmanagers, such as one per region, get one Integration each, so that each has its own repeats, its own Static
+labels and its own health.
+
+Static labels are added to every alert of the Integration before routing, for example `cluster=prod-eu`, so that Routes
+and messages can tell the clusters apart.
+
+Alertmanager pushes its Snapshots to Muster by webhook: the Integration's connection mode is `webhook-only`
+(`integration.connection_mode`), the only mode in this version.
+
+## Create a token and paste the snippet
+
+1. In Muster, open **Integrations** and select **Create integration**. Enter a **Name** after the Alertmanager cluster,
+   such as `prod-eu`, and add its [Static labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels) with **Add label**, such as `cluster=prod-eu`. Keep
+   the **Duplicate window** of 45 seconds. Select **Create**.
+
+    ![The form of a new Integration: the name prod-eu, the Static label cluster=prod-eu and the duplicate window of 45 seconds](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/01-new-integration.png){ .screenshot }
+
+2. On the Integration page, select **Create token**, give the token a **Name** if you like, such as `alertmanager`, and
+   select **Create**. Muster shows the token and a ready Alertmanager snippet, the **Alertmanager configuration**,
+   **once**; copy it with **Copy** before you select **Done**. Only a hash of the token is kept, so a lost token cannot
+   be shown again: create a new one.
+
+    ![The dialog Token created: the token, the Alertmanager configuration with the receiver and the route, and the warning that the token is shown once](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/02-token-and-snippet.png){ .screenshot }
+
+3. Paste the snippet into the Alertmanager configuration, as the rest of this section explains, and reload Alertmanager.
+
+The snippet has two parts. The Alertmanager receiver goes into `receivers`:
+
+```yaml
+receivers:
+  - name: muster-prod-eu
+    webhook_configs:
+      - url: https://ingest.muster.example.org/api/v1/ingest
+        send_resolved: true
+        max_alerts: 0
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: mstr_int_…
+```
+
+- `send_resolved: true` sends resolves, which close alerts in Muster at once.
+- `max_alerts: 0` sends every alert of the Alertmanager group. Muster treats each Snapshot as the whole Alertmanager
+  group; a Truncated Snapshot makes it warn.
+- The token travels as `Authorization: Bearer`. A sender that cannot set a header may append the token to the URL
+  instead, as `/api/v1/ingest/<token>`; Muster's logs name only the route, never such a path.
+
+The route goes first under the top-level `route`, before your other child routes:
+
+```yaml
+route:
+  routes:
+    - receiver: muster-prod-eu
+      continue: true
+      repeat_interval: 10m
+    # ... your existing child routes
+    # The last child route: a catch-all without matchers for the receiver of the top-level route.
+    # - receiver: <your default receiver>
+```
+
+- With no matchers, the route takes every alert, and `continue: true` passes each alert on to the child routes after
+  it, so Muster runs beside your current Alertmanager receivers while you try it.
+- **Keep a catch-all child route last.** Alertmanager sends an alert to the receiver of the top-level `route` only when
+  no child route matches it. The Muster route matches every alert, so without a catch-all, an alert that none of your
+  other child routes matches goes to Muster alone and your default receiver stops getting it. Add a last child route
+  without matchers for your default receiver, or make sure an existing later child route already catches everything.
+
+For example, a configuration that sends critical alerts to `oncall` and everything else to the top-level `default`:
+
+```yaml
+route:
+  receiver: default
+  routes:
+    - receiver: oncall
+      matchers: ['severity="critical"']
+```
+
+becomes:
+
+```yaml
+route:
+  receiver: default
+  routes:
+    - receiver: muster-prod-eu
+      continue: true
+      repeat_interval: 10m
+    - receiver: oncall
+      matchers: ['severity="critical"']
+    - receiver: default
+```
+
+A critical alert goes to `muster-prod-eu` and `oncall`, any other alert to `muster-prod-eu` and `default`. Without the
+last line, a warning would reach only Muster. `amtool config routes test --config.file=alertmanager.yml
+severity=warning` prints the receivers an alert reaches; it should list Muster and your default receiver.
+
+- Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet, `snippet.repeat_interval`). See
+  [Repeat intervals](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#repeat-intervals) for why.
+
+Reload Alertmanager (`POST /-/reload` or `SIGHUP`). The Integration page then shows the time of the last Snapshot and
+the Stored Snapshots as received. In the screenshots, the addresses start with `http://localhost:8081`, the ingest
+address of a development installation; yours start with your `MUSTER_INGEST_URL`.
+
+![The Integration prod-eu after its first Snapshot: the last Snapshot, one Snapshot received, the token last used and the Alertmanager route Muster saw](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/03-first-snapshot.png){ .screenshot }
+
+Further down, **Stored Snapshots** lists each Snapshot as received, newest first, with its group key and its state;
+select one to see its body.
+
+![The Stored Snapshots of the Integration: one Snapshot, Processed](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/04-stored-snapshots.png){ .screenshot }
+
+## Repeat intervals
+
+Keep the `repeat_interval` of the route that sends to Muster between **5 and 15 minutes**. It is a setting of the
+route, not of the receiver, so a route that sends only some alerts to Muster can have its own.
+
+Muster learns from the repeats. An Alertmanager group sends a Snapshot again each time `repeat_interval` elapses, and
+Muster measures the gaps between those Snapshots. Two rules depend on them:
+
+- An Alert is **Gone** when at least two consecutive Snapshots of its Alertmanager group, and at least
+  `processing.gone_min_absence` (5 minutes), do not list it any more. This is how Muster notices an alert that
+  Alertmanager dropped without a `resolved` notification.
+- An Alert goes **Stale** when its Alertmanager group sends no Snapshot at all for `processing.stale_after_factor`
+  (3) times the learned repeat interval, for example when the group is silenced in Alertmanager. It applies only while
+  the Integration's [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md) is live. Until Muster has learned the interval, it waits
+  `processing.stale_after_unlearned` (25 hours).
+
+Alertmanager sends a repeat on the first `group_interval` tick after `repeat_interval` has elapsed, so the gaps are
+about `repeat_interval` + `group_interval`. With 10 minutes and Alertmanager's default `group_interval` of 5 minutes,
+Muster learns an interval of about 15 minutes, and an Alert of a silenced group goes Stale after about 45 minutes. With
+a daily interval it takes more than three days, and the Integration page warns about an interval longer than
+`processing.long_repeat_warning` (1 hour) and shows the route to put in Alertmanager. A short interval does not make
+Muster noisy: Muster sends one message per Alert Group and edits it, so a repeat changes nothing that people see. It
+only makes Muster faster to notice that an alert is gone.
+
+The routes Muster has learned, with their intervals and the time each needs to resolve by absence, are on the
+Integration page.
+
+## Send every alert of the group
+
+Set `max_alerts: 0` on the webhook configuration, as the snippet does. Alertmanager's default is no limit, but a
+`max_alerts` above 0 makes it keep only the first alerts of a group in each notification and count the rest in
+`truncatedAlerts`. A truncated Snapshot lists only part of the Alertmanager group, so Muster cannot tell an alert that is
+missing from one that was cut off. It never takes a truncated Snapshot as proof of absence: it keeps the unlisted Alerts
+firing as long as Snapshots of that group keep arriving, which can keep a resolved Alert open. It raises the Internal
+alert `MusterSnapshotTruncated` for the Integration and counts the Snapshot in
+`muster_ingest_truncated_snapshots_total`. If you see that alert, set `max_alerts: 0` on the receiver and reload
+Alertmanager; the [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md) has the steps.
+
+## Static labels
+
+Static labels belong to the Integration, not to Alertmanager. Add them in the Integration's settings, such as
+`cluster=prod-eu`; Muster adds them to every Alert of the Integration before it routes the Alert, so a Route and a Group
+key can use them as if the rules had set them.
+
+1. Open the Integration and select **Edit**, or set them in the form of a new Integration.
+2. Under **Static labels**, select **Add label** and enter the label's name and value, one label per row; **Remove
+   label** takes a row away. Select **Save**.
+
+    ![The field Static labels of an Integration with the label cluster=prod-eu](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/05-static-labels.png){ .screenshot }
+
+- Use them for what the Alertmanager cluster knows and the rules do not: the cluster, the region, the environment. The
+  default Group key of a Route includes `cluster`, so Alert Groups of different clusters stay apart.
+- An Alert that already has the label keeps its own value. Muster then warns about the label on the Alert and in its
+  Alert Group's Timeline, and the Alerts view of the Integration shows the warning. A Static label never overwrites a
+  label that a rule set.
+
+## Instance labels in informational alerts
+
+**Instance labels** are the labels that change when the process that reports an Alert restarts, such as `pod` and
+`instance`. The Organization lists them in `organization.instance_labels` (by default `pod`, `instance`, `container`
+and `endpoint`).
+
+Keep them out of informational alerts, the ones nobody needs to act on at once, such as those of a Route with the
+Informational profile. A
+restarted pod reports the same problem under a new `pod` label, which is a different Alert. Muster recognises that
+case: it records a **Replacement**, a Quiet event in the Timeline that names the label that differs, and the Alert Group
+page suggests fixing the rule. But every restart still adds an Alert and a Timeline entry to an Alert Group that was
+meant to be calm, and if the label is also in the Route's Group key, each pod gets an Alert Group of its own.
+
+Aggregate the label away in the rule instead, for example `sum without(pod, instance) (...)` in the expression. Keep the label where it helps a person find the culprit, in
+an annotation rather than a label. For alerts about one particular pod that people must act on, Instance labels are fine:
+there each pod is a separate problem.
+
+## Start delay
+
+When Alertmanager starts, it does not know the alerts that were firing before. It learns them again as the rule
+evaluators (Prometheus, vmalert) send them, and until then its Alertmanager groups list only part of their alerts. A
+Snapshot sent in that time is **partial**, and Muster would take the missing alerts as Gone.
+
+Set `--dispatch.start-delay` so that Alertmanager waits before it sends. It must be at least **twice** the longer of the
+rule evaluation interval and the rule evaluator's resend delay, plus a margin. Prometheus re-sends a firing alert only
+every second evaluation at its defaults, so with a 1-minute evaluation interval use **about 2.5 minutes or more**:
+
+```sh
+alertmanager --dispatch.start-delay=2m30s ...
+```
+
+With 90 seconds, the first Snapshot after a start was still partial in tests.
+
+## HA pairs need a persistent volume
+
+Give every instance of an HA pair a persistent volume for its data directory (`--storage.path`). Without one, a
+restarted instance loses its silences and its notification log: it can notify silenced alerts and send partial
+Snapshots until the other instance catches it up.
+
+## Token rotation
+
+An Integration may hold several tokens. To rotate one without losing a webhook:
+
+1. Create a second token and paste its snippet (or only the new `credentials`) into the Alertmanager configuration.
+2. Reload Alertmanager and check that the token list shows a recent use of the new token.
+3. Revoke the old token. It is refused from the next request.
+
+A request with a revoked token is refused with `401` and counted under the Integration in
+`muster_ingest_requests_total{outcome="unauthorized"}`, so the chart rule `MusterIngestRejected` shows an Alertmanager
+that still uses an old token.
+
+## Behind a reverse proxy
+
+Muster serves ingestion on its own listener, `MUSTER_LISTEN_INGEST` (`:8081` by default), apart from the UI and API on
+`MUSTER_LISTEN_APP`. Set `MUSTER_INGEST_URL` to the address Alertmanager uses; it defaults to `MUSTER_PUBLIC_URL`, and
+the snippets are built from it.
+
+With separate listeners, route `/api/v1/ingest` and `/api/v1/heartbeat` (with everything below them) to the ingest
+port. A reverse proxy that serves both on one host name, for example, sends these two paths to `:8081` and everything
+else to `:8080`. Keep the proxy's body size limit at **16 MB** or more: Muster accepts bodies up to `ingest.body_limit`
+(16 MB) and answers `413` above it. Do not let the proxy log request paths with the token, or prefer the
+`Authorization` header, which proxies do not log by default.
+
+With one listener for both (`MUSTER_LISTEN_INGEST` equal to `MUSTER_LISTEN_APP`), the same port serves ingestion and
+the API.
+
+## What the body needs
+
+Alertmanager's webhook always has these fields, so only a custom sender, such as a CI job or a script, can miss one.
+Muster reads the body after it has answered, so a body without them is stored, answered with `202` and then rejected:
+
+- At the top level: `groupKey` (a string), `status` (`firing` or `resolved`) and `alerts` (an array).
+- In each Alert: `labels` (an object of strings), `status` (`firing` or `resolved`) and `startsAt` (an RFC 3339 time).
+- Optional: `truncatedAlerts` and `notification_reason` at the top level, `annotations`, `endsAt` and `fingerprint` in
+  an Alert. Other fields, `version` included, are ignored, and `generatorURL` is kept as it is.
+- A body with a negative `truncatedAlerts`, or with a NUL character in `groupKey` or `notification_reason`, is
+  rejected.
+
+A rejected Stored Snapshot is `failed`, with the reason in its `processing_error`, for example `the webhook has no
+groupKey`. It is never retried by itself and creates no Alert Group. Muster shows it in three places:
+
+- The Integration page and `GET /api/v1/integrations/{id}` carry the warning `snapshot_failed` with the error, without
+  the values you sent, and the time of the Snapshot, while the newest Stored Snapshot of the Integration that is
+  processed or failed has failed. It clears when a later Snapshot is processed, also one from another sender of the
+  same Integration. The Integrations list marks the Integration too.
+- **Stored Snapshots** of the Integration lists the Snapshot, `failed`, with its body as received.
+- `muster_ingest_failed_snapshots_total{integration}` counts it, and the chart rule `MusterIngestSnapshotFailed` fires
+  on it; the [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed.md) has the steps.
+
+After you fix the sender, send a valid body, or run `muster ingest replay` to process the rejected one again.
+
+## What Muster answers
+
+| Answer | When | Alertmanager |
+|---|---|---|
+| `202` | The body was stored, whatever it holds | done |
+| `401` | No token, an unknown or revoked token, a token of a deleted Integration, or an API token | does not retry |
+| `413` | The body is larger than 16 MB | does not retry |
+| `500` | The body could not be written | retries |
+
+Muster never answers `400`: a body that is not JSON, or not an Alertmanager payload, is stored and fails later in
+processing, where the Stored Snapshot shows the error and the Integration shows
+[the warning](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#what-the-body-needs).
+
+<!-- Source: https://muster-io.github.io/muster/latest/integrations/grafana.md -->
+# Connect Grafana
+
+Grafana Alerting reaches Muster in one of two ways: directly, from Grafana's built-in Alertmanager through a webhook
+contact point, or through an external Alertmanager that Grafana forwards its alerts to. Both carry Grafana-managed
+alert rules.
+
+```mermaid
+flowchart LR
+  rules["Grafana alert rules"] --> builtin["Grafana's built-in Alertmanager"]
+  builtin -- "Snapshots, webhook contact point" --> direct["Muster Integration for Grafana"]
+  rules -. "alerts" .-> am["External Alertmanager"]
+  prom["Prometheus rules"] -- "alerts" --> am
+  am -- "Snapshots" --> shared["Muster Integration for the Alertmanager"]
+```
+
+- **Directly** needs nothing between Grafana and Muster. Grafana's built-in Alertmanager sends Alertmanager's webhook
+  format with a few fields of its own, and Muster reads each notification as a **Snapshot**, as from any Alertmanager.
+- **Through an external Alertmanager** suits you when you already run an Alertmanager for Prometheus rules and want one
+  Integration in Muster for both.
+
+In the examples, `MUSTER_INGEST_URL` is `https://ingest.muster.example.org`. Muster was tested with Grafana OSS 13.2.4,
+as a single instance and as an HA pair.
+
+## Connect Grafana directly
+
+The steps, in this order: create an Integration and its token in Muster, create a webhook contact point in Grafana, and
+send the alerts to it with a notification policy.
+
+### One Integration per Grafana cluster and organization
+
+Create one **Integration** for each Grafana cluster, and for each Grafana organization in it, that sends to Muster.
+
+- An HA pair — two or more Grafana replicas that share a database and gossip with each other — is **one** cluster and
+  gets **one** Integration. See [HA pairs](https://muster-io.github.io/muster/latest/integrations/grafana.md#ha-pairs).
+- Each Grafana organization gets an Integration of its own. The `groupKey` of a Snapshot names the notification policy
+  and the group, not the organization, so two organizations with the same notification policies send the same
+  `groupKey`s, and one Integration would take their Snapshots for one Alertmanager group.
+- Give the Integration [Static labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels) for what the rules do not say, such as
+  `cluster=prod-eu`.
+
+### Create the Integration and a token
+
+1. In Muster, open **Integrations** and select **Create integration**. Enter a **Name**, such as `grafana-prod`, and
+   add the [Static labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels) with **Add label**, such as `cluster=prod-eu`. Select
+   **Create**.
+
+    ![The form of a new Integration: the name grafana-prod and the Static label cluster=prod-eu](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/grafana/01-new-integration.png){ .screenshot }
+
+2. On the Integration page, select **Create token**, give the token a **Name** if you like, such as `grafana`, and
+   select **Create**. Muster shows the token **once**, with a snippet for Alertmanager; Grafana needs only the
+   **Token** (`mstr_int_…`), the `credentials` of that snippet. Copy it with **Copy** before you select **Done**.
+
+    ![The dialog Token created with the token outlined, above the Alertmanager configuration that Grafana does not need](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/grafana/02-token.png){ .screenshot }
+
+3. Create the contact point and the notification policy in Grafana, as the next two sections say. Once Grafana sends
+   its first Snapshot, the Integration page shows it under **Snapshots**: the time of the last one and how many were
+   received. In the screenshot, the address starts with `http://localhost:8081`, the ingest address of a development
+   installation; yours starts with your `MUSTER_INGEST_URL`.
+
+    ![The Integration grafana-prod after the first Snapshot from Grafana: the last Snapshot and one Snapshot received](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/grafana/03-first-snapshot.png){ .screenshot }
+
+### Create a webhook contact point
+
+In Grafana, open **Alerting** → **Contact points** → **Add contact point** and choose the integration **Webhook**:
+
+1. **URL**: the Integration's ingest URL, `MUSTER_INGEST_URL` followed by `/api/v1/ingest`:
+   `https://ingest.muster.example.org/api/v1/ingest`.
+2. **HTTP Method**: `POST`.
+3. **Authorization header**: the scheme `Bearer`, and the Integration token as its credentials.
+4. **Max alerts**: `0`, the default, which sends every alert of the group. Muster treats each Snapshot as the whole
+   Alertmanager group; see [Limits](https://muster-io.github.io/muster/latest/integrations/grafana.md#limits).
+5. **Disable resolved message**: off, the default. Resolves close Alerts in Muster at once.
+6. No custom payload: Muster reads the payload that Grafana sends by default, and a custom one replaces it.
+
+Check these names against the version of Grafana that you run, because the places of the settings in the interface
+change between versions. The same contact point in a provisioning file, together with the notification policy of the
+next step:
+
+```yaml
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: muster
+    receivers:
+      - uid: muster
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: https://ingest.muster.example.org/api/v1/ingest
+          httpMethod: POST
+          authorization_scheme: Bearer
+          authorization_credentials: ${MUSTER_TOKEN}
+
+policies:
+  - orgId: 1
+    receiver: muster
+    group_by: [grafana_folder, alertname]
+    repeat_interval: 10m
+```
+
+Grafana replaces `${MUSTER_TOKEN}` with the variable of its environment when it reads the file, so the token stays out
+of the file. The file leaves out Max alerts (`maxAlerts`), so it is 0. Grafana does not let you edit resources
+provisioned from files in its interface, this contact point and the notification policy tree included: change the
+file, then restart Grafana or reload the provisioned files through its Admin API.
+
+### Send the alerts with a notification policy
+
+In **Alerting** → **Notification policies**, send the alerts to the contact point:
+
+- Keep Grafana's default grouping, `group_by: [grafana_folder, alertname]`, and let Muster make Alert Groups with its
+  [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md). See
+  [Do not merge rules into one group](https://muster-io.github.io/muster/latest/integrations/grafana.md#do-not-merge-rules-into-one-group).
+- Set `repeat_interval` between **5 and 15 minutes** (10 minutes in the example). See
+  [Repeat intervals](https://muster-io.github.io/muster/latest/integrations/grafana.md#repeat-intervals).
+- The example makes Muster the contact point of the default policy, which takes every alert. A provisioned `policies`
+  entry is the whole notification policy tree of the organization and replaces the one set in the user interface. If
+  Grafana also notifies other contact points, add Muster instead as the first nested policy, without matchers, with
+  `continue: true` and its own `repeat_interval`, and keep a last nested policy for your default contact point, as for
+  the [Alertmanager route](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#create-a-token-and-paste-the-snippet).
+- Grafana's built-in Alertmanager sends the notifications, so keep it receiving Grafana-managed alerts, the default in
+  **Alerting** → **Settings**.
+
+On its first start, Grafana applies provisioned policies within about a minute. Grafana sends the first Snapshot when
+an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received, as
+in [Create the Integration and a token](https://muster-io.github.io/muster/latest/integrations/grafana.md#create-the-integration-and-a-token).
+
+### Repeat intervals
+
+Repeats are how Muster learns when an alert is **Gone** or **Stale**, as with Alertmanager; see
+[Repeat intervals](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#repeat-intervals). Grafana sends no `notification_reason`, so Muster recognises a
+repeat as a Snapshot identical to the one before it and learns the interval from those.
+
+Grafana sends a repeat on the first `group_interval` tick after `repeat_interval` has elapsed. With 10 minutes and
+Grafana's default `group_interval` of 5 minutes, Muster learns an interval of about 15 minutes; with Grafana's default
+`repeat_interval` of 4 hours, an Alert of a silent group would go Stale only after more than 12 hours. Control the noise
+in Muster, not with a long interval: Muster sends one message per Alert Group and edits it, so a repeat changes nothing
+that people see.
+
+### Do not merge rules into one group
+
+Keep each Grafana notification group to the alerts of one rule, as the default grouping by `grafana_folder` and
+`alertname` does, and do not group many rules together, for example by a label that they share.
+
+After a restart, Grafana knows the alerts of a rule again only once it has evaluated the rule. A group of rules with
+different evaluation intervals then sends Snapshots without the slower rules' alerts until their first evaluation: in
+a test, the alert of a rule evaluated every 8 minutes was missing from its group's Snapshots for about 7 minutes. Muster
+can take such an alert for Gone, and its return for a new firing, which is Loud. Grafana has no setting like
+Alertmanager's [start delay](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#start-delay). The alerts of one rule all return with its first evaluation,
+and Muster's Routes put them into Alert Groups as they would any other alerts.
+
+### Simplified routing
+
+A contact point chosen in the rule itself (simplified routing) puts the label `__grafana_route_settings_hash__`, a hash
+of the rule's notification settings, into the route path of the `groupKey`. Editing those settings starts a new
+`groupKey`, and the old one falls silent, as when the matchers of an Alertmanager route change: an Alert that the new
+`groupKey` lists stays firing, and one that only the old `groupKey` listed resolves only by going Stale, which needs a
+live [Heartbeat](https://muster-io.github.io/muster/latest/integrations/grafana.md#heartbeat). Notification policies avoid this.
+
+### What Grafana sends
+
+- **Every end of an alert is an explicit resolve**: a value back under the threshold, a series that is missing for two
+  evaluations, a paused rule and a deleted rule. Muster resolves the Alert at once, with the reason `resolved`. Grafana
+  gives the resolve the annotation `grafana_state_reason` (`MissingSeries`, `Paused` or `RuleDeleted`); Muster takes
+  annotations from firing alerts only, so that reason shows in the Stored Snapshot, not on the Alert.
+- **NoData and Error are alerts of their own.** A rule whose query returns no data, with the no-data state No Data,
+  resolves its alert and fires an alert `DatasourceNoData` in a group of its own, with the label `rulename` (the rule's
+  title), `datasource_uid` and `ref_id` beside the rule's labels. When data returns, the rule's alert fires again as a
+  new firing and `DatasourceNoData` resolves. The error state Error gives an alert `DatasourceError` with the label
+  `rulename` the same way, as Grafana documents it; it has not been tested with Muster. A Route can match both by
+  `alertname`.
+- **Links.** The **Source** link of an Alert Group opens the rule's page in Grafana, the alert's `generatorURL`:
+  `<root_url>/alerting/grafana/<rule uid>/view?orgId=1`. Set Grafana's `root_url` to the address people open. The
+  built-in Link rule Explore builds its link from the Prometheus query of a `generatorURL`, which Grafana's does not
+  have, so it makes no link for Grafana's alerts.
+
+### HA pairs
+
+An HA pair needs nothing more than its one Integration and one contact point. Normally one replica sends; when both do,
+Muster folds their copies together within the Integration's duplicate window.
+
+The replicas evaluate the rules each on its own, so their copies of one alert can carry different `startsAt`. Muster
+takes the resolve of either replica: a resolve whose firing overlaps the current one resolves it (see
+[Resolved](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md#resolved)). Such copies can also make Muster record a Quiet Continuation
+for an Alert once. Grafana's `ha_single_node_evaluation`, which makes one replica evaluate the rules for both, has not
+been tested with Muster.
+
+### Heartbeat
+
+The [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md) page's setup is for Alertmanager. The same idea in Grafana — an always-firing rule with a
+notification policy of its own, a `repeat_interval` of about one minute, and a second webhook contact point at the
+Integration's Heartbeat URL, `https://ingest.muster.example.org/api/v1/heartbeat`, with resolved messages disabled —
+**has not been verified with Grafana**.
+
+Without a Heartbeat, Muster never resolves an Alert as Stale: an Alert whose Grafana group stops sending altogether
+stays firing in Muster. Gone still works. A cron job that requests the Heartbeat URL keeps the Heartbeat live too, but
+it proves only the network: when Grafana itself stops, its groups fall silent and their Alerts go Stale.
+
+### Limits
+
+- **Truncation.** With Max alerts above 0, a Snapshot lists only part of its group. Muster keeps the unlisted Alerts
+  alive and raises the Internal alert `MusterSnapshotTruncated`
+  ([runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md)). Grafana computes the status of a Snapshot from the
+  alerts it lists, so a truncated Snapshot can say `resolved` while alerts it left out still fire; Muster recognises a
+  Snapshot from Grafana by its top-level `orgId`, and a truncated `status: resolved` from Grafana resolves only the
+  Alerts it lists as resolved. When a whole group resolves, its last Snapshot too lists only the first alerts, and
+  Grafana sends nothing more for the group until one of its alerts fires again: the Alerts it left out stay firing in
+  Muster until they go Stale, which needs a live [Heartbeat](https://muster-io.github.io/muster/latest/integrations/grafana.md#heartbeat). Set Max alerts to 0; for the Alerts already
+  left firing, see the [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md#fix).
+- **The Integration page speaks of Alertmanager**, the part that Grafana's built-in one plays. Its Alertmanager routes
+  are Grafana's notification policies; its warning about a long repeat interval shows an Alertmanager route, where for
+  Grafana you set the `repeat_interval` of the policy; its truncation warning names `max_alerts`, which is Max alerts
+  in Grafana.
+- [What Muster answers](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#what-muster-answers), [Token rotation](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#token-rotation) and
+  [Behind a reverse proxy](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#behind-a-reverse-proxy) apply to Grafana as they are.
+- **Not tested with Muster**: Grafana's retries of a webhook after an error or a timeout; Grafana's silences and mute
+  timings; several Grafana organizations on one Integration; a custom payload; HMAC signing (Muster checks the
+  Integration token only); `ha_single_node_evaluation`; `DatasourceError`; the Heartbeat through Grafana.
+
+## Connect Grafana through an external Alertmanager
+
+Grafana-managed alert rules can also reach Muster the same way as Prometheus rules do: Grafana forwards its alerts to
+an external Alertmanager, and that Alertmanager has the Muster receiver from [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md).
+One Alertmanager can serve Grafana and Prometheus together, with one Integration in Muster for the whole Alertmanager
+cluster.
+
+Prefer this way when you already run an Alertmanager for Prometheus rules and want one Integration for both: the
+Heartbeat route of the [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md) page then watches the path of Grafana's alerts too.
+
+### Send Grafana's alerts to the Alertmanager
+
+In Grafana, two settings are needed, and both must be on.
+
+1. Add the Alertmanager as a data source: **Connections** → **Data sources** → **Alertmanager**. Set the
+   **Alertmanager Implementation** (Prometheus, for a plain Alertmanager) and the **HTTP URL**, and turn on **Receive
+   Grafana Alerts**.
+2. In **Alerting** → **Settings** (called Administration in some versions), enable that Alertmanager so that it shows
+   that it receives Grafana-managed alerts.
+
+From then on Grafana forwards all its Grafana-managed alerts to the Alertmanager. The same data source in a
+provisioning file, which covers step 1 only; step 2 is still done in **Alerting** → **Settings**:
+
+```yaml
+apiVersion: 1
+
+datasources:
+  - name: Alertmanager
+    type: alertmanager
+    url: http://alertmanager.monitoring.svc:9093
+    access: proxy
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: true
+```
+
+The option in the user interface is **Receive Grafana Alerts**; its `jsonData` name is `handleGrafanaManagedAlerts`. The
+names above are those of the Grafana documentation of the Alertmanager data source; check the version of Grafana that
+you run, because the places of the settings in the interface change between versions.
+
+Then follow [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md): create an Integration for the Alertmanager, paste the receiver and
+the route into its configuration, and keep the catch-all child route last.
+
+## Labels
+
+Grafana adds two labels of its own to every Grafana-managed alert: `alertname`, the name of the alert rule, and
+`grafana_folder`, the title of the folder that holds the rule. Labels that you set on the rule, such as `severity` or
+`team`, come with them. Route and Group key on these labels in Muster as on any others:
+
+- Set `severity` on your rules: it is part of the default Group key, and Routes can match it.
+- `alertname` is also part of the default Group key, so rules of different names make different Alert Groups.
+- Grafana rules have no `cluster` label of their own: add it to the Integration as a
+  [Static label](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels). Through an Alertmanager shared with Prometheus, you can instead give
+  Grafana's alerts an Integration of their own.
+- A rule on a query that returns one series per pod or instance makes one alert per series, with those labels. Keep
+  [Instance labels out of informational alerts](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#instance-labels-in-informational-alerts); a Grafana
+  rule can reduce the series to one with an aggregation.
+- Directly from Grafana, an Alert's fingerprint is the one in the body, which also covers the rule's hidden uid, so two
+  rules with the same labels make two Alerts.
+
+Muster shows the labels of each alert on the page of its Alert Group. If a label you expected is missing, open the
+Stored Snapshot on the Integration page, which shows the request as Grafana or the Alertmanager sent it.
+
+<!-- Source: https://muster-io.github.io/muster/latest/integrations/heartbeat.md -->
+# Heartbeat
+
+A **Heartbeat** proves, for one Integration, that the path from your cluster to Muster works: Prometheus evaluates
+rules, Alertmanager sends notifications, and the network carries them to Muster. Alertmanager sends Muster a signal
+about once a minute; when the signals stop, Muster calls people. It is part of the recommended setup of every
+Integration.
+
+In the examples, `MUSTER_INGEST_URL` is `https://ingest.muster.example.org`.
+
+## Why it matters
+
+Without a Heartbeat, a silent Alertmanager looks exactly like a healthy cluster with nothing to report. With one:
+
+- Muster notices when Alertmanager goes quiet. After the Heartbeat timeout without a signal, the Integration is
+  **Heartbeat lost** and Muster raises the Internal alert `MusterHeartbeatLost` (severity `critical`). Its labels are
+  `integration` (the Integration's id), `integration_name` and the Integration's Static labels, so a Route can send it
+  to the team of that cluster.
+- Muster can resolve alerts as **Stale**. An Alertmanager group that is silenced, inhibited or muted as a whole sends
+  nothing at all, not even its resolves, so Muster resolves its alerts once it has not seen them for three learned
+  repeat intervals. It does that only while it knows that it would have heard from Alertmanager: while the Heartbeat is
+  live. An Integration without a Heartbeat never resolves alerts as Stale.
+
+## Turn it on
+
+On the Integration page, turn the Heartbeat on. The timeout is 5 minutes by default (`integration.heartbeat_timeout`);
+keep it a few times the interval at which Alertmanager signals. The Heartbeat then **waits for the first signal**:
+nothing is raised and nothing goes Stale until it arrives, however long that takes. The first signal makes it
+**live**.
+
+1. Open **Integrations** and the Integration. Next to its name, the Heartbeat badge says **Not configured**, and a
+   banner warns that Muster will not notice when Alertmanager goes quiet. The list of **Integrations** shows the same
+   badge in its column **Heartbeat**.
+
+    ![An Integration without a Heartbeat: the badge Not configured and the banner No Heartbeat](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/01-not-configured.png){ .screenshot }
+
+2. Select **Edit**. Under **Heartbeat**, turn on **Watch for Heartbeat signals**, keep or change the **Timeout** in
+   minutes, and note the [Heartbeat URL](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#the-heartbeat-url). Select **Save**. A new Integration can have the
+   Heartbeat on from the start: the same switch is in its form.
+
+    ![The Heartbeat settings of an Integration: Watch for Heartbeat signals on, the timeout of 5 minutes and the Heartbeat URL](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/02-turn-on.png){ .screenshot }
+
+3. The badge says **Waiting** until the first signal arrives.
+
+    ![The Integration waiting for its first Heartbeat signal: the badge Waiting and its banner](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/03-waiting.png){ .screenshot }
+
+4. Select **Create token** and **Create**. With the Heartbeat on, the dialog also shows the **Heartbeat
+   configuration**: add it to Prometheus and Alertmanager as [The snippet](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#the-snippet) explains, and reload them.
+
+    ![The dialog Token created with the Heartbeat configuration under the Alertmanager configuration](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/04-token-and-snippet.png){ .screenshot }
+
+5. The first signal makes the badge **Live**, and the banner goes.
+
+    ![The Integration with a live Heartbeat: the badge Live and no banner](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/05-live.png){ .screenshot }
+
+While the Heartbeat is off, Muster answers a signal with `204` and records nothing, so turning it on later always
+starts from waiting. Turning it off resolves an open `MusterHeartbeatLost`.
+
+## The Heartbeat URL
+
+Each Integration has its Heartbeat URL on the ingest listener:
+
+```text
+https://ingest.muster.example.org/api/v1/heartbeat
+```
+
+It accepts `GET` and `POST` with one of the Integration's tokens as `Authorization: Bearer <token>`, or appended to the
+path as `/api/v1/heartbeat/<token>`, and answers `204`. The body is ignored. A missing, wrong or revoked token, or an
+API token, is refused with `401`. Muster's logs name only the route, never a path with a token.
+
+## The snippet
+
+With the Heartbeat on, **Create token** also shows a Heartbeat snippet, **once**, with the token in it. It has three
+parts.
+
+An alert that always fires, as a Prometheus rule:
+
+```yaml
+groups:
+  - name: muster-heartbeat
+    rules:
+      - alert: MusterHeartbeat
+        expr: vector(1)
+```
+
+kube-prometheus-stack already has such an alert, **`Watchdog`**. With it, skip the rule and match
+`alertname="Watchdog"` in the route instead.
+
+A child route for it, first under the top-level route:
+
+```yaml
+route:
+  routes:
+    - receiver: muster-heartbeat-prod-eu
+      matchers: ['alertname="MusterHeartbeat"']
+      continue: true
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+```
+
+`repeat_interval: 1m` (`snippet.heartbeat_repeat_interval`) makes Alertmanager send the always-firing alert about once
+a minute, and `continue: true` passes it on to your other routes, such as a dead man's switch.
+
+A receiver that sends it to the Heartbeat URL, without resolves:
+
+```yaml
+receivers:
+  - name: muster-heartbeat-prod-eu
+    webhook_configs:
+      - url: https://ingest.muster.example.org/api/v1/heartbeat
+        send_resolved: false
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: mstr_int_…
+```
+
+Reload Alertmanager. Within a minute or two the Integration's Heartbeat becomes live.
+
+## A cron job also works, but proves less
+
+Any client that requests the Heartbeat URL regularly keeps the Heartbeat live, for example a cron job:
+
+```sh
+curl -fsS -H "Authorization: Bearer $MUSTER_TOKEN" https://ingest.muster.example.org/api/v1/heartbeat
+```
+
+It proves only that the network from that host to Muster works. The Alertmanager route proves much more: that
+Prometheus evaluates rules, that Alertmanager routes and sends notifications, and that they reach Muster, which is
+exactly the path your alerts take. Prefer it.
+
+## When the Heartbeat is lost
+
+No signal within the timeout makes the Integration **Heartbeat lost**:
+
+- Muster raises `MusterHeartbeatLost` as a firing Alert of the built-in "Muster" Integration, and the Integration shows
+  since when Muster has had no contact: the time of the last signal.
+- **Stale resolution pauses.** The time without a live Heartbeat, from the last signal before the loss until the
+  signal returns, does not count towards an alert's time to go Stale, so a broken path never resolves alerts that may
+  still fire.
+- The chart's rule `MusterHeartbeatLost` on `muster_heartbeat_lost` is the backup when Muster itself cannot deliver.
+
+On the Integration page, the badge says **Lost** and the banner names the time of the last signal; the list of
+**Integrations** and **Organization → System status** show the loss too.
+
+![An Integration whose Heartbeat is lost: the badge Lost and the banner No contact with Alertmanager since the last signal](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/06-lost.png){ .screenshot }
+
+The next signal makes the Heartbeat live again and resolves `MusterHeartbeatLost`. Deleting the Integration resolves it
+too.
+
+After Muster itself was down, the timeout counts from the moment the Leader started leading again, so that Muster's own
+outage does not make every Integration Heartbeat lost. A downtime longer than the timeout does not count towards
+staleness either; a shorter one does, which is at most the timeout against at least three repeat intervals.

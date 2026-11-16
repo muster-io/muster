@@ -1,0 +1,427 @@
+# Muster documentation, version latest: Home, Quick start, First alert in a messenger
+
+This file holds the full text of the pages outside any section. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text; the rules for AI agents are in https://muster-io.github.io/muster/latest/llms-full-guide.txt.
+
+<!-- Source: https://muster-io.github.io/muster/latest/index.md -->
+# Muster
+
+Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It groups Alerts into Alert
+Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Slack, in Telegram, in
+any other messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze
+Alert Groups.
+
+```mermaid
+flowchart LR
+  am["Alertmanager"] -- "Snapshots" --> integration
+  subgraph muster["Muster"]
+    integration["Integration"] --> routes["Routes"] --> groups["Alert Groups"]
+  end
+  subgraph destinations["Destinations"]
+    mm["Mattermost"]
+    sl["Slack"]
+    tg["Telegram"]
+    br["Bridge"]
+    wh["Outgoing webhook"]
+  end
+  groups --> mm
+  groups --> sl
+  groups --> tg
+  groups --> br
+  groups --> wh
+```
+
+The Alertmanager of each cluster sends its notifications to an Integration of Muster. Routes pick Alerts by their
+labels, group them into Alert Groups and decide the Destinations they are delivered to, and Muster keeps the message
+of each Alert Group there up to date until the Alert Group is resolved.
+
+![An Alert Group arrives in the Muster web UI, is acknowledged from its page and resolves](https://muster-io.github.io/muster/latest/assets/demo.gif)
+
+## Sections
+
+- [Quick start](https://muster-io.github.io/muster/latest/quick-start.md): run Muster with Docker Compose, sign in, connect Alertmanager and send a test alert,
+  in about five minutes.
+- [First alert in a messenger](https://muster-io.github.io/muster/latest/first-alert.md): connect Telegram, route the Alert Groups of one service to a channel
+  and acknowledge one from Telegram, step by step with screenshots.
+- [Install](https://muster-io.github.io/muster/latest/install/helm.md): run Muster in production with [Helm](https://muster-io.github.io/muster/latest/install/helm.md) and an external
+  [PostgreSQL](https://muster-io.github.io/muster/latest/install/database.md), and read the [requirements and tested versions](https://muster-io.github.io/muster/latest/install/versions.md) and how
+  to verify a release.
+- [Integrations](https://muster-io.github.io/muster/latest/integrations/alertmanager.md): connect the Alertmanager of a cluster, connect
+  [Grafana Alerting](https://muster-io.github.io/muster/latest/integrations/grafana.md) directly or through an Alertmanager, and watch the path from Alertmanager
+  with a [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).
+- [Messengers](https://muster-io.github.io/muster/latest/messengers/index.md): see what each Destination type can do, connect
+  [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md), [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md) and [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md), reach any
+  other messenger through a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md) (and [write one](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md)),
+  [link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md), and set a [proxy](https://muster-io.github.io/muster/latest/messengers/proxies.md) for a client.
+- [Outgoing webhooks](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md): send the lifecycle events of Alert Groups in the
+  [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md), or keep a message in any chat in the
+  [template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md); [recipes](https://muster-io.github.io/muster/latest/outgoing-webhooks/recipes.md) for a phone call, a status page,
+  a second chat and an issue tracker.
+- [Configure](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md): change what [messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md)
+  say, add links with Lookup tables and Link rules, set the [Organization](https://muster-io.github.io/muster/latest/configure/organization.md), and automate
+  with [API tokens](https://muster-io.github.io/muster/latest/configure/api-tokens.md).
+- [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md): Roles and ways to sign in; [OpenID Connect with Keycloak](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md),
+  [TOTP](https://muster-io.github.io/muster/latest/sign-in/totp.md), and [closed networks](https://muster-io.github.io/muster/latest/sign-in/closed-networks.md).
+- [Concepts](https://muster-io.github.io/muster/latest/concepts/alert-groups.md): what an [Alert Group](https://muster-io.github.io/muster/latest/concepts/alert-groups.md) is, how
+  [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) group Alerts, the rules of
+  [Snapshots](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md), [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md) messages, the
+  [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md), [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md),
+  [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md) and [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md), and
+  [what critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md).
+- [Operations](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md): [back up and restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md),
+  [upgrade](https://muster-io.github.io/muster/latest/operations/upgrades.md), [rotate the master keys](https://muster-io.github.io/muster/latest/operations/key-rotation.md), run
+  [more than one replica](https://muster-io.github.io/muster/latest/operations/high-availability.md), [monitor Muster](https://muster-io.github.io/muster/latest/operations/monitoring.md), set an
+  [outgoing heartbeat](https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md), use the [command line](https://muster-io.github.io/muster/latest/operations/cli.md), and read the
+  [Request log](https://muster-io.github.io/muster/latest/operations/request-log.md).
+- [Runbooks](https://muster-io.github.io/muster/latest/operations/runbooks/index.md): what each alert about Muster means and how to fix it.
+- [Reference](https://muster-io.github.io/muster/latest/reference/index.md): metrics, log events, Internal alerts, environment variables, chart values, the API
+  and the Bridge protocol.
+
+## AI agents
+
+AI agents and coding assistants start at [llms.txt](https://muster-io.github.io/muster/latest/llms.txt): the map of this documentation for agents, with a
+Markdown version of every page and the full text in one file per section.
+
+<!-- Source: https://muster-io.github.io/muster/latest/quick-start.md -->
+# Quick start
+
+Run Muster with Docker Compose on one machine, sign in, connect Alertmanager and send a test alert. You need Docker with
+the Compose plugin, `curl` and `openssl`, and it takes about five minutes. The compose example runs one replica of
+Muster beside its own PostgreSQL; for a production installation, [install with Helm](https://muster-io.github.io/muster/latest/install/helm.md).
+
+```mermaid
+flowchart LR
+  am["Alertmanager or curl"] -- "Snapshots, port 8080" --> muster["Muster"]
+  browser["Browser"] -- "web UI, port 8080" --> muster
+  muster --> pg["PostgreSQL"]
+```
+
+## Start Muster
+
+Download the compose example into a new directory:
+
+<!-- quickstart -->
+```sh
+mkdir muster && cd muster
+curl -fsSLO https://raw.githubusercontent.com/muster-io/muster/v0.1.4/deploy/compose/docker-compose.yml # x-release-please-version
+```
+
+Write its settings into `.env` next to it, with a generated master key and generated passwords:
+
+<!-- quickstart -->
+```sh
+cat >.env <<EOF
+MUSTER_SECRET_KEYS=$(openssl rand -base64 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+MUSTER_PUBLIC_URL=http://localhost:8080
+MUSTER_BOOTSTRAP_ADMIN_EMAIL=admin@example.org
+MUSTER_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 16)
+EOF
+chmod 600 .env
+```
+
+- `MUSTER_SECRET_KEYS` is the **master key**. It encrypts the secrets Muster keeps in the database, such as the tokens
+  of messenger bots, and Muster refuses to start on a database without the key that wrote it. Keep a copy of the key,
+  **apart from the database backups**: see [Backup and restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md).
+- `MUSTER_PUBLIC_URL` is the address people open, and links in messages point to it.
+- `MUSTER_BOOTSTRAP_ADMIN_EMAIL` and `MUSTER_BOOTSTRAP_ADMIN_PASSWORD` create the first Admin at the first start. Use
+  your own email if you like; it is also the login. Once an Admin exists, Muster ignores both.
+
+Start Muster:
+
+<!-- quickstart -->
+```sh
+docker compose up -d --wait
+```
+
+Muster creates its schema at the first start. One port, `8080`, serves the web UI, the API and ingestion.
+
+## Sign in
+
+Open `http://localhost:8080` and sign in with the login `admin@example.org` and the password from `.env`:
+
+```sh
+grep MUSTER_BOOTSTRAP_ADMIN_PASSWORD .env
+```
+
+Muster runs on a machine without HTTPS, such as a VM? Browsers keep the session only over HTTPS or on `localhost`, and the
+shortest way in is an SSH tunnel. On your own machine run `ssh -L 8080:localhost:8080 <vm>`, keep it open and browse to
+`http://localhost:8080`, with `MUSTER_PUBLIC_URL=http://localhost:8080` as above. See
+[Sign-in needs HTTPS or localhost](https://muster-io.github.io/muster/latest/sign-in/index.md#sign-in-needs-https-or-localhost).
+
+Everything in the web UI and the API works only after sign-in: people sign in with a password or through
+[OpenID Connect](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md), and automation with tokens. Each User has a Role — Admin, Responder or
+Viewer — that decides what they see and change. Add the people of your team as Users under **Access**; each of them
+links their own messenger accounts in their profile, as [Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md)
+describes.
+
+## Create an Integration
+
+An **Integration** is the way one Alertmanager cluster sends to Muster.
+
+1. Open **Integrations** and select **Create integration**.
+2. Name it after your Alertmanager cluster, such as `prod-eu`, and select **Create**.
+3. On the Integration's page, under **Tokens**, select **Create token**, then **Create**.
+4. The dialog shows the **Token** and the **Alertmanager configuration** once. Copy both before you select **Done**:
+   only a hash of the token is kept.
+
+The Alertmanager configuration is a receiver that sends to Muster with the token, and a child route for it to place
+first under the top-level route:
+
+```yaml
+receivers:
+  - name: muster-prod-eu
+    webhook_configs:
+      - url: http://localhost:8080/api/v1/ingest
+        send_resolved: true
+        max_alerts: 0
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: mstr_int_…
+route:
+  routes:
+    - receiver: muster-prod-eu
+      continue: true
+      repeat_interval: 10m
+    # ... your existing child routes
+```
+
+Its URL comes from `MUSTER_PUBLIC_URL`, because the compose example serves ingestion on the same address. Keep
+`MUSTER_PUBLIC_URL=http://localhost:8080` for your browser on this machine. When your Alertmanager runs on another
+machine, replace `localhost` in the receiver's `url` with an address of this machine that Alertmanager reaches.
+Browsers keep Muster's session only over HTTPS or on `localhost`: to open Muster from other machines, put an HTTPS
+reverse proxy in front of port 8080, set `MUSTER_PUBLIC_URL` in `.env` to its `https://` address and run
+`docker compose up -d --wait` again. [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) explains every line of the
+configuration, the catch-all child route to keep last, and the start delay.
+
+## Send a test alert
+
+You do not need Alertmanager for a first try: send what it would send. Put the token you copied into `TOKEN`, then post
+a Snapshot with one firing alert:
+
+```sh
+TOKEN=mstr_int_...
+curl -sS -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/v1/ingest \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @- <<EOF
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"QuickStartTest\"}",
+  "status": "firing",
+  "receiver": "muster-prod-eu",
+  "groupLabels": {"alertname": "QuickStartTest"},
+  "commonLabels": {"alertname": "QuickStartTest", "severity": "warning"},
+  "commonAnnotations": {"summary": "A test alert from Quick start"},
+  "externalURL": "http://localhost:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {"alertname": "QuickStartTest", "severity": "warning"},
+      "annotations": {"summary": "A test alert from Quick start"},
+      "startsAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "endsAt": "0001-01-01T00:00:00Z"
+    }
+  ]
+}
+EOF
+```
+
+Muster answers `202`. Open **Alert Groups**: the Alert Group `QuickStartTest` is there, firing, and its page shows the
+alert, its labels and its Timeline. It reached no messenger, because the alert went to the **Default route**, the Route
+that takes every Alert no other Route takes, and the Default route has no Destination yet.
+
+To resolve it, send the same request with both `"status": "firing"` changed to `"status": "resolved"`.
+
+## Next steps
+
+- **Send your first alert to a messenger.** [First alert in a messenger](https://muster-io.github.io/muster/latest/first-alert.md) connects Telegram, sends
+  the Alert Groups of one service to a channel, and acknowledges one from Telegram, step by step.
+- **Set the time zone.** The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
+  under **Organization → General**: see [Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#general).
+- **Connect a messenger.** Connect [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md), [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md) or
+  [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md), add a Destination for a channel, and add the Destination to the Default route or
+  to a Route of its own; see [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md). Mattermost sends button presses
+  to `MUSTER_PUBLIC_URL` here, so the Mattermost server must reach that address: unless it reaches Muster at
+  `http://localhost:8080`, put an HTTPS reverse proxy in front of port 8080 and set `MUSTER_PUBLIC_URL` to its
+  `https://` address first. Slack in Socket Mode needs no address of Muster that Slack can reach.
+- **Use any other messenger through a Bridge.** A [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md) is a small service that connects
+  Muster to a messenger it does not support natively. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md) with the library
+  for Go, [muster-bridge-go](https://github.com/muster-io/muster-bridge-go), or for Python,
+  [muster-bridge-python](https://github.com/muster-io/muster-bridge-python), or try the
+  [example bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-example-bridge) from
+  [`examples/chat`](https://github.com/muster-io/muster-bridge-go/tree/master/examples/chat) of the Go library: a
+  small chat with a web page, to see Muster's messages without a real messenger. It runs
+  [next to this Quick start](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-example-bridge) as one more service of the compose project.
+- **Change what messages say**, and add links to your dashboards and runbooks, as
+  [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md) describes. [API tokens and
+  automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md) is for scripts and Terraform.
+- **Connect your Alertmanager** as [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) describes, and watch the path
+  from it with a [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).
+- **Learn how Muster groups alerts** in [Concepts](https://muster-io.github.io/muster/latest/concepts/alert-groups.md).
+- **Run it in production**: [install with Helm](https://muster-io.github.io/muster/latest/install/helm.md), and read
+  [Operations](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md) for backups, upgrades and monitoring.
+
+`docker compose down` stops Muster and keeps its data; `docker compose down -v` deletes the database too.
+
+<!-- Source: https://muster-io.github.io/muster/latest/first-alert.md -->
+# First alert in a messenger
+
+This tutorial takes one alert from Alertmanager to a Telegram channel and back: you connect Alertmanager, connect a
+Telegram bot, send Alert Groups of one service to a channel, and acknowledge the Alert Group from Telegram. It starts
+where [Quick start](https://muster-io.github.io/muster/latest/quick-start.md) ends: Muster runs and you are signed in as the Admin. It takes about fifteen
+minutes.
+
+Telegram needs no address of Muster that Telegram can reach: Muster asks Telegram for updates itself. Before you start,
+in Telegram:
+
+- create a bot with [@BotFather](https://t.me/BotFather) and copy its token, as
+  [Create the bot](https://muster-io.github.io/muster/latest/messengers/telegram.md#create-the-bot) describes;
+- create a channel for the alerts, enable comments on it, and make the bot an admin of the channel and of its
+  discussion group, as [Enable comments on the channel](https://muster-io.github.io/muster/latest/messengers/telegram.md#enable-comments-on-the-channel) and
+  [Make the bot an admin](https://muster-io.github.io/muster/latest/messengers/telegram.md#make-the-bot-an-admin-of-the-channel-and-of-the-group) describe.
+
+The screenshots show the channel `@muster_alerts` and the bot `@muster_dev_b_bot`; yours have your names.
+
+## 1. Create the Integration
+
+An **Integration** is the way one Alertmanager sends to Muster. Open **Integrations**, select **Create integration**,
+name it after your Alertmanager, such as `Production Alertmanager`, and select **Create**.
+
+![The form of a new Integration with the name Production Alertmanager](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/01-create-integration.png){ .screenshot }
+
+On the Integration's page, under **Tokens**, select **Create token**, name it, such as `alertmanager`, and select
+**Create**. The dialog shows the **Token** and the **Alertmanager configuration** once; copy both before you select
+**Done**. Add the configuration to your Alertmanager and reload it. In the screenshot both are hidden.
+
+![The dialog of a new token, which shows the token and the Alertmanager configuration once](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/02-integration-token.png){ .screenshot }
+
+[Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) explains every line of the configuration.
+
+## 2. Connect Telegram
+
+A **Connection** holds the credentials Muster uses to talk to a messenger, here a Telegram bot. Open **Connections**, select **Create connection** and choose
+**Telegram**. Enter a **Name**, such as `Telegram`, select **Set a value** next to **Bot token** and paste the bot's
+token. Keep the **Bot API base URL** `https://api.telegram.org` and the **Update mode** **Long polling**.
+
+Select **Check connection**. The check runs in three steps against the values in the form and saves nothing; it names
+the bot when they pass. Then select **Save**.
+
+![The Connection check of the form: the dry probe, getMe and getWebhookInfo passed, connected as the bot](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/03-connection-check.png){ .screenshot }
+
+[Connect Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md#create-the-connection) explains each field and each step of the check.
+
+## 3. Add a Destination
+
+A **Destination** is the channel Muster posts to. Open **Destinations**, select **Create destination** and choose
+**Telegram**. Choose the **Connection** of step 2, enter the **Channel** as `@username`, or its chat id for a private
+channel, give it a **Name**, such as `alerts`, and select **Save**. Saving runs the **Destination check**: the bot is
+an admin of the channel and of its discussion group. The saved Destination shows the discussion group it found.
+
+![The saved Destination alerts: Telegram, Healthy, the channel Muster alerts and its discussion group](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/04-destination.png){ .screenshot }
+
+Under **Test and preview**, on the tab **Test**, select **Send test message**. A message marked 🧪 appears in the
+channel, and the result shows the request Muster sent, with the bot token hidden. Links in the screenshots start with
+`http://localhost:8080`, the address of a development installation; yours start with your `MUSTER_PUBLIC_URL`.
+
+![The result of the test message: Test passed, Message: Sent, with the request to the Bot API](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/05-test-message.png){ .screenshot }
+
+[Connect Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md#add-a-destination) lists what the Destination check needs and what it says
+when it fails.
+
+## 4. Send Alert Groups to the Destination
+
+A **Route** picks Alerts by their labels and decides where their Alert Groups go. Alerts that no other Route takes go
+to the **Default route**, which has no Destination yet. Open **Routes**, select **Create route** and choose the profile
+**Paging**. Name the Route `checkout` and select **Add matcher**: the label `service`, `=`, the value `checkout`. In
+**Group key**, remove `severity` and `cluster` and add `service`, so that each alert name of each service is one Alert
+Group. Under **Destinations**, choose `alerts` in **Add a Destination**, then select **Create**.
+
+![The Route checkout with the Matcher service="checkout", the Group key alertname and service, and the Destination alerts](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/06-route.png){ .screenshot }
+
+[Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) explains Matchers, Group keys and the order of the Routes.
+
+## 5. Link your Telegram account
+
+A button in Telegram acts as a Muster User only through an **Account link**. Open your profile from the user menu and,
+under **Messenger accounts**, select **Link Telegram**. With more than one Telegram Connection, choose the one of step
+2 and select **Get link**. Select **Open Telegram**, or scan the QR code with your phone, and press **Start** in the
+chat with the bot. The link works once and expires after a few minutes; in the screenshot the code and the time are
+hidden.
+
+![The dialog Link Telegram after Get link: the button Open Telegram and its QR code, with the QR code and the expiry time hidden](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/07-link-telegram.png){ .screenshot }
+
+The dialog closes once the bot has linked your account, and your profile shows it.
+
+![Messenger accounts: Telegram, @oncall_admin, for all Telegram bots](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/08-telegram-linked.png){ .screenshot }
+
+[Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-telegram) explains the other messengers.
+
+## 6. Send a test alert
+
+Send an alert of the service `checkout`, as Alertmanager would send it, with the request of
+[Quick start](https://muster-io.github.io/muster/latest/quick-start.md#send-a-test-alert) and the token of step 1 in `TOKEN`:
+
+```sh
+TOKEN=mstr_int_...
+curl -sS -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/v1/ingest \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @- <<EOF
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"HighErrorRate\"}",
+  "status": "firing",
+  "receiver": "muster-prod-eu",
+  "groupLabels": {"alertname": "HighErrorRate"},
+  "commonLabels": {"alertname": "HighErrorRate", "service": "checkout", "severity": "critical"},
+  "commonAnnotations": {"summary": "Error rate of checkout is above 5 %"},
+  "externalURL": "http://localhost:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {"alertname": "HighErrorRate", "service": "checkout", "severity": "critical"},
+      "annotations": {"summary": "Error rate of checkout is above 5 %"},
+      "startsAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "endsAt": "0001-01-01T00:00:00Z"
+    }
+  ]
+}
+EOF
+```
+
+Muster answers `202`. Open **Alert Groups**: the Alert Group `HighErrorRate` is there, Firing, on the Route
+`checkout`. Its page shows the Alert, its labels, its delivery to `alerts` and its Timeline.
+
+![The page of the Alert Group HighErrorRate, Firing, with its Alert and its Timeline](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/09-alert-group.png){ .screenshot }
+
+At the same moment the bot posts its **Root message** in the channel: the status, the title, the labels and the
+buttons. The Destination's **Preview**, based on the Alert Group, shows that message as Telegram draws it.
+
+![The preview of the Root message in the Destination alerts, with its buttons Ack, Resolve and the Snooze durations](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/10-preview.png){ .screenshot }
+
+[Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md) explains how Alerts become Alert Groups.
+
+## 7. Acknowledge it in Telegram
+
+In the channel, press **Ack** under the Root message. Telegram shows "Done: Acknowledge", the message changes to
+Acknowledged, and the Alert Group's page names you as its **Owner**. Its Timeline records that you acknowledged it
+through Telegram.
+
+![The Alert Group Acknowledged, Owner admin, with the Timeline entry admin via Telegram](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/11-acknowledged.png){ .screenshot }
+
+[Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md) lists what each button does.
+
+## Next steps
+
+Mattermost, Slack and Bridges differ only in steps 2, 3 and 5:
+
+- **Mattermost**: [create the Connection](https://muster-io.github.io/muster/latest/messengers/mattermost.md#create-the-connection) with the server's address and
+  a bot token, [add a Destination](https://muster-io.github.io/muster/latest/messengers/mattermost.md#add-a-destination) for a channel the bot is a member of, and
+  [link the account](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-mattermost) with a code the bot sends. Mattermost calls Muster for
+  button presses, so it must reach `MUSTER_INGEST_URL`.
+- **Slack**: [create the app and the Connection](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-connection), invite the bot and
+  [create Destinations](https://muster-io.github.io/muster/latest/messengers/slack.md#invite-the-bot-and-create-destinations), and
+  [link the account](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-slack). In Socket Mode, Slack needs no address of Muster.
+- **Any other messenger** through a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#create-the-connection), with a Destination for each
+  [channel](https://muster-io.github.io/muster/latest/messengers/bridge.md#add-a-destination).
+
+Then set the [time zone of the Organization](https://muster-io.github.io/muster/latest/configure/organization.md#general), change
+[what messages say](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md), and watch the path from Alertmanager with a
+[Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).

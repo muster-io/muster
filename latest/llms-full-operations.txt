@@ -1,0 +1,2007 @@
+# Muster documentation, version latest: Operations
+
+This file holds the full text of the section Operations. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text; the rules for AI agents are in https://muster-io.github.io/muster/latest/llms-full-guide.txt.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/backup-and-restore.md -->
+# Backup and restore
+
+Muster keeps all its state in PostgreSQL, and encrypts its secrets with the [master keys](https://muster-io.github.io/muster/latest/operations/key-rotation.md) from the
+environment. Neither the Helm chart nor the compose example backs up anything, so you back up two things, **separately**:
+
+The database
+:   Holds Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted.
+
+    Without it, everything is gone.
+
+The master keys (`MUSTER_SECRET_KEYS`)
+:   Hold the keys that decrypt the Secrets and sign the buttons in messages.
+
+    Without them, Muster refuses to start on the database, and its encrypted Secrets cannot be read.
+
+## Why they are kept apart
+
+A database backup alone reveals no bot token, OIDC client secret or proxy password, because Muster encrypts them before
+they reach the database. A backup together with the master keys reveals all of them. Store the two in different places
+and give them different access: the dump in your backup storage, the keys where you keep your other secrets, such as a
+password manager or the secret store of your cluster.
+
+Without the master key that wrote the database, Muster refuses to start on it, and nobody can read the Secrets in it.
+Muster cannot recover them, and it has no way to start that database again with a new key: keep the key safe.
+
+After a [key rotation](https://muster-io.github.io/muster/latest/operations/key-rotation.md), back up the new key list too. A backup taken before the rotation needs the old
+key to restore.
+
+## Back up the database
+
+Muster has no backup format of its own. Use the tools of PostgreSQL:
+
+- **A dump.** `pg_dump` writes a consistent copy while Muster runs:
+
+    ```sh
+    pg_dump --format=custom --file=muster-$(date +%F).dump "$MUSTER_DATABASE_URL"
+    ```
+
+    With the compose example, run it in the database container:
+
+    ```sh
+    docker compose exec -T postgres pg_dump -U muster --format=custom muster > muster-$(date +%F).dump
+    ```
+
+- **Continuous backup.** With CloudNativePG, add `spec.backup` to the `Cluster`; see [the
+  database](https://muster-io.github.io/muster/latest/install/database.md#cloudnativepg). A managed PostgreSQL offers its own snapshots and point-in-time
+  recovery. Either is better than a nightly dump when you cannot lose an hour of Alert Groups.
+
+Take a backup before every [upgrade](https://muster-io.github.io/muster/latest/operations/upgrades.md), and test a restore before you rely on it.
+
+## Restore
+
+1. Stop every Muster replica. In Kubernetes, scale the Deployment to 0; with compose, stop the `muster` service.
+2. Restore the database into an empty database. For a dump:
+
+    ```sh
+    pg_restore --clean --if-exists --no-owner --dbname="$MUSTER_DATABASE_URL" muster-2026-10-19.dump
+    ```
+
+    A CloudNativePG or managed restore creates a new cluster from the backup; point `database.host` at it. When the
+    chart reads the database from the Secret that CloudNativePG generates, point `database.existingSecret` at the new
+    cluster's `-app` Secret too: it holds a new password and, in its `uri`, the new host.
+3. Put the **same master keys** back into `MUSTER_SECRET_KEYS`. The key that was active when the backup was taken must be
+   in the list. Keys are identified by their material, so any copy of the same key works.
+4. Start Muster, in the version that wrote the backup or in a newer one that the [upgrade rules](https://muster-io.github.io/muster/latest/operations/upgrades.md#the-rules)
+   allow. It applies the migrations that are
+   missing (see [Upgrades](https://muster-io.github.io/muster/latest/operations/upgrades.md#migrations)) and checks the key canary. A wrong or missing key stops the start with
+   "master key does not match the database".
+5. Run `muster doctor` with the same environment as the server, and read every line. See [the
+   CLI](https://muster-io.github.io/muster/latest/operations/cli.md#muster-doctor).
+
+After the restore, Muster treats the time since the last "alive" mark as downtime. For a while, the web UI says that
+Muster is recovering and its data may be incomplete, and overdue timers fire once, collapsed. That is expected.
+
+## What to check
+
+- `muster doctor` exits 0. The `key_canary` line is `OK`, which proves that the keys match the database. The `keyring`
+  line is `OK` when no older key is in use; it is `WARN` while a Secret or an open Root message still needs an older key,
+  and it says when a key is no longer used and can be [removed](https://muster-io.github.io/muster/latest/operations/key-rotation.md#remove-the-old-key).
+- **Organization → System status** shows one Leader and every replica, and no Destination you did not expect as Broken.
+- Open an Alert Group and press a button in its messenger message. A press works only when the master keys are right.
+- Messengers and Alertmanagers reach the restored Muster at `MUSTER_PUBLIC_URL` and `MUSTER_INGEST_URL`. If you
+  restored into an installation with other addresses, change them in the environment and check the Connections.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/upgrades.md -->
+# Upgrades
+
+Muster follows semantic versioning (`major.minor.patch`). A release publishes the container image
+`ghcr.io/muster-io/muster`, binaries, and the Helm chart as an OCI artifact in the same registry. The changelog of each
+release is on the releases page of the repository, written from the commit messages.
+
+## The rules
+
+- **Patch and minor versions.** Update to the next version, or to any patch version of the same minor version.
+- **Rolling updates only between adjacent minor versions.** From 1.4.x to 1.5.x, replica by replica, is supported. From
+  1.4.x to 1.7.x is not: go through 1.5 and 1.6, or stop every replica before you start the new version.
+- **Back up first.** Take a [database backup](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md) before every upgrade, because of the next rule.
+- **No downgrades.** Migrations only go forward in production. A binary refuses to start on a schema newer than it knows
+  and names both versions. To go back, restore the backup you took before the upgrade, together with the master keys of
+  that time, and run the old version on it. Everything written since is lost.
+- Read the release notes of every version you skip. Settings that change are named there.
+
+## Upgrade with Helm
+
+1. Take a backup.
+2. Change the version: `helm upgrade muster oci://ghcr.io/muster-io/charts/muster --version <version> -n muster -f values.yaml`.
+   The chart's `image.tag` defaults to its `appVersion`, so the chart and the image move together. If you pin
+   `image.tag`, change it too.
+3. Watch the rollout: `kubectl -n muster rollout status deploy/muster`.
+4. Run `muster doctor` (see [the CLI](https://muster-io.github.io/muster/latest/operations/cli.md#muster-doctor)) and open **Organization → System status**: it shows the
+   version and commit that serve the page, and under *Replicas* which replica is the Leader.
+
+The chart does not migrate in the server. Each new pod runs `muster migrate` in an **init container** before its server
+container starts, and `MUSTER_MIGRATE_ON_START` stays off. The pods of a rollout do not migrate at once, because
+migrations run under a database lock. Kubernetes starts a new pod before it stops an old one, so the web UI and
+ingestion stay up with one replica too; run two replicas with a
+[PodDisruptionBudget](https://muster-io.github.io/muster/latest/operations/high-availability.md#two-replicas) if you also want to survive the loss of a node.
+
+## Upgrade with Docker Compose
+
+The compose example sets `MUSTER_MIGRATE_ON_START` to `true`: the server migrates when it starts. Take a backup, change
+the image (set `MUSTER_IMAGE`, or download the compose file of the new release), and run `docker compose up -d`. With a
+single replica nothing else is needed.
+
+## Migrations
+
+Migrations are SQL files built into the binary. They run through `muster migrate` or, when
+`MUSTER_MIGRATE_ON_START` is `true`, at server start, in both cases under a session advisory lock and with the
+applied versions in the log.
+
+Every migration follows **expand and contract**: a release only adds what the previous release can ignore, and removes
+what the previous release no longer uses in a later release. That is why a rolling update between adjacent minor
+versions works: while the new schema is in place, the replicas of the old version still run on it.
+
+To migrate before you update the servers, run the command of the new version with the environment of the server:
+
+```sh
+muster migrate
+```
+
+It needs the database settings and `MUSTER_SECRET_KEYS` of the server (see [the CLI](https://muster-io.github.io/muster/latest/operations/cli.md#environment)). It exits non-zero
+on a schema newer than the binary knows.
+
+## During a rolling update
+
+Replicas of two adjacent minor versions serve at the same time, and either may be the Leader. Do not leave an
+installation in this state: finish the rollout.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/key-rotation.md -->
+# Key rotation
+
+Muster encrypts its Secrets and signs the buttons of its messages with the **master keys** in `MUSTER_SECRET_KEYS`. These
+keys form the Keyring; one of them is **active** and encrypts and signs, and all of them can still decrypt and verify.
+Which key is active is stored in the database, not in the environment. Muster never generates a master key and never
+writes the environment: you add a new key yourself, then tell Muster to use it.
+
+Rotate when a key may have leaked, when a person who knew it leaves, or on a schedule you keep. The rotation takes two
+deliberate steps, so that a rolling restart never leaves a replica unable to read what another one wrote.
+
+## Step 1: add the new key everywhere
+
+1. Generate a key: `openssl rand -base64 32`.
+2. Add it to `MUSTER_SECRET_KEYS`, **after** the current key, separated by a comma. With the Helm chart the value comes
+   from the key `secret-keys` of your Secret (`masterKeysKey`); `MUSTER_SECRET_KEYS_FILE` takes one key per line.
+3. Roll the change out to every replica. Muster applies a changed environment only on start, so restart the pods.
+
+Both keys stay in the list. The key that is active does not change yet, and nothing is re-encrypted.
+
+Each replica records the key ids it holds every 30 seconds, and counts as live while its record is younger than 2
+minutes. Open **Organization → Keyring**. It lists every key by its id, which one is *Active*, and for each key *Held by*
+the replicas that have it and *Missing on* those that do not. The new key has the state **Not active yet**, because it
+has never been active. Muster never calls such a key removable.
+
+## Step 2: activate it
+
+Run the command with the same environment as the server (see [the CLI](https://muster-io.github.io/muster/latest/operations/cli.md#muster-secrets-rotate-key)), giving the
+id of the new key as the Keyring page shows it:
+
+```sh
+muster secrets rotate-key --activate <id> --actor alice
+```
+
+`--actor` names who runs the command and goes to the Audit log. Muster refuses to activate a key while a live replica
+does not hold it, names those replicas, and exits 1. Wait until the Keyring page shows no replica as *Missing on*, or
+until the replica that lacks the key stops being live, and run the command again.
+
+When every live replica holds the key, one transaction:
+
+- makes the key active,
+- re-encrypts every stored Secret and the key canary with it, and
+- records `keyring.key_activated` in the Audit log.
+
+The replicas switch to the key without a restart. Then the Leader recomputes the message of every open Alert Group whose
+buttons the old key signed, so that the delivery worker edits each Root message and signs its buttons with the new key.
+The edits go through the usual limits of the messengers, so a large backlog takes a while.
+
+## Remove the old key
+
+The old key is still needed while a Secret or an open Root message depends on it. The Keyring page shows each older
+key as *Still needed* until nothing does; then it says **Key `<id>` is no longer used and can be removed from
+MUSTER_SECRET_KEYS.** `muster doctor` prints the same on its `keyring` line, with the number of encrypted values and
+open Root messages that still need each key. Only a key that was active before is ever called removable.
+
+Then remove the key from `MUSTER_SECRET_KEYS` and roll the change out. Removing the key before Muster says so breaks
+what still depends on it; the start of a replica that lacks the *active* key fails with "master key does not match the
+database".
+
+Keep the old key in your records until the backups that need it are gone: a [backup](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md) taken before
+the rotation restores only with the key that was active then.
+
+## What stops working when the old key goes
+
+- **Buttons in Thread replies.** Muster re-signs only the buttons of Root messages. A Reminder, for example, is a Thread
+  reply, and keeps the signature it was sent with. Once the old key is gone, a press on such a button is answered
+  privately: "This button has expired; use the buttons on the Alert Group's message". Nothing changes in the Alert
+  Group, and the Root message works.
+- **Web pages that were open before the rotation.** The CSRF token that a web page sends with each change carries the id of
+  the key that signed it, and verifies while Muster holds that key. A page that has been open since before the rotation
+  has the old token. Once the old key is gone, the next change from that page is refused (`403`, `csrf_invalid`) and the
+  page says "The page is out of date. Reload it and try again." Reload the page, and it works again with a token of the
+  new key. Nobody has to sign in again.
+
+Nothing else changes: Personal access tokens and Service account tokens are stored as hashes and are not affected, and the
+Signing secret of an outgoing webhook Destination does not change (Muster only re-encrypts it).
+
+## If something goes wrong
+
+`Replicas {names} do not hold key {id} yet.`
+:   cause: a live replica has not restarted with the new key · what to do: finish the rollout, or wait until the record
+    of a gone replica expires
+
+`key {id} is not in the master keys of this process`
+:   cause: you ran the command without the new key in `MUSTER_SECRET_KEYS` · what to do: give the command the same
+    environment as the server
+
+A replica stops with "master key does not match the database"
+:   cause: it lacks the active key · what to do: add the key back to its environment
+
+Exit code 2
+:   cause: `--activate` or `--actor` is missing · what to do: add the flag
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/high-availability.md -->
+# High availability
+
+Run more than one replica of Muster when you want the web UI, ingestion and delivery to survive the loss of a node or
+a restart. The Helm chart defaults to one replica, and the compose example runs one. Two replicas with a
+PodDisruptionBudget are an option, not a requirement.
+
+## All replicas are active
+
+Every replica serves the web UI, the API and ingestion, and runs the workers for ingestion, delivery and timers. The
+workers claim rows from PostgreSQL with a lease, so a timer such as an ack timeout, a Reminder or the end of a Snooze
+fires on whichever replica is free. A replica that stalls delays nothing beyond its lease.
+
+## The Leader
+
+A few tasks must run **once**, not once per replica. One replica, the **Leader**, runs only those. The list is closed:
+
+| Task | What it does |
+|---|---|
+| Telegram polling | long polling of `getUpdates` for Connections in that update mode; Telegram answers `409` to a second poller |
+| Bridge polling | polls the events of Bridge Connections in the `poll` event delivery mode, with one cursor per Connection |
+| Slack's Socket Mode | holds one Socket Mode connection per Slack Connection in the `socket` event mode; presses made during a handover are lost, the `http` event mode avoids that |
+| Heartbeat and Stale checks | find Integrations that are Heartbeat lost and Alerts that went Stale |
+| partitions and retention | create partitions ahead of time, drop expired ones, and delete what the retention periods remove |
+| pruning | removes ended sessions, expired requests and links, the records of gone replicas, and the Request log past its bounds |
+| database gauges | the metrics computed from the database: open Alert Groups, the ingestion backlog, delivery queues, Broken Destinations, Storms |
+| the "alive" mark | every 30 seconds, so that a restarted Muster knows how long it was down |
+| the outgoing heartbeat | the call to your [dead man's switch](https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md) |
+| OIDC secret expiry check | raises `MusterOIDCSecretExpiring` |
+| re-render after a key rotation | re-signs the buttons of open Root messages ([Key rotation](https://muster-io.github.io/muster/latest/operations/key-rotation.md)) |
+
+Nothing else depends on the Leader. Every task is safe to run twice, because a handover can overlap for a moment.
+
+### How a replica becomes Leader
+
+The Leader holds a **session advisory lock** in PostgreSQL on a dedicated connection, the *session connection*. Every
+replica tries to take the lock every `leader.ping_interval` (5 seconds); one succeeds. The Leader proves that it still
+holds the lock by pinging over that session at the same interval. If no ping succeeds for `leader.fencing_timeout` (15
+seconds), it stops all Leader tasks and closes the connection, and it may compete for the lock again later.
+
+When a Leader crashes, its connection closes and PostgreSQL releases the lock at once. When its node disappears or the
+network splits, PostgreSQL would keep the session for hours by default. Muster sets `idle_session_timeout` on the lock
+session and TCP keepalives, so PostgreSQL ends a silent session and releases the lock within `leader.server_bound` (30
+seconds). The fencing timeout is shorter than that, so the old Leader normally stops before another replica can take
+over. The values are built in; they are not settings.
+
+```mermaid
+sequenceDiagram
+  participant A as "Replica A (Leader)"
+  participant PG as "PostgreSQL"
+  participant B as "Replica B"
+  A->>PG: "ping over the lock session, every 5 s"
+  B->>PG: "try the lock, every 5 s: taken"
+  Note over A: "the node of A is lost"
+  Note over A: "A stops its Leader tasks after 15 s without a ping"
+  PG-->>PG: "ends the silent session within 30 s, the lock is free"
+  B->>PG: "try the lock: acquired"
+  Note over B: "B is the Leader: muster_leader is 1"
+  B->>PG: "writes the alive mark, runs the Leader tasks"
+```
+
+A handover after the loss of a node takes well under a minute. During it, Telegram and Bridge polling, Slack's Socket
+Mode connections, the periodic checks and the outgoing heartbeat pause. Ingestion, delivery and timers do not. Telegram
+and the bridges keep what arrives meanwhile. A press made in Socket Mode before the new Leader connects is lost and
+its person sees Slack's error: Muster does not count on Slack to send it again.
+
+### When no replica leads
+
+The gauge `muster_leader` is 1 on the Leader and 0 on the others. When the "alive" mark is older than 2 minutes
+(`leader.absence_notice`), the web UI shows a notice that no replica is leading. The chart rule `MusterNoLeader` fires
+when no replica has led for 2 minutes; see [its runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNoLeader.md).
+
+While there is no Leader:
+
+- **Bridge** Connections in the `poll` mode and Telegram Connections in the long polling mode receive no button presses and
+  no Text commands, and Notification gateways in the `poll` mode no acknowledgements made in a call. When a Leader
+  returns, a Bridge press, Text command or acknowledgement in a call older than `bridge.event_max_age` (1 hour) is
+  dropped unanswered; a Telegram press is dropped unanswered when the Connection received no updates for longer than
+  `telegram.press_max_age` (1 hour) before it. Connections in the `push` mode of a Bridge and the webhook mode of
+  Telegram keep working.
+- Slack Connections in the `socket` event mode hold no Socket Mode connection: a press made meanwhile is lost, and the
+  person sees Slack's error. Connections in the `http` event mode keep working.
+- No Integration becomes Heartbeat lost and no Alert goes Stale.
+- Partition maintenance, retention and pruning pause; the gauges that only the Leader exports go stale.
+- The outgoing heartbeat stops, so a [dead man's switch](https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md) alerts you.
+
+Ingestion, delivery, timers, the web UI and the API keep working.
+
+### After downtime
+
+When every replica was down, the next Leader reads the "alive" mark, records the period, and adds a Timeline entry to open
+Alert Groups. Timers that came due during the downtime fire once, collapsed. For a while the web UI says Muster is
+recovering.
+
+## The session connection
+
+The Leader lock and the `LISTEN` connections need a real session. If the main database connection goes through PgBouncer
+in transaction mode, set `MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT` (in the chart,
+`database.sessionHost` and `database.sessionPort`), or `MUSTER_DATABASE_SESSION_URL`, to an endpoint that reaches
+PostgreSQL directly or through a pooler in session mode. At start, Muster checks that advisory locks and `LISTEN` work
+over it and stops with an error that names the setting otherwise. See [PgBouncer](https://muster-io.github.io/muster/latest/install/database.md#pgbouncer).
+
+## Two replicas
+
+In the Helm values:
+
+```yaml
+replicas: 2
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+```
+
+The PodDisruptionBudget keeps a node drain from stopping both pods at once. Spread the pods over nodes with
+`topologySpreadConstraints` or `affinity`. See [Install with Helm](https://muster-io.github.io/muster/latest/install/helm.md) for the other values. PostgreSQL
+is the single stateful component, so its own availability, such as a CloudNativePG cluster with two instances, sets the
+limit of the installation.
+
+Replicas of different minor versions run side by side only during a rolling [upgrade](https://muster-io.github.io/muster/latest/operations/upgrades.md#the-rules).
+
+## Clocks
+
+Replicas share one database and take the time from their own system clocks. Run NTP, or the time service of your cloud
+provider, on **every node** and on the database server. A replica measures its clock against the database every minute and
+exports it as `muster_clock_skew_seconds`; it logs a warning above `process.clock_skew_warning` (2 seconds), and the chart
+rule `MusterClockSkew` fires after 5 minutes.
+
+A skew moves the timestamps a replica writes and the timers and windows it evaluates, and it can make TOTP codes, OIDC ID
+tokens and the timestamps of outgoing webhook signatures fail. It can also make the lease of a row or of the Leader lock
+expire too early or too late, so that work runs twice or waits. See the [MusterClockSkew
+runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md), and check the clock with [`muster doctor`](https://muster-io.github.io/muster/latest/operations/cli.md#muster-doctor).
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/monitoring.md -->
+# Monitoring
+
+Muster exports Prometheus metrics, ships alert rules and a Grafana dashboard in its Helm chart, and raises Internal
+alerts about its own problems. Use all three: the metrics and the rules tell you from outside, and the Internal alerts
+reach you through Muster itself.
+
+## Metrics
+
+Muster serves `/metrics` on the **internal listener**, port 8082 by default (`MUSTER_LISTEN_INTERNAL`), next to
+`/health/live` and `/health/ready`. It never pushes metrics. Do not expose that listener outside the cluster.
+
+With the Prometheus Operator, set `serviceMonitor.enabled: true`. The chart then creates a `ServiceMonitor` for the
+internal Service, with `serviceMonitor.interval` (default 30 seconds) and `serviceMonitor.scrapeTimeout` (default 10
+seconds), and extra labels from `serviceMonitor.labels` for the selector of your Prometheus. Without the operator, scrape
+the internal Service yourself, or the pods on port 8082.
+
+Every metric is in the [metrics reference](https://muster-io.github.io/muster/latest/reference/metrics.md). Entities appear by their immutable id; their names are
+in the `*_info` metrics, which the dashboard joins. No metric carries an alert label, a user or an Alert Group number.
+
+## Alert rules
+
+The chart renders one group of rules, named `muster`, when you enable one of:
+
+`alerting.prometheusRule.enabled`
+:   renders: a `PrometheusRule` · needs: the Prometheus Operator CRDs
+
+`alerting.vmRule.enabled`
+:   renders: a `VMRule` · needs: the VictoriaMetrics Operator CRDs
+
+Both take extra labels (`alerting.prometheusRule.labels`, `alerting.vmRule.labels`) for the rule selector of your
+operator. Each rule has a `description` and a `runbook_url` that points to its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md), built from
+`alerting.runbookBaseURL` and the version of Muster the chart deploys.
+
+What you can tune:
+
+- `alerting.jobSelector` is the label matcher that selects Muster's series in every rule. By default it is
+  `job="muster"`, the job the `ServiceMonitor` gives. Change it when your scrape job has another name.
+- `alerting.rules.<Name>.enabled` switches one rule off, and `.for` sets how long its condition holds before it fires.
+- Some rules have thresholds: `window` (the range of the `rate` or `increase`), `seconds` (`MusterDeliverySlow`: p95
+  delivery latency; `MusterClockSkew`: the skew), `size` (`MusterDeliveryQueueGrowing`), `backlog` and `delaySeconds`
+  (`MusterIngestBacklog`), `unauthorized` (`MusterIngestRejected`) and `failures` (`MusterLoginFailures`).
+- `MusterIngestSnapshotFailed` fires for an Integration whose requests were accepted and then rejected in processing,
+  for example a custom sender's body without `groupKey`; it has `for` and `window` and resolves a `window` after the
+  last failure. The Integration page shows the matching warning.
+
+The defaults are in the [chart values reference](https://muster-io.github.io/muster/latest/reference/chart-values.md), and the expression of each rule is on
+its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md) page. The rules are covered by unit tests in CI.
+
+The six rules with severity `critical` are `MusterDown`, `MusterNoLeader`, `MusterDeliveryFailing`,
+`MusterDestinationBroken`, `MusterHeartbeatLost` and `MusterNotificationGatewayBroken`. The others are `warning`.
+
+### Send the critical rules around Muster
+
+!!! warning "Do not route the critical rules through Muster"
+    A rule such as `MusterDown` or `MusterDeliveryFailing` fires when Muster cannot do its job. If Alertmanager sends
+    it to Muster, the alert goes exactly where it cannot be delivered. Use an Alertmanager route that **bypasses** Muster
+    for them, to a receiver you trust to work when Muster does not.
+
+The chart rules carry the labels `alertname` (starting with `Muster`) and `severity: critical` or `warning`, plus the
+labels Prometheus adds from the series. Match on both, and put the bypass route **first**, above the route that sends
+everything to Muster, with `continue` false (the default) so that the alert stops there. Here it is added to the
+configuration of [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md), whose receivers `muster-prod-eu`, `oncall`
+and `default` stay as they are:
+
+```yaml
+route:
+  receiver: default
+  routes:
+    - receiver: platform-direct          # not Muster
+      matchers: ['alertname=~"Muster.+"', 'severity="critical"']
+    - receiver: muster-prod-eu
+      continue: true
+      repeat_interval: 10m
+    - receiver: oncall
+      matchers: ['severity="critical"']
+    - receiver: default
+
+receivers:
+  # ... muster-prod-eu, oncall and default
+  - name: platform-direct
+    webhook_configs:
+      - url: https://chat.example.org/hooks/<id>          # a chat or a pager of your own
+        send_resolved: true
+```
+
+The matchers use `alertname=~"Muster.+"` for the rules of this chart; `severity="critical"` limits the bypass to the ones
+that need it, so the warnings still reach Muster, and every other alert still reaches Muster and your own receivers.
+Point the receiver `platform-direct` at a path that does not depend on Muster.
+
+The Internal alerts of Muster itself do not go through Alertmanager, so this route does not see them.
+
+## Dashboard
+
+The chart ships one dashboard, "Muster", with the fixed uid `muster`, a data source variable, and the variables
+`namespace`/`job`, `integration`, `route` and `destination`. It has four rows: Overview, Ingestion, Delivery and
+Platform. You enable it in either or both ways, each behind its own flag:
+
+`dashboard.configMap.enabled`
+:   renders: a `ConfigMap` with the dashboard JSON
+
+    For the Grafana sidecar; `dashboard.configMap.labels` defaults to `grafana_dashboard: "1"`.
+
+`dashboard.grafanaDashboard.enabled`
+:   renders: a `GrafanaDashboard` of the Grafana Operator
+
+    References that ConfigMap, so it needs `dashboard.configMap.enabled` too; `instanceSelector`, `folder` and
+    `allowCrossNamespaceImport` are values.
+
+## Internal alerts
+
+Muster raises its own problems as **Internal alerts**: `MusterSnapshotTruncated`, `MusterHeartbeatLost`,
+`MusterDestinationBroken`, `MusterTemplateError`, `MusterOIDCSecretExpiring`, `MusterScheduleGap` and
+`MusterNotificationGatewayBroken`. They are Alerts
+of the built-in "Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any
+Alert, and they reach nobody until a Route sends them to a Destination. The
+[Internal alerts reference](https://muster-io.github.io/muster/latest/reference/internal-alerts.md) lists them with their labels.
+
+Give them a Route:
+
+1. Open **Routes**. At the top of the list, Muster suggests *Send Muster's own alerts to a Destination* when no Route
+   other than the Default route matches them.
+2. Choose a Destination, and press *Create the route*. The Route matches `alertname=~"Muster.*"` and groups by
+   `alertname`, `integration`, `destination`, `route`, `schedule` and `connection`: one Alert Group per Internal alert
+   and what it is about, so that the gaps of two Schedules make two Alert Groups, each with its own Team, and two
+   Broken Notification gateways two Alert Groups.
+
+Use a Destination that does not depend on what the alert reports: not the one that is Broken, and a messenger rather
+than a call for a Broken Notification gateway. A second messenger, or an
+[outgoing webhook](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md) to a chat of your own, serves well. When a Route for
+`MusterHeartbeatLost` exists, the Internal alerts Route goes directly below it. Every Internal alert has a
+[runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md), and `MUSTER_RUNBOOK_BASE_URL` (set by the chart from `alerting.runbookBaseURL`) is the base
+of its link.
+
+Five Internal alerts have a chart rule with the same name: `MusterHeartbeatLost`, `MusterDestinationBroken`,
+`MusterTemplateError`, `MusterScheduleGap` and `MusterNotificationGatewayBroken`. The rule is the backup for when
+Muster cannot deliver; the Internal alert carries the labels of what it is about: the Integration, with its Static
+labels, for `MusterHeartbeatLost`, the Destination for `MusterDestinationBroken`, the Schedule with its Team for
+`MusterScheduleGap`, whose Team's slug under the Team label makes the alert belong to the Team, so that a Route can
+pick it by the Team label, and the gateway's Connection for `MusterNotificationGatewayBroken`.
+
+## Watching that Muster is alive
+
+Metrics and rules need Prometheus. To notice that Muster, its cluster or its network is down altogether, configure the
+[outgoing heartbeat](https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md): an external service alerts you when the calls stop.
+
+The **System status** page shows the same from the inside: see [System status](https://muster-io.github.io/muster/latest/operations/monitoring.md#system-status).
+
+## System status
+
+**Organization → System status** (Admins only) shows the state of the installation from the inside. It only reads: it
+lists what is wrong, and you fix it on the pages it links to.
+
+1. Open **Organization → System status**. At the top, the version of Muster and the **Replicas**: every live replica,
+   the Leader marked, with the key ids it holds and when its record was last refreshed. Below them, **Recovery after
+   downtime** and the **Delivery queues**.
+
+    ![System status: the version, one replica that is the Leader with its keys, not recovering, and the delivery queues](https://muster-io.github.io/muster/latest/assets/screenshots/operations/monitoring/01-system-status.png){ .screenshot }
+
+2. Further down: **Broken Destinations**, **Integrations needing attention** — Heartbeat lost or Snapshots truncated —,
+   **Template errors**, **Storms**, and the **Outgoing heartbeat**, with the result of its last call or a link to set
+   one up. Each says **None** when there is nothing to show.
+
+    ![System status further down: not recovering, no delivery queues, Broken Destinations, Integrations needing attention, template errors or Storms, and the outgoing heartbeat last sent OK](https://muster-io.github.io/muster/latest/assets/screenshots/operations/monitoring/02-system-status-more.png){ .screenshot }
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md -->
+# Outgoing heartbeat
+
+The metrics and the Internal alerts tell you about a Muster that runs. They cannot tell you that Muster, its node, its
+cluster or its network is gone: a dead service raises nothing. For that, Muster calls a URL of your choice at a regular
+interval, and a service outside Muster alerts you when the calls stop. This is a **dead man's switch**, and the call is
+the **outgoing heartbeat**. It is the opposite direction of a [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md), which watches the
+path *to* Muster.
+
+## Pick a service
+
+Any service that expects a regular HTTP request and alerts when it misses, and that sits outside the cluster Muster runs
+in, will do:
+
+- **Uptime Kuma**: a monitor of the type *Push*; it gives a URL and alerts when no call arrives within the interval.
+- Any dead man's switch service that accepts an HTTP `GET` and alerts when the calls stop.
+
+Set its expected period a little above Muster's interval of 1 minute, such as 2 or 3 minutes, so that a single slow call
+does not alert. Send its alert somewhere that does not depend on Muster.
+
+## Set it up
+
+Open **Organization → Outgoing heartbeat**, as an Admin.
+
+1. Enter the **Heartbeat URL** of the service.
+2. If Muster must reach it through a proxy, fill the proxy form; it is the same form as everywhere, see
+   [Proxies](https://muster-io.github.io/muster/latest/messengers/proxies.md).
+3. Save.
+
+The URL is a **Secret**: such URLs carry a token. Muster encrypts it with the Keyring, never shows it again, and removes
+it from every log line and error. The page shows whether it is set, and the Organization settings have no way to read it
+back. To change it, enter the whole new URL.
+
+Without a URL nothing is sent, and **System status** suggests setting one up: "Set up an outgoing heartbeat so that a
+stopped Muster is noticed."
+
+## What Muster sends
+
+Interval
+:   1 minute (`outgoing_heartbeat.interval`)
+
+Method
+:   `GET` (`outgoing_heartbeat.method`)
+
+Timeout
+:   10 seconds for one request (`outgoing_heartbeat.timeout`)
+
+Retry
+:   None: a failure is counted and logged, and the next tick is the retry.
+
+Only the **Leader** sends it, so it stops when no replica leads, and it stops when Muster is down. Both are what you want
+a dead man's switch to see. See [High availability](https://muster-io.github.io/muster/latest/operations/high-availability.md#the-leader). The call goes through the
+[outbound address policy](https://muster-io.github.io/muster/latest/messengers/proxies.md#what-the-outbound-address-policy-checks) like every other outbound
+request, so a service on a private network needs an allowed entry under **Organization → Outbound addresses** when the
+policy is strict.
+
+## What the System status page shows
+
+**Organization → System status** has a section *Outgoing heartbeat* with the last result:
+
+- *Last sent {time}: OK*
+- *Last sent {time}: {reason}*, where the reason is, for example, that the host name does not resolve, that no answer came
+  in time, that the TLS handshake failed or that the URL refused the request
+- *Not sent yet*, right after a start or a change
+
+The settings page shows the same as *Last result: OK, sent {time}*, *Last result: not sent yet* and *Last result: nothing
+is sent without a URL*. Check it after you save: it proves that Muster reaches the service.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/cli.md -->
+# The command line
+
+The `muster` binary is the server and its command line. Without a command it runs the server. The commands are for
+emergencies, for setup and for diagnosis; everything else is in the web UI and the API. `muster help` lists them; its
+output, abridged:
+
+```text
+Usage: muster [command]
+
+Commands:
+  migrate   Apply the database migrations under the migration lock
+  doctor    Check the database, its connections, the master keys and the clock; only reads
+  admin     Emergency access with --actor <name> <login>: admin reset-password sets a password read from standard
+            input, admin reset-totp removes a lost second factor
+  ingest    ingest replay --since <duration> [--integration <name>] --actor <name> reprocesses Stored Snapshots
+  secrets   secrets rotate-key --activate <id> --actor <name> activates a master key that every live replica holds
+  bridge    bridge check <url> --token-file <file> --channel <id> runs the Bridge protocol against a bridge, without a
+            database; muster bridge help lists its flags
+  dev       Development mode: fake servers and development defaults
+  version   Print the version and commit
+  help      Show this help
+```
+
+Every command exits 0 on success, 1 on a failure and 2 on a usage error, such as a missing flag.
+
+## Environment
+
+The commands that use the database read the same `MUSTER_*` variables as the server. Run them in the environment of the
+server, not in a bare shell:
+
+```sh
+kubectl -n muster exec deploy/muster -- muster doctor
+docker compose exec muster muster doctor
+```
+
+The image has no shell, so run the binary directly. A command that reads a password from standard input needs
+`kubectl exec -i` or `docker compose exec -T`.
+
+`doctor`, `migrate`, `secrets rotate-key`
+:   Need the database settings, `MUSTER_PUBLIC_URL` and the master keys (`MUSTER_SECRET_KEYS` or
+    `MUSTER_SECRET_KEYS_FILE`).
+
+`admin`, `ingest replay`
+:   Need the database settings and `MUSTER_PUBLIC_URL`; they do not open the Keyring.
+
+`bridge check`, `version`
+:   Need nothing.
+
+The [environment reference](https://muster-io.github.io/muster/latest/reference/environment.md) lists the variables, and [the database](https://muster-io.github.io/muster/latest/install/database.md)
+the ways to set the connection.
+
+## `--actor`
+
+The commands that **change data** require `--actor <name>`: `admin reset-password`, `admin reset-totp`, `ingest replay`
+and `secrets rotate-key`. The name says who runs the command. Muster writes it, with the Transport `cli`, to the Audit
+log, so that a change made from a terminal has a person next to it like a change made in the web UI. Without `--actor` the
+command exits 2 before it connects, and nothing changes. `migrate` and `doctor` take no `--actor`.
+
+## `muster doctor`
+
+```text
+muster doctor
+```
+
+Checks and **only reads**. Each check prints one line, `OK`, `WARN` or `FAIL`, then its name and detail. The command
+exits 1 when a check fails. A warning does not fail it.
+
+`database`
+:   Looks at: the main connection works.
+
+`postgresql_version`
+:   Looks at: PostgreSQL 14 or newer.
+
+`session_connection`
+:   Looks at: the session connection supports advisory locks and `LISTEN`, and the mode of each pooler.
+
+`tls_main`, `tls_session`
+:   Looks at: whether each connection is encrypted; `WARN`, not `FAIL`, when it is not.
+
+`key_canary`
+:   Looks at: the master keys can decrypt the canary, so they belong to this database.
+
+`keyring`
+:   Looks at: the active key is held, and which other keys are still needed, removable or not active yet.
+
+`clock_skew`
+:   Looks at: the replica's clock against the database clock, `WARN` above 2 seconds.
+
+`connection <name>`, `destination <name>`
+:   Looks at: the check of every Connection and every Destination that has one.
+
+Run it after an install, after a [restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md), after an [upgrade](https://muster-io.github.io/muster/latest/operations/upgrades.md), and when you suspect
+the database, a pooler or the keys.
+
+## `muster migrate`
+
+```text
+muster migrate
+```
+
+Applies the migrations under a session advisory lock and logs the versions it applied. It refuses to run on a schema
+newer than the binary knows and names both versions. The Helm chart runs it in an init container. See
+[Upgrades](https://muster-io.github.io/muster/latest/operations/upgrades.md#migrations).
+
+## `muster admin`
+
+```text
+muster admin reset-password --actor <name> <login>
+muster admin reset-totp --actor <name> <login>
+```
+
+Emergency access when no Admin can sign in. Flags come before the login.
+
+- `reset-password` reads the new password from standard input: without echo after a prompt on a terminal, otherwise the
+  first line. It sets it on the User with that login and ends the User's sessions. On a User who signs in through
+  OpenID Connect, it also removes the OIDC identity, so the User signs in with the password from then on.
+- `reset-totp` removes the TOTP and the recovery codes of the User, for a lost second factor, and ends their sessions.
+  Under a TOTP policy that covers the User, they enrol again at the next sign-in. See [TOTP](https://muster-io.github.io/muster/latest/sign-in/totp.md).
+
+```sh
+printf '%s\n' "$NEW_PASSWORD" | kubectl -n muster exec -i deploy/muster -- \
+  muster admin reset-password --actor alice admin@example.org
+```
+
+## `muster ingest replay`
+
+```text
+muster ingest replay --since <duration> [--integration <name>] --actor <name>
+```
+
+Reprocesses Stored Snapshots, for example after a bug in processing was fixed.
+
+- `--since` is the period back from now, such as `1h` or `90m`. A period longer than the retention of Stored Snapshots
+  is cut to it.
+- `--integration` limits the replay to the Integration with that name.
+
+The command sets the Stored Snapshots of the period back to pending in one transaction and records `ingest.replayed` in
+the Audit log; the running replicas process them again in arrival order. Processing is idempotent per Alert, so Snapshots
+that were processed change nothing, while one that failed is processed with the current code. The command prints how many
+Stored Snapshots it replayed.
+
+## `muster secrets rotate-key`
+
+```text
+muster secrets rotate-key --activate <id> --actor <name>
+```
+
+Activates a master key, re-encrypts the Secrets and the key canary, and makes the Leader re-sign the buttons of open Root
+messages. It refuses while a live replica does not hold the key. `--activate` is the key id that **Organization →
+Keyring** shows. The two steps around it, and what to do afterwards, are in [Key rotation](https://muster-io.github.io/muster/latest/operations/key-rotation.md).
+
+## `muster bridge check`
+
+```text
+muster bridge check <url> --token-file <file> --channel <id> [flags]
+```
+
+Runs the Bridge protocol against a bridge, step by step, and prints one line per step: `PASS`, `FAIL` with the reason, or
+`SKIP`. It needs no database, master key or configuration, writes nothing, and never changes the bridge's configuration.
+It exits 0 when no step failed, 1 when one did, and 2 on a usage error.
+
+Flags: `--token-file` and `--channel` are required; `--forbidden-channel`, `--handle`, `--push-listen`, `--push-url`,
+`--push-secret-file` and `--no-interactive` are optional. Their meaning, the steps and a worked example are in [Write a
+bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check).
+
+## `muster version`
+
+```text
+muster version
+```
+
+Prints the version and the commit, in the form `muster <version> (commit <sha>)`. The metric `muster_build_info` carries the
+same two labels.
+
+## `muster dev`
+
+`muster dev` runs Muster with fake messenger servers and a published development master key. It is for working on Muster; do
+not use it for an installation.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/request-log.md -->
+# Request log
+
+The **Request log** keeps the recent HTTP requests Muster sent to a messenger, a bridge or an outgoing webhook, and
+those that reached a Connection's addresses, each with its answer and with secrets masked. It shows what Muster sent
+and what came back when a Root message looks wrong, a check fails or a button press does nothing, without a packet
+capture. It is neither the Audit log, which says who changed what, nor the Delivery events, which say what happened to
+an Alert Group's delivery: the Request log keeps the requests themselves, for a short time.
+
+## What is recorded
+
+Each attempt of a request is a record of its own.
+
+**Requests Muster sends** for a Connection or an outgoing webhook Destination: Root messages, their edits, Thread
+replies, final edits, Storm summaries and deletions; test messages, and the button press a Mattermost test makes through
+the bot (a Slack test makes none, because a bot cannot press its own button); answers to people, such as ephemeral
+messages and callback answers; the requests of Account links, such as finding a person and sending a direct message;
+channel lists, bridge info and webhook registration; event polling (Telegram `getUpdates`, Bridge `pollEvents`), and the
+request that opens a Slack Socket Mode connection; and the requests of checks and tests — the Connection check, the
+check before saving, also of a Connection that does not exist yet, the Destination check, the test message and the probe
+of a Broken Destination.
+
+**Requests that reach Muster** on the ingest listener, each with the answer Muster gave, refused ones included — a bad
+signature, a wrong secret token, a Connection in the other event delivery mode:
+
+`press`
+`/api/v1/callbacks/mattermost/{connection_id}`
+:   A button press in Mattermost.
+
+`update`
+`/api/v1/callbacks/telegram/{connection_id}`
+:   A Telegram update in the webhook mode.
+
+`push`
+`/api/v1/callbacks/bridge/{connection_id}`
+:   An event a bridge pushes.
+
+`interactive`
+`/api/v1/callbacks/slack/{connection_id}`
+:   A button press in Slack, in the HTTP event mode. In Socket Mode there is no request to Muster: each envelope that
+    carries an envelope id is recorded as received under its own type, with the socket's host as its URL, the
+    envelope as its request and Muster's confirmation as its answer, without a status; the app subscribes to no events,
+    so only `interactive` envelopes arrive. Slack's `hello`, `disconnect` and keep-alive frames are not recorded.
+
+A record holds:
+
+- the time, and the direction: **Sent** (→) or **Received** (←);
+- the operation as its protocol names it: the method of the Telegram Bot API (`sendMessage`, `editMessageText`,
+  `getUpdates`), the operation of Mattermost's REST API in lower camel case (`createPost`, `patchPost`, `getPing`), the
+  operation of the Bridge protocol (`getInfo`, `postMessage`, `pollEvents`), the method of Slack's Web API as Slack
+  names it (`chat.postMessage`, `chat.update`, `apps.connections.open`), `response_url` for an answer sent to a press's
+  `response_url`, `event` or the request of a template (`create`, `update`, `open_thread`, `reply_in_thread`) for an
+  outgoing webhook, and `press`, `update`, `push` or `interactive` for requests that reached Muster;
+- the method, the URL, the request headers and body, and the answer's status, headers and body — none for a request
+  that got no answer;
+- the latency in milliseconds, the path — direct or through the proxy — and the attempt;
+- for a request that failed, its error class, what failed — the codes of the checks, such as a DNS lookup that failed
+  or no answer in time — and the error text;
+- for a request of a check or a test, its kind — **Connection check**, **Check before saving**, **Destination check**,
+  **Test message** or **Broken probe** — and its check run, which the requests of one check or test share;
+- the Connection or the outgoing webhook Destination it belongs to, and the Destination and the Alert Group it
+  concerns, when it concerns one.
+
+## What is not recorded
+
+- A long poll that ended without events: an empty `getUpdates` of Telegram or `pollEvents` of a bridge.
+- A request to a callback address whose path names no Connection, or a deleted one.
+- The requests of OIDC sign-in and of the outgoing heartbeat.
+- The requests of `muster doctor` and `muster bridge check`, which run outside the server.
+
+## Bounds
+
+The bounds are built in; nothing configures them.
+
+`request_log.max_records`
+:   The newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of
+    new Connections in an Organization.
+
+`request_log.max_age`
+:   7 days on the business clock.
+
+`request_log.body_max`
+:   16 KB (16,384 bytes) of each request or answer body.
+
+- A record past either bound is neither listed nor shown, even before it is deleted. The Leader deletes such records
+  every minute (the task `request_log_pruning`).
+- A longer body is cut at a character boundary and marked with its full size: the record shows "Cut at 16 KB of
+  {size} KB". Bodies are stored as text; bytes that are not UTF-8 are replaced.
+- A URL is kept up to 16 KB and the names and values of a request's or an answer's headers up to 64 KB in all; what is
+  cut ends with "…".
+- The body of a request that reached Muster, or of Muster's answer, that is larger than 256 KB, or that was not read to
+  the end, is kept as its size only: the record shows "Not kept: {size} KB, too large or not read to the end".
+- Writing a record never fails or delays the request it records beyond the write itself, which may take at most 2
+  seconds. A record that cannot be written is dropped, logged as `request_log_write_failed` and counted in
+  `muster_request_log_write_failures_total`; see [Log events](https://muster-io.github.io/muster/latest/reference/log-events.md) and
+  [Metrics](https://muster-io.github.io/muster/latest/reference/metrics.md).
+
+## Masking
+
+Nothing secret is stored. Muster masks a record before it writes it: the requests it sends where they are made, which
+knows each request's secrets, and the requests that reach it in one place shared by the three callback addresses.
+Every masked value reads `[redacted]`.
+
+- **Secrets a request carries**, wherever they appear — the URL, the headers and both bodies: a bot token, also inside
+  a Telegram URL, the proxy password, an outgoing webhook's Secrets and Signing secret, a bridge's push secret, a
+  secret in a query.
+- **Headers whose values are always masked**, whatever they hold: `Authorization`, `Proxy-Authorization`, `Cookie`,
+  `Set-Cookie`, `X-Telegram-Bot-Api-Secret-Token`, `X-Slack-Signature` and `webhook-signature`, the signature header of
+  outgoing webhooks and of pushed Bridge events.
+- **The URL** keeps no user information, and the path of a Connection's base URL, which may be a secret — such as the
+  path of a bridge behind a reverse proxy — is shown as `[redacted]`, as in errors.
+- **Values that authenticate a person**: the signed action ids of buttons, which authenticate a Mattermost or a Slack
+  press, and the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an
+  `account_link` event, the code in a direct message.
+- **What a Notification gateway is sent**: the `contact` and the `text` of every request to `sendNotification`, in the
+  request and in its answer, since a contact is personal data and the text names Alert Groups or carries the code that
+  confirms a contact ([Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#privacy)). They are masked as the
+  values of the JSON members `contact` and `text`, also in a problem that quotes the request as JSON inside a JSON
+  string, one level deep, and, from six characters on, wherever they appear; JSON quoted two levels deep, or member
+  names written with `\u` escapes, are covered only by the masking from six characters on. A contact shorter than six
+  characters, such as an extension `1234`, that a gateway repeats in free text outside a JSON member is not masked
+  there, since masking its digits would mask them in every time and id of the record too.
+- **What Slack sends and answers with**: the bot token and the app-level token, the Slack signing secret, the address
+  that `apps.connections.open` answers with, whose single-use `ticket` opens a socket, the `response_url` of a press,
+  and the legacy verification `token` that every Slack payload still carries.
+
+Headers and bodies are untrusted text. The record view shows them as plain text and never renders HTML or Markdown.
+
+## Who may read it
+
+To list the records of a Connection, or of a check run
+:   needs: `connections:read`
+
+To list the records of a Destination
+:   needs: `destinations:read`
+
+To open a record of a Connection, or of a check before saving
+:   needs: `connections:read`
+
+To open a record of an outgoing webhook Destination
+:   needs: `destinations:read`
+
+A messenger Destination's requests are its Connection's: its list shows the records of its Connection that concern
+it, and opening one of them needs `connections:read`. The built-in Roles — Admin, Responder and Viewer — hold both
+Permissions; a Personal access token may hold fewer.
+
+## Where to find it
+
+The Request log of a Connection, or of an outgoing webhook Destination, is a tab of its page:
+
+1. Open **Connections → a Connection**, of any type, or **Destinations → an outgoing webhook**, and select the tab
+   **Request log**. A messenger Destination's page has no tab of its own. The list shows, newest first, the time in
+   your time zone, the direction arrow, the operation with the kind of check below it, the status — or, without an
+   answer, what failed — and the latency; **Load more** shows older records.
+
+    ![The tab Request log of the Mattermost Connection: the requests of its check, with the operation, the status and the latency](https://muster-io.github.io/muster/latest/assets/screenshots/operations/request-log/01-connection-request-log.png){ .screenshot }
+
+2. Narrow the list by **Direction**, **Status** — the class `2xx`, `3xx`, `4xx`, `5xx` or **No answer** — and
+   **Operation**, and select **Apply**. The filters are kept in the address, such as
+   `?tab=request-log&direction=inbound&status_class=4xx`, so a link to a filtered list can be shared.
+3. Select an operation to open its record: the request — method, URL, headers, body — and the answer — status,
+   headers, body — side by side on a wide screen and one under the other on a narrow one; a JSON body is indented.
+   **Copy URL**, **Copy headers** and **Copy body** copy each, the body as it is stored rather than indented. A record
+   links to its Destination, its Alert Group and the other requests of its check.
+
+    ![A record of the Request log: the request getMe to the Mattermost server with its headers, the token redacted, and the answer 200 with its body](https://muster-io.github.io/muster/latest/assets/screenshots/operations/request-log/02-record.png){ .screenshot }
+
+The same records show in two more places:
+
+- **The Alert Group page → Delivery → Requests** on each Destination's row: what was sent to that Destination for this
+  Alert Group and what came back.
+- **Requests of this check** under the result of the Connection check, of the check before saving and of the
+  Destination's check and test: the requests that check or test made.
+
+The API reads the same records: `listRequestLog` and `getRequestRecord` in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md),
+with the check run in the results of the Connection check, the check before saving, the Destination check and the
+Destination test.
+
+## Examples
+
+- **Button presses in Mattermost do nothing.** Filter the Connection's Request log by **Received**. No `press` at all
+  means that the Mattermost server does not reach Muster: see
+  [Let button presses reach Muster](https://muster-io.github.io/muster/latest/messengers/mattermost.md#let-button-presses-reach-muster). A `press` that Muster
+  answered shows the answer the person got, such as the text that their account is not linked.
+- **Button presses in Slack do nothing.** In the HTTP event mode, filter the Connection's Request log by **Received**.
+  No `interactive` at all means that Slack does not reach Muster: see [Socket Mode or
+  HTTP](https://muster-io.github.io/muster/latest/messengers/slack.md#socket-mode-or-http). An `interactive` answered `401` means a wrong Slack signing secret,
+  a clock further than `slack.request_tolerance` from Slack's, or a Connection in Socket Mode. In Socket Mode, an
+  `interactive` is recorded for each press, and the Connection page says whether another program shares the app.
+- **A Root message looks wrong.** On the Alert Group page, open **Requests** of that Destination: the `createPost`,
+  `sendMessage` or `postMessage` shows the body Muster sent and what the messenger answered.
+- **A bridge refuses a message.** The Connection's Request log shows the `postMessage`, the problem the bridge answered
+  with its detail, and the latency.
+- **A check before saving fails.** **Requests of this check** shows what the address answered, such as an HTML page
+  of a reverse proxy instead of the bridge's info.
+- **Pushed events are refused.** A bridge that signs its pushes with an old secret shows each `push` answered `401`.
+- **An outgoing webhook fails.** The Destination's Request log, filtered by `5xx`, shows each attempt with the
+  endpoint's status and body.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/index.md -->
+# Runbooks
+
+One page for every alert Muster can raise: the rules of the Helm chart, evaluated by Prometheus or VictoriaMetrics
+from Muster's metrics, and the Internal alerts that Muster raises itself. Each page says what the alert means, its
+impact, how to diagnose it and how to fix it.
+
+| Alert | Severity | Source |
+|---|---|---|
+| [MusterDown](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDown.md) | critical | chart rule |
+| [MusterNoLeader](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNoLeader.md) | critical | chart rule |
+| [MusterDeliveryFailing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing.md) | critical | chart rule |
+| [MusterDestinationBroken](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDestinationBroken.md) | critical | both |
+| [MusterHeartbeatLost](https://muster-io.github.io/muster/latest/operations/runbooks/MusterHeartbeatLost.md) | critical | both |
+| [MusterNotificationGatewayBroken](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md) | critical | both |
+| [MusterDeliverySlow](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliverySlow.md) | warning | chart rule |
+| [MusterDeliveryQueueGrowing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing.md) | warning | chart rule |
+| [MusterIngestBacklog](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog.md) | warning | chart rule |
+| [MusterIngestRejected](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected.md) | warning | chart rule |
+| [MusterIngestSnapshotFailed](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed.md) | warning | chart rule |
+| [MusterTemplateError](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md) | warning | both |
+| [MusterClockSkew](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md) | warning | chart rule |
+| [MusterLoginFailures](https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures.md) | warning | chart rule |
+| [MusterScheduleGap](https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md) | warning | both |
+| [MusterSnapshotTruncated](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md) | warning | Internal alert |
+| [MusterOIDCSecretExpiring](https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring.md) | warning | Internal alert |
+
+## Two sources
+
+- **Chart rules** are evaluated by your monitoring from the metrics Muster serves at `/metrics`, and reach people
+  through your Alertmanager like any other rule. Their thresholds, windows and job selector are values of the chart;
+  the expressions on these pages are the defaults.
+- **Internal alerts** are raised by Muster itself, as Alerts of the built-in Integration "Muster" that every
+  Organization has. Ordinary Routes pick them by their labels and deliver them like any other Alert Group; see
+  [Internal alerts](https://muster-io.github.io/muster/latest/reference/internal-alerts.md).
+- An alert listed as **both** is an Internal alert with a chart rule of the same name for the same condition. The
+  chart rule is the backup for when Muster cannot deliver the Internal alert itself.
+
+Send the critical chart rules through an Alertmanager route that bypasses Muster, to a pager or a chat that Muster
+does not manage: when Muster is down or cannot deliver, it cannot deliver an alert about that either.
+
+## Runbook links
+
+Every Internal alert carries a `runbook_url` annotation that opens its page here, for the version of Muster that
+raised it, and the chart rules link to the same pages:
+
+```text
+<MUSTER_RUNBOOK_BASE_URL>/<version>/operations/runbooks/<alertname>/
+```
+
+`MUSTER_RUNBOOK_BASE_URL` is `https://muster-io.github.io/muster` by default, the published site; point it at your own
+copy of the site where people cannot reach the public one. `<version>` is the `major.minor` of a release, such as `1.2`
+for `1.2.3`, or `latest` for any version that is not a release `X.Y.Z`: a development build, the `sha-…` and `edge`
+images and pre-releases. For example, `MusterOIDCSecretExpiring` of a development build links to
+`https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring/`.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDown.md -->
+# MusterDown
+
+## Meaning
+
+Prometheus cannot scrape a Muster replica: the target of the job `muster` is down. The chart rule is:
+
+```promql
+up{job="muster"} == 0
+```
+
+It fires after 2 minutes, with severity `critical` and one alert per scrape target (`instance`). It is a chart rule
+only; Muster cannot raise it about itself.
+
+!!! warning "Route it around Muster"
+    Send this alert through an Alertmanager route that bypasses Muster, for example straight to a pager or a chat
+    that Muster does not manage. While Muster is down it cannot deliver anything, this alert included.
+
+## Impact
+
+- With every replica down, nothing is ingested, no message is sent or edited, and the UI, the API and the buttons in
+  the messengers do not answer. Alertmanager retries its failed notifications, and each later notification carries the
+  whole Alertmanager group again, so Muster catches up once it is back.
+- With one replica of several down, the others keep working: ingestion, delivery and timers run on every replica, and
+  another replica takes over the Leader tasks if the stopped one was the Leader.
+- After the downtime, the new Leader records it (`downtime_recorded`) and Muster recovers: see
+  **Recovery after downtime** on the System status page.
+
+## Diagnosis
+
+1. Find out whether the process runs at all: the pod or the container, its restarts and its exit code.
+2. Ask the internal listener (`MUSTER_LISTEN_INTERNAL`, `:8082` by default) directly. `GET /health/live` answers
+   `200` while the process serves; `GET /health/ready` answers `503` while the database does not answer or the
+   shutdown has begun.
+3. Read the last log lines of the replica:
+    - `startup_failed`: start-up stopped; its `error` says what to fix — the database cannot be reached, a migration
+      failed or a listener cannot listen.
+    - `listener_failed`: a listener stopped with an error and the process exits so that it is restarted.
+    - `shutdown_requested`: the replica received SIGTERM, for example during a rollout.
+4. When the process runs but the scrape fails, check the scrape configuration against `MUSTER_LISTEN_INTERNAL`: the
+   port, the path `/metrics` and the network policy between Prometheus and the replica.
+5. Run `muster doctor` with the replica's settings. The lines `database`, `session_connection` and `key_canary` name
+   a database that cannot be reached, a session connection whose advisory locks or `LISTEN` do not work, and master
+   keys that do not decrypt the stored data.
+
+## Fix
+
+- Fix what `startup_failed` or `muster doctor` names: the database URL or its credentials, the master keys, a port
+  that another process holds.
+- When the database is down, bring it back first; Muster becomes ready as soon as it answers.
+- When only the scrape fails, correct the scrape target or the network policy.
+- Once Muster is back, open **Recovery after downtime** on the System status page (`/admin/system-status`) and the
+  Alert Group list: Alertmanager's next notifications bring the state up to date.
+- Set up an outgoing heartbeat (Organization → **Outgoing heartbeat**, `/admin/organization/outgoing-heartbeat`) to an
+  external dead man's switch, so that a stopped Muster is noticed even when Prometheus cannot report it.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterNoLeader.md -->
+# MusterNoLeader
+
+## Meaning
+
+Every replica of Muster reports that it is not the Leader. The chart rule is:
+
+```promql
+max(muster_leader{job="muster"}) == 0
+```
+
+It fires after 2 minutes, with severity `critical`. It is a chart rule only. One replica, the **Leader**, holds a lock
+in the database and runs the Leader tasks; when it cannot confirm its lock within `leader.fencing_timeout` (15 s) it
+stops them, and any replica may take the lock. This alert means that none has for 2 minutes.
+
+!!! warning "Route it around Muster"
+    Send this alert through an Alertmanager route that bypasses Muster. Muster still delivers without a Leader, but
+    the problem behind the missing Leader — usually the database — may stop delivery next.
+
+## Impact
+
+What stops while no replica leads:
+
+- **Telegram polling**: Connections in the long polling update mode receive no button presses and no messages from
+  the discussion group.
+- **Bridge polling**: Bridge Connections in the `poll` event delivery mode receive no events — no button presses, Text
+  commands, acknowledgements made in a call through a Notification gateway, Account link requests or reports of
+  deleted messages — until a replica leads again. A press, a Text command or an acknowledgement in a call that is
+  older than `bridge.event_max_age` (1 hour) by then is dropped unanswered.
+- **Slack's Socket Mode**: Slack Connections in the `socket` event mode hold no Socket Mode connection, so a button
+  press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Muster does
+  not count on Slack to send such presses again.
+- The **Heartbeat** check and the **Stale** check: no Integration becomes Heartbeat lost, and no alert is resolved as
+  Stale.
+- Partition maintenance, retention and the pruning of short-lived state, the outgoing heartbeat, the expiry check of
+  the OIDC client secret and the Leader-only metrics (`muster_alert_groups`, `muster_delivery_queue`, `muster_destination_broken`,
+  `muster_heartbeat_lost`, `muster_ingest_backlog`, `muster_storm_active`), which go stale or disappear.
+
+What keeps working: ingestion, delivery to every Destination, timers (the end of a Snooze, Ack timeouts and Reminders),
+the UI, the API, the webhook update mode of Telegram, the `push` event delivery mode of Bridge Connections and the
+`http` event mode of Slack Connections, whose presses any replica receives. After `leader.absence_notice` (2 minutes)
+without a Leader, the UI shows the banner "No replica is leading: Telegram and Bridge polling, Slack's Socket Mode,
+Heartbeat and Stale checks are paused."
+
+## Diagnosis
+
+1. Open **System status** (`/admin/system-status`). **Replicas** lists every replica that refreshed its record, when
+   it last did ("Refreshed …"), and which one is the **Leader**; with no Leader, no replica carries the flag.
+2. Check `muster_leader` per replica: `max by (instance) (muster_leader{job="muster"})`. A replica that does not
+   appear at all is not scraped; see [MusterDown](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDown.md).
+3. Read the logs of the replicas:
+    - `leadership_lost` (`replica`, `error`): the Leader could not confirm its lock within `leader.fencing_timeout`,
+      or its lock session failed.
+    - `leadership_acquired` (`replica`): a replica took the lock. Alternating lost and acquired lines mean that the
+      lock keeps breaking.
+    - `leader_task_failed` (`task`, `error`): a Leader task failed, usually because the database was unavailable.
+4. Run `muster doctor` with the replicas' settings. `session_connection` must say "advisory locks and LISTEN work":
+   the Leader lock is an advisory lock on the session connection. Behind a pooler in transaction mode, such as
+   PgBouncer, advisory locks do not hold, and `MUSTER_DATABASE_SESSION_URL` must point at the database directly or
+   at a pool in session mode.
+5. Check the database itself: its availability, failovers, connection limits and the latency between the replicas
+   and the database.
+
+## Fix
+
+- Restore the database or the network path to it. Once the session connection works again, a replica takes the lock
+  within seconds and the banner disappears.
+- Set `MUSTER_DATABASE_SESSION_URL` when the main connection goes through a pooler in transaction mode, and restart
+  the replicas.
+- Raise the database's connection limit if the session connections are refused: each replica holds about three of
+  them besides its main pool.
+- Once a Leader returns, the paused tasks run again at their next interval: the new Leader polls Telegram and the
+  bridges and connects Slack's Socket Mode, and the Heartbeat and Stale checks resume from the signals and Snapshots
+  that ingestion recorded meanwhile.
+- A Slack Connection that must not lose a press while no replica leads uses the `http` event mode, which every replica
+  serves.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing.md -->
+# MusterDeliveryFailing
+
+## Meaning
+
+A Destination has deliveries waiting and has not had a successful delivery for 10 minutes. The chart rule is:
+
+```promql
+max by (destination) (muster_delivery_queue{job="muster"}) > 0 unless on (destination) sum by (destination) (increase(muster_delivery_attempts_total{job="muster",outcome="delivered"}[10m])) > 0
+```
+
+It fires after 5 minutes, with severity `critical` and the label `destination`, the Destination's id;
+`muster_destination_info{destination="…"}` gives its name. It is a chart rule only. It fires before the Destination
+becomes Broken as well as after: Muster retries a Transient error with a growing pause (`delivery.transient_backoff`,
+from 2 s up to 5 min) and marks the Destination Broken only when the Transient budget runs out
+(`delivery.transient_budget`, 10 attempts within 30 minutes) or after a Fatal error.
+
+!!! warning "Route it around Muster"
+    Send this alert through an Alertmanager route that bypasses Muster: the Destination it is about may be the one
+    that would carry it.
+
+## Impact
+
+- The Root messages of the Destination are not created or edited: people in that chat do not see new Alert Groups,
+  and the messages they see may show an old status. Thread replies wait too.
+- Other Destinations, ingestion, Commands from the UI and the API, and timers keep working. The Alert Group pages show
+  the current state, and the Alert Group list filter **Delivery problem** finds the affected Alert Groups.
+- Nothing is lost while deliveries wait: once the Destination answers again, Muster delivers the current state of
+  each Root message, not every change it missed.
+
+## Diagnosis
+
+1. Open **System status** (`/admin/system-status`): **Delivery queues** shows how many deliveries wait per
+   Destination, and **Broken Destinations** whether the Destination is already Broken.
+2. Open the Destination page (`/destinations/<id>`). **Health** says Healthy or Broken; a Broken Destination shows
+   "Broken since HH:MM: {reason}. Muster tries again every {interval}."
+3. Look at the outcomes of its attempts:
+   `sum by (outcome) (increase(muster_delivery_attempts_total{job="muster",destination="<id>"}[15m]))`. `transient`
+   and `unknown` point at the network or the messenger; `retry_after` at rate limits; `fatal` and `markup_rejected` at
+   the configuration or the message; `template_error` at a template, see [MusterTemplateError](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md).
+4. Read the log lines `delivery_attempt` for the Destination (`destination` is its id): `outcome`, `code` (the HTTP
+   status of the answer or the `error_code` of a Telegram answer, 0 when the outcome carries no status), `reason` (the
+   masked error the messenger answered or the call failed with), `attempt`, `duration_ms` and `retry_after_ms`.
+   `outbound_blocked` means that the outbound address policy refused the address or the proxy (`rule` names why);
+   `delivery_work_failed` that the worker itself could not attempt, for example because the database connection was
+   lost.
+5. Compare with all outbound calls of the delivery client class:
+   `sum by (outcome) (rate(muster_client_requests_total{job="muster",client="delivery"}[5m]))`. Failures across
+   every Destination point at the network, a proxy or DNS rather than one messenger.
+6. Press **Check** on the Destination page, or run `muster doctor`, which prints one line per Mattermost, Slack,
+   Telegram and Bridge Destination (`destination <name>`) with the result of its check.
+
+## Fix
+
+- Network, DNS or proxy: fix the path from the replicas to the messenger, the proxy of the Connection, or the
+  Organization's **Outbound addresses** (`/admin/organization/outbound`) when `outbound_blocked` names the address.
+- Credentials or permissions: replace the bot token on the Connection, or give the bot back the rights the
+  Destination check asks for, then press **Check**.
+- Telegram is blocked in your network: see
+  [Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md).
+- When the Destination has become Broken, follow [MusterDestinationBroken](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDestinationBroken.md).
+- The alert resolves once a delivery to the Destination succeeds, or its queue is empty.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDestinationBroken.md -->
+# MusterDestinationBroken
+
+## Meaning
+
+A Destination is **Broken**: Muster stopped sending to it after a Fatal error — the messenger refused the bot or the
+request for good — or after its Transient budget ran out (`delivery.transient_budget`, 10 attempts within 30
+minutes). Muster then probes it every `delivery.broken_probe_interval` (5 minutes) with the oldest waiting delivery,
+or with the Destination check when nothing waits, and ends the Broken state on the first success.
+
+This alert has two sources with the same name, severity `critical` and this page:
+
+- The **Internal alert**, raised by Muster itself as an Alert of the built-in "Muster" Integration when the
+  Destination becomes Broken, with the labels `destination` (the Destination's id) and `destination_name`. It is
+  resolved when a probe, the Destination check or a test message succeeds, and when the Destination is deleted.
+- The **chart rule**, the backup for when Muster cannot deliver the Internal alert:
+
+    ```promql
+    max by (destination) (muster_destination_broken{job="muster"}) == 1
+    ```
+
+    It fires after 5 minutes with the label `destination`. `muster_destination_broken` is set by the Leader.
+
+!!! warning "Route it around Muster"
+    Send the chart rule through an Alertmanager route that bypasses Muster. Route the Internal alert to a Destination
+    of another kind than the Broken one — a Broken Telegram Destination usually means that Telegram is unreachable
+    for every Telegram Destination, so send `MusterDestinationBroken` of Telegram Destinations to Mattermost or an
+    outgoing webhook.
+
+## Impact
+
+- Nothing is sent to the Destination: no new Root messages, no edits, no Thread replies. Its deliveries wait, and the
+  Alert Groups that wait for it show a delivery problem; the Alert Group list filter **Delivery problem** finds them.
+- Other Destinations, ingestion, Commands and timers keep working.
+- When the Broken state ends, Muster brings every waiting Root message to its current state; it does not replay the
+  changes it missed one by one.
+
+## Diagnosis
+
+1. Open **System status** (`/admin/system-status`): **Broken Destinations** lists every Broken Destination and
+   since when. The Destination list (`/destinations`) has the filter **Broken Destinations** too.
+2. Open the Destination page (`/destinations/<id>`). The banner says "Broken since HH:MM: {reason}. Muster tries
+   again every {interval}." The reason is the error the messenger answered, with secrets masked.
+3. Find the log line `destination_broken` (`destination`, `cause`, `reason`): `cause` is `fatal` after a Fatal error
+   and `unavailable` after the Transient budget ran out. `outbound_blocked` lines for the same address mean that the
+   outbound address policy refused it.
+4. Press **Check** on the Destination page to run the Destination check now, or run `muster doctor`, which prints a
+   line `destination <name>` with the failing step. For a Connection problem, press **Check connection** on the
+   Connection page (`/connections/<id>`).
+
+## Fix
+
+- `cause` `fatal`: fix what the reason names. Typical cases are a revoked bot token (replace it on the Connection),
+  a bot that lost its admin rights in a Telegram channel or its discussion group, a bot removed from a Slack channel
+  (invite it again with `/invite`) or a Slack channel that was archived, a deleted channel or chat, or an outgoing
+  webhook that answers with a permanent error. Then press **Check**: a check that passes ends the Broken
+  state at once.
+- `cause` `unavailable`: the messenger or the path to it was down long enough to use up the Transient budget. Fix the
+  network, the proxy of the Connection or the **Outbound addresses** (`/admin/organization/outbound`); the next probe
+  ends the Broken state by itself, or press **Check** to end it now.
+- Slack answers `429`: it limits each method per app and workspace. Muster holds the whole Connection for the seconds
+  of `Retry-After` and does not count that as a failed attempt, so a `429` with `Retry-After` does not make a
+  Destination Broken. A `429` without it counts as a transient failure, and enough of them use up the Transient budget
+  (`cause` `unavailable`): lower the limiters or spread the load. See [Rate
+  limits](https://muster-io.github.io/muster/latest/messengers/slack.md#rate-limits).
+- Telegram is unreachable from your network: see
+  [Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md).
+- **Send test message** on the Destination page also ends the Broken state when every step succeeds.
+- The Internal alert resolves and `destination_recovered` (`destination`, `broken_for_s`) is logged when the Broken
+  state ends; the chart rule resolves at the Leader's next update of `muster_destination_broken`.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterHeartbeatLost.md -->
+# MusterHeartbeatLost
+
+## Meaning
+
+An Integration is **Heartbeat lost**: its Heartbeat is on, and no signal arrived within its Heartbeat timeout
+(`integration.heartbeat_timeout`, 5 minutes by default). Something on the path from Prometheus through Alertmanager
+and the network to Muster has stopped; see [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).
+
+This alert has two sources with the same name, severity `critical` and this page:
+
+- The **Internal alert**, raised by the Leader's Heartbeat check, which runs every 10 seconds, as an Alert of the
+  built-in "Muster" Integration. Its labels are `integration` (the Integration's id), `integration_name` and the
+  Integration's Static labels, so a Route can send it to the team of that cluster. It is resolved by the next signal,
+  by turning the Heartbeat off, and by deleting the Integration.
+- The **chart rule**, the backup for when Muster itself cannot deliver the Internal alert:
+
+    ```promql
+    max by (integration) (muster_heartbeat_lost{job="muster"}) == 1
+    ```
+
+    It fires after 1 minute with the label `integration`. `muster_heartbeat_lost` is set by the Leader's Heartbeat
+    check.
+
+!!! warning "Route it around Muster"
+    Send the chart rule through an Alertmanager route that bypasses Muster, so that it reaches people even when the
+    path through Muster is the one that broke.
+
+## Impact
+
+- Alerts from that Alertmanager may not reach Muster: new problems in that cluster may go unnoticed.
+- **Stale resolution pauses** for the Integration: the time without a live Heartbeat does not count towards an
+  alert's time to go Stale, so nothing is resolved as Stale until the signal returns.
+- Other Integrations, delivery and Commands keep working.
+
+## Diagnosis
+
+1. Open the Integration page (`/integrations/<id>`): the banner says "No contact with Alertmanager since HH:MM…",
+   the time of the last signal. **System status** (`/admin/system-status`) lists the Integration under
+   **Integrations needing attention** as "Heartbeat lost since …".
+2. Find the log line `heartbeat_lost` (`integration`, `last_signal_at`). The signal returning logs `heartbeat_live`
+   with `first` false.
+3. Check Alertmanager: is it running, and does it still have the Heartbeat route and receiver? Its own metrics show
+   failed notifications to the Heartbeat receiver.
+4. Check Prometheus: the always-firing alert (`MusterHeartbeat`, or `Watchdog` in kube-prometheus-stack) must be
+   firing, so the rule evaluation and the connection from Prometheus to Alertmanager work.
+5. Check the path to Muster's ingest listener (`MUSTER_INGEST_URL`): DNS, ingress, certificates and network
+   policies. Requests that arrive with a wrong or revoked token are refused with `401` and logged as
+   `ingest_rejected`; see [MusterIngestRejected](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected.md).
+6. When many Integrations are Heartbeat lost at once, the problem is likely on Muster's side: its ingest listener or
+   the network in front of it.
+
+## Fix
+
+- Restart or repair Alertmanager or Prometheus, or restore the Heartbeat route and receiver from the snippet
+  ([The snippet](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#the-snippet)).
+- Fix the network path or the ingress to `MUSTER_INGEST_URL`.
+- Replace a revoked token in the Heartbeat receiver with a token of the Integration.
+- When the cluster was retired on purpose, turn the Heartbeat off or delete the Integration; both resolve the alert.
+- The next signal makes the Heartbeat live again and resolves the Internal alert; see
+  [When the Heartbeat is lost](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#when-the-heartbeat-is-lost).
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md -->
+# MusterNotificationGatewayBroken
+
+## Meaning
+
+A [Notification gateway](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md) is **Broken**: a call through it ended with a
+Fatal error — the bridge, or the provider behind it, refused the token or the credentials (`401` or `403`, the class
+`forbidden`), or the outbound address policy blocks the bridge's address — or a call failed until its retry budget ran
+out (`delivery.transient_budget`, 10 attempts within 30
+minutes). Muster then probes the gateway every `delivery.broken_probe_interval` (5 minutes) by reading its `info`, and
+ends the Broken state on the first success. A successful check of its Connection ends it too.
+
+This alert has two sources with the same name, severity `critical` and this page:
+
+- The **Internal alert**, raised by Muster itself as an Alert of the built-in "Muster" Integration when the gateway
+  becomes Broken, with the labels `connection` (the id of the gateway's Connection) and `connection_name`. It is
+  resolved when a probe or a Connection check succeeds, and when the Connection is deleted. The suggested Route
+  "Muster internal alerts" groups by `connection`, so every Broken gateway has an Alert Group of its own.
+- The **chart rule**, the backup for when Muster cannot deliver the Internal alert:
+
+    ```promql
+    max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1
+    ```
+
+    It fires after 5 minutes with the label `connection`. `muster_notification_gateway_broken` is set by the Leader
+    every 15 seconds, so the rule fires about 5 minutes after the gateway became Broken and resolves within 15 seconds
+    after the state ended.
+
+!!! warning "Route it around the gateway"
+    A Broken gateway cannot call anybody about itself. Route the Internal alert to a messenger Destination, and send
+    the chart rule through an Alertmanager route that bypasses Muster.
+
+## Impact
+
+- No call goes through the gateway. Every call that comes due while it is Broken — from an Escalation step or a
+  Notification rule — ends Not delivered: each of its Alert Groups records `page_not_delivered` with the reason
+  `gateway_broken` in its Timeline, naming the person and the gateway.
+- **The calls that came due meanwhile were not sent, and are not sent after the gateway recovers.** Nobody was called
+  for those Alert Groups through this gateway; check them by hand.
+- The Destinations of the same bridge, if it is also a messenger, are not affected: a Broken gateway never makes a
+  Destination Broken, nor the other way round. Other gateways, ingestion, delivery to messengers and timers keep
+  working.
+
+## Diagnosis
+
+1. Open the gateway's Connection page (`/connections/<id>`). Its read in the API, `GET /api/v1/connections/<id>`,
+   has `gateway` with `broken`, `broken_since`, `reason` and `next_probe_at`. The reason is the error the bridge
+   answered to the call or to the last probe, with secrets and the contacts and texts of calls masked; it starts with
+   "unavailable after repeated failures:" when the retry budget ran out.
+2. Open the tab **Request log** of the Connection and narrow it to the operations `sendNotification` and `getInfo`
+   (see [Request log](https://muster-io.github.io/muster/latest/operations/request-log.md#where-to-find-it)): the record shows the status and the body the bridge
+   answered. The probes are the `getInfo` requests of the kind **Broken probe**.
+3. Find the log line `gateway_broken` (`connection`, `cause`, `reason`): `cause` is `fatal` after a Fatal answer and
+   `unavailable` after a call used up its retry budget. The lines `gateway_call_not_delivered` with the reason
+   `gateway_broken` name the calls that were not sent.
+4. Run `muster bridge check <base URL> --token-file <file> --contact <your contact> --no-interactive`, and
+   `--channel <id>` when the bridge is also a messenger, against the bridge to see which step of the Bridge protocol
+   fails, outside Muster: it sends one test notification to your contact (see
+   [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check)).
+
+## Fix
+
+- `cause` `fatal`, a `401` or `403`: the bridge refuses Muster's token, or the provider refuses the bridge's
+  credentials. Replace the token on the Connection if it is Muster's that changed; otherwise fix the credentials or
+  the account of the provider in the bridge's own configuration — an expired API key, a blocked account, a used-up
+  balance.
+- `cause` `fatal` without a status, the reason naming the outbound address policy: Muster refused to reach the
+  bridge's address. Allow it in the **Outbound addresses** (`/admin/organization/outbound`), or fix the base URL of the
+  Connection.
+- `cause` `unavailable`: the bridge or its provider did not answer, or answered `transient` or asked to wait, until the
+  retry budget ran out. Fix the bridge, its provider, the network path to it or the proxy of the Connection.
+- Then press **Check connection** on the Connection page: a check whose step `info` passes ends the Broken state at
+  once. Otherwise the next probe ends it by itself, within `delivery.broken_probe_interval`.
+- **A passing `info` does not prove that calls go through.** The check and the probe read only the bridge's `info`,
+  which a bridge answers also while its provider refuses the bridge's own credentials, so the state can end while
+  calls would still fail and make the gateway Broken again. Before you trust a recovery, run `muster bridge check <base
+  URL> --token-file <file> --contact <your contact>` against the bridge, with `--channel <id>` when it is also a
+  messenger: its step `notification` sends a real notification to your contact through the provider (see
+  [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check)).
+- The Internal alert resolves and `gateway_recovered` (`connection`, `by` — `probe` or `check` — and
+  `broken_for_s`) is logged when the Broken state ends; the chart rule resolves at the Leader's next update of
+  `muster_notification_gateway_broken`, within 15 seconds.
+- Calls that come due afterwards go as usual. Check the Alert Groups whose Timeline shows `page_not_delivered` with
+  `gateway_broken`: their people were not called.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliverySlow.md -->
+# MusterDeliverySlow
+
+## Meaning
+
+Deliveries are slow: the 95th percentile of the time from receiving a Snapshot to the API call that delivers the
+resulting change is above 5 seconds, the objective Muster keeps while its rate limiters have room. The chart rule is:
+
+```promql
+histogram_quantile(0.95, sum by (le) (rate(muster_delivery_latency_seconds_bucket{job="muster"}[15m]))) > 5
+```
+
+It fires after 15 minutes, with severity `warning`. It is a chart rule only and has no labels of its own: it covers
+every Destination together. Changes made by Commands or timers are not measured, only those caused by Snapshots.
+
+## Impact
+
+- New Alert Groups and their changes appear in the messengers later than usual. Nothing is lost.
+- The UI and the API show the current state without delay; Commands keep working.
+
+## Diagnosis
+
+1. Find the slow Destinations:
+   `histogram_quantile(0.95, sum by (le, destination) (rate(muster_delivery_latency_seconds_bucket{job="muster"}[15m])))`.
+   `muster_destination_info` gives their names.
+2. Look for rate limits: `increase(muster_delivery_attempts_total{job="muster",outcome="retry_after"}[15m])` by
+   `destination`. A messenger that answers "retry after" makes Muster wait as long as it asks.
+3. Look for a Storm: `muster_storm_active` by `route`, the log line `storm_started` and **Storms** on the System
+   status page (`/admin/system-status`). More than `route.storm_threshold` (20) new Alert Groups per minute on a
+   Route fill the limiters.
+4. Check Muster's own limiters. Telegram: `destination.telegram.limiter` (10 requests per minute per Destination, sends
+   and edits together, in the channel and its discussion group) and `connection.telegram.limiter` (15 messages per
+   second per Connection). Slack: `destination.slack.limiter` (30 requests per minute per Destination, sends and edits
+   together) and `connection.slack.limiter` (50 requests per minute per Connection). A busy Destination waits for its
+   limiter, which is expected and not a fault.
+5. Check the latency of the calls themselves:
+   `histogram_quantile(0.95, sum by (le, outcome) (rate(muster_client_request_duration_seconds_bucket{job="muster",client="delivery"}[15m])))`.
+   Slow calls point at the network, a proxy or the messenger.
+6. Check **Delivery queues** on the System status page; when a queue keeps growing, see
+   [MusterDeliveryQueueGrowing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing.md).
+
+## Fix
+
+- A Storm or a noisy Route: tune the Route's grouping so that one problem makes one Alert Group, or create an
+  Alertmanager silence for the source. The Storm summary already replaces separate messages while the Storm lasts.
+- Rate limits of one chat: spread the Routes of that Destination over more Destinations (chats or channels).
+- Slow calls: fix the network path or the proxy of the Connection; for Telegram in a restricted network, see
+  [Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md).
+- The alert clears once the 95th percentile over 15 minutes is back under 5 seconds.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing.md -->
+# MusterDeliveryQueueGrowing
+
+## Meaning
+
+A Destination has more than 100 deliveries waiting, and the number keeps growing. The chart rule is:
+
+```promql
+max by (destination) (muster_delivery_queue{job="muster"}) > 100 and max by (destination) (deriv(muster_delivery_queue{job="muster"}[15m])) > 0
+```
+
+It fires after 15 minutes, with severity `warning` and the label `destination`, the Destination's id;
+`muster_destination_info` gives its name. It is a chart rule only. `muster_delivery_queue` is counted by the Leader
+every 15 seconds: the pending deliveries and Thread replies that are due.
+
+## Impact
+
+- The messages of that Destination fall further and further behind: new Alert Groups and their changes appear late.
+  Deliveries are still made; nothing is lost.
+- Other Destinations, the UI and the API keep working. Once this Destination's limiter, or its Connection's, refuses a
+  call, the delivery worker leaves the rest of its deliveries, and, when the Connection's limiter refused, those of its
+  other Destinations, untouched until the limiter has a call free again; those of Urgent Alert Groups it tries again
+  during a round, at most one batch of ten calls each time the limiter has a call free again. So the queue holds up the
+  messages of other Destinations by about one batch of ten calls each time the limiter has a call free, and by a few
+  calls per batch of other Urgent work, not by its size. The calls that the limiter allows go to the deliveries in the
+  delivery order: those of Urgent Alert Groups first. On the Destinations whose limiters have room, Thread replies and
+  the events of outgoing webhooks still wait for the Root messages and edits due before them, as the delivery order
+  says.
+- While the queue lasts, the delivery worker sleeps until the limiter has a call free, unless other work wakes it, which
+  leaves this Destination alone: the round at a free call tries about one batch of ten calls to this Destination, and
+  every round makes about a dozen claims per Organization in PostgreSQL, each a millisecond or two, longer with tens of
+  thousands of waiting deliveries.
+
+## Diagnosis
+
+1. Open **System status** (`/admin/system-status`): **Delivery queues** shows the waiting deliveries per Destination,
+   **Storms** the Routes in a Storm and **Broken Destinations** whether the Destination stopped.
+2. Look at the outcomes of its attempts:
+   `sum by (outcome) (increase(muster_delivery_attempts_total{job="muster",destination="<id>"}[15m]))`. Many
+   `retry_after` mean that the messenger limits the rate; `transient` or `unknown` that calls fail; few attempts of any
+   kind that Muster's own limiter holds them back.
+3. Check whether a Storm feeds the queue: `muster_storm_active` by `route` and the log line `storm_started`.
+   `route.storm_threshold` is 20 new Alert Groups per minute.
+4. For Telegram, compare the load with the limiters: `destination.telegram.limiter` allows 10 requests per minute per
+   Destination, sends and edits together, in the channel and its discussion group. For Slack,
+   `destination.slack.limiter` allows 30 requests per minute per Destination, sends and edits together, and
+   `connection.slack.limiter` 50 requests per minute per Connection.
+5. When no delivery succeeds at all, follow [MusterDeliveryFailing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing.md) instead.
+
+## Fix
+
+- Reduce what feeds the Destination: tune the grouping of its Routes, create an Alertmanager silence for a noisy source,
+  or move some Routes to another Destination.
+- When calls fail, fix the cause as in [MusterDeliveryFailing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing.md).
+- A queue that only grows during a Storm shrinks after it: Muster coalesces the changes of a Root message, so it
+  delivers the current state rather than every change.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog.md -->
+# MusterIngestBacklog
+
+## Meaning
+
+Processing falls behind ingestion: more than 1,000 Stored Snapshots wait to be processed, or the 95th percentile of
+the time from receiving a Snapshot to the end of its processing is above 60 seconds. The chart rule is:
+
+```promql
+max(muster_ingest_backlog{job="muster"}) > 1000 or histogram_quantile(0.95, sum by (le) (rate(muster_ingest_processing_delay_seconds_bucket{job="muster"}[5m]))) > 60
+```
+
+It fires after 5 minutes, with severity `warning`. It is a chart rule only. `muster_ingest_backlog` is counted by the
+Leader over every Organization. Ingestion itself keeps answering Alertmanager: Muster stores each Snapshot first and
+processes it afterwards, in arrival order per Alertmanager group.
+
+## Impact
+
+- New Alerts reach their Alert Groups late, and so do resolves: Alert Groups appear, change and resolve in the UI and
+  in the messengers later than Alertmanager sent them.
+- Nothing is lost: the Stored Snapshots wait and are processed in order.
+
+## Diagnosis
+
+1. Find the slow Integrations:
+   `histogram_quantile(0.95, sum by (le, integration) (rate(muster_ingest_processing_delay_seconds_bucket{job="muster"}[5m])))`.
+2. List what waits for one Integration: `GET /api/v1/stored-snapshots?integration=<id>&state=pending`, or the
+   Stored Snapshots of the Integration page (`/integrations/<id>`).
+3. Read the log lines `snapshot_processing_interrupted` (`integration`, `error`): the processing worker stopped
+   because the database failed or the connection was lost, and tries again after a growing pause.
+4. Check the database pool of each replica: `muster_db_pool_connections` by `state` against
+   `muster_db_pool_max_connections`, and the rate of `muster_db_pool_acquire_wait_seconds_total`. A pool that is always
+   fully acquired, with the wait time growing, means that the replicas need more connections.
+5. Check whether failures add to the load: `muster_ingest_failed_snapshots_total` by `integration` and the log line
+   `snapshot_failed` (`integration`, `stored_snapshot`, `error`). A failed Snapshot is not retried by itself; the
+   Snapshots behind it are processed.
+6. Check the database itself: CPU, I/O, locks and slow queries.
+
+## Fix
+
+- Restore the database or the connection to it; the worker resumes on its own.
+- Give the replicas more connections (`pool_max_conns` of `MUSTER_DATABASE_URL`, by default the larger of 10 and the
+  number of CPUs), or run more replicas. Each Integration processes `processing.parallel_groups` (2) Alertmanager
+  groups at the same time.
+- Reduce the input: an Alertmanager that sends very often or very large groups makes more work. Check its
+  `group_interval` and `repeat_interval`.
+- After fixing the cause of `snapshot_failed`, process the failed Snapshots again with
+  `muster ingest replay --since <duration> [--integration <name>] --actor <name>`, for example
+  `muster ingest replay --since 2h --integration prod-eu --actor "Jane Doe"`. Processing is idempotent, so Snapshots
+  that were processed change nothing.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected.md -->
+# MusterIngestRejected
+
+## Meaning
+
+Muster refused ingestion requests within 15 minutes: an oversized one, or more than 10 without a valid Integration
+token, counted per value of the label `integration`. The chart rule is:
+
+```promql
+sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="too_large"}[15m])) > 0 or sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="unauthorized"}[15m])) > 10
+```
+
+It fires at once (`for: 0m`), with severity `warning` and the labels `integration` — the id of the token's
+Integration, or `unknown` when the token matched none — and `outcome`. It is a chart rule only.
+
+- `too_large`: the body was larger than `ingest.body_limit` (16 MB) and was refused with `413`.
+- `unauthorized`: the token was missing, wrong or revoked, belonged to a deleted Integration, or was an API token
+  instead of an Integration token; refused with `401`.
+
+## Impact
+
+- The refused requests are not stored or processed. When they come from an Alertmanager, its Alerts do not reach
+  Muster, and with a Heartbeat on, the Integration soon becomes Heartbeat lost.
+- Requests with a valid Integration token and a body within `ingest.body_limit` keep working.
+
+## Diagnosis
+
+1. See which Integration and outcome:
+   `sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster"}[15m]))`.
+2. Read the log lines `ingest_rejected` (`integration`, `outcome`, `route_pattern`, `client_address`): the route
+   pattern tells ingestion from the Heartbeat, and the client address which host sent it. Muster never logs a token.
+3. For `unauthorized`, open the Integration page (`/integrations/<id>`) and compare its tokens and their last use with
+   the Alertmanager receivers that send to it. `integration="unknown"` means the token matched no Integration at all:
+   a mistyped token, one of a deleted Integration, an API token, or a scanner probing the ingest listener.
+4. For `too_large`, find the Alertmanager group that produces such a Snapshot: a group with very many Alerts or very
+   long annotations.
+
+## Fix
+
+- A revoked or old token still in use: put a current token into the Alertmanager receiver and reload Alertmanager;
+  see [Token rotation](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#token-rotation).
+- An API token in a receiver: replace it with a token of the Integration; ingestion accepts only Integration tokens.
+- Traffic from unknown addresses: restrict who may reach the ingest listener (`MUSTER_INGEST_URL`) with a network
+  policy or the ingress.
+- `too_large`: split the Alertmanager group with a finer `group_by`, or shorten the annotations that make it large.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed.md -->
+# MusterIngestSnapshotFailed
+
+## Meaning
+
+Stored Snapshots of an Integration failed in processing.
+
+Within 15 minutes Muster could not process one: the body was not JSON, lacked a field that an Alertmanager webhook
+has, or processing failed. The chart rule is:
+
+```promql
+sum by (integration) (increase(muster_ingest_failed_snapshots_total{job="muster"}[15m])) > 0
+```
+
+It fires at once (`for: 0m`), with severity `warning` and the label `integration`, the id of the Integration. It is a
+chart rule only. The sender got `202`, because ingestion never answers `400`; the Integration page shows the warning
+`snapshot_failed` instead.
+
+## Impact
+
+- The failed Snapshots create or change no Alert and no Alert Group, so nothing is sent for them, and they are not
+  retried by themselves.
+- Snapshots that arrive later are processed as usual, and the Integration page stops warning once one is processed,
+  also one from another sender of the same Integration. The warning is not a durable signal; this rule is, and it
+  resolves 15 minutes after the last failure.
+- The warning shows the error without the values the sender chose, such as a quoted status. The Stored Snapshot has
+  the full error.
+
+## Diagnosis
+
+1. Open the Integration page (`/integrations/<id>`): the warning `snapshot_failed` shows the error of its newest
+   Stored Snapshot, for example `the webhook has no groupKey`. `GET /api/v1/integrations/<id>` carries the same as
+   `warnings`.
+2. Open **Stored Snapshots** of the Integration, or `GET /api/v1/stored-snapshots?integration=<id>`: the Snapshots in
+   state `failed` keep their body as received and the `processing_error`.
+3. Read the log lines `snapshot_failed` for the Integration.
+4. Compare the body with the [fields a body needs](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#what-the-body-needs): a
+   custom sender must send `groupKey`, `status` and `alerts`, and in each Alert `labels`, `status` and `startsAt`.
+
+## Fix
+
+- Correct the sender so that its body has the required fields, and send it again; the next Snapshot that is processed
+  clears the warning.
+- Run `muster ingest replay --since <duration> --integration <name> --actor <name>` to process the failed Snapshots
+  again after a fix on the Muster side.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md -->
+# MusterTemplateError
+
+## Meaning
+
+A template failed to render. This alert has two sources with the same name, severity `warning` and this page:
+
+- The **Internal alert**, raised by Muster as an Alert of the built-in "Muster" Integration when a template of a Route
+  or of a Destination starts failing, and resolved when that template renders again or, for a Route, when a new
+  template of that kind is saved; for a Destination, also when the Destination is deleted. Its labels are `route`
+  and `route_name` for a template of a Route — the Root message, the Alert line or the Ack timeout notice (`template`
+  is `root_message`, `line` or `ack_timeout_notice`) — or `destination` and `destination_name` for a request template
+  of an outgoing webhook (`template` is `webhook_request`).
+- The **chart rule**, on every failure counted in the last 15 minutes:
+
+    ```promql
+    sum by (route, destination, template) (increase(muster_template_errors_total{job="muster"}[15m])) > 0
+    ```
+
+    It fires at once (`for: 0m`) with the labels `route`, `destination` (one of them empty) and `template`. The
+    counter also counts the URL templates of Link rules (`template="link_rule"`), which raise no Internal alert, so
+    the chart rule can fire where the Internal alert does not.
+
+## Impact
+
+- A Route template that fails: the message is rendered with the **Fallback template** instead — every label under
+  Muster's heading, with the footer and the buttons. People still see and act on the Alert Group, in a plainer
+  format.
+- A request template of an outgoing webhook that fails: that request is not sent; the delivery or the Thread reply
+  ends as Not delivered, with no fallback body.
+- A Link rule that fails: its link is left out of the Alert Group's links.
+- Everything else keeps working.
+
+## Diagnosis
+
+1. Open **System status** (`/admin/system-status`): **Template errors** lists every Route and Destination whose
+   template fails, with the kind — Root message, Alert line, Ack timeout notice, Link rule or Request template.
+2. Open the Route page (`/routes/<id>`): the banner says "Template error since HH:MM: {error}." with the line and
+   column that failed. The Route list marks the Route with "Template error".
+3. Read the log lines:
+    - `fallback_template_used` (`route`, `group`, `template`, `error`): a Route template failed and the message used
+      the Fallback template.
+    - `webhook_template_failed` (`destination`, `group`, `request`, `error`): a request template of an outgoing
+      webhook failed.
+    - `link_rule_failed` (`link_rule`, `route`, `group`, `error`): the URL template of a Link rule failed.
+4. Check which labels the template reads: a template that works for most Alert Groups often fails on one whose
+   Alerts lack a label or carry an unexpected value.
+
+## Fix
+
+- Correct the template so that it handles the missing or unexpected value, and check it with the preview before you
+  save it. For outgoing webhooks, see [Template errors](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#template-errors).
+- For a Link rule, correct its URL template under Organization → **Link rules** (`/admin/organization/link-rules`).
+- The Internal alert resolves when the next message of the Route renders with the template (logged as
+  `template_recovered`) or when a new template of that kind is saved on the Route, and when the next request of the
+  Destination renders or the Destination is deleted. Deleting a Route does not resolve it. The chart rule resolves
+  15 minutes after the last failure.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md -->
+# MusterClockSkew
+
+## Meaning
+
+A replica's clock differs from the database clock by more than 2 seconds. The chart rule is:
+
+```promql
+max by (instance) (abs(muster_clock_skew_seconds{job="muster"})) > 2
+```
+
+It fires after 5 minutes, with severity `warning` and the label `instance`. It is a chart rule only. Each replica
+measures its clock against the database every minute and exports the difference as `muster_clock_skew_seconds`,
+positive when the replica is ahead.
+
+## Impact
+
+Every replica takes the time from its own system clock, and the replicas share one database, so a replica that is off
+disagrees with the others:
+
+- Timestamps it writes — of Alerts, Alert Groups and Timeline entries — are off by the skew, and the timers and
+  windows it evaluates, such as Snooze ends, Ack timeouts and the Reopen window, run early or late.
+- TOTP codes may be refused at sign-in.
+- ID tokens of the identity provider may be refused as not yet valid or expired, so OIDC sign-in fails.
+- Signatures of outgoing webhooks carry a timestamp that receivers may reject.
+- Leases of claimed rows and of the Leader lock expire too early or too late, which can make work run twice or wait.
+
+## Diagnosis
+
+1. Find the replica: `muster_clock_skew_seconds` by `instance`.
+2. Read its log lines `clock_skew` (`skew_seconds`, `warning_seconds`): logged on every measurement above
+   `process.clock_skew_warning` (2 s).
+3. Run `muster doctor` on the same host or node. The line `clock_skew` prints the measured skew, and warns with
+   "… against the database clock, more than 2s" above the limit.
+4. Check time synchronisation on the node of the replica and on the database server: whether NTP (chrony,
+   systemd-timesyncd or the cloud provider's time service) runs and is in sync.
+
+## Fix
+
+- Synchronise the clocks of the nodes and of the database server with NTP. The skew is measured again every minute,
+  and the alert resolves 5 minutes after it falls under 2 seconds.
+- When only one node is off, move the replica to another node until its clock is fixed.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures.md -->
+# MusterLoginFailures
+
+## Meaning
+
+A burst of failed sign-ins: more than 20 for one method within 10 minutes. The chart rule is:
+
+```promql
+sum by (method) (increase(muster_login_failures_total{job="muster"}[10m])) > 20
+```
+
+It fires at once (`for: 0m`), with severity `warning` and the label `method`: `local` for a wrong login or password,
+`totp` for a wrong TOTP or recovery code, `oidc` for a refused OIDC sign-in. It is a chart rule only. Attempts that
+the sign-in throttle refuses before evaluating them are not counted.
+
+## Impact
+
+- Someone may be guessing passwords or codes. The sign-in throttle (`auth.signin_throttle`) slows them down: after 3
+  consecutive failures per account or source address, each attempt waits twice as long as the previous one, up to 60
+  seconds.
+- Legitimate users of the same account or address wait longer between attempts.
+- With `oidc`, people may be unable to sign in at all because the identity provider or its settings fail.
+
+## Diagnosis
+
+1. See the method: `sum by (method) (increase(muster_login_failures_total{job="muster"}[10m]))`.
+2. For `local` and `totp`, open the **Audit log** (Organization → **Audit log**, `/admin/audit-log`) and look for the
+   actions `session.sign_in_failed` and `session.second_factor_failed`: each names the account, when it is known, and
+   the source address.
+3. For `oidc`, read the log lines `oidc_sign_in_failed` (`reason`, `error`): the identity provider reported an error,
+   could not be reached, or answered with an ID token that did not verify. A clock that is off also makes ID tokens
+   fail; see [MusterClockSkew](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md).
+4. Tell an attack from a mistake: many accounts from few addresses look like guessing; one account from its usual
+   address looks like a forgotten password or a script with an old one.
+
+## Fix
+
+- Guessing from outside: block the source addresses at the ingress or the firewall, and restrict who may reach the
+  UI.
+- A forgotten password or a lost authenticator: on the user's page (`/admin/users/<id>`), create a **New password
+  setup link** or **Reset TOTP**. Without an Admin who can sign in, use the emergency commands
+  `muster admin reset-password --actor <name> <login>` and `muster admin reset-totp --actor <name> <login>`.
+- A script or a tool with old credentials: give it a Personal access token or an API token of a Service account
+  instead of a password.
+- `oidc` failures: fix the identity provider, or the **OIDC settings** (`/admin/oidc`) and their **Check
+  connection**; see [Sign-in with Keycloak](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md). Local sign-in stays available meanwhile.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md -->
+# MusterScheduleGap
+
+## Meaning
+
+A Schedule has a **gap** now or one that starts within the next 7 days (`schedule.gap_alert_horizon`): a time when no
+Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is On-call. A person may not be
+Paged when they are a Viewer, disabled, or no longer in the Schedule's Team, and their Shifts are skipped; see
+[Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md#gaps-and-the-internal-alert).
+
+Only a Schedule whose gap alert is active reports its gaps: by default (`schedule.gap_alert` `by_default`) the Team's
+main Schedule, and any Schedule an Admin set to `on`. The Leader looks for gaps every 5 minutes
+(`schedule.gap_scan_interval`).
+
+This alert has two sources with the same name, severity `warning` and this page:
+
+- The **Internal alert**, raised by Muster itself as an Alert of the built-in "Muster" Integration, with the labels
+  `schedule` (the Schedule's id), `schedule_name`, `team_id`, `team_name` and, under the Organization's Team label
+  (`team` by default), the Team's slug, so that the alert belongs to the Team: its Alert Group lists the Team, and a
+  Route can pick it by the Team label. The annotation `gap_start` says when the nearest gap starts. It stays raised
+  while the gap lasts, and resolves at the next scan once no gap is current or within the horizon, when the gap alert
+  is no longer active, or when the Schedule is deleted.
+- The **chart rule**, the backup for when Muster cannot deliver the Internal alert:
+
+    ```promql
+    max by (schedule) (muster_schedule_gap{job="muster"}) == 1
+    ```
+
+    It fires at once with the label `schedule`. `muster_schedule_gap` is set by the Leader: 1 for a Schedule whose gap
+    alert is active and that has a gap now or within the horizon, 0 for every other Schedule.
+
+## Impact
+
+- During the gap nobody is On-call in the Schedule: "On call now" shows the gap, and nobody of this Schedule can be
+  Paged for the Team's Alert Groups then.
+- Alert Groups are still created, routed and delivered to their Destinations; only the On-call is missing.
+
+## Diagnosis
+
+1. Read the labels: `schedule_name` and `team_name` name the Schedule, and `gap_start` says when the gap starts.
+2. Read the gaps of the Schedule: `GET /api/v1/schedules/<schedule>/on-call` lists a warning `gap` with its `start`
+   and `end` for each gap of the next 14 days, and the warnings `disabled`, `viewer` and `not_in_team` name the people
+   whose Shifts are skipped. `GET /api/v1/schedules/<schedule>` gives the nearest gap as `next_gap`.
+3. A gap where a person should be On-call usually means that the person was disabled, turned into a Viewer or taken
+   out of the Team, for example by the groups of the identity provider; a gap at the edge of a Rotation layer's limits
+   usually means that the limits leave hours uncovered.
+4. Find the log line `schedule_gap_detected` (`schedule`, `team`, `gap_start`) of the raise.
+
+## Fix
+
+- **Fill the gap with an Override**: any Responder of the Team, or an Admin, makes the person who takes the time
+  On-call from the start to the end of the gap with `POST /api/v1/schedules/<schedule>/overrides`. The next scan
+  resolves the alert once no other gap is within the horizon.
+- **Change the Rotation layers**: an Admin replaces a person who may no longer be Paged, adds people to a Rotation
+  layer, widens its limits or adds a Rotation layer below that covers the rest of the time.
+- **Turn the alert off** for a Schedule that is meant to cover only part of the day, such as a second line in working
+  hours: set `gap_alert` to `off` on it. A Schedule that is not its Team's main one reports its gaps only with
+  `gap_alert` `on`.
+- The Internal alert resolves and `schedule_gap_cleared` (`schedule`, `team`) is logged at the next scan; the chart
+  rule resolves when the Leader sets `muster_schedule_gap` to 0 at the same scan.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md -->
+# MusterSnapshotTruncated
+
+## Meaning
+
+Alertmanager truncates the Snapshots of an Integration: it left Alerts out of a Snapshot because of the `max_alerts`
+limit of its webhook receiver, or, for Grafana, the Max alerts limit of its webhook contact point. Muster treats each
+Snapshot as the whole Alertmanager group, so a Truncated Snapshot hides Alerts from it.
+
+It is an **Internal alert** only, severity `warning`, raised by Muster as an Alert of the built-in "Muster"
+Integration when the first Alertmanager group (`groupKey`) of the Integration arrives truncated. Its labels are
+`integration` (the Integration's id) and `integration_name`. It is resolved when no group of the Integration is
+truncated any more: each group's next untruncated Snapshot ends its truncation, and so does a group that has sent
+nothing for as long as it takes an Alert to go Stale.
+
+## Impact
+
+- The Alerts that Alertmanager left out do not reach their Alert Groups: Muster may show fewer Alerts than fire, miss
+  an Alert Group entirely, or keep an Alert open that Alertmanager no longer lists.
+- For Grafana, when a whole group resolves, its last Snapshot lists only the first alerts, up to Max alerts, and
+  Grafana sends nothing more for the group until one of its alerts fires again. The Alerts it left out stay firing in
+  Muster until they go Stale, which needs a live Heartbeat; the Heartbeat through Grafana has not been verified (see
+  [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md#heartbeat)).
+- Everything else of the Integration keeps working.
+
+## Diagnosis
+
+1. Open the Integration page (`/integrations/<id>`): the banner says "Alertmanager truncates Snapshots for N groups.
+   Set `max_alerts: 0` on the Alertmanager receiver." Its **Alertmanager routes** list shows the **Truncated groups**.
+2. **System status** (`/admin/system-status`) lists the Integration under **Integrations needing attention** with
+   "Snapshots truncated".
+3. `muster_ingest_truncated_snapshots_total` by `integration` counts the truncated Snapshots; the log line
+   `internal_alert_raised` (`alertname`, `fingerprint`, `entity`) marks when the alert was raised.
+4. Open a recent Stored Snapshot of the Integration (`/integrations/<id>/snapshots/<id>`): a Truncated Snapshot has
+   `truncatedAlerts` above 0.
+5. In the Alertmanager configuration, find the `webhook_configs` entry of the receiver that sends to Muster and its
+   `max_alerts`. For Grafana, open the webhook contact point that sends to Muster and check its Max alerts (`maxAlerts`
+   in a provisioning file).
+
+## Fix
+
+- Set `max_alerts: 0` on the Alertmanager receiver that sends to Muster, so that every Alert of the group is sent,
+  and reload Alertmanager; see [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md).
+- For Grafana, set Max alerts to 0, the default, on the webhook contact point that sends to Muster; see
+  [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md#create-a-webhook-contact-point). Max alerts 0 does not end the Alerts
+  that a wholly resolved group of Grafana's left firing: they go Stale while the Heartbeat is live, or end once the
+  group fires again and sends untruncated Snapshots. Resolving their Alert Group by hand does not end them either:
+  Alerts still firing when its Grace period ends start a new Alert Group.
+- The alert resolves once each truncated group has sent an untruncated Snapshot, at its next notification. A group of
+  Grafana's that resolved wholly sends none until one of its alerts fires again, so its truncation ends as
+  [Meaning](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md#meaning) says.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring.md -->
+# MusterOIDCSecretExpiring
+
+## Meaning
+
+The OIDC client secret expires soon: the date entered as **Client secret expires on** in the OIDC settings is within
+`oidc.secret_expiry_lead` (14 days).
+
+It is an **Internal alert** only, severity `warning`, with no labels besides `alertname` and `severity`. The Leader
+checks the date every 5 minutes and raises it as an Alert of the built-in "Muster" Integration; it is resolved when
+the date is changed to a later one or cleared.
+
+## Impact
+
+- Nothing yet. Once the secret expires, the identity provider refuses Muster's back-channel requests, and OIDC
+  sign-in fails for everyone.
+- Local sign-in keeps working, so an Admin with a local password can still fix the settings.
+
+## Diagnosis
+
+1. Open the **OIDC settings** (`/admin/oidc`): the banner says "The client secret expires on {date}. Issue a new one in
+   the identity provider and enter it here."
+2. The log line `oidc_secret_expiring` (`expires_on`) is written once per raise.
+3. In the identity provider, look up the client's secret and its real expiry date; the date in Muster is only what
+   someone entered.
+
+## Fix
+
+1. Issue a new client secret in the identity provider, for Keycloak under the client's **Credentials**; see
+   [Sign-in with Keycloak](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md).
+2. Enter the new secret in the OIDC settings, set **Client secret expires on** to its new expiry date, or clear it if
+   the new secret does not expire, and save. With the API, `PUT /api/v1/oidc-settings` takes the fields
+   `client_secret` and `client_secret_expires_on`.
+3. Press **Check connection**, then sign in once through OIDC to confirm.
+
+The alert resolves within 5 minutes, at the Leader's next check.

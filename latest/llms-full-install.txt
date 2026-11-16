@@ -1,0 +1,1342 @@
+# Muster documentation, version latest: Install
+
+This file holds the full text of the section Install. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text; the rules for AI agents are in https://muster-io.github.io/muster/latest/llms-full-guide.txt.
+
+<!-- Source: https://muster-io.github.io/muster/latest/install/helm.md -->
+# Install with Helm
+
+The Helm chart runs Muster on Kubernetes 1.30 or newer. It deploys Muster and its Services, and optionally an Ingress or
+Gateway API routes, a PodDisruptionBudget, a ServiceMonitor, a NetworkPolicy, alert rules and a dashboard. It does not
+include PostgreSQL: Muster takes an [external database](https://muster-io.github.io/muster/latest/install/database.md). For a first try on one machine, use the
+[Quick start](https://muster-io.github.io/muster/latest/quick-start.md) with Docker Compose instead.
+
+```mermaid
+flowchart LR
+  browser["Browser"] -- "muster.example.org" --> app["app Service, 8080"]
+  am["Alertmanager"] -- "ingest.example.org" --> ingest["ingest Service, 8081"]
+  app --> pod["Muster pods"]
+  ingest --> pod
+  pod --> pg["PostgreSQL"]
+  prom["Prometheus"] -- "/metrics" --> internal["internal Service, 8082"]
+  internal --> pod
+```
+
+## Get the chart
+
+Each release publishes the chart as an OCI artifact in the registry of the image:
+
+```sh
+helm install muster oci://ghcr.io/muster-io/charts/muster --version <version> \
+  --namespace muster --create-namespace -f values.yaml
+```
+
+`<version>` is a Muster release without the `v`, such as `0.1.0` for the release `v0.1.0`. The chart's `appVersion` is
+the release's tag, and `image.tag` defaults to it, so each chart runs the image of its own release.
+
+The release signs the chart with cosign, keyless, as it signs the image; [Verify a release](https://muster-io.github.io/muster/latest/install/versions.md#verify-a-release)
+shows how to check the signature before you install. Artifact Hub lists the released versions of the chart, each
+with its changes and the image it runs, pinned by digest: [Muster on Artifact Hub](https://artifacthub.io/packages/search?repo=muster).
+
+## Create the Secret
+
+The chart never generates the master keys. Create a Secret yourself and name it in `existingSecret`; rendering fails
+without it. The Secret holds, under the key names that the values `masterKeysKey`, `database.passwordKey` and
+`bootstrapAdmin.passwordKey` name:
+
+`secret-keys`
+:   the default of `masterKeysKey`
+
+    Holds the master key of the Keyring, as `openssl rand -base64 32` prints it.
+
+`database-password`
+:   the default of `database.passwordKey`
+
+    Holds the password of the database user, unless `database.existingSecret` names another Secret for it.
+
+`bootstrap-password`
+:   no default; set `bootstrapAdmin.passwordKey`
+
+    Holds the password of the first Admin.
+
+```sh
+kubectl create namespace muster
+kubectl -n muster create secret generic muster \
+  --from-literal=secret-keys="$(openssl rand -base64 32)" \
+  --from-literal=database-password='<the database password>' \
+  --from-literal=bootstrap-password="$(openssl rand -hex 16)"
+```
+
+The pods mount the Secret as files and read the values through `MUSTER_SECRET_KEYS_FILE`,
+`MUSTER_DATABASE_PASSWORD_FILE` and `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE`, so no secret appears in the pod's
+environment, except the whole database URL when you name its key in `database.urlKey`.
+
+When another operator keeps the database credentials in a Secret of its own, name that Secret in
+`database.existingSecret` instead of copying the password: `database.passwordKey` and `database.urlKey` then name keys
+of that Secret, and the master keys and the password of the first Admin stay in `existingSecret`. For the Secret
+`muster-db-app` that CloudNativePG generates:
+
+```yaml
+existingSecret: muster
+database:
+  existingSecret: muster-db-app
+  urlKey: uri
+```
+
+[The database](https://muster-io.github.io/muster/latest/install/database.md#cloudnativepg) shows the form with `sslmode`.
+
+!!! warning "Keep a copy of the master key"
+    Muster refuses to start on a database without the key that wrote it, and a restored database is useless without it.
+    Keep a copy **apart from the database backups**: see [Backup and restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md).
+
+A tool that manages Secrets, such as External Secrets or Sealed Secrets, works the same way: it only has to produce a
+Secret of that name with those keys.
+
+### Ship the Secret's source in the release
+
+With GitOps tools such as Argo CD or Flux, the object that produces the Secret can be part of the same
+release: `extraObjects` takes a list of extra manifests, and the chart renders each as a document of its own. An item
+is a map or a string that holds a YAML manifest; both go through `tpl`, so a manifest can name `.Values` and `.Release`
+and keeps the key names in one place. An `ExternalSecret` of External Secrets Operator that fills the Secret from a
+secret store:
+
+```yaml
+existingSecret: muster
+
+bootstrapAdmin:
+  email: admin@example.org
+  passwordKey: bootstrap-password
+
+extraObjects:
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: '{{ .Values.existingSecret }}'
+    spec:
+      refreshInterval: 1h
+      secretStoreRef: { kind: ClusterSecretStore, name: vault }
+      target: { name: '{{ .Values.existingSecret }}' }
+      data:
+        - secretKey: '{{ .Values.masterKeysKey }}'
+          remoteRef: { key: muster/keys, property: secret-keys }
+        - secretKey: '{{ .Values.bootstrapAdmin.passwordKey }}'
+          remoteRef: { key: muster/keys, property: bootstrap-password }
+        - secretKey: '{{ .Values.database.passwordKey }}'
+          remoteRef: { key: muster/database, property: password }
+```
+
+Quote a value that is only a template, as above, so that the item stays valid YAML. `bootstrapAdmin.passwordKey` has
+no default, so set it before naming it. With `database.existingSecret`, the database password comes from that Secret
+instead, and its line is left out.
+
+`tpl` renders every `{{` of an item, so one meant for another tool, such as the template of an `ExternalSecret`, is
+escaped as ``{{ `{{ .password | urlquery }}` }}``; unescaped, it renders empty. Write the strings inside `{{ }}` with
+backticks, not double quotes: the chart writes a map item back as YAML before `tpl` runs, which breaks a line longer
+than 80 characters at a space, and a backtick string may span that break, which YAML then joins again, while a
+double-quoted string fails with `unterminated quoted string`. A string item is used as it is written.
+
+With `database.urlKey`, a key named `{{ .Values.database.urlKey }}` takes the place of the `passwordKey` line, for
+example a database URL that External Secrets Operator builds from the password, which `urlquery` encodes for the URL.
+Add it to the values above, with `existingSecret` and `bootstrapAdmin`, in place of their `extraObjects`:
+
+```yaml
+database:
+  urlKey: database-url
+
+extraObjects:
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: '{{ .Values.existingSecret }}'
+    spec:
+      refreshInterval: 1h
+      secretStoreRef: { kind: ClusterSecretStore, name: vault }
+      target:
+        name: '{{ .Values.existingSecret }}'
+        template:
+          mergePolicy: Merge
+          data:
+            '{{ .Values.database.urlKey }}': 'postgresql://muster:{{ `{{ .password | urlquery }}` }}@muster-db-rw.muster.svc:5432/muster?sslmode=require'
+      data:
+        - secretKey: '{{ .Values.masterKeysKey }}'
+          remoteRef: { key: muster/keys, property: secret-keys }
+        - secretKey: '{{ .Values.bootstrapAdmin.passwordKey }}'
+          remoteRef: { key: muster/keys, property: bootstrap-password }
+        - secretKey: password
+          remoteRef: { key: muster/database, property: password }
+```
+
+On the first install the pods wait in `Init:0/1`, with `FailedMount` events, until External Secrets Operator has
+created the Secret; this is normal, and they start once it exists. A `SealedSecret` works the same way; a string item
+suits it, since the encrypted data is pasted as it is:
+
+```yaml
+extraObjects:
+  - |
+    apiVersion: bitnami.com/v1alpha1
+    kind: SealedSecret
+    metadata:
+      name: {{ .Values.existingSecret }}
+    spec:
+      encryptedData:
+        secret-keys: <the output of kubeseal>
+        database-password: <the output of kubeseal>
+        bootstrap-password: <the output of kubeseal>
+```
+
+## Values
+
+A short `values.yaml` for an installation with an Ingress and an external database:
+
+```yaml
+existingSecret: muster
+
+database:
+  host: muster-db-rw.muster.svc
+  name: muster
+  user: muster
+  sslmode: require
+
+publicURL: https://muster.example.org
+ingestURL: https://ingest.example.org
+
+bootstrapAdmin:
+  email: admin@example.org
+  passwordKey: bootstrap-password
+
+replicas: 2
+podDisruptionBudget:
+  enabled: true
+
+ingress:
+  enabled: true
+  className: nginx
+  app:
+    hosts:
+      - host: muster.example.org
+    tls:
+      - secretName: muster-tls
+        hosts: [muster.example.org]
+  ingest:
+    hosts:
+      - host: ingest.example.org
+    tls:
+      - secretName: muster-ingest-tls
+        hosts: [ingest.example.org]
+```
+
+`publicURL` is required: the chart renders without it, but Muster stops at start. The notes that `helm install` prints
+warn about a missing `publicURL` or a missing database. `bootstrapAdmin` creates the first Admin once; after the first
+Admin exists, Muster ignores it. Everything else about the installation — Connections, Integrations, Routes, people —
+is configuration in the database and changes in the web UI and the API, never in the chart.
+
+The full list of values, with types and defaults, is the [chart values reference](https://muster-io.github.io/muster/latest/reference/chart-values.md). The
+chart rejects a value it does not know. Environment variables that have no value of their own go into `extraEnv`; the
+[environment reference](https://muster-io.github.io/muster/latest/reference/environment.md) lists them.
+
+The chart sets `MUSTER_MIGRATE_ON_START` off and runs `muster migrate` in an init container instead, under a database
+lock, so that the pods of a rollout do not migrate at once. The pods run as a non-root user with a read-only root file
+system. The readiness probe checks only the database, and a startup probe gives a slow start up to five minutes.
+
+## The two public addresses
+
+Muster has two addresses that other systems use, and the chart takes both as values:
+
+`publicURL`
+:   environment variable: `MUSTER_PUBLIC_URL`
+
+    Used for people: the web UI, links in messages, the OIDC redirect.
+
+`ingestURL`
+:   environment variable: `MUSTER_INGEST_URL`
+
+    Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook, and the button
+    presses of Slack Connections in the HTTP event mode.
+
+`ingestURL` defaults to `publicURL`. Muster never derives either from an Ingress or a route: set them to the addresses
+that people and machines really use, or the links it builds will be wrong.
+
+Muster serves ingestion on its own listener (`8081`) apart from the web UI and the API (`8080`), and the chart gives
+each a Service. A separate address for ingestion lets you expose the two differently: the web UI only inside the company
+network, and ingestion to Alertmanagers in other networks, or the other way round, with different TLS settings, rate
+limits and firewall rules on each. It also keeps a burst of Snapshots away from the web UI's address. When you have no
+such need, give both the same host name and send the paths `/api/v1/ingest`, `/api/v1/heartbeat` and
+`/api/v1/callbacks/` (with everything below them) to the ingest Service and everything else to the app Service, as
+[Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#behind-a-reverse-proxy) describes.
+
+The third listener, `8082`, serves `/health/live`, `/health/ready` and `/metrics`. It has a Service and no Ingress or
+route; do not expose it outside the cluster.
+
+## Ingress
+
+`ingress.enabled` creates two Ingress objects, one for the app Service and one for the ingest Service. List the hosts of
+each under `ingress.app.hosts` and `ingress.ingest.hosts`, with their `tls` blocks, and set `ingress.className` and
+`ingress.annotations` for your controller. A host takes an optional `path` (`/` by default) and `pathType` (`Prefix`).
+`ingress.annotations` applies to both Ingress objects; `ingress.app.annotations` and `ingress.ingest.annotations` are
+merged over a copy of it for their own Ingress, and their keys win. Restrict the web UI to your networks with an
+annotation of `ingress.app.annotations`, and keep the ingest host public for Alertmanagers and messengers.
+Set the body size limit of your controller to at least 16 MB for the ingest
+host, because Muster accepts Snapshots up to that size.
+
+## Image registry
+
+The image is `<registry>/<repository>:<tag>`, with `image.registry` `ghcr.io` and `image.repository` `muster-io/muster`
+by default. Set `image.registry` to pull the image through a mirror or a pull-through proxy, or `global.imageRegistry`,
+which wins over it, for every image the chart renders. An `image.repository` that starts with a registry host, such as
+`nexus.example.org/muster-io/muster`, is used as it is, with neither registry applied.
+
+## Gateway API
+
+`httpRoute.enabled` creates two `HTTPRoute` objects (`gateway.networking.k8s.io/v1`) instead of Ingress objects, one
+for each Service. Name the Gateway in `httpRoute.parentRefs` and the host names in `httpRoute.app.hostnames` and
+`httpRoute.ingest.hostnames`. `httpRoute.annotations` applies to both routes, and `httpRoute.app.annotations` and
+`httpRoute.ingest.annotations` are merged over a copy of it for their own route, as for the Ingress objects:
+
+```yaml
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: public
+      namespace: gateway
+  app:
+    hostnames: [muster.example.org]
+  ingest:
+    hostnames: [ingest.example.org]
+```
+
+The chart does not create the Gateway and its certificates. The Gateway API resources must be installed in the cluster
+and the Gateway must accept routes from the namespace of Muster. Use `ingress` or `httpRoute`, not both.
+
+## Replicas and the PodDisruptionBudget
+
+`replicas` is 1 by default. All replicas are active: each serves the web UI and ingestion and works on the queues, and a
+Leader among them does the few jobs that must run only once. With more than one replica:
+
+- Set `podDisruptionBudget.enabled` to `true`. The budget allows one unavailable pod (`maxUnavailable`), so a node drain
+  never takes all replicas down at once.
+- Spread the pods over nodes with `topologySpreadConstraints` or `affinity`.
+- If the main database connection goes through PgBouncer in transaction mode, set `database.sessionHost` (and
+  `sessionPort`) to a session-capable endpoint. See [the database](https://muster-io.github.io/muster/latest/install/database.md#pgbouncer).
+- Keep the clocks of all nodes in sync with NTP; Muster compares them with the database's clock and logs a warning on a
+  skew, and the chart rule `MusterClockSkew` raises an alert.
+
+Rolling updates run between adjacent minor versions only, and the init container of each new pod applies the database
+migrations before the pod starts. Take a backup first.
+
+## Watch Muster
+
+`serviceMonitor.enabled` makes the Prometheus Operator scrape `/metrics` of the internal Service.
+`alerting.prometheusRule.enabled` or `alerting.vmRule.enabled` renders the alert rules, and `dashboard.configMap.enabled`
+or `dashboard.grafanaDashboard.enabled` the Grafana dashboard. The rules and the dashboard are reference material; the
+[Runbooks](https://muster-io.github.io/muster/latest/operations/runbooks/index.md) explain each alert, and the [metrics reference](https://muster-io.github.io/muster/latest/reference/metrics.md)
+lists what Muster exports.
+
+<!-- Source: https://muster-io.github.io/muster/latest/install/database.md -->
+# The database
+
+Muster keeps everything in PostgreSQL 14 or newer, and nothing else stateful: no Redis and no queue. At start Muster
+refuses an older PostgreSQL and stops with an error that names the cause. It needs one extension, `pg_trgm`, which ships
+with PostgreSQL and which the database owner can create (a trusted extension since PostgreSQL 13); the first migration
+creates it. Neither the Helm chart nor the compose example backs up the database: see
+[Backup and restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md), and keep the master key apart from the backups.
+
+## As a URL or as fields
+
+Give the database to Muster in one of two forms. The settings are in the
+[environment reference](https://muster-io.github.io/muster/latest/reference/environment.md).
+
+A URL
+:   `MUSTER_DATABASE_URL`, such as `postgres://muster:<password>@db.example.org:5432/muster?sslmode=require`
+
+Fields
+:   `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_PORT` (default `5432`), `MUSTER_DATABASE_NAME`, `MUSTER_DATABASE_USER`,
+    `MUSTER_DATABASE_PASSWORD` or `MUSTER_DATABASE_PASSWORD_FILE`, `MUSTER_DATABASE_SSLMODE` (default `prefer`)
+
+When both forms are set, the URL wins and Muster logs a warning that names both. Muster ignores every `PG*` variable,
+such as `PGHOST`, `PGSSLMODE`, `PGSSLROOTCERT`, `PGOPTIONS` and `PGPASSFILE`, and the password file `~/.pgpass`. Give
+any other libpq setting as a parameter of the URL instead, such as `sslrootcert`, `options` or `target_session_attrs`.
+Percent-encode the values as libpq requires, `=` as `%3D` and a space as `%20`, for example
+`options=-c%20search_path%3Dmuster`. A URL that libpq rejects stops Muster at start with an error that names the
+parameter; the URL in the error includes the `sslmode` that Muster appends when the URL names none. Only libpq's
+default certificate files still apply when the URL names none: `~/.postgresql/root.crt`, and
+`~/.postgresql/postgresql.crt` with `postgresql.key`; these are files, not variables, and the Muster image has none. Any
+secret can come from a `*_FILE` variable.
+
+Prefer the fields when the host, user and name are plain values and only the password is a secret: the Helm chart does
+exactly that, with `database.host`, `database.port`, `database.name`, `database.user` and `database.sslmode` as values
+and the password from a key of the Secret as `MUSTER_DATABASE_PASSWORD_FILE`. Use the URL when you need a setting that
+has no field, such as `pool_max_conns` or `sslrootcert`; in the chart, `database.urlKey` names the key of the Secret that
+holds the whole URL, and the field values are then ignored.
+
+A replica's main pool holds `max(10, CPUs)` connections unless the URL sets `pool_max_conns`. The `pool_*` parameters
+size the main pool only: a session connection derived from the URL drops them, and one given by
+`MUSTER_DATABASE_SESSION_URL` ignores them. On top of that, each replica keeps about three session connections (see
+[PgBouncer](https://muster-io.github.io/muster/latest/install/database.md#pgbouncer)). Size `max_connections` of PostgreSQL for all replicas together.
+
+Create the database and its user before the first start. The user owns the database, because Muster creates its tables,
+indexes and partitions itself:
+
+```sql
+CREATE ROLE muster LOGIN PASSWORD '<password>';
+CREATE DATABASE muster OWNER muster;
+```
+
+Muster applies its migrations at the first start: the compose example sets `MUSTER_MIGRATE_ON_START`, and the chart runs
+`muster migrate` in an init container.
+
+## CloudNativePG
+
+[CloudNativePG](https://cloudnative-pg.io) runs PostgreSQL clusters on Kubernetes. A `Cluster` for Muster creates the
+database and its owner:
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: muster-db
+  namespace: muster
+spec:
+  instances: 3
+  storage:
+    size: 10Gi
+  bootstrap:
+    initdb:
+      database: muster
+      owner: muster
+```
+
+CloudNativePG serves the primary at the Service `muster-db-rw` (and the replicas read-only at `muster-db-ro`) and enables
+TLS on its own. It generates the password and keeps it in the Secret `muster-db-app`, with the keys `username`,
+`password`, `host`, `port`, `dbname` and `uri` among others. The chart reads the database from that Secret when you name
+it in `database.existingSecret`; the Secret `muster` of [Install with Helm](https://muster-io.github.io/muster/latest/install/helm.md#create-the-secret) then holds only
+the master keys and the password of the first Admin:
+
+```yaml
+existingSecret: muster
+database:
+  existingSecret: muster-db-app
+  urlKey: uri
+```
+
+The `uri` key holds a URL such as `postgresql://muster:<password>@muster-db-rw.muster:5432/muster`. It names no
+`sslmode`, so Muster connects with its default, `prefer`, which uses the TLS of CloudNativePG but does not insist on
+it. To require TLS, give the connection as fields and take only the password from the Secret, which also keeps the
+password out of the pod's environment:
+
+```yaml
+existingSecret: muster
+database:
+  existingSecret: muster-db-app
+  host: muster-db-rw.muster.svc
+  name: muster
+  user: muster
+  sslmode: require
+  passwordKey: password
+```
+
+When you give the `Cluster` a Secret of your own under `bootstrap.initdb.secret`, CloudNativePG generates no
+`muster-db-app`, and your Secret holds no `uri`: use the fields form above, with your Secret in `database.existingSecret`
+and `passwordKey: password`.
+
+Add an `spec.backup` section to the `Cluster` (see the CloudNativePG documentation) and test a restore, together with the
+master key, before you rely on it.
+
+## Managed PostgreSQL
+
+A managed PostgreSQL service works when it offers version 14 or newer and a role that owns an empty database. Check:
+
+- **Version.** PostgreSQL 14 or newer. Muster is tested on 14 and 17.
+- **Extensions.** Only `pg_trgm`; allow it where the service keeps an allow-list of extensions. Muster does not use
+  `pg_partman`; it creates its partitions itself.
+- **Session features.** Muster needs session advisory locks and `LISTEN/NOTIFY`. Plain endpoints of managed services
+  provide them. A pooler endpoint that your provider adds in transaction mode does not: see [PgBouncer](https://muster-io.github.io/muster/latest/install/database.md#pgbouncer).
+- **Failover.** Name the endpoint that follows the primary, not an instance.
+- **TLS.** Most services require it. Set `sslmode` as [below](https://muster-io.github.io/muster/latest/install/database.md#tls).
+- **Connections.** Check the connection limit of the plan against the pool sizes above.
+
+Run `muster doctor` against the database after you set it up. It checks the version, the session features, the pooler
+mode and whether each connection is encrypted.
+
+## PgBouncer
+
+Muster uses two kinds of database connections:
+
+- The **main connection** carries every query. It may go through PgBouncer in transaction mode.
+- The **session connection** carries what needs a real session: the advisory lock of the Leader, the `LISTEN`
+  connection that wakes the workers and feeds live updates to the web UI, partition maintenance and the migrations. A
+  transaction pooler would lose their session state between statements.
+
+Without a separate setting, the session connection is the main connection. At start, Muster takes an advisory lock over
+it and completes a `LISTEN/NOTIFY` round trip. Behind a transaction pooler this fails within five seconds, and Muster
+stops with an error that names `MUSTER_DATABASE_SESSION_URL`.
+
+So when the main connection goes through PgBouncer in transaction mode, give Muster a session connection that reaches
+PostgreSQL directly or through a pooler in session mode:
+
+`MUSTER_DATABASE_SESSION_URL`
+:   A whole URL for the session connection.
+
+`MUSTER_DATABASE_SESSION_HOST`
+`MUSTER_DATABASE_SESSION_PORT`
+:   Only the host and the port; the user, password, database, `sslmode` and the other parameters are those of the main
+    connection, without its `pool_*` parameters.
+
+In the chart, these are `database.sessionHost` and `database.sessionPort`. With CloudNativePG, the main connection can
+use a `Pooler` object in transaction mode, whose Service takes the `Pooler`'s name, here `muster-db-pooler-rw`, and the
+session connection the `-rw` Service of the `Cluster`:
+
+```yaml
+database:
+  host: muster-db-pooler-rw.muster.svc
+  sessionHost: muster-db-rw.muster.svc
+  sessionPort: 5432
+```
+
+!!! note "PgBouncer 1.21 or newer"
+    Muster's driver uses prepared statements on the main connection. In transaction mode, PgBouncer supports them from
+    version **1.21**, and only when `max_prepared_statements` is above 0. An older PgBouncer, or a value of 0, makes
+    queries fail with errors about missing prepared statements. Set `max_prepared_statements` to a few hundred, such as
+    `200`. A pooler in session mode, or no pooler, needs no such setting.
+
+PgBouncer is optional. Most installations connect straight to PostgreSQL, and then no session setting is needed.
+
+## TLS
+
+`MUSTER_DATABASE_SSLMODE` (or `sslmode` in the URL) takes the values of PostgreSQL's client library:
+
+`disable`
+:   encrypts: never · checks the server: nothing
+
+`allow`
+:   encrypts: only when the server insists · checks the server: nothing
+
+`prefer` (default)
+:   encrypts: when the server offers TLS, else falls back to plain text · checks the server: nothing
+
+`require`
+:   encrypts: always · checks the server: nothing: protects against listening in, not against an impostor
+
+`verify-ca`
+:   encrypts: always · checks the server: the certificate chain against a trusted CA
+
+`verify-full`
+:   encrypts: always · checks the server: the chain, and that the certificate names the host you connect to
+
+`prefer` makes a fresh installation work, but it also connects without encryption to a server that has none. Muster tells
+you: `muster doctor` reports each connection as encrypted or not, and a start with an unencrypted connection logs a
+warning. For anything but a single machine, set `require` at least, and `verify-full` where you can: the certificate then
+proves that the server is yours.
+
+`verify-ca` and `verify-full` check against the file named by `sslrootcert` in `MUSTER_DATABASE_URL`, which must exist
+in the container; without it, against `~/.postgresql/root.crt` when that file exists, and otherwise against the root
+certificates of the system. The fields form has no such setting. With
+`MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT`, the session connection takes the `sslmode` of the
+main connection; a `MUSTER_DATABASE_SESSION_URL` carries its own, `prefer` when it names none.
+
+<!-- Source: https://muster-io.github.io/muster/latest/install/versions.md -->
+# Requirements and tested versions
+
+What Muster needs, which versions it was checked against, how its own versions are numbered, and how to verify that a
+release you download is the one the project built. "Tested" means different things for different rows, so each row says
+which.
+
+- **CI** means an automated job that runs on the project's pull requests or nightly, and fails the build.
+- **Development stand** means a person ran the behaviour against a real server of that version and recorded what it did,
+  but no job repeats it. These facts are the ground the messenger and Alertmanager features rest on; the fake servers
+  that CI uses imitate them.
+
+## Requirements
+
+**PostgreSQL**
+:   14 or newer, directly or or through a pooler whose session connection is session-capable. Nothing else
+    stateful: no Redis, no queue. See [The database](https://muster-io.github.io/muster/latest/install/database.md).
+
+**Where Muster runs**
+:   Binaries and container images for Linux; binaries also for macOS; both on amd64 and arm64. The container image is
+    `linux/amd64` and `linux/arm64`. The [Quick start](https://muster-io.github.io/muster/latest/quick-start.md) needs Docker with the Compose plugin.
+
+**Kubernetes**
+:   1.30 or newer, for the [Helm chart](https://muster-io.github.io/muster/latest/install/helm.md).
+
+**A browser**
+:   For the web UI, one that keeps a `Secure` cookie: over HTTPS, or on `localhost`. See
+    [Sign-in needs HTTPS or localhost](https://muster-io.github.io/muster/latest/sign-in/index.md#sign-in-needs-https-or-localhost).
+
+## Tested versions
+
+PostgreSQL
+:   14 and 17 in **CI**: `make test-integration` runs the integration tests on both, in containers, on every pull
+    request. The compose example and the development database run PostgreSQL 17.
+
+Kubernetes and Helm
+:   Kubernetes 1.33.0 in **CI**: `make helm-check` lints the chart, renders it with the values files of the repository
+    and validates the result strictly against the schemas of 1.33.0. Helm v4.3.0 does the rendering, and also packages
+    the chart for a release. Nothing is run in a cluster by CI, and other versions from 1.30 are not checked.
+
+Alertmanager
+:   v0.34.1 on a **development stand**, with Prometheus v3.15.0 and vmalert v1.153.0: how it repeats, groups, restarts
+    and truncates is measured there. Other versions of Alertmanager send the same webhook; if one behaves differently,
+    the [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md) page and the Heartbeat are how you notice.
+
+Grafana
+:   OSS 13.2.4 on a **development stand**, as one instance on SQLite and as a pair of replicas on PostgreSQL 17, through
+    the webhook contact point of its built-in Alertmanager. See [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md).
+
+Mattermost
+:   11.2.2, a test server on the **development stand**, through REST API v4 with a bot account. CI runs the same
+    behaviour against a fake Mattermost server. See [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md).
+
+Slack
+:   Slack's cloud Web API and Socket Mode, on a **development stand**: a free workspace with a test app and a test
+    channel. CI runs against a fake. See [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md).
+
+Telegram
+:   The cloud Bot API 10.3, on a **development stand**, with a test bot and a test channel. CI runs against a fake. See
+    [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md).
+
+The web UI
+:   Its component tests and its end-to-end tests run in Chromium in **CI**. Other browsers are not tested.
+
+## Version numbers
+
+Muster's versions are `0.N.x`, and 1.0 is a long way off.
+
+- **`0.N` is layer N of the [roadmap](https://github.com/muster-io/muster#roadmap).** L1, Alert Groups in messengers,
+  is released as `0.1.x`; L2 will be `0.2.x`, L3 `0.3.x`, and so on. Layer N+1 starts with the release `0.(N+1).0`,
+  which the maintainers set with release-please's `release-as`.
+- **`0.N.x` releases bring fixes and small changes**, and nothing that breaks an installation: settings, the API under
+  `/api/v1` and the database keep working without a change on your side.
+- **Breaking changes come only with the next layer's minor version**, and its release notes say what to change before
+  you upgrade. See [Upgrades](https://muster-io.github.io/muster/latest/operations/upgrades.md) for how to upgrade.
+
+## Upgrade notes
+
+0.2.0
+:   The urgent mark of a Route (`route.urgent`) and the Organization's "critical is Urgent"
+    (`organization.critical_is_urgent`) no longer act: an Alert Group is Urgent exactly when its Severity level is
+    critical, and a Route raises the level of its Alert Groups with its
+    [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity).
+
+    - Routes marked urgent got the Minimum severity critical, which also makes their Alert Groups critical, also for
+      Severity conditions.
+    - An Organization that had turned "critical is Urgent" off now sees its critical Alert Groups as Urgent: a rise to
+      critical ends their Snoozes and, where `route.urgent_rise_removes_ack` is on, their acknowledgements.
+    - Migration 0021 computes the Severity level and the urgency of the open Alert Groups and of their deliveries once,
+      by the new rule: without lifecycle events or Mentions, without ending a Snooze or an acknowledgement, and without
+      publishing anywhere new.
+    - `urgent` in the input of a Route and `critical_is_urgent` in the input of the Organization are optional. A Route
+      request with `urgent: true` and no `minimum_severity`, as a 0.1 client sends it, sets the Minimum severity
+      critical; `urgent: false`, `urgent` beside `minimum_severity`, and `critical_is_urgent` change nothing. Reads keep
+      both until 0.3.0 removes them: `urgent` is `true` exactly when the Minimum severity is critical, and
+      `critical_is_urgent` is always `true`.
+    - Migration 0022 adds [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md) and the Organization's Working hours: Monday to Friday, from
+      the start of the working day to its end, `18:00`. The end must be later than the start on the same day, so an
+      Organization whose working day started at 18:00 or later gets the end `23:59` — and one that started at 23:59,
+      the latest time with no later end, the start `23:58`. Check the Organization's settings after the upgrade if
+      yours did.
+    - Migration 0023 adds the [button sets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#button-sets): the Organization's
+      shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.
+    - Migration 0024 adds the [Team label and Team matchers](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team). The
+      Team label is `team` by default, and no Team exists after the upgrade: each Alert Group whose Alerts start
+      firing with the label `team` after the upgrade records one Quiet `unknown_team_value` per value in its
+      Timeline, and outgoing webhooks in events mode receive one extra event for each. Create the Teams, or change the
+      Team label, to avoid it.
+    - Migration 0025 adds [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md) and the Permissions `schedules:read`,
+      `schedules:write` and `schedule-overrides:write`. Roles get them at once; a Personal access token keeps the
+      Permissions it was issued with, so issue a new one to reach Schedules with a token.
+    - Migration 0026 adds the personal [iCal feeds](https://muster-io.github.io/muster/latest/concepts/schedules.md#ical-feed); no User has one after the
+      upgrade.
+    - Migration 0027 adds the [evaluation of the open Alert Groups](https://muster-io.github.io/muster/latest/concepts/teams.md#values-without-a-team) when
+      a Team or the Team label is saved: creating a Team for a value of the Team label, or changing a Team's slug or
+      Team matchers, or the Team label, adds the Team to the open Alert Groups whose firing Alerts it now picks, with a
+      Quiet `team_joined`. It only adds, so the Alert Groups of Alerts that fired before the upgrade get their Teams
+      the first time a Team is created, its slug or Team matchers change, or the Team label changes.
+    - Migration 0028 adds the [gap alert](https://muster-io.github.io/muster/latest/concepts/schedules.md#gaps-and-the-internal-alert) of each Schedule,
+      `by_default`: the main Schedule of each Team raises the Internal alert `MusterScheduleGap` for a gap now or within
+      7 days.
+
+    - **The Root messages have a new layout** for every Route, in Mattermost, Slack, Telegram and the body of a bridge:
+      the title with the status as a word, the fields Severity, Route, Teams and Started, the summary and the
+      description, one line of [Labels in the message](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#labels-in-the-message),
+      the Alerts by the label that tells them apart, then the notices, the footer, the buttons and the links. The
+      label sections and the expandable quote of 0.1 are gone; every other label stays on the Alert Group page. An
+      open Alert Group's message changes to the new layout at its next edit. A Route with its own Root message
+      template keeps its body, now under the title, the fields and the links; its built-in source, which "Custom"
+      fills the editor with, changed too.
+    - Migration 0029 adds "Labels in the message" of a Route, `routes.message_labels`, computed by default from the
+      Group key without `alertname` and the severity label, then the Team label and `namespace`, and the description
+      of an Alert Group, `alert_groups.description`, set once like its summary. An Alert Group created before the
+      upgrade, or by a 0.1 replica during it, has none until a new Alert with a description joins it on 0.2.0, which
+      sets it; until then its Root messages show no description.
+    - Migration 0030 adds the claim of every entry of the Role mapping, with
+      [subtrees](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles), and the
+      [identity provider entries of Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#membership-from-the-identity-provider). The Role mapping
+      reads as before: every entry reads the groups claim, and an entry ending in `/*` now matches its subtree.
+    - Migration 0031 lets a change of the Organization's severity label, Team label, Instance labels, time zone, start
+      of the working day or first day of the week, and a rename of a Team, reach the open Alert Groups: their Root
+      messages are edited once, Quietly, to show the new labels, start time, Snooze presets or name, instead of at each
+      Alert Group's next change.
+    - Migration 0032 adds the [Severity conditions](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions) of the
+      Destinations of Routes and Teams, "Also to the Teams from the label" of a Route, off, and the Destinations of the
+      Teams, none. Every Destination of a Route has the condition `any`, so a Route delivers as before. Routes take and
+      read `destination_entries`; `destination_ids` stays, derived from `destination_entries`, until 0.3.0 removes it: a
+      request with only `destination_ids` keeps the condition of each Destination it keeps and gives a new one `any`.
+      Outgoing webhooks in events mode may receive the new event `destination_joined`.
+    - Migration 0033 adds the [contacts at Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#contact-for-calls-and-sms)
+      and their confirmation codes; no data is migrated. It is expand only: a 0.1 replica, or one of a development image without it,
+      reads and writes nothing of the new tables.
+    - Migration 0034 adds the queue of calls through Notification gateways, the Timeline kind `escalation` with its
+      events, the Mention `paged` and the Transport `gateway`; no data is migrated. It is expand only: a 0.1 replica,
+      or one of a development image without it, writes none of the new tables and columns, and every row it writes
+      satisfies the widened CHECKs. Outgoing webhooks in events mode may receive the new event `page_not_delivered`.
+    - Migration 0035 keeps the signed action data of a call through a Notification gateway, with the id of the key that
+      signed it, from its first attempt; no data is migrated. It is expand only: a 0.1 replica, or one of a development
+      image without it, writes neither column and signs each attempt of a call with the active key, as before.
+    - Migration 0036 adds the [Broken state of Notification gateways](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md)
+      to the Connections; no data is migrated, and no gateway starts Broken. It is expand only: a 0.1 replica, or one of
+      a development image without it, writes none of the new columns; one of such an image sends the calls of a Broken
+      gateway, which then fail and end Not delivered as before.
+    - Migration 0037 adds the [Notification rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md): the Organization's default
+      rules, which every existing Organization takes — normal a Mention, important a Mention, a wait of 5 minutes and a
+      Mention — and the rules of each User, none at first, so that every User follows the Organization's. It is expand
+      only: a 0.1 replica, or one of a development image without it, reads and writes nothing of either, and an
+      Organization it creates gets the default rules.
+    - Migration 0038 marks the edits of open Root messages that a change of configuration alone made — a new button
+      set, new message settings, a renamed Team, the re-render after a key rotation — so that delivery sends them
+      after the Publications of new Alert Groups and the edits of Root messages that Alerts and Commands made, of the
+      same urgency, and those of Alert Groups that are not Urgent also after the Thread replies and the events of
+      outgoing webhooks; no data is migrated, and a re-render still pending at the upgrade keeps its place. It is expand
+      only: a 0.1 replica, or one of a development image without it, claims in its own order and never writes the mark,
+      so an edit, a final edit or a republication it queues for a Root message whose re-render a 0.2.0 replica queued
+      — still pending, or already delivered by the older replica — waits behind the work that goes before
+      configuration edits of its urgency until it is delivered; a delivery by a 0.2.0 replica clears the mark.
+    - Migration 0039 lets a change of a Route's language, Snooze durations, Root message template or line template,
+      and a change of a Link rule or a Lookup table, reach the open Alert Groups: their Root messages are edited once,
+      Quietly, to show the new texts, Snooze buttons, body or links, instead of at each Alert Group's next change; no
+      data is migrated.
+    - Migration 0040 does the same for the user a footer names: a new display name of a User, a new, changed or
+      removed Account link of a User, and a new name of a Service account edit, once and Quietly, the open Root
+      messages whose footer names them as the Owner or as who snoozed; no data is migrated. Whether a Root message
+      needs an edit is now decided by the footer of its Destination's identity space alone, so after the upgrade an
+      open Root message whose footer names a User with an Account link in any other identity space — a User with only
+      a Telegram link, for a Mattermost Destination — gets one Quiet edit, with no visible change, at its next
+      re-render.
+    - Migration 0041 does the same for a Destination moved to a Mattermost, Slack or Bridge Connection of another
+      identity space: each open Root message whose footer then reads otherwise — a User with an Account link in
+      either Connection — is edited once, Quietly, at the re-render of the move, so that the footer names the user as
+      the new Connection's messenger knows them; the others are not edited. No data is migrated. Such an edit goes
+      through the new Connection to a message published through the old one, as any edit after a move always did, now
+      at the move instead of at the Alert Group's next change: a message the new Connection cannot find (a 404, as
+      from another Mattermost server) is published again once, Quietly, as a deleted Root message is, and a Mention
+      in its footer may notify; a message the new Connection may not edit (a 403, as from another Connection of the same
+      Mattermost server) makes the Destination Broken. A repair of a Root message that a send after a move may have
+      shown wrong stores a repair hash in `deliveries.desired_hash`; a replica without 0041, during a rolling update
+      or after a downgrade, takes it as a changed Desired state and edits each such Root message once more, Quietly,
+      with no visible change.
+    - Migration 0042 adds the [Team mentions](https://muster-io.github.io/muster/latest/concepts/teams.md#team-mentions), none after the upgrade, and what the
+      check of a Connection finds of its groups: whether a Slack bot token has `usergroups:read` and whether a
+      Mattermost bot may read the groups, unknown until the Connection's next check. It is expand only: a 0.1 replica,
+      or one of a development image without it, reads and writes neither; a Team or a Connection it deletes keeps its
+      Team mentions, which no read shows and the Team's next save of its Team mentions replaces, and a new bot token or
+      server URL it saves keeps what the last check found of the old bot's groups until the Connection is checked again
+      on 0.2.0.
+    - Migration 0043 turns the Mention settings of every Destination into
+      [Mention entries](https://muster-io.github.io/muster/latest/concepts/mentions.md#upgrading-from-01) with the same effect: each target chosen for a kind
+      of Loud event becomes one entry for those kinds, and an entry for `new_alert_group` also applies to the start of
+      a Storm, as the Storm summary of 0.1 mentioned. A Destination that mentioned nobody has no entries, and a
+      Destination of a Team gets the entry "Team {Team}", Telegram excepted. Until 0.3.0 the API still returns the
+      Mention settings as the deprecated field `mentions`, computed from the entries — the same Users and groups for
+      each kind, listed in the order of the first kind that lists each — and a request with `mentions` and without
+      `mention_entries` is still converted, replacing only the entries that 0.1 could express; 0.3.0 removes the
+      field. The migration keeps `destinations.mentions` as it found it and 0.2.0 no longer writes it,
+      except that a Destination created on 0.2.0 stores nobody there. It is expand only, and its down migration drops
+      the entries and restores the settings as the column kept them.
+    - Migration 0044 adds what the Destination check of a Telegram Destination sees of the members of its discussion
+      group, for the warnings about [unreachable On-calls](https://muster-io.github.io/muster/latest/concepts/schedules.md#unreachable-on-calls): nothing is
+      known after the upgrade, so no On-call is warned about a discussion group until each Telegram Destination is
+      saved or checked again. It is expand only: a 0.1 replica, or one of a development image without it, reads and
+      writes neither column, and a check it runs leaves what the last check on 0.2.0 saw. A Telegram Destination that
+      such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
+      the old group until its next check: select **Check** on it once every replica runs 0.2.0.
+
+    **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
+    [manifest](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
+    working without it, without Team mentions. To add it, add the scope to the app and reinstall the app in the
+    workspace, as Slack asks: the reinstall keeps the bot token, so the Connection needs no change; check it again and
+    it records the scope
+    ([Add usergroups:read to an installed app](https://muster-io.github.io/muster/latest/messengers/slack.md#add-usergroupsread-to-an-installed-app)).
+
+    **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
+    Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
+    `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule`, then
+    `connection` — so that each Schedule's gaps get an Alert Group of their own, which belongs to that Schedule's Team,
+    and each Broken Notification gateway one of its own; without them, the gaps of every Schedule share one Alert
+    Group, which collects the Teams of all of them, and so do the Broken gateways. When the Routes
+    can deliver to the Teams of their Alert Groups, the suggestion turns that on too, so that each gap reaches its own
+    Team; turn it on for a Route accepted before.
+
+    **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
+    the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
+    can turn it on again. The image is now `image.registry` and `image.repository`, with `global.imageRegistry` over
+    the registry. An `image.repository` with the full path keeps working, but it ignores both registry values; move its
+    host to `image.registry` to use `global.imageRegistry`. A host without a dot or a colon, such as `registry/muster`,
+    now counts as a path under `image.registry`.
+
+    - An `image.repository` without a registry host, such as the Docker Hub path `myorg/muster` or a bare local
+      `muster` for kind or minikube, is now prefixed with `ghcr.io`. To keep pulling it from Docker Hub, set
+      `image.registry: docker.io`; or write the full path, such as `docker.io/myorg/muster`. A local image for kind or
+      minikube needs `image.registry: ""`.
+    - A `global.imageRegistry` inherited from an umbrella chart now applies to Muster. To keep pulling Muster from
+      GitHub, set `image.repository` to the full `ghcr.io/muster-io/muster`, which ignores both registry values.
+    - `httpRoute.app.annotations` and `httpRoute.ingest.annotations` set the annotations of one HTTPRoute, over the
+      shared `httpRoute.annotations`, as the Ingress ones do.
+
+    **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
+    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids or look up `on_call`;
+    during a rolling update a 0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles
+    Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only
+    fill in a new Route and are not stored, so nothing stored changes.
+
+    **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
+    replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
+    level on the Alert Groups it changes, with `urgent` true, since 0.2.0 writes `routes.urgent`. Until a later change
+    of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
+    Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
+    Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
+    differently. A 0.1 replica also does not know the end of the working day: its `updateOrganization` that sets the
+    start of the working day at or after the end fails the CHECK of migration 0022 with `500` until the rollout ends;
+    save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
+    does not know them and renders every button on the messages it touches. A 0.1 replica gives the Alerts it
+    processes no Teams, and the events-mode webhook bodies it sends lack `alert_group.teams`: create Teams only after
+    every replica runs 0.2.0. A 0.1 replica does not serve the iCal feeds: it answers a link of a feed with the page
+    of the web UI, and a User it deletes keeps the row of their feed, whose link then answers `404` as the feed of a
+    deleted User does. Issue iCal links only after every replica runs 0.2.0. Neither a 0.1 replica nor one of a
+    development image without migration 0027 writes the evaluation of the open Alert Groups, and neither claims one: a
+    Team or a Team label saved on such a replica during the rollout is not evaluated, so save it again once every
+    replica runs this version, which evaluates it. The open Alert Groups whose Alerts a 0.1 replica took in get their
+    Teams the first time a Team is created, its slug or Team matchers change, or the Team label changes after the
+    rollout. Migration 0028 adds a column with a default to the Schedules, which 0.1 replicas do not use. A 0.1 replica
+    renders the layout of 0.1 on the messages it edits, which a 0.2.0 replica renders again at their next change; do not
+    set "Labels in the message" until every replica runs 0.2.0, since a 0.1 replica ignores them. The other way round, a
+    Root message that a 0.2.0 replica rendered and a 0.1 replica delivers shows only its title, summary, notices,
+    footer, buttons and links — no fields, key labels, description or Alerts, which 0.1 does not know — and stays so
+    until the next change of its Alert Group, since its Desired state, and so its hash, is the one 0.2.0 stored. Keep
+    the overlap of the two versions short. An Alert Group that a 0.1 replica creates during the rollout has no
+    description, which 0.1 does not write, until a new Alert with a description joins it on 0.2.0. A 0.1 replica reads
+    the Role mapping against the groups claim alone, so 0.2.0 shows it only the entries it reads the same way — the
+    groups claim and an exact group: while the rollout lasts, a sign-in on a 0.1 replica ignores the entries of another
+    claim, such as GitLab's role claims, and the subtrees `a/b/*`, which may refuse it or give a lower Role, never a
+    higher one, and it changes no Team membership. Do not save the OIDC settings until every replica runs 0.2.0: a save
+    on a 0.1 replica keeps only the entries it knows, so the entries of another claim and the subtrees are lost; that
+    mapping applies from then on, and the lost entries must be added again on a 0.2.0 replica after the rollout.
+    Neither a 0.1 replica nor one of a development image without migration 0031 writes the re-render of the open Root
+    messages after a change of the severity label, the Team label, the Instance labels, the time zone, the start of the
+    working day or the first day of the week, or a rename of a Team, and neither claims one: such a change saved on one
+    of them reaches the open Root messages only at each Alert Group's next change, so make it after every replica runs
+    this version. The same holds for a change of a Route's language, Snooze durations or templates, or of a Link rule
+    or a Lookup table, saved on a 0.1 replica or on one of a development image without migration 0039, and for a
+    rename of a User or a Service account or a change of an Account link made on one without migration 0040, and for a
+    change of a Destination's Connection saved on one without migration 0041. A 0.1 replica mentions by the Mention
+    settings of 0.1, which migration 0043 keeps, and ignores the Mention entries until it stops: a change of the
+    Mentions saved during the rollout reaches the messages that a 0.1 replica sends only after the rollout, and a
+    Destination created during it mentions nobody there. A change of the Mentions saved through the API of a 0.1
+    replica writes only the column, which 0.2.0 never reads, and is lost. Change the Mentions after every replica runs
+    0.2.0. An Alert Group that a 0.1 replica counts against a Storm during the rollout is not recorded among the Alert
+    Groups of the Storm, so its Teams add no Mentions to the first publication of the Storm's summary. A 0.1
+    replica ignores Severity conditions and Team Destinations: until the rollout ends, the Alert Groups it changes go to every
+    Destination of their Route, whatever its condition, and not to the Destinations of their Teams, and it records no
+    `destination_joined`. Set Severity conditions, the Destinations of Teams and "Also
+    to the Teams from the label" after every replica runs 0.2.0.
+
+    **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
+    that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
+    anywhere else still matches only that exact group name, but saving the OIDC settings is refused with `422`
+    `invalid_format` at that entry until it is changed or removed.
+
+    Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
+    and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
+    waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
+    to start with `schema_dirty`. The changes of 0021 are one transaction, so a failure leaves the schema as 0.1.4 left
+    it, recorded as dirty at version 21. To recover, with the same database role as Muster:
+
+    1. Check whether the migration took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'routes' AND column_name = 'minimum_severity';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 20, dirty = false;`. If it
+       returns 1, the migration committed and only its record failed: `UPDATE schema_migrations SET dirty = false;`.
+    3. Start the 0.2.0 replica again, or run `muster migrate`, at a quieter time; it applies migration 0021 again.
+
+    Migration 0022 runs in two transactions: the first adds the Teams and the Working hours, the second validates the
+    CHECKs of the Working hours. A failure leaves the schema recorded as dirty at version 22. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect: `SELECT to_regclass('teams');`
+    2. If it returns NULL, clear the failed attempt: `UPDATE schema_migrations SET version = 21, dirty = false;`.
+    3. If it returns `teams`, finish the second transaction and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_working_days_check;
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_end_check;
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_order_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0023 runs in three transactions: the first adds the button sets, the second validates their CHECKs and
+    foreign key, the third drops the old CHECK of the kinds of `open_group_updates`. A failure leaves the schema
+    recorded as dirty at version 23. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'organizations' AND column_name = 'buttons';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 22, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_buttons_check;
+        ALTER TABLE destinations VALIDATE CONSTRAINT destinations_buttons_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_id_fkey;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v2_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0024 adds the Team label, Team matchers and the Teams of Alerts and Alert Groups, in three transactions:
+    the first adds the columns and tables and the new CHECKs of the Timeline and of `webhook_events`, the second
+    validates them, the third drops the old CHECKs. A failure leaves the schema recorded as dirty at version 24. To
+    recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'organizations' AND column_name = 'team_label';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 23, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_team_label_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_team_rule_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_v2_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_kind_v2_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_event_v2_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_v2_check;
+        ALTER TABLE webhook_events VALIDATE CONSTRAINT webhook_events_event_v2_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_event_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_event_kind_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_system_event_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_system_check;
+        ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_event_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0025 adds the Schedules in one transaction: a failure leaves nothing of it, but the schema recorded as
+    dirty at version 25. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 24, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
+
+    Migration 0026 adds the iCal feeds in one transaction: a failure leaves nothing of it, but the schema recorded as
+    dirty at version 26. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 25, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
+
+    Migration 0027 runs in three transactions: the first adds `open_group_updates.team_id` and the new CHECK of the
+    kinds of `open_group_updates`, the second validates them, the third drops the old CHECK. A failure leaves the
+    schema recorded as dirty at version 27. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'open_group_updates' AND column_name = 'team_id';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 26, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_team_id_fkey;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v3_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v2_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0028 adds the gap alert of the Schedules in one transaction: a failure leaves nothing of it, but the
+    schema recorded as dirty at version 28. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 27, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
+
+    Migration 0029 adds "Labels in the message" and the description of Alert Groups in three transactions: the first
+    adds the columns and the new CHECKs of `open_group_updates`, the second validates them, the third drops the CHECK
+    of the kinds of 0027. A failure leaves the schema recorded as dirty at version 29. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'routes' AND column_name = 'message_labels';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 28, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v4_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_route_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v3_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0030 adds the claims of the Role mapping and the identity provider entries of Teams in two
+    transactions: the first adds the columns and the table and fills the Role mapping, the second validates the new
+    CHECKs. A failure leaves the schema recorded as dirty at version 30. To recover, with the same database role as
+    Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'oidc_settings' AND column_name = 'role_mappings';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 29, dirty = false;`.
+    3. If it returns 1, finish the second transaction and clear the mark:
+
+        ```sql
+        ALTER TABLE oidc_settings VALIDATE CONSTRAINT oidc_settings_role_mappings_check;
+        ALTER TABLE oidc_settings VALIDATE CONSTRAINT oidc_settings_claims_seen_check;
+        ALTER TABLE team_users VALIDATE CONSTRAINT team_users_source_check;
+        ALTER TABLE team_users VALIDATE CONSTRAINT team_users_idp_matches_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0031 lets a change of the Organization's message settings or a rename of a Team re-render the open
+    Root messages in three transactions: the first adds the new CHECK of the kinds of `open_group_updates`, the second
+    validates it, the third drops the CHECK of 0029. A failure leaves the schema recorded as dirty at version 31. To
+    recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_constraint
+         WHERE conrelid = 'open_group_updates'::regclass AND conname = 'open_group_updates_kind_v5_check';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 30, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v5_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v4_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0032 adds the Severity conditions, the Destinations of Teams and `destination_joined` in three
+    transactions: the first adds the columns, the table and the new CHECKs, the second validates them, the third drops
+    the CHECKs they replace. A failure leaves the schema recorded as dirty at version 32. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'team_destinations';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 31, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE route_destinations VALIDATE CONSTRAINT route_destinations_severity_condition_check;
+        ALTER TABLE deliveries VALIDATE CONSTRAINT deliveries_entries_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_v3_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_kind_v3_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_event_v3_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_v3_check;
+        ALTER TABLE webhook_events VALIDATE CONSTRAINT webhook_events_event_v3_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v6_check;
+        ALTER TABLE timeline_entries
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_v2_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_kind_v2_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_system_event_v2_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_system_v2_check;
+        ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_event_v2_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v5_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0033 adds the contacts at Notification gateways in one transaction: a failure leaves nothing of it, but
+    the schema recorded as dirty at version 33. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 32, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
+
+    Migration 0034 adds the queue of calls through Notification gateways and the kind `escalation` of the Timeline in
+    three transactions: the first adds the tables, the columns and the new CHECKs, the second validates them, the third
+    drops the CHECKs they replace. A failure leaves the schema recorded as dirty at version 34. To recover, with the
+    same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'gateway_calls';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 33, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_kind_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_kind_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_mentions_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_transport_v4_check;
+        ALTER TABLE audit_log VALIDATE CONSTRAINT audit_log_transport_v4_check;
+        ALTER TABLE webhook_events VALIDATE CONSTRAINT webhook_events_event_v4_check;
+        ALTER TABLE timeline_entries
+            DROP CONSTRAINT IF EXISTS timeline_entries_kind_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_v3_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_kind_v3_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_mentions_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_transport_v3_check;
+        ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_transport_v3_check;
+        ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_event_v3_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0035 adds the action data and the key id of calls in one transaction: a failure leaves nothing of it, but
+    the schema recorded as dirty at version 35. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 34, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
+
+    Migration 0036 adds the Broken state of Notification gateways to the Connections in one transaction: a failure
+    leaves nothing of it, but the schema recorded as dirty at version 36. To recover, with the same database role as
+    Muster, run `UPDATE schema_migrations SET version = 35, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0036 forgets which gateways are Broken, and an open
+    `MusterNotificationGatewayBroken` stays open while a version before 0036 runs; once 0036 is back, the Leader
+    resolves it within 15 seconds, as it resolves every `MusterNotificationGatewayBroken` of a gateway that is not Broken,
+    and a gateway whose calls still fail becomes Broken again with its next failed call.
+
+    Migration 0037 adds the Notification rules in one transaction: a failure leaves nothing of it, but the schema
+    recorded as dirty at version 37. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 36, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0037 loses every User's own Notification rules and the Organization's default
+    rules; once 0037 is back, every User follows the Organization's rules, which are the defaults again.
+
+    Migration 0038 adds the mark of configuration edits and its claim index to the deliveries in one transaction: a
+    failure leaves nothing of it, but the schema recorded as dirty at version 38. To recover, with the same database
+    role as Muster, run `UPDATE schema_migrations SET version = 37, dirty = false;` and start the 0.2.0 replica again,
+    or run `muster migrate`. Going back below 0038 loses no delivery: the pending edits of a re-render are sent again
+    in the order of urgency and due time alone.
+
+    Migration 0039 lets a change of a Route's language, Snooze durations or templates, or of a Link rule or a Lookup
+    table, re-render the open Root messages in three transactions: the first adds the new CHECKs of
+    `open_group_updates`, the second validates them, the third drops the kind CHECK of 0032. A failure leaves the schema
+    recorded as dirty at version 39. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_constraint
+         WHERE conrelid = 'open_group_updates'::regclass AND conname = 'open_group_updates_kind_v7_check';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 38, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v7_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_route_settings_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v6_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0039 deletes the re-renders of these kinds still to do, whose Root messages then catch up at each
+    Alert Group's next change; a replica of a version without 0039 neither writes nor claims them.
+
+    Migration 0040 lets a rename of a User or a Service account, or a change of an Account link, re-render the open
+    Root messages whose footer names them, in four transactions: the first adds two indexes on the Alert Groups, the
+    second the new columns, foreign keys and CHECKs of `open_group_updates`, the third validates them, the fourth drops
+    the kind CHECK of 0039. The indexes are built inside a transaction, so on a large `alert_groups` table the writes
+    to it, ingestion included, wait while the build runs. A failure leaves the schema recorded as dirty at version 40.
+    To recover, with the same database role as Muster:
+
+    1. Check how far it got:
+
+        ```sql
+        SELECT (SELECT count(*) FROM pg_indexes
+                 WHERE indexname IN ('alert_groups_snoozed_by_user_idx',
+                                     'alert_groups_snoozed_by_service_account_idx')) AS indexes,
+               (SELECT count(*) FROM pg_constraint
+                 WHERE conrelid = 'open_group_updates'::regclass
+                   AND conname = 'open_group_updates_kind_v8_check') AS checks;
+        ```
+
+    2. If `checks` is 0, drop what the first transaction made and clear the failed attempt:
+
+        ```sql
+        DROP INDEX IF EXISTS alert_groups_snoozed_by_user_idx;
+        DROP INDEX IF EXISTS alert_groups_snoozed_by_service_account_idx;
+        UPDATE schema_migrations SET version = 39, dirty = false;
+        ```
+
+    3. If `checks` is 1, finish the third and the fourth transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_user_id_fkey;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_service_account_id_fkey;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v8_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_user_scope_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_service_account_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v7_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0040 deletes the re-renders of these kinds still to do, whose Root messages then catch up at each
+    Alert Group's next change; a replica of a version without 0040 neither writes nor claims them.
+
+    Migration 0041 lets a change of a Destination's Connection re-render its open Root messages in three transactions:
+    the first adds the new CHECKs of `open_group_updates`, the second validates them, the third drops the kind CHECK of
+    0040. A failure leaves the schema recorded as dirty at version 41. To recover, with the same database role as
+    Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_constraint
+         WHERE conrelid = 'open_group_updates'::regclass AND conname = 'open_group_updates_kind_v9_check';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 40, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v9_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_connection_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v8_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0041 deletes the re-renders of this kind still to do, whose Root messages then catch up at each
+    Alert Group's next change; a replica of a version without 0041 neither writes nor claims them.
+
+    Migration 0042 adds the Team mentions and the groups a check of a Connection finds in one transaction: a failure
+    leaves nothing of it, but the schema recorded as dirty at version 42. To recover, with the same database role as
+    Muster, run `UPDATE schema_migrations SET version = 41, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0042 loses every Team mention and what the checks found of the groups; once 0042
+    is back, each Connection's next check finds the groups again, and the Team mentions are entered again.
+
+    Migration 0044 adds the two columns of what a Telegram Destination's check saw of its discussion group in one
+    transaction: a failure leaves nothing of it, but the schema recorded as dirty at version 44. To recover, with the
+    same database role as Muster, run `UPDATE schema_migrations SET version = 43, dirty = false;` and start the 0.2.0
+    replica again, or run `muster migrate`. Going back below 0044 loses what the checks saw, and with it the warnings
+    `not_in_discussion_group`; once 0044 is back, each Telegram Destination's next check finds them again.
+
+0.1.1
+:   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
+    are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back
+    to 0.1.0 needs the database backup taken before the upgrade, as [Upgrades](https://muster-io.github.io/muster/latest/operations/upgrades.md) describes.
+
+## Image tags
+
+The images are `ghcr.io/muster-io/muster` and the tags are:
+
+- `vX.Y.Z`: a release. Use it, so that an upgrade is a decision you make.
+- `latest`: the newest release that is not a prerelease. A prerelease tag, such as `v1.4.0-rc.1`, never moves it.
+- `edge`: the newest commit on `master`, a development image.
+- `sha-<7 hex digits>`: the development image of one commit.
+
+## Verify a release
+
+A release is built by the workflow `release.yml` of the repository, on a tag `vX.Y.Z`. It signs the container image and
+the Helm chart with [cosign](https://docs.sigstore.dev/cosign/), keyless, with the identity of that workflow run, so a
+valid signature proves that the image or the chart was built by that workflow on that tag. The development images,
+`edge` and `sha-…`, are **not signed** and carry no SBOM attestation: the workflow that builds them skips signing.
+Install cosign v3 or newer (the release signs with v3.1.3, in the new signature format), then verify the image:
+
+```sh
+VERSION=vX.Y.Z
+cosign verify ghcr.io/muster-io/muster:$VERSION \
+  --certificate-identity "https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+It prints the verified signature and exits `0`. To accept any release tag, replace `--certificate-identity` with
+`--certificate-identity-regexp '^https://github\.com/muster-io/muster/\.github/workflows/release\.yml@refs/tags/v'`.
+The signature covers the multi-architecture index and the image of each platform. To pin what you run, deploy the digest
+you verified, `ghcr.io/muster-io/muster@sha256:…`, rather than the tag.
+
+**The Helm chart** is signed the same way, by the same workflow run. Its tag is the version without the `v`:
+
+```sh
+VERSION=vX.Y.Z
+cosign verify ghcr.io/muster-io/charts/muster:${VERSION#v} \
+  --certificate-identity "https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To install exactly the chart you verified, verify it by its digest and install by the same digest. `helm pull` prints
+the digest as `Digest: sha256:…`:
+
+```sh
+helm pull oci://ghcr.io/muster-io/charts/muster --version ${VERSION#v}
+cosign verify ghcr.io/muster-io/charts/muster@sha256:… \
+  --certificate-identity "https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+helm install muster oci://ghcr.io/muster-io/charts/muster@sha256:… \
+  --namespace muster --create-namespace -f values.yaml
+```
+
+**The SBOM of the image** is an attestation that BuildKit attaches when the image is pushed, not a cosign attestation.
+Read it with Docker:
+
+```sh
+docker buildx imagetools inspect ghcr.io/muster-io/muster:$VERSION --format '{{ json .SBOM }}'
+```
+
+It prints the software bill of materials, one per platform.
+
+**The archives** are attached to the GitHub release: `muster_<version>_<os>_<arch>.tar.gz` for Linux and macOS on amd64
+and arm64, `checksums.txt` with their SHA-256 sums, and one SPDX JSON software bill of materials per archive. Download
+the archive and `checksums.txt` into one directory and check it:
+
+```sh
+sha256sum --ignore-missing -c checksums.txt
+```
+
+On macOS use `shasum -a 256 -c checksums.txt --ignore-missing`. `checksums.txt` is not signed: it finds a broken or
+swapped download from the same release, not a swapped release. For that, verify the image.

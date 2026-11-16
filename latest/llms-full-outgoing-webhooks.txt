@@ -1,0 +1,916 @@
+# Muster documentation, version latest: Outgoing webhooks
+
+This file holds the full text of the section Outgoing webhooks. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text; the rules for AI agents are in https://muster-io.github.io/muster/latest/llms-full-guide.txt.
+
+<!-- Source: https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md -->
+# Outgoing webhook: events mode
+
+An outgoing webhook Destination in the **events mode** sends one HTTP `POST` for every lifecycle event of every Alert
+Group on its Routes: an ordered, signed stream of versioned JSON events that an automation can record, react to or
+forward. Muster renders nothing for a chat here; for a chat with a REST API, use the template mode instead.
+
+In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the receiving endpoint is
+`https://automation.example.org/muster`.
+
+## Create the Destination
+
+In the web UI:
+
+1. Open **Destinations**, select **Create destination** and choose **Outgoing webhook**. Keep the **Mode** **Events**.
+2. Under **Events request**, enter the **URL** and, with **Add header**, each header's name and value; a value reads a
+   [Secret](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#secrets) as `{{ .Secrets.<name> }}`. Set the **Proxy** if the endpoint needs one, and give the
+   Destination a **Name**. Select **Save**.
+
+    ![The form of a new outgoing webhook in the mode Events: the URL and the header Authorization that reads the Secret token](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/01-new-destination.png){ .screenshot }
+
+3. Muster shows the **Signing secret** once: copy it to the receiving endpoint, which verifies the signatures with it
+   (see [Verify the signature](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#verify-the-signature)), and close the dialog.
+
+    ![The dialog Signing secret: the secret whsec_… and the warning that it is shown once](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/02-signing-secret.png){ .screenshot }
+
+4. The saved Destination shows its type and health, its **Routes** and its settings, with the tab **Request log** beside
+   **Settings**. Add it to a Route to send it events. In the screenshots, the receiving endpoint is
+   `https://hooks.example.org`.
+
+    ![The saved Destination automation: Outgoing webhook, Healthy, no Route yet, and its Events request](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/03-saved-destination.png){ .screenshot }
+
+Through the API, create a Destination of type `webhook` with the mode `events`:
+
+```json
+{
+  "type": "webhook",
+  "name": "automation",
+  "mode": "events",
+  "events": {
+    "url": "https://automation.example.org/muster",
+    "headers": [{ "name": "Authorization", "value": "Bearer {{ .Secrets.token }}" }]
+  },
+  "proxy": { "enabled": false },
+  "mentions": { "...": "Mention settings, as for any Destination" },
+  "limiter": { "limit": 5, "per_seconds": 1 }
+}
+```
+
+- The **URL** and the **header values** are Go templates. They can read the Destination's Secrets as
+  `{{ .Secrets.<name> }}` (or `{{ $.Secrets.<name> }}`, or `{{ index .Secrets "<name>" }}`) and nothing else; any
+  other use of `.Secrets`, such as `{{ with .Secrets }}` or `{{ $s := .Secrets }}`, is refused, because Muster could
+  not check that the Secret exists. They are parsed and run on a dry run when you save; an error names the field, its
+  line and its column.
+- Muster sets `Content-Type`, `webhook-id`, `webhook-timestamp` and `webhook-signature` itself; a header template may
+  not name them. Every request also carries `User-Agent: Muster/<version>` unless a header template sets its own.
+- The **proxy** is the Destination's own; the requests never read `HTTP_PROXY` or `HTTPS_PROXY`.
+- The **limiter** defaults to 5 requests per second in the form (`destination.webhook.limiter`).
+- An outgoing webhook has no Connection and no Destination check: checking it answers `422 check_not_supported`.
+
+The answer to the creation carries the **Signing secret** once, in `signing_secret`. Store it where the endpoint verifies the signatures; Muster
+never shows it again.
+
+## Secrets
+
+Credentials the endpoint needs go into the Destination's **Secrets**, never into the URL or a header as text.
+
+1. On the page of the Destination, under **Secrets**, select **Add secret**. Enter the **Name**, such as `token`, and the
+   **Value**, and select **Save**.
+
+    ![Secrets of the Destination: the form with the name token and a hidden value](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/04-add-secret.png){ .screenshot }
+
+2. The list shows the Secret's name, that it is set and when it changed, and its reference, `{{ .Secrets.token }}`,
+   which the URL and the headers read. **Replace** sets a new value and **Remove** deletes it; the value is never shown
+   again.
+
+    ![Secrets of the Destination: token, set, with its reference](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/05-secrets.png){ .screenshot }
+
+Through the API:
+
+```sh
+curl -X PUT https://muster.example.org/api/v1/destinations/DSK7M3QX9P2RTA/secrets/token \
+  -H "Authorization: Bearer $MUSTER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"value":"the-token-of-the-endpoint"}'
+```
+
+- A Secret name is a letter or an underscore followed by letters, digits and underscores.
+- Values are write-only: `GET …/secrets` lists names, whether they are set and when they last changed, with an `ETag`
+  that `If-Match` on `PUT` and `DELETE` compares with.
+- Everyone who can read Destinations sees the URL and header templates as written, with the references only.
+- Secret values and the Signing secrets are masked as `[redacted]` in delivery errors, the Timeline and the logs.
+- A template that reads a Secret the Destination does not have fails: that event is not sent and ends as Not
+  delivered.
+
+A header named `Authorization`, or a URL whose user information or query holds a literal value instead of a
+`{{ .Secrets.<name> }}` reference, gives the Destination the warning `literal_credential` with the JSON Pointer of the
+field, for example `/events/headers/0/value`: the value is shown to everyone who can read Destinations.
+
+## What is sent
+
+One `POST` per lifecycle event, with the version 1 body as `application/json`:
+
+```json
+{
+  "version": 1,
+  "event": "created",
+  "notify": true,
+  "mentions": [{ "type": "user", "id": "SR2K9D1VW3MPTE", "name": "Alice Smith", "login": "alice" }],
+  "sequence": 1,
+  "occurred_at": "2026-10-03T09:41:07Z",
+  "actor": { "kind": "system", "transport": "system" },
+  "alert_group": {
+    "number": 412,
+    "id": "AGK7M3QX9P2RTA",
+    "title": "HighErrorRate payments-api",
+    "summary": "Error rate above 5% for 10 minutes",
+    "status": "firing",
+    "route": { "id": "RT8Q2M4X7K1P3B", "name": "payments" },
+    "urgent": false,
+    "severity_level": "critical",
+    "started_at": "2026-10-03T09:41:07Z",
+    "resolved_at": null,
+    "snooze_until": null,
+    "reopen_count": 0,
+    "url": "https://muster.example.org/alert-groups/AGK7M3QX9P2RTA",
+    "teams": [{ "id": "TM4D7K2Q9X1VBN", "name": "Payments", "slug": "payments" }]
+  },
+  "alerts": [
+    {
+      "fingerprint": "6f1c2b0e9d4a7c31",
+      "status": "firing",
+      "labels": { "alertname": "HighErrorRate", "service": "payments-api" },
+      "annotations": { "summary": "Error rate above 5%" },
+      "starts_at": "2026-10-03T09:31:07Z",
+      "resolved_at": null,
+      "resolve_reason": null,
+      "generator_url": "https://prometheus.example.org/graph?g0.expr=…"
+    }
+  ]
+}
+```
+
+`version`
+:   `1`.
+
+`event`
+:   The lifecycle event, one of the names below.
+
+`notify`
+:   `true` exactly when the event is Loud.
+
+`mentions`
+:   Who the event mentions under the Destination's Mention entries, as data: `{"type": "everyone"}`,
+    `{"type": "group", "name": …}`, `{"type": "user", "id": …, "name": …, "login": …}` — the On-call of a Team too —
+    or `{"type": "team", "slug": …, "name": …}`, with one target per Team of the Alert Group for "Team from the label".
+    Always `[]` for a Quiet event.
+
+`sequence`
+:   The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
+    and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".
+
+`occurred_at`
+:   When the event was recorded.
+
+`actor`
+:   Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name`
+    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`, `cli`), or
+    `system` with the `reason`, for example `timer`.
+
+`alert_group`
+:   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,
+    `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count, its page in Muster and its
+    `teams`: the `id`, `name` and `slug` of each Team of the Alert Group, in the order they joined, a deleted Team by
+    its name, `[]` for none ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team)).
+
+`alerts`
+:   One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.
+
+`destination`
+:   Only on `destination_joined`: the `id`, `name` and `type` of the Destination the Alert Group joined. No other
+    event carries it.
+
+`page`
+:   Only on `page_not_delivered`: the people the Page names in `users` (`id`, `name`, `login`), the Notification
+    gateway of a call in `gateway` (`id`, `name`), null for a Page by Mention, and the `reason`. No other event
+    carries it.
+
+The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
+
+### Event names
+
+Every row of the lifecycle event tables is one event, Quiet ones and those with nothing to show in a messenger
+included. What delivery itself does — a Publication, a Storm summary, a final edit — is not a lifecycle event and is
+never sent.
+
+`created`
+:   `notify`: true
+
+`alerts_added`
+:   `notify`: true while firing; false while acknowledged or snoozed
+
+`alert_replaced`, `alert_resolved`, `alert_continued`, `annotations_changed`, `severity_raised`
+:   `notify`: false
+
+`urgency_raised`
+:   `notify`: true when the rise ends a Snooze or removes the acknowledgement; false otherwise
+
+`reopened`
+:   `notify`: true while firing or acknowledged; false while snoozed
+
+`snooze_ended`
+:   `notify`: true
+
+`resolved`
+:   `notify`: false
+
+`moved_to_default_route`
+:   `notify`: false
+
+`acknowledged`
+:   `notify`: false
+
+`takeover`
+:   `notify`: true
+
+`unacknowledged`
+:   `notify`: true when disabling or deleting the Owner released it; false for the Command
+
+`unresolved`, `snoozed`, `unsnoozed`, `note_added`
+:   `notify`: false
+
+`ack_timeout`
+:   `notify`: true
+
+`unclaimed`
+:   `notify`: false
+
+`reminder`
+:   `notify`: true
+
+`reminder_answered`
+:   `notify`: false
+
+`auto_unacknowledged`
+:   `notify`: true
+
+`notices_missed`
+:   `notify`: true
+
+`team_joined`
+:   `notify`: false. A Team joined the Teams of the Alert Group; `alert_group.teams` lists it.
+
+`unknown_team_value`
+:   `notify`: false. An Alert of the Alert Group carries a value of the Team label that names no Team; sent once per
+    value and Alert Group.
+
+`destination_joined`
+:   `notify`: true while firing; false while acknowledged or snoozed. The Alert Group, already published elsewhere,
+    reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
+    Destination, named in `destination` ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md)).
+
+`page_not_delivered`
+:   `notify`: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
+    refused it (`call_refused`), answered what Muster cannot classify (`call_unknown`), kept failing until the retry
+    budget was used (`call_budget_used`), the person had no confirmed contact at the gateway
+    (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); named in
+    `page` ([Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md)).
+
+The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
+Group's order.
+
+### Versioning
+
+New event names and new fields are added within `version` 1. Removing a field or changing its meaning needs a new
+`version`. Ignore event names and fields you do not know.
+
+## Order and duplicates
+
+- The events of one Alert Group are sent **in order**: the next one waits until the previous one is delivered or ends
+  as Not delivered. Events of different Alert Groups do not wait for each other.
+- Delivery is **at least once** and never collapsed: a retry sends the same event again with the same `webhook-id`
+  and the same body. **Drop duplicates by `webhook-id`.**
+- Events are never subject to Storms: during a Storm every event is sent, `created` of every Alert Group included.
+- While the Destination is Broken its events wait; after it recovers, every event that came due meanwhile is sent in
+  order per Alert Group, none dropped and with no age limit.
+
+## How the answer counts
+
+`2xx`
+:   Delivered.
+
+`429` or `503` with `Retry-After`
+:   The same event is sent again exactly when asked.
+
+`408`, any other `5xx`, a timeout or a network error
+:   Retried with backoff; after `delivery.transient_budget` the Destination becomes Broken.
+
+`401`, `403`, `404`, `410`
+:   The Destination becomes Broken; the event waits and is the probe.
+
+`400`, `413`, `422`, a redirect, any other answer
+:   That event ends as Not delivered and the next one follows; the Destination stays healthy. A redirect is never
+    followed; the error names its target.
+
+Requests go through the outbound address policy: a URL that resolves to a link-local, cloud metadata, multicast or
+unspecified address is refused under every policy, and loopback and private addresses need an allowed network. A
+refused request makes the Destination Broken with the rule as the reason, because every later request would be
+refused too. A Broken outgoing webhook is probed with its oldest waiting event; with none waiting, the next event is
+attempted as soon as it comes due.
+
+## Verify the signature
+
+Every request carries three headers, in the style of the
+[Standard Webhooks](https://www.standardwebhooks.com/) specification:
+
+- `webhook-id` — the id of the event, kept across retries;
+- `webhook-timestamp` — Unix seconds when the request was signed;
+- `webhook-signature` — one or more signatures `v1,<base64>`, separated by a space.
+
+Each signature is the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}` — the raw body, byte for
+byte — with the key that is the base64 after `whsec_` in the Signing secret. Accept a request when one of its
+signatures matches, compare in constant time, and refuse a timestamp more than five minutes from your clock.
+
+Go:
+
+```go
+func verify(secret, id, timestamp string, body []byte, header string) bool {
+	key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, "whsec_"))
+	if err != nil {
+		return false
+	}
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil || math.Abs(time.Since(time.Unix(ts, 0)).Seconds()) > 300 {
+		return false
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(id + "." + timestamp + "."))
+	mac.Write(body)
+	want := []byte(base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+	for _, sig := range strings.Fields(header) {
+		if v, s, ok := strings.Cut(sig, ","); ok && v == "v1" && hmac.Equal([]byte(s), want) {
+			return true
+		}
+	}
+	return false
+}
+```
+
+Python:
+
+```python
+import base64, hashlib, hmac, time
+
+def verify(secret: str, msg_id: str, timestamp: str, body: bytes, header: str) -> bool:
+    key = base64.b64decode(secret.removeprefix("whsec_"))
+    try:
+        if abs(time.time() - int(timestamp)) > 300:
+            return False
+    except ValueError:
+        return False
+    mac = hmac.new(key, f"{msg_id}.{timestamp}.".encode() + body, hashlib.sha256)
+    want = base64.b64encode(mac.digest()).decode()
+    for sig in header.split():
+        version, _, value = sig.partition(",")
+        if version == "v1" and hmac.compare_digest(value, want):
+            return True
+    return False
+```
+
+A shell, with `openssl`, to check a recorded request by hand — it compares neither in constant time nor the
+timestamp, so do not use it in a receiver — for a body saved in `body.json`:
+
+```sh
+KEY=$(printf '%s' "${SECRET#whsec_}" | base64 -d | od -An -v -tx1 | tr -d ' \n')
+EXPECTED="v1,$( { printf '%s.%s.' "$WEBHOOK_ID" "$WEBHOOK_TIMESTAMP"; cat body.json; } |
+  openssl dgst -sha256 -mac HMAC -macopt "hexkey:$KEY" -binary | base64)"
+case " $WEBHOOK_SIGNATURE " in *" $EXPECTED "*) echo valid ;; *) echo invalid ;; esac
+```
+
+## Regenerate and retire the Signing secret
+
+1. On the page of the Destination, under **Signing secret**, select **Regenerate**, and **Regenerate** again in the
+   dialog. Muster shows the new secret once: deploy it to the receiving endpoint.
+
+    ![The dialog Regenerate the Signing secret?](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/06-regenerate.png){ .screenshot }
+
+2. Until you retire it, the previous secret still signs, and the Destination says since when. Once the endpoint
+   verifies with the new secret, select **Retire previous secret**.
+
+    ![The Signing secret with the previous secret still signing and the button Retire previous secret](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/07-previous-secret.png){ .screenshot }
+
+Through the API, `POST /api/v1/destinations/{id}/signing-secret` makes a new Signing secret and shows it once. Until you retire the
+previous one, requests carry two signatures — with the new and with the previous secret — and the Destination shows the
+warning `previous_signing_secret_active` with the date since when: deploy the new secret to the receiving endpoint, then retire
+the previous one with `DELETE /api/v1/destinations/{id}/signing-secret/previous`. Requests then carry one signature.
+Both changes are recorded in the Audit log, never with the secret. Rotating the master keys re-encrypts the Signing
+secrets but never changes them.
+
+## Delete the Destination
+
+Deleting an events-mode Destination sends nothing more: its waiting events end as Not delivered with "the Destination
+was deleted", no final event is sent, and its secrets — the Signing secrets, the Secrets and the proxy password — are
+wiped at once, or as soon as a request that was already being sent ends.
+
+<!-- Source: https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md -->
+# Outgoing webhook: template mode
+
+An outgoing webhook Destination in the **template mode** keeps one message per Alert Group in any chat that has a REST
+API, the way Muster keeps a message in Mattermost or Telegram: a **create** request posts it, an **update** request
+edits it to the current state, and optional **open thread** and **reply in thread** requests carry the follow-ups.
+You write each request as Go templates; Muster sends them, signed, and reads the values it needs from the answers.
+
+The messages that Muster keeps in a messenger are customised with templates written the same way: see
+[Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md).
+
+For an ordered stream of every lifecycle event instead, use the [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md); the mode `both` sends both.
+
+In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the chat's API is
+`https://chat.example.org/api`.
+
+## Create the Destination
+
+In the web UI:
+
+1. Open **Destinations**, select **Create destination**, choose **Outgoing webhook** and the **Mode** **Template** (or
+   **Both**, with the **Events request** too). Under **Requests**, **Create** and **Update** are required; **Open
+   thread** and **Reply in thread** are optional.
+
+    ![The form of a new outgoing webhook in the mode Template, with its requests](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/01-template-mode.png){ .screenshot }
+
+2. In **Create**, choose the **Method**, enter the **URL**, the headers with **Add header** and the **Body**, and add
+   the [extraction rules](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#extraction-rules-and-response) with **Add rule**: a name and a JSONPath into the answer.
+
+    ![The request Create: POST to the chat's messages, the body template and the extraction rule id at $.data.id](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/02-create-request.png){ .screenshot }
+
+3. In **Update**, enter the request that edits the message; it reads the extracted values as `{{ .Response.<name> }}`.
+
+    ![The request Update: PUT to the message by its id, read as .Response.id, with the same body](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/03-update-request.png){ .screenshot }
+
+4. Give the Destination a **Name** and select **Save**. Muster shows the Signing secret once, as in the
+   [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#create-the-destination), and then the saved Destination. In the screenshots, the chat's API
+   is at `https://hooks.example.org/chat/ops`.
+
+    ![The saved Destination team chat in the mode Template](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/04-saved-destination.png){ .screenshot }
+
+Through the API, create a Destination of type `webhook` with the mode `template` (or `both`, with the `events` request
+too):
+
+```json
+{
+  "type": "webhook",
+  "name": "team chat",
+  "mode": "template",
+  "template": {
+    "create": {
+      "method": "POST",
+      "url": "https://chat.example.org/api/channels/ops/messages",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ .Secrets.token }}" }],
+      "body": "{\"text\":{{ printf \"#%d %s (%s)\" .AlertGroup.Number .AlertGroup.Title .AlertGroup.Status | toJson }}}",
+      "extract": [{ "name": "id", "path": "$.data.id" }]
+    },
+    "update": {
+      "method": "PUT",
+      "url": "https://chat.example.org/api/channels/ops/messages/{{ .Response.id }}",
+      "headers": [{ "name": "Authorization", "value": "Bearer {{ .Secrets.token }}" }],
+      "body": "{\"text\":{{ printf \"#%d %s (%s)\" .AlertGroup.Number .AlertGroup.Title .AlertGroup.Status | toJson }}}"
+    }
+  },
+  "proxy": { "enabled": false },
+  "mentions": { "...": "Mention settings, as for any Destination" },
+  "limiter": { "limit": 5, "per_seconds": 1 }
+}
+```
+
+Each request has:
+
+- a **method**: `GET`, `POST`, `PUT`, `PATCH` or `DELETE`;
+- a **URL**, **headers** and an optional **body**, each a Go template in the same sandbox as message templates;
+- for `create` and `open_thread` only, **extraction rules**: a name and a JSONPath (RFC 9535) into the JSON answer.
+
+`create` and `update` are required; `open_thread` and `reply_in_thread` are optional. When you save, every template
+is parsed and run on a dry run with a built-in example Alert Group, its Secrets and the values it may read filled with
+`example-<name>`; an error answers `422` at `/template/<request>/<field>` with its line and column. The URL must then be
+an absolute `http` or `https` URL.
+
+Muster sets `webhook-id`, `webhook-timestamp` and `webhook-signature` on every request, signed with the Destination's
+Signing secret as in the events mode, `Content-Type: application/json` when a request has a body and no
+`Content-Type` header of its own, and `User-Agent: Muster/<version>` when it has no `User-Agent` of its own. The
+requests go through Muster's outbound address policy and the Destination's proxy; redirects are never followed. The answers map to outcomes as in the [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#how-the-answer-counts).
+
+## What the templates read
+
+`.AlertGroup`
+:   `Number`, `Title`, `Summary`, `Status`, `Route`, `SeverityLevel`, `Urgent`, `StartedAt`, `URL`, `ReopenCount`,
+    `Owner`; absent (nil) for a Storm summary.
+
+`.Alerts`
+:   The Alerts, as in Alertmanager: `Status`, `Labels`, `Annotations`, `StartsAt`, `EndsAt`, `GeneratorURL`,
+    `Fingerprint`; with `.Alerts.Firing` and `.Alerts.Resolved`.
+
+`.Status`, `.GroupLabels`, `.CommonLabels`, `.CommonAnnotations`, `.ExternalURL`
+:   As in Alertmanager templates.
+
+`.Storm`
+:   For a Storm summary only: `Route`, `AlertGroupCount`, `UrgentCount`, `Final` (the Storm ended) and `URL` (the
+    Route's Alert Groups in Muster).
+
+`.Response`
+:   The values the extraction rules found, by name.
+
+`.Event`
+:   The lifecycle event a Thread reply carries, such as `alerts_added`; empty otherwise.
+
+`.Notify`
+:   `true` when the message is Loud.
+
+`.Mentions`
+:   The Mention targets of a Loud message (see below).
+
+`.Secrets`
+:   The Destination's Secrets, by name.
+
+`.Final`
+:   In the final edit only: "No longer updated here; current state in Muster: {link}".
+
+Alert data reach the templates **as received**, not escaped for any markup, because Muster does not know the chat's
+format. Write JSON bodies with `toJson` (or `js` inside a string), so that a label with a quote or a line break cannot
+break the body. A label or annotation the Alerts do not have is empty text, as in Alertmanager, so `toJson` gives
+`""`, not `null`; tell a missing value apart with `if` or `or`, as in `{{ or .CommonLabels.team "none" }}`.
+
+Read a Secret as `{{ .Secrets.<name> }}` and an extracted value as `{{ .Response.<name> }}` — or with `$.` in front, or
+as `{{ index .Secrets "<name>" }}` with a quoted name. Any other use, such as `{{ with .Secrets }}`, `{{ $s := .Secrets }}`
+or `{{ toJson .Response }}`, is refused when you save: Muster checks before each request that every Secret and value a
+template reads exists, which it can only do for names written out. Printed or encoded whole, as `{{ toJson . }}` would,
+the Secrets show as `[redacted]`.
+
+## Extraction rules and `.Response`
+
+A rule picks the first node its JSONPath selects in the JSON answer of `create` or `open_thread` — a string, a number
+as written, or a boolean — and stores it as a string under its name, per Alert Group and Destination. The first rule
+of `create` is also the message id Muster shows. `create` reads no values (it runs first), `open_thread` and `update`
+read those of `create` (an `update` can come before any thread exists), and `reply_in_thread` reads those of both.
+
+When a rule finds nothing — the answer is not JSON, the path selects nothing, `null`, an object or an array, or a value
+longer than 1024 bytes — the `create` still counts as delivered, the Alert Group's Timeline records
+`template_value_missing` with the rule's name, and every later request that reads the value fails as a template error.
+
+## Reconciliation
+
+The template mode follows the Desired state like a messenger. The Desired state is the rendered `update` request
+(with Secrets and extracted values left out): when a change leaves it as it was, no request is made, and changes made
+while a request is pending collapse into the next `update`. Lifecycle events whose form is a Thread reply in the
+lifecycle event tables — new Alerts, a Takeover, a Reopen, an ack timeout notice, a Reminder… — go through
+`reply_in_thread`, batched like Thread replies in a messenger; without `reply_in_thread` they are not sent.
+
+After the Destination was Broken, the template mode sends only the current state: one `update` per published Alert
+Group, no reply for the events of the period, and no `create` for an Alert Group that started and resolved meanwhile.
+
+Deleting the Destination sends the final edit through `update`, with `.Final` set, and wipes its secrets once the
+final edits are done; in the mode `both`, the queued events end as Not delivered at once.
+
+## Recipe: a chat with one-step threads
+
+A reply is posted under the message:
+
+```json
+"reply_in_thread": {
+  "method": "POST",
+  "url": "https://chat.example.org/api/channels/ops/messages/{{ .Response.id }}/replies",
+  "headers": [{ "name": "Authorization", "value": "Bearer {{ .Secrets.token }}" }],
+  "body": "{\"text\":{{ printf \"%s on #%d\" .Event .AlertGroup.Number | toJson }},\"notify\":{{ .Notify }}}"
+}
+```
+
+## Recipe: a chat with two-step threads
+
+The chat needs a thread created first; `open_thread` runs once, before the first reply of each message, and adds its
+values:
+
+```json
+"open_thread": {
+  "method": "POST",
+  "url": "https://chat.example.org/api/threads",
+  "headers": [{ "name": "Authorization", "value": "Bearer {{ .Secrets.token }}" }],
+  "body": "{\"root\":\"{{ .Response.id }}\"}",
+  "extract": [{ "name": "thread", "path": "$.thread.id" }]
+},
+"reply_in_thread": {
+  "method": "POST",
+  "url": "https://chat.example.org/api/threads/{{ .Response.thread }}/messages",
+  "headers": [{ "name": "Authorization", "value": "Bearer {{ .Secrets.token }}" }],
+  "body": "{\"text\":{{ printf \"%s on #%d\" .Event .AlertGroup.Number | toJson }}}"
+}
+```
+
+If `open_thread` fails, no reply is sent and the reply is retried by the usual rules; once it succeeded it does not
+run again for that message, whatever the reply after it came to.
+
+## Recipe: Storm summaries
+
+During a Storm, the Destination gets one Storm summary through `create` — Loud, first — and its later counts and final
+state through `update`, instead of the Alert Groups the Storm holds. Their templates see `.Storm` and no Alert Group, so
+templates that should handle both branch on it:
+
+```json
+"body": "{\"text\":{{ if .Storm }}{{ printf \"Storm on %s: %d new Alert Groups, %d Urgent — %s\" .Storm.Route .Storm.AlertGroupCount .Storm.UrgentCount .Storm.URL | toJson }}{{ else }}{{ printf \"#%d %s (%s)\" .AlertGroup.Number .AlertGroup.Title .AlertGroup.Status | toJson }}{{ end }},\"over\":{{ if .Storm }}{{ .Storm.Final }}{{ else }}false{{ end }}}"
+```
+
+A template that reads `.AlertGroup` without the branch fails for a summary as a template error.
+
+## Mentions
+
+Muster does not know the chat's syntax for a Mention, so a Loud message carries its targets as data in `.Mentions`:
+each has `Type` (`everyone`, `group`, `user` or `team`) and, by type, `Everyone` (`all`, `channel`, `here` or
+`everyone`), `Name`, `ID` and `Login`, or a Team's `Slug` and `Name`. The trusted function `mention` renders a target as
+plain text — `@all` (or `@channel`, `@here`, `@everyone` as the Mention entries chose), the group's name, `@` and the
+login, or the Team's slug — for the template to wrap in the chat's syntax:
+
+```
+{{ range .Mentions }}<{{ mention . }}> {{ end }}
+```
+
+## Template errors
+
+A request whose template fails is not sent: that delivery or Thread reply ends as Not delivered with no fallback body,
+since the chat expects its own format. The Destination shows `template_error` with `fallback` `not_sent`,
+`muster_template_errors_total{template="webhook_request"}` grows, the log line `webhook_template_failed` names the
+request, and the Internal alert `MusterTemplateError` fires with the labels `destination`, `destination_name` and
+`template`. The next request of the Destination that renders clears the error and resolves the alert.
+
+Preview a request template before you save it with `POST /api/v1/template-previews` and the kind `webhook_request`: it
+renders against a sample, with Secrets shown as `[redacted]` and extracted values as `example-<name>`.
+
+<!-- Source: https://muster-io.github.io/muster/latest/outgoing-webhooks/recipes.md -->
+# Recipes
+
+Four ways to use an outgoing webhook, built only from what it has: the [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md) sends one signed event per
+lifecycle event; the [template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md) sends the requests you write and keeps their answers. Each recipe says
+which mode it uses and why.
+
+!!! note "These are sketches"
+    The recipes show the shape of a setup, not a tested integration. The endpoints, fields and header names of the other
+    system are examples, taken from the public documentation of an open tool. They change between versions and settings,
+    so check them against the documentation of the version you run, and use **Preview** and **Send test message** on
+    the Destination before you rely on it. In template mode, **Send test message** makes a real `create` request: on a
+    status page or in an issue tracker it opens a real incident or issue, so send the first ones to a status page nobody
+    reads or to a test repository. Everything about Muster in them is real: the modes, the fields the templates read,
+    the extraction rules, the Secrets and the signature.
+
+Common to all four:
+
+- **Use a Route of its own.** Create a Route whose Matchers pick only the Alerts you want to reach this system, for
+  example `severity="critical"`, and give it the webhook as its Destination. The other Routes are unaffected. See [Routes
+  and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md).
+- **Keep credentials in Secrets**, never in the URL or in a header as text. See [Secrets](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#secrets).
+- **Template mode follows Storms.** While a Storm lasts, a template-mode Destination gets one Storm summary through its
+  `create` request, and templates that read `.AlertGroup` fail for it. On a dedicated, narrow Route this rarely matters;
+  otherwise branch on `.Storm` as [Recipe: Storm summaries](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#recipe-storm-summaries) shows.
+- **Look at the Request log** when something does not work: it shows the requests Muster sent and the answers, with
+  secrets masked. See [Request log](https://muster-io.github.io/muster/latest/operations/request-log.md).
+
+In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`.
+
+## A phone call or an SMS
+
+**Mode: events.** A provider with an HTTP API starts a call or sends a text when you post a small request to it. You want
+that only for the changes that need a human, and you want to send it once. The events mode fits, because every event
+carries `notify`, which is true exactly when the change is [Loud](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md), and a `webhook-id` that
+stays the same across retries.
+
+Template mode does not fit here. It always has an `update` request, which sends again whenever its rendered `update`
+changes, and a call provider has nothing to update. It cannot decide to skip an event either.
+
+Muster cannot know your provider's request, so put a small **relay** between them. The relay checks the signature, drops
+duplicates, picks the events worth a call, and calls the provider.
+
+1. Create a Destination of type `webhook`, mode `events`, with the relay's URL, as in
+   [Create the Destination](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#create-the-destination). The relay below checks only the signature, so it needs
+   the Secret `token` and its header from that example only when something in front of it asks for a credential. Keep
+   the Signing secret that the answer shows once, and give it to the relay.
+2. Create a Route that matches what should ring a phone, with the Destination, and the Paging profile.
+3. Run the relay. This sketch is Python; the `verify` function is the one on [Verify the
+   signature](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#verify-the-signature):
+
+   ```python
+   import json, os, urllib.request
+   from http.server import BaseHTTPRequestHandler, HTTPServer
+
+   CALL_ON = {"created", "ack_timeout", "reopened"}   # the events worth a call
+   seen = set()                                        # webhook-ids; use a store with an expiry in real life
+
+   class Relay(BaseHTTPRequestHandler):
+       def do_POST(self):
+           body = self.rfile.read(int(self.headers["Content-Length"]))
+           if not verify(os.environ["SIGNING_SECRET"], self.headers["webhook-id"],
+                         self.headers["webhook-timestamp"], body, self.headers["webhook-signature"]):
+               self.send_response(401); self.end_headers(); return
+           event = json.loads(body)
+           wid = self.headers["webhook-id"]
+           if wid not in seen and event["notify"] and event["event"] in CALL_ON:
+               group = event["alert_group"]
+               call = urllib.request.Request(
+                   os.environ["PROVIDER_URL"],          # your provider's HTTP API
+                   json.dumps({"to": os.environ["ON_CALL_NUMBER"],
+                               "text": f"Muster #{group['number']}: {group['title']}"}).encode(),
+                   {"Authorization": "Bearer " + os.environ["PROVIDER_TOKEN"],
+                    "Content-Type": "application/json"})
+               urllib.request.urlopen(call, timeout=10)  # an error here fails the request, and Muster retries the same event
+               seen.add(wid)
+           self.send_response(204); self.end_headers()
+
+   HTTPServer(("", 8080), Relay).serve_forever()
+   ```
+
+What to know:
+
+- **Which events.** `created` is a new Alert Group, `ack_timeout` a notice that nobody took it, and `reopened` a problem
+  that returned. Leave out `alerts_added` and `reminder`, which are Loud too but only worth a message. The relay can
+  also skip an Alert Group that is already acknowledged: every event carries the Alert Group's `status` as it was when
+  the event was recorded.
+- **Answer honestly.** `2xx` marks the event delivered. A `5xx` makes Muster send the same event again with the same
+  `webhook-id`. A `400` or `422` drops that one event. `401`, `403`, `404` and `410` make the Destination
+  [Broken](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md), which is right for a relay that is misconfigured. See [How the answer
+  counts](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#how-the-answer-counts).
+- **Test it.** **Send test message** sends the event `test` with `notify` false. For the first run, add `"test"` to
+  `CALL_ON` and replace `event["notify"]` in the condition with `(event["notify"] or event["event"] == "test")`, then
+  change both back.
+
+## A status page
+
+**Mode: template.** A status page that has an HTTP API takes one incident per problem and lets you update it. That is the
+shape of the template mode: `create` opens the incident and extracts its id from the answer, and `update` changes it to
+the current state.
+
+This sketch uses the incident API of the open status page Cachet 2.x as the example: a `POST` to `/api/v1/incidents`
+answers `{"data": {"id": 7, …}}`, and a `PUT` to `/api/v1/incidents/7` changes it. Its `status` is 1 for investigating, 2
+for identified and 4 for fixed. Create a Secret `token` with the page's API token.
+
+`create`:
+
+```
+POST https://status.example.org/api/v1/incidents
+X-Cachet-Token: {{ .Secrets.token }}
+Content-Type: application/json
+```
+
+```
+{"name": {{ .AlertGroup.Title | toJson }},
+ "message": {{ .AlertGroup.Summary | toJson }},
+ "status": 1,
+ "visible": 1}
+```
+
+Extraction rule: the name `id`, the path `$.data.id`.
+
+`update`:
+
+```
+PUT https://status.example.org/api/v1/incidents/{{ .Response.id }}
+X-Cachet-Token: {{ .Secrets.token }}
+Content-Type: application/json
+```
+
+```
+{"name": {{ .AlertGroup.Title | toJson }},
+ "message": {{ .AlertGroup.Summary | toJson }},
+ "status": {{ if eq .AlertGroup.Status "resolved" }}4{{ else if eq .AlertGroup.Status "firing" }}1{{ else }}2{{ end }},
+ "visible": 1}
+```
+
+The incident opens as investigating when an Alert Group appears, becomes identified while somebody has it or it is
+snoozed, and becomes fixed when the Alert Group resolves. If the Alert Group reopens, the next `update` says investigating
+again.
+
+Think before you publish: the title and summary of an Alert Group come from your alert rules and may show internal names.
+Use a Route with Matchers for the alerts that are meant for your users, and write the summary annotations for them.
+
+## A second chat
+
+**Mode: template.** A chat with an open REST API and incoming messages is a Destination of its own: the same Alert Groups,
+in a second place. The template mode keeps one message per Alert Group in it, edits it where the chat's API allows, and
+posts the replies of the Thread.
+
+This sketch uses the REST API of Rocket.Chat as the example. A `POST` to `chat.postMessage` answers with the message under
+`message`, with its `_id` and its room id `rid`; `chat.update` edits it; a message with a `tmid` is a reply in its thread.
+Create the Secrets `token` and `user_id` for the bot user's token and id.
+
+`create`:
+
+```
+POST https://chat.example.org/api/v1/chat.postMessage
+X-Auth-Token: {{ .Secrets.token }}
+X-User-Id: {{ .Secrets.user_id }}
+Content-Type: application/json
+```
+
+```
+{"channel": "#alerts",
+ "text": {{ printf "#%d %s (%s)\n%s" .AlertGroup.Number .AlertGroup.Title .AlertGroup.Status .AlertGroup.URL | toJson }}}
+```
+
+Extraction rules: `id` with `$.message._id`, and `room` with `$.message.rid`.
+
+`update`:
+
+```
+POST https://chat.example.org/api/v1/chat.update
+X-Auth-Token: {{ .Secrets.token }}
+X-User-Id: {{ .Secrets.user_id }}
+Content-Type: application/json
+```
+
+```
+{"roomId": {{ .Response.room | toJson }},
+ "msgId": {{ .Response.id | toJson }},
+ "text": {{ printf "#%d %s (%s)\n%s" .AlertGroup.Number .AlertGroup.Title .AlertGroup.Status .AlertGroup.URL | toJson }}}
+```
+
+`reply_in_thread`:
+
+```
+POST https://chat.example.org/api/v1/chat.postMessage
+X-Auth-Token: {{ .Secrets.token }}
+X-User-Id: {{ .Secrets.user_id }}
+Content-Type: application/json
+```
+
+```
+{"roomId": {{ .Response.room | toJson }},
+ "tmid": {{ .Response.id | toJson }},
+ "text": {{ printf "%s on #%d" .Event .AlertGroup.Number | toJson }}}
+```
+
+What to know:
+
+- **Edits may be limited by the chat.** Many chats let a user edit a message only for a while, or not at all. If yours does,
+  the `update` of an old message is refused, and by the chat's answer that ends as Not delivered or makes the Destination
+  Broken. Check the chat's setting for editing messages. If you
+  cannot allow edits, make `update` a second `chat.postMessage` call: each change is then a new message instead of an
+  edit.
+- **Loud and Quiet.** A chat decides for itself what rings. Muster tells the template through `.Notify`, and through
+  `.Mentions` whom to mention; wrap them in the chat's syntax with the `mention` function, as [Mentions](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#mentions)
+  shows.
+- **Two-step threads.** A chat that needs a thread created first uses `open_thread`; see [Recipe: a chat with two-step
+  threads](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#recipe-a-chat-with-two-step-threads).
+
+## An issue tracker
+
+**Mode: template.** Opening an issue when a problem starts, commenting on it as it develops, and closing it when the
+problem resolves needs one thing: the id of the issue that the first request created, in every later request. That is what
+the extraction rules are for. The `create` request opens the issue and extracts its number, `update` changes its state,
+and `reply_in_thread` adds comments.
+
+This sketch uses the issue API of the open forges Gitea and Forgejo, which share it. A `POST` to
+`/repos/{owner}/{repo}/issues` answers with the issue, including its `number`; a `PATCH` to
+`/repos/{owner}/{repo}/issues/{number}` changes its `state` to `open` or `closed`; a `POST` to
+`/repos/{owner}/{repo}/issues/{number}/comments` adds a comment. Create a Secret `token` with an access token of a bot user
+that may write issues in the repository.
+
+`create`:
+
+```
+POST https://git.example.org/api/v1/repos/ops/alerts/issues
+Authorization: token {{ .Secrets.token }}
+Content-Type: application/json
+```
+
+```
+{"title": {{ printf "#%d %s" .AlertGroup.Number .AlertGroup.Title | toJson }},
+ "body": {{ printf "%s\n\n%s" .AlertGroup.Summary .AlertGroup.URL | toJson }}}
+```
+
+Extraction rule: the name `number`, the path `$.number`.
+
+`update`:
+
+```
+PATCH https://git.example.org/api/v1/repos/ops/alerts/issues/{{ .Response.number }}
+Authorization: token {{ .Secrets.token }}
+Content-Type: application/json
+```
+
+```
+{"title": {{ printf "#%d %s (%s)" .AlertGroup.Number .AlertGroup.Title .AlertGroup.Status | toJson }},
+ "state": "{{ if eq .AlertGroup.Status "resolved" }}closed{{ else }}open{{ end }}"}
+```
+
+`reply_in_thread`:
+
+```
+POST https://git.example.org/api/v1/repos/ops/alerts/issues/{{ .Response.number }}/comments
+Authorization: token {{ .Secrets.token }}
+Content-Type: application/json
+```
+
+```
+{"body": {{ printf "%s: %s" .Event .AlertGroup.URL | toJson }}}
+```
+
+The issue opens with the Alert Group, gets a comment for each Thread reply, such as new Alerts, a Takeover or a Reminder,
+closes when the Alert Group is resolved, and opens again if the Alert Group returns. The title shows the current status.
+
+What to know:
+
+- **One issue per Alert Group.** A Route that takes many Alert Groups opens many issues. Narrow its Matchers, or choose a
+  Group key that groups more.
+- **If the extraction finds nothing,** the `create` still counts as delivered, the Timeline records the missing value, and
+  every later request that reads it fails as a template error. Check the answer in the **Send test message** result,
+  sent to a test repository.
+- **A tracker whose answer carries no id** cannot be driven this way. Use the events mode with a relay that remembers the
+  id of the issue for each `alert_group.id`, and does what the recipe above does with the events `created`, `resolved` and
+  `reopened`.

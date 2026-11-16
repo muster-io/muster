@@ -1,0 +1,2559 @@
+# Muster documentation, version latest: Concepts
+
+This file holds the full text of the section Concepts. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text; the rules for AI agents are in https://muster-io.github.io/muster/latest/llms-full-guide.txt.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/alert-groups.md -->
+# Alert Groups
+
+An **Alert Group** is a set of Alerts that Muster treats as one problem. It is the thing people act on: it has a number
+like `#412`, a status, and at most one **Owner**, and each Destination that receives it shows it as a single message
+that Muster keeps up to date. Acknowledge it, snooze it or resolve it, and everyone looking at it sees the result.
+
+This page explains what an Alert Group is and how it relates to the other things Muster handles. The pages that follow
+go deeper:
+
+- [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md): how an Alert finds its Alert Group.
+- [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md): how Alertmanager's notifications become Alerts, and when an Alert counts
+  as gone.
+- [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md): the four statuses, the commands, ack timeouts and Reminders.
+- [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md): which changes ring a phone, and whom they Mention.
+- [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md): what happens when a messenger stops answering.
+
+## The things Muster handles
+
+Four words sound alike and are not the same. Muster keeps them apart:
+
+| Term | What it is |
+|---|---|
+| Snapshot | One notification from Alertmanager. It lists the current Alerts of one **Alertmanager group**. It is input, not an Alert. |
+| Alertmanager group | The alerts Alertmanager notifies about together under one `groupKey`. It is Alertmanager's idea of "together", decided by the `group_by` of its route. |
+| Alert | One firing problem reported by a source, identified by its full set of labels, such as one pod, one node or one domain. |
+| Alert Group | The problem Muster shows people. It contains Alerts, and which ones go together is decided by a [Route and its Group key](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md), not by Alertmanager. |
+
+Muster does not copy Alertmanager's grouping. Alertmanager's groups exist to batch notifications. An Alert Group exists
+so that a person can say "I have this one". The two often look alike, but you can change either without the other.
+
+## What an Alert Group has
+
+Number, `#N`
+:   Assigned per Organization, without gaps, when the Alert Group is created. It is what people say aloud: "I took
+    #412".
+
+Status
+:   `firing`, `acknowledged`, `snoozed` or `resolved`. See [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md).
+
+Owner
+:   The user who acknowledged it. Only a user can be an Owner; a Service account cannot.
+
+Title
+:   The `alertname` that its Alerts share. When Alerts with different `alertname` values join it, the Group key values
+    instead, such as `cluster=prod, namespace=payments`. It is set when the Alert Group is created and changes at most
+    once, at that switch.
+
+Summary
+:   The `summary` annotation of the first of its Alerts that has one. It is set once.
+
+Route
+:   The [Route](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) that took its Alerts. It decides the Destinations and the timers.
+
+Severity level
+:   The highest Severity level of its firing Alerts — critical, warning or info — raised to the
+    [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of its Route.
+
+Urgent
+:   Set exactly when its Severity level is critical. See [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent) and [What critical
+    changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md).
+
+Reopen count
+:   How many times Muster reopened it.
+
+Teams
+:   The [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team) of every Alert that ever joined it, each with the rule that
+    brought it: the Team label or a Team matcher. They only grow, and they do not change where the Alert Group is
+    delivered, unless its Route delivers to the Teams
+    ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#also-to-the-teams-from-the-label)). The list filters by Team, and **My
+    Teams** shows those of the Teams you are in.
+
+Alerts
+:   One entry per fingerprint, firing first, resolved ones struck through with their reason.
+
+Timeline
+:   The ordered record of everything that happened to it.
+
+The Alert Group page shows all of this, the Alerts with their labels and annotations, the labels they share, and the
+previous Alert Groups with the same Route and Group key values. The page and the list work at phone width.
+
+## In the web UI
+
+1. Open **Alert Groups**. The list shows the Alert Groups of the chosen **Time range**, the last 7 days by default,
+   newest first: the status, the number, the title, the severity, the Route and the Integrations first. The tabs
+   above it — **Open**, **Firing**, **Acknowledged**, **Snoozed**, **Resolved** and **All** — choose the statuses and
+   count each one; **Search** finds an Alert Group by its number, such as `#412`, or by text.
+
+    ![The Alert Groups list on the tab All: Alert Groups in each status, with the filters beside it](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/01-list.png){ .screenshot }
+
+   The table scrolls sideways inside its box to the columns further right: the Owner, the end of a Snooze, when each
+   Alert Group started, how long it has lasted and its last change.
+
+    ![The list scrolled to its right end: the Owner admin, the end of the Snooze, the start, the duration and the last change of each Alert Group](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/02-list-columns.png){ .screenshot }
+
+2. Narrow the list with the filters beside it: the **Routes**, the **Integrations**, the **Severity**, **Urgent**, the
+   **Owner**, label Matchers and more. They combine, and they live in the address, so a filtered list can be shared;
+   **Clear filters** removes them. On a phone they open from **Filters**.
+
+    ![The list filtered by the Route payments: two Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/03-filters.png){ .screenshot }
+
+3. Select the number or the title of an Alert Group to open its page: the status, the Owner, the command buttons, the
+   [Alerts](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#what-an-alert-group-has), the labels, the deliveries to its Destinations and the previous Alert Groups
+   with the same Route and Group key values.
+
+    ![The page of an acknowledged Alert Group: its status, its Owner admin, its commands and its Alerts](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/04-alert-group.png){ .screenshot }
+
+4. Further down, the [Timeline](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#the-timeline) lists what happened to it, with the actor and the Transport of each
+   change, and the box to add a Note.
+
+    ![The Timeline of the Alert Group: Alert Group created by Muster, then Acknowledged by admin via the UI](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/05-timeline.png){ .screenshot }
+
+The [commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#commands-in-the-web-ui) act on the Alert Group from its page.
+
+## Live updates
+
+The list and the Alert Group page change as soon as something happens, without a reload. A mark in the header of every
+page says whether these live updates reach your browser, so that on a phone at night you know whether the list in front
+of you is current:
+
+| Mark | Meaning |
+|---|---|
+| Green filled dot, "Live" | Live updates are on. |
+| Grey ring, "Connecting…" | The page has loaded and is connecting. The text shows once this has taken 5 seconds. |
+| Amber half-filled dot, pulsing, "Reconnecting…" | The connection has been lost for 5 seconds, and the browser keeps trying again. |
+| Red ring with a slash, "Offline" | The connection has been lost for 30 seconds, or the page has not connected within 30 seconds of loading. |
+
+On a screen narrower than 640 pixels, such as a phone, only the dot shows, whatever the state, so that the navigation
+keeps its room; each state has its own shape as well as its colour, so you can tell them apart without the colour. A
+drop shorter than 5 seconds, such as a Muster replica restarting, leaves the mark as it was. Press the mark to read its
+state and what it means: in every state but "Live" it says that what you see may be out of date, while reconnecting or
+offline it names the time the connection was lost, and when offline it offers to reload the page. As soon as the
+connection is back, the list and the page are read again, so they show everything that happened meanwhile. The mark
+sends nothing to Muster.
+
+## How Alerts join an Alert Group
+
+When an Alert starts firing, Muster picks its [Route](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) and reads the values of the Route's
+**Group key** from the Alert's labels. Then, in this order:
+
+1. If an **open** Alert Group of that Route has the same Group key values, the Alert joins it.
+2. Otherwise, if the system resolved an Alert Group of that Route with the same values within the
+   [Reopen window](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#reopening), that Alert Group reopens.
+3. Otherwise a new Alert Group starts, with the next number.
+
+An Alert that is already in an open Alert Group is not routed again: it stays there until the Alert Group is resolved,
+even if you change the Route's Matchers or Group key meanwhile.
+
+What a new Alert does to an Alert Group depends on its status, because the status says whether anybody is paying
+attention:
+
+| The Alert Group is | A new Alert joining it is |
+|---|---|
+| firing | a Loud event, added to the Thread in batches |
+| acknowledged | a Quiet event; the acknowledgement stays, always |
+| snoozed | a Quiet update of the Root message only; what accumulated is listed when the Snooze ends |
+
+### Replacements
+
+An exporter restarts and reports the same problem with a new `pod` label. That is a different Alert, since its labels
+differ, but it is the same problem. When a new Alert differs from a firing Alert of the same Alert Group only in
+[Instance labels](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#instance-labels), Muster records a **Replacement**: a Quiet event in the Timeline that names the label
+that differs. The old Alert resolving is Quiet too. The Alert Group page suggests the real fix, which is to aggregate the
+label away in the rule, for example with `without(pod, instance)`.
+
+### Instance labels
+
+Instance labels are the labels that change when the process reporting an Alert restarts. The Organization lists them in
+`organization.instance_labels`; by default `pod`, `instance`, `container` and `endpoint`. See [Instance labels in
+informational alerts](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#instance-labels-in-informational-alerts) for when to keep them
+out of your rules.
+
+## Reopening
+
+An Alert Group is **resolved by the system** when its last Alert resolves, whether Alertmanager said so, or the Alert
+went [Gone or Stale](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md), or its Integration was deleted. A person can resolve it too.
+
+The two ways to resolve differ in what happens when the problem returns:
+
+| Resolved by | When an Alert with the same Route and Group key values fires again |
+|---|---|
+| The system | Within the **Reopen window** (`route.reopen_window`, 15 minutes by default) the same Alert Group **reopens**: same number, Reopen count plus one, and it returns to the status it had before, with the same Owner if it was acknowledged. After the window, a new Alert Group starts. |
+| A person | The Reopen window does not apply. If the Alerts that were still firing are still reported when the **Grace period** (`route.grace_period`, 15 minutes by default) ends, they are grouped again as if they had just fired. Within the Grace period, a new firing starts a new Alert Group at once. |
+
+A reopen is keyed by the Route and the Group key values, not by one Alert: any Alert with the same values brings the
+Alert Group back, whether it is one of its own Alerts or a new one. How loud a reopen is depends on where it returns:
+Loud into firing, Loud into acknowledged but Mentioning only the Owner, Quiet into snoozed.
+
+A person who resolved the wrong Alert Group presses **Unresolve** in the web UI or the API. Unresolve is not offered in
+messengers, and it works only on an Alert Group that a person resolved, not on one that reopens by itself.
+
+The reason is always visible. A resolution by the system carries the reason, such as "Alertmanager no longer reports this
+alert", and so does every other automatic change; the page, the Timeline and the message show it.
+
+## Where an Alert Group shows up
+
+A Route lists the Destinations that receive its Alert Groups. For each Alert Group and each of its Destinations, Muster
+keeps one **Root message** and brings it to the latest state each time something changes. Replies, such as new Alerts
+joining or a Reminder, go to the message's **Thread**. See [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md) for which changes are new
+messages and which are edits.
+
+An Alert Group whose Route has no Destination, as with the Default route in the [Quick start](https://muster-io.github.io/muster/latest/quick-start.md), exists
+only in Muster. Its page, the list, the statistics and the Timeline still work.
+
+## The Timeline
+
+The Timeline of an Alert Group shows, in order: Alerts added, resolved, replaced and continued; status changes with the
+actor and the Transport; Reopens; Notes; Takeovers; ack timeout notices, Reminders and their answers; use of the
+Fallback template; delivery events such as a Publication, a possible duplicate or a delivery that was Not delivered;
+moves to the Default route; and the periods when Muster itself was down. Each entry that records something Muster might
+tell people also shows whether it was Loud and whom it Mentioned.
+
+You can filter the Timeline by kind and read it oldest first or newest first. Notes belong to it: Responders and Admins
+can add one, up to 4,000 characters (`alert_group.note_max_length`).
+
+## Changing a Route does not change an Alert Group
+
+Edits of a Route's settings apply at once, also to its open Alert Groups, whose messages are updated. They never change
+an Alert Group's status. A new Group key or new Matchers apply only to Alerts that start firing afterwards.
+
+A Route that still has open Alert Groups cannot be deleted. Muster refuses and offers to move them to the Default
+route. A moved Alert Group keeps its Group key values, takes no new Alerts, and never reopens; it stays open until its
+Alerts resolve or a person resolves it.
+
+## Statistics
+
+**Statistics** counts the Alert Groups that started in a period and how fast people took and closed them: for each
+Route or each Integration, the number of Alert Groups and the median and the 95th percentile of the time to acknowledge
+and of the time to resolve. Days are split in your time zone.
+
+1. Open **Statistics**. Choose the **Period** — **Last 7 days**, **Last 30 days**, **Last 90 days** or **Custom** — and
+   show it **By route** or **By integration**; add Routes or Integrations to narrow it.
+
+    ![Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/06-statistics.png){ .screenshot }
+
+2. Select a Route or an Integration to see its Alert Groups per day of start, with the median times of each day.
+
+    ![The Alert Groups per day of start of the Route payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/07-statistics-days.png){ .screenshot }
+
+## How long Alert Groups are kept
+
+`retention.alert_details`
+:   kept for: 90 days
+
+    Alerts in Alert Groups, Timeline entries, delivery events.
+
+`retention.alert_group_summaries`
+:   kept for: 2 years
+
+    The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes; and the calls
+    through a [Notification gateway](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#calls) about it, once every Alert Group
+    a call was about is removed. The text of a call, which names its Alert Groups, is cleared when the call ends.
+
+After the details are removed, search still finds the Alert Group by its title and number, and its page shows the
+summary with the notice that the Alerts and the Timeline were removed. The list shows Alert Groups whose lifetime
+overlaps the chosen time range, 7 days by default (`alert_group.list_range`), so an Alert Group that has been firing for
+weeks is always in the default view. Searching by number ignores the range.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md -->
+# Routes and Group keys
+
+A **Route** decides what happens to an Alert after Muster has read it: which Alert Group it joins, who is told, and how
+the Alert Group is handled afterwards. A **Group key** decides which Alerts share an Alert Group. Together they are the
+two settings that shape what your team sees.
+
+Do not confuse a Route with an **Alertmanager route**. An Alertmanager route is a rule inside Alertmanager that picks a
+receiver and a repeat interval. A Route of Muster is evaluated after the Alert has arrived, on the labels of the Alert.
+
+## How an Alert is routed
+
+1. The Alert arrives in a [Snapshot](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md) of an Integration.
+2. The Integration's **Static labels** are added to it. If the Alert already has a label of that name, its own value
+   wins, and Muster warns about the label.
+3. Muster walks the Routes in list order. The first Route whose Matchers all match takes the Alert.
+4. The Route's Group key says which Alert Group the Alert goes to. See [Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#how-alerts-join-an-alert-group).
+
+Only an Alert that starts firing is routed. An Alert that already lives in an open Alert Group stays in it.
+
+## Routes
+
+A Route has:
+
+- a **name**, unique in the Organization, and a description;
+- **Matchers**, which pick the Alerts;
+- a **position** in the list;
+- a [**Minimum severity**](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity);
+- a **Group key**;
+- the **Destinations** that receive its Alert Groups;
+- policy fields for how its Alert Groups are handled: the Reopen window and the Grace period, whether a rise to Urgent
+  removes an acknowledgement, the Snooze durations, the Thread batching window and the Storm threshold, the templates
+  and the language, and the ack timeout, the Reminders and auto-unacknowledge.
+
+### Matchers
+
+A Matcher is a condition on one label, written as in Alertmanager: `=`, `!=`, `=~` and `!~`, where the last two take an
+RE2 regular expression. The Matchers of a Route are all required: they combine with AND. The Route editor builds them
+from fields; the API takes the same structure; an invalid expression is refused with a pointer to the field.
+
+`team="payments"` and `severity="critical"`
+:   Takes Alerts of the payments team that are critical.
+
+`namespace=~"prod-.*"`
+:   Takes Alerts in any namespace that starts with `prod-`.
+
+`alertname!="Watchdog"`
+:   Takes everything except the Watchdog.
+
+A missing label counts as an empty value. So `team!="payments"` also matches an Alert that has no `team` label.
+
+In the Route editor, under **Matchers**:
+
+1. Select **Add matcher**. A row appears with the label, the operator and the value.
+2. Enter the label, such as `team`, choose the operator, `=` by default, and enter the value, such as `payments`. The ×
+   at the end of a row removes it.
+
+![The Matchers of a Route: one row, team = payments, and the button Add matcher](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/01-matchers.png){ .screenshot }
+
+### Order, and the Default route
+
+Routes are evaluated in list order, and the first Route that matches takes the Alert. Put the narrow Routes first and
+the broad ones after them. Drag the Routes on the Routes page to reorder them.
+
+The **Default route** is always last. It has no Matchers, cannot be deleted or moved, and takes every Alert that no other
+Route took. A small installation may keep only the Default route. A Route with no Destinations is fine too: its Alert
+Groups exist in Muster and in no messenger.
+
+Edits to Routes use optimistic locking: if somebody changed the Routes while you were editing, your save is refused and
+you reload.
+
+### Route profiles
+
+When you create a Route, you choose a **Route profile**. A profile only fills in the settings; it is not stored, and you
+can change every field afterwards. There are two:
+
+Ack timeout (`route.ack_timeout`)
+:   Paging: on; first notice after 15 minutes · Informational: off
+
+Reminders (`route.reminders`)
+:   Paging: on; first after 4 hours · Informational: off
+
+Snooze durations (`route.snooze_durations`)
+:   Paging: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d
+
+Group key (`route.group_key`)
+:   Paging: `alertname`, `severity`, `cluster` · Informational: the same
+
+Reopen window and Grace period
+:   Paging: 15 minutes each · Informational: the same
+
+Choose **Informational** for alerts nobody needs to act on at once, such as a certificate that expires in a month: no
+notices, no Reminders, and long Snooze durations. Choose **Paging** for the rest. See [Statuses and
+commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) for what the timers do.
+
+### Minimum severity
+
+The **Minimum severity** of a Route (`route.minimum_severity`: none, `warning` or `critical`; none by default) is the
+lowest Severity level of its Alert Groups. An Alert Group's Severity level is the highest Severity level of its firing
+Alerts, raised to the Minimum severity of its Route. The Minimum severity only raises: it never lowers an Alert Group,
+and it never changes the level of an Alert, which the Alerts of the Alert Group page, the Alerts view and the `alerts[]`
+of outgoing webhook events still show as received.
+
+Use it for a Route whose Alerts all matter as much as a critical one, whatever their `severity` label says: with the
+Minimum severity critical, a warning Alert of the Route starts a critical, and so [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent), Alert Group. The
+Route that Muster suggests for `MusterHeartbeatLost` has the Minimum severity critical. [What critical
+changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md#what-the-minimum-severity-adds) lists what a Minimum severity does, and what it
+leaves alone.
+
+A changed Minimum severity applies at once to the open Alert Groups of the Route, Quietly. A raised one records a Quiet
+`severity_raised`, or the Quiet `urgency_raised` of an Alert Group it makes critical, with the reason "Minimum severity
+of the Route"; it never removes an acknowledgement or a Snooze. A lowered one records nothing and lowers their level,
+as a falling Severity level does. The Root messages show the new level.
+
+By default the `severity` label maps to a Severity level: `critical` is critical, `warning` is warning, `info` and
+`none` are info, any other value counts as warning and is shown as received, and an Alert without the label counts as
+info. The Organization can change the label and the mapping.
+
+### Urgent
+
+An Alert Group is **Urgent** when its Severity level is critical — from its Alerts, or from the
+[Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of its Route. An Urgent Alert Group is posted first when many arrive at once, is
+published on its own during a Storm, and a rise to Urgent can end a Snooze or remove an acknowledgement, where the
+Route's "rise to Urgent removes the acknowledgement" is on. [What critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md) lists
+every effect of Urgent.
+
+From 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act: a Route marked urgent
+got the Minimum severity critical, and a critical Alert Group is always Urgent. The API keeps `urgent` on Routes and
+`critical_is_urgent` on the Organization until 0.3.0. A Route request with `urgent: true` and no `minimum_severity`, as
+a 0.1 client sends it, sets the Minimum severity critical; `urgent: false`, `urgent` beside `minimum_severity`, and
+`critical_is_urgent` change nothing. See the
+[upgrade notes of 0.2.0](https://muster-io.github.io/muster/latest/install/versions.md#upgrade-notes).
+
+## Group keys
+
+The **Group key** of a Route is a list of label names. Alerts of the Route that have the same values for all of those
+labels go to the same Alert Group. A label that an Alert lacks counts as an empty value, so Alerts that all lack
+`cluster` group together.
+
+The default Group key is `alertname`, `severity` and `cluster`. Take these four Alerts, all taken by one Route:
+
+| Alert | `alertname` | `severity` | `cluster` | `namespace` | `pod` |
+|---|---|---|---|---|---|
+| 1 | `KubePodCrashLooping` | `warning` | `prod` | `payments` | `api-1` |
+| 2 | `KubePodCrashLooping` | `warning` | `prod` | `payments` | `api-2` |
+| 3 | `KubePodCrashLooping` | `warning` | `prod` | `search` | `web-1` |
+| 4 | `KubePodCrashLooping` | `warning` | `staging` | `payments` | `api-1` |
+
+| Group key | Alert Groups | Which Alerts |
+|---|---|---|
+| `alertname`, `severity`, `cluster` (default) | 2 | 1, 2 and 3 in one; 4 in another |
+| `alertname`, `cluster`, `namespace` | 3 | 1 and 2; 3; 4 |
+| `alertname`, `cluster`, `namespace`, `pod` | 4 | one Alert Group per pod |
+| `alertname` | 1 | all four |
+
+There is no best key. A coarse key gives few Alert Groups that stay open longer, and a person takes the whole problem
+with one Acknowledge. A fine key gives more Alert Groups and a clearer ownership of each. Pick the labels that tell
+"who should look at this" apart. A good start is the labels your teams split on: the alert name, the cluster and the
+namespace or the service.
+
+In the Route editor, the **Group key** shows its labels in order:
+
+1. To take a label out, select the × next to it.
+2. To add one, type its name in the field under the labels and select **Add label**.
+
+![The Group key of a new Route, alertname, severity and cluster, beside its preview: 2 Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/02-group-key.png){ .screenshot }
+
+### Preview before you save
+
+The Group key editor previews what a key would do. It reads the Stored Snapshots of the chosen period (24 hours by
+default, at most the retention of Stored Snapshots; `routing.group_key_preview_period`) and shows how many Alert Groups
+the current and the proposed key would produce, with the 5 largest as examples (`routing.group_key_preview_examples`).
+It covers the Alerts that the Route would take
+at its place in the current order, each Alert once, and it works for a Route you are still creating. Use it before every
+change of a key.
+
+1. Change the Matchers or the Group key in the Route editor.
+2. Under **Group key preview**, choose the **Period**, 24 hours by default, and select **Preview**.
+3. Compare **Current**, the saved key, with **Proposed**, the key in the editor: each table lists the largest Alert
+   Groups with the values of the key's labels and the number of Alerts. A new Route has only the proposed side. When
+   you change the Matchers, the key or the period after a preview, the preview says so; select **Preview** again.
+
+![The Group key preview of a saved Route with namespace instead of severity in its key: Current 2 Alert Groups, Proposed 3 Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/03-preview.png){ .screenshot }
+
+The screenshot shows the four Alerts of the table above: with `namespace` in place of `severity`, the Alerts of `prod`
+split by namespace.
+
+### Do not put Instance labels in the key
+
+**Instance labels** change when the process that reports an Alert restarts, such as `pod` and `instance`. If one is in the
+Group key, every restart of a pod starts an Alert Group of its own and the old one stays open. Keep `pod` and `instance`
+out of the key unless one Alert Group per pod is what you want. When it is, restarts cause no trouble, since the Alert Group
+for a pod fires and resolves with that pod. Otherwise leave the labels out of the key, so that the restarted pod's
+Alert is recognised as a **Replacement** inside the same Alert Group. See [Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#replacements)
+and [Instance labels in informational alerts](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#instance-labels-in-informational-alerts).
+
+### Static labels
+
+**Static labels** belong to an Integration, not to the Route. Muster adds them to every Alert of the Integration before it
+routes it, so the Matchers and the Group key can use them like labels the rules set. Their usual job is to name what
+the Alertmanager cluster knows and the rules do not, such as `cluster=prod-eu`. That is why the default Group key can
+include `cluster`: set it as a Static label on each Integration, and Alert Groups of different clusters stay apart even
+when the alerting rules never mention the cluster. See [Static
+labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels).
+
+## Create a Route
+
+1. Open **Routes** and select **Create route**. Choose a [Route profile](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#route-profiles), **Paging** or
+   **Informational**; **Choose another profile** takes you back.
+
+    ![Create route: the choice between the profiles Paging and Informational](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
+
+2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#matchers) and check the
+   [Group key](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#group-keys) with its [preview](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#preview-before-you-save).
+
+    ![The form of the new Route payments: the Matcher team = payments, the Group key and its preview of 2 Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/05-new-route.png){ .screenshot }
+
+3. Under **Route Destinations**, choose each Destination in **Add a Destination**. The list shows each one with its type and
+   health, and a Severity condition you can leave at **Any severity**; a Route without Destinations sends no messages.
+   Next to them, **Also to the Teams from the label** adds the Destinations of the Teams of the Alerts. Both are
+   explained in [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions).
+
+    ![The Destinations of the Route: the outgoing webhook payments, Healthy](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
+
+4. Under **Severity, Escalation chains and owner**, choose the [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity): **None**, which is
+   the default, **warning** or **critical**. It only raises the Severity level of the Route's Alert Groups; with
+   **critical** they are [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent), with [what that changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md). The same section
+   names the **Owning Team**, which only organizes ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#what-a-team-is)).
+
+    ![The Minimum severity of the Route: None, with its hint](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/07-minimum-severity.png){ .screenshot }
+
+5. Check the policy below, filled in by the profile: **Lifecycle** (the Reopen window and the Grace period),
+   **Delivery** (the Thread batching window and the Storm threshold), **Snooze durations**, **Ack timeout and
+   Reminders** — see [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) —
+   and **Message**, which [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#edit-a-routes-message)
+   explains.
+
+    ![The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/08-policy.png){ .screenshot }
+
+6. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
+   Minimum severity where it is warning or critical, its Group key and its open Alert Groups; drag it, or use its
+   arrows, to [change the order](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#order-and-the-default-route). Above the list, Muster may suggest Routes for its own
+   alerts.
+
+    ![The Routes list: the Route payments first, then the Default route, under two suggestions](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/09-saved-route.png){ .screenshot }
+
+## Examples
+
+**Only the Default route.** Every Alert goes to one Route, grouped by `alertname`, `severity` and `cluster`. Add one
+Destination to the Default route and everything reaches one place. This is the setup of the [Quick start](https://muster-io.github.io/muster/latest/quick-start.md)
+plus a messenger.
+
+**Pages for payments.** Create the Route `payments-critical` with the Matchers `team="payments"` and
+`severity="critical"`, the Paging profile and a Destination that is the payments team's channel. Put it above the
+Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
+to the Default route.
+
+**A service whose every alert matters.** Create the Route `hb` with the Matcher `svc="hb"` and the Minimum severity
+**critical**. Even its warning Alerts start critical, and so Urgent, Alert Groups, and the Routes list marks the Route
+"Minimum severity: critical".
+
+**Certificates.** Create the Route `certificates` with the Matcher `alertname=~"Cert.*"`, the Informational profile and a
+Destination for the platform channel. These Alert Groups send no ack timeout notices and no Reminders, and they offer
+Snooze for a day, three days or a week.
+
+**Muster's own alerts.** The Internal alerts, such as `MusterDestinationBroken`, are Alerts of the built-in "Muster"
+Integration and are routed by Routes like any other. Route them to a Destination of another kind than the one that
+failed. The Routes page offers a Route for `alertname=~"Muster.*"` once you have a Destination, and a Route for
+`MusterHeartbeatLost` when an Integration has a [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md). See the [Internal
+alerts](https://muster-io.github.io/muster/latest/reference/internal-alerts.md).
+
+## What changes when you edit a Route
+
+- Settings, such as the timers, the templates and the Snooze durations, apply at once, also to open Alert Groups, whose
+  messages are brought up to date.
+- A new Group key or new Matchers apply to Alerts that start firing afterwards. A fingerprint already in an open Alert
+  Group stays there until that Alert Group is resolved.
+- A changed [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) raises or lowers the Severity level of the open Alert Groups, Quietly.
+- No edit changes the status of any Alert Group.
+- Adding a Destination to a Route gives it the Route's open Alert Groups, Quietly. Removing one gives each open Root
+  message one last edit that says it is no longer updated and links to Muster.
+- Deleting a Route that has open Alert Groups is refused. You can move them to the Default route first.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md -->
+# Snapshot semantics
+
+Alertmanager does not tell Muster "this alert started" and "this alert stopped" as separate events. It sends a
+**Snapshot**: the full state of one Alertmanager group at the moment of the notification, listing every alert it holds.
+Grafana's built-in Alertmanager sends Snapshots too, through a webhook contact point.
+Muster works out what changed by comparing Snapshots. This page explains the rules, and why an alert can be **Gone** or
+**Stale** without anybody sending a "resolved".
+
+You only need this page to understand why Muster resolved something, or why it did not. The settings that matter are on
+[Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md), in particular its
+[Repeat intervals](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#repeat-intervals), and on
+[Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md).
+
+## From a Snapshot to a message
+
+Receiving is store-first. Muster checks the Integration token and the size, stores the Snapshot exactly as received, and
+answers `202`. A worker then processes it, on any replica, and everything that follows is a chain of small steps:
+
+```mermaid
+flowchart TD
+  am["Alertmanager or Grafana"] -- "Snapshot" --> ingest["Ingest"]
+  ingest --> stored[("Stored Snapshot")]
+  stored --> processing["Processing"]
+  processing -- "Alert changes" --> routing["Routing"]
+  routing -- "Route" --> groups["Alert Group"]
+  groups -- "lifecycle event" --> desired["Desired state"]
+  desired --> worker["Delivery worker"]
+  worker --> root["Root message"]
+```
+
+1. **Ingest** stores the Snapshot as a **Stored Snapshot** and wakes a worker. It is kept for
+   `retention.stored_snapshots` (14 days) for debugging, previews and replay.
+2. **Processing** splits the Snapshot into Alerts by fingerprint, adds the Integration's Static labels, and applies the
+   rules below. It emits Alert changes: a new firing, a resolution with its reason, a Continuation, a change of
+   annotations. It processes the Snapshots of an Alertmanager group in the order they arrived.
+3. **Routing** gives each newly firing Alert its Route and Severity level.
+4. The **Alert Group** takes the Alert: it joins an open one, reopens a resolved one, or starts a new one. Every change
+   records a lifecycle event in the Timeline.
+5. The lifecycle event changes the **Desired state** of the Alert Group's message in each of its Destinations: what the
+   Root message should look like right now.
+6. The **delivery worker** brings the actual message to the Desired state with one call, and the **Root message** in the
+   messenger shows it. See [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md) for when that is an edit and when a new message.
+
+Processing writes one log line per Snapshot, never one per Alert.
+
+## One Alertmanager group, one stream of Snapshots
+
+An Alertmanager group is the set of alerts that Alertmanager notifies about together under one `groupKey`. The
+Snapshots of one group form a stream, and Muster compares each with the ones before it. Alertmanager sends a Snapshot
+again each time the group changes and each time the route's `repeat_interval` elapses, and Muster learns from the gaps.
+
+Two things about Snapshots matter in practice:
+
+- **Copies from an HA pair are harmless.** Two Alertmanagers in a pair send their own copy, 0 to 15 seconds apart,
+  sometimes one of them incomplete. Muster processes an Alert once for the same fingerprint, status and `startsAt`, so a
+  duplicate changes nothing. Snapshots of one group that arrive within the Integration's **duplicate window**
+  (`integration.duplicate_window`, 45 seconds) count as one, and an Alert listed in either of them counts as listed.
+- **A Snapshot's status is the group's, an Alert's status is its own.** A Snapshot with `status: firing` can list alerts
+  that are resolved, and each alert's own status decides for it.
+
+## Resolved
+
+The normal way an Alert ends is that Alertmanager lists it as `resolved`. Muster resolves it at once, with the reason
+that Alertmanager resolved it, in the latest Alert Group where that fingerprint is still firing.
+
+- A `resolved` for an Alert that is already resolved, or for an earlier firing of it, changes nothing. Prometheus re-sends
+  a resolved alert for about 15 minutes, so the same `resolved` arrives several times.
+- A `resolved` with an older `startsAt` than the Alert's current one resolves the current firing when its `endsAt` is
+  later than the current `startsAt`: the two firings overlap. The replicas of a Grafana HA pair evaluate the rules each
+  on its own, so their copies of one alert can carry different `startsAt`, and the resolve of either replica ends the
+  Alert. Without an `endsAt`, or with one not later than the current `startsAt`, it is a resolve of an earlier firing.
+  Alertmanager merges overlapping firings of one alert, so with one rule evaluator a resolve it sends of an earlier
+  firing ends before the next one starts. With an HA pair of rule evaluators, such as two Prometheus replicas, it can
+  send one that ends later, and Muster resolves the Alert, as it would with the `startsAt` that Alertmanager merged.
+- A `resolved` for a fingerprint that fires nowhere is dropped, and counted.
+- A Snapshot whose status is `resolved`, sent when all the alerts of its group resolved, resolves **every Alert of that
+  group** that still fires, also the ones it does not list. After a restart of both Alertmanagers of a pair, such a
+  Snapshot can list only some of them and the others are never sent. A truncated Snapshot from Grafana is the
+  exception; see [Truncation](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md#truncation).
+
+## Gone
+
+Sometimes Alertmanager stops listing an alert without saying that it resolved. The rule evaluator may have stopped, an
+alert may have been inhibited, or the route may have changed. Muster notices that the Alert is **Gone**:
+
+> An Alert is Gone in an Alertmanager group when it has been missing from **at least two consecutive Snapshots** of that
+> group, over **at least `processing.gone_min_absence`** (5 minutes), counted from the first Snapshot that missed it to
+> the latest one.
+
+A Snapshot that lists it ends the count. Both conditions are needed, for good reasons. A restarted Alertmanager starts
+with an empty memory, and its first Snapshots can leave out a firing alert twice, a minute apart, because Prometheus
+re-sends firing alerts only every 2 minutes. The minimum absence covers that. A restarted instance of an HA pair is
+covered by the duplicate window, because the other instance sends the full Snapshot 15 seconds later.
+
+| Snapshots of one group | Result |
+|---|---|
+| Alert A missing at T and T+60 s, listed at T+120 s | A stays firing; the count restarts |
+| Alert A missing at T, T+60 s and T+6 min | A is Gone at T+6 min |
+| Alert A missing at T only | A stays firing; one Snapshot never counts |
+
+An Alert that appears in several Alertmanager groups is resolved by absence only when it is Gone (or Stale) in **every**
+one of them.
+
+## Stale
+
+If the whole group sends nothing at all, there is no Snapshot to miss the Alert from. This happens when the group is
+silenced, inhibited or muted as a whole in Alertmanager. Muster calls an Alert **Stale** when it has heard nothing about
+it for too long:
+
+> An Alert goes Stale when its Alertmanager group has sent no Snapshot for `stale_after`, which is
+> `processing.stale_after_factor` (3) times the repeat interval that Muster has learned for the group's Alertmanager
+> route.
+
+Muster learns the interval from the gaps between Snapshots whose `notification_reason` is `repeat interval elapsed` or,
+from senders without that field such as Grafana, between identical Snapshots, and uses the median of the last 9 gaps (`processing.repeat_samples`).
+Until it has learned an interval, `stale_after` is `processing.stale_after_unlearned`, 25 hours. Alertmanager sends a
+repeat on the first `group_interval` tick after `repeat_interval` has elapsed, so the gaps are about `repeat_interval` +
+`group_interval`. With a 10-minute `repeat_interval` and Alertmanager's default `group_interval` of 5 minutes, Muster
+learns an interval of about 15 minutes, and a silenced group's Alerts go Stale after about 45 minutes. With a daily
+interval it takes more than three days, which is why the Integration page warns about an interval longer than
+`processing.long_repeat_warning` (1 hour). See [Repeat intervals](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#repeat-intervals).
+
+Gone and Stale both resolve the Alert with the reason "Alertmanager no longer reports this alert — it resolved without
+notice, was silenced or inhibited in Alertmanager, or the Alertmanager routing changed". If a silenced alert's mute
+ends within about 14 minutes, Alertmanager still reports it as resolved, so it resolves normally; after that it only
+goes Stale.
+
+## The Heartbeat
+
+Stale resolution has a risk: if the path from Alertmanager to Muster breaks, Muster hears nothing, and every Alert would
+go Stale, although they may still fire. The [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md) removes the risk. It is a regular
+signal that proves the path works.
+
+- **Stale applies only while the Integration's Heartbeat is live.** An Integration without a Heartbeat, or still waiting
+  for the first signal, never resolves an Alert as Stale. Gone still works.
+- While the Heartbeat is **lost** (no signal within `integration.heartbeat_timeout`, 5 minutes), the time does not count
+  towards `stale_after`. From the last signal before the loss until the signal returns, nothing goes Stale. Muster's own
+  downtime does not count either, beyond the timeout.
+- The Integration shows "No contact with Alertmanager since HH:MM", and Muster raises the Internal alert
+  `MusterHeartbeatLost`.
+
+So with a live Heartbeat and a learned 5-minute interval, an Alert whose group last arrived at T goes Stale at T+15
+minutes. If the last Heartbeat signal also came at T, the Heartbeat was lost at T+5 minutes, and the signal returned at
+T+10 minutes, the Alert goes Stale at T+25 minutes: the 10 minutes from the last signal until its return did not count.
+
+## Truncation
+
+An Alertmanager webhook configuration with `max_alerts` above 0, like Grafana's webhook contact point with Max alerts
+above 0, keeps only the first alerts of a group in each notification, and counts the rest in `truncatedAlerts`. A
+truncated Snapshot lists only part of the group, so it can never be evidence that an Alert is missing.
+
+- Muster does **not** count a truncated Snapshot as absence. While Snapshots of the group keep arriving truncated, the
+  unlisted Alerts stay alive, which can keep an Alert open that has resolved in reality.
+- Muster raises the Internal alert `MusterSnapshotTruncated` for the Integration while any group is truncated, and
+  resolves it when none is left. The Integration page shows a warning too.
+- Grafana computes the status of a Snapshot from the alerts it lists, not from the whole group, so a truncated
+  Snapshot from Grafana can say `resolved` while alerts it left out still fire. Muster recognises a Snapshot from
+  Grafana by its top-level `orgId`, which Alertmanager never sends. A truncated one with `status: resolved` resolves
+  only the Alerts it lists as resolved, never its whole group.
+- The fix is `max_alerts: 0` on the Alertmanager receiver, or Max alerts 0, the default, on Grafana's webhook contact
+  point. See [Send every alert of the group](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#send-every-alert-of-the-group),
+  [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md#create-a-webhook-contact-point) and the
+  [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md).
+
+## Continuation
+
+A Prometheus restart whose first evaluation falls exactly on the alerts' `endsAt` can make Alertmanager send them again
+with a new `startsAt` and no `resolved` in between. A longer stop gives a `resolved` and a new firing. That first case
+is a **Continuation**: the Alert stays the same, its start time is updated, and nothing is Loud and nothing reopens.
+Once an Alert has resolved by any route, the next firing of the same fingerprint is a new firing.
+
+## Why an Alert resolved
+
+Every Alert resolved by Muster carries one of four reasons, which the Integration's Alerts view shows and the metric
+`muster_alerts_resolved_total` counts:
+
+`resolved`
+:   Alertmanager sent `resolved`, for the Alert or for its whole group.
+
+`gone`
+:   Missing from at least two consecutive Snapshots for the minimum absence.
+
+`stale`
+:   Its group sent nothing for three learned repeat intervals, with a live Heartbeat.
+
+`integration_deleted`
+:   Its Integration was deleted.
+
+When the last Alert of an Alert Group resolves, the Alert Group is resolved by the system with the reason of the last
+one. See [Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#reopening) for what happens if the problem returns. If processing ever misbehaves,
+`muster ingest replay` reprocesses Stored Snapshots, and because processing is idempotent it changes nothing that was
+already right.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md -->
+# Loud and Quiet
+
+Every change to an Alert Group is either **Loud** or **Quiet**. A Loud change should make people's devices ring. A Quiet
+change should only update what they see when they look. Muster fixes the loudness of every change; you decide only whom
+a Loud change **Mentions**.
+
+The rule behind it is simple, and it is the same in Mattermost, Slack and Telegram: **an edit never notifies anybody.**
+Editing a message, even to add a Mention, does not ring a phone. So a Loud change is always a **new message**, a new
+Root message or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a
+Mention.
+
+## Which changes are Loud
+
+A new Alert Group starts
+:   Loud, as a new Root message · mentions: the Destination's `new_alert_group` setting
+
+New Alerts join a **firing** Alert Group
+:   Loud, as a Thread reply; batched · mentions: `new_alerts`
+
+New Alerts join an acknowledged or snoozed Alert Group
+:   Quiet · mentions: nobody
+
+A Reopen into firing
+:   Loud · mentions: `reopen`
+
+A Reopen into acknowledged
+:   Loud · mentions: the Owner only
+
+A Reopen into snoozed
+:   Quiet · mentions: nobody
+
+A Snooze ends while Alerts still fire
+:   Loud, listing what accumulated · mentions: `snooze_ended`
+
+A rise to Urgent that ends a Snooze or removes an acknowledgement
+:   Loud, with the reason · mentions: the Owner it removed, and `rise_to_urgent`
+
+A rise in Severity level that changes nothing else
+:   Quiet · mentions: nobody
+
+A Takeover
+:   Loud · mentions: the previous Owner
+
+An ack timeout notice
+:   Loud · mentions: `ack_timeout`
+
+A Reminder
+:   Loud · mentions: the Owner
+
+Auto-unacknowledge
+:   Loud, with the reason · mentions: the Owner it removed
+
+The Owner is disabled or deleted
+:   Loud · mentions: nobody
+
+Several notices missed during downtime
+:   Loud, as one reply · mentions: as the notices it stands for
+
+Acknowledge, Unacknowledge, Snooze, Unsnooze, Resolve, Unresolve
+:   Quiet · mentions: nobody
+
+An Alert resolves, is replaced or continues, or its annotations change
+:   Quiet · mentions: nobody
+
+The system resolves the Alert Group
+:   Quiet, with a Thread reply that gives the reason · mentions: nobody
+
+A Note
+:   Quiet, and not sent to messengers · mentions: nobody
+
+The pattern: Muster rings when something needs a human who may not be looking, such as a new problem, one that returned,
+one that nobody took, or one that someone took and went quiet. It does not ring for what a person just did, because that
+person is looking. The Takeover is the only result of a person's command that is Loud, because the previous Owner has
+just lost the Alert Group.
+
+Delivery adds a few cases of its own:
+
+| Delivery event | Loud or Quiet |
+|---|---|
+| A Destination added to a Route receives its open Alert Groups | Quiet |
+| A Destination recovers from [Broken](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md): an Alert Group still firing is published | Loud |
+| The same recovery, for an Alert Group that is not firing, or an edit of a message already there | Quiet |
+| A message published late, after the Alert Group already resolved | Quiet, with a note |
+| A Root message posted again because it was deleted | Quiet, with a note |
+| A Storm summary, when it first appears | Loud |
+| A Storm summary's updates, and the Alert Groups posted after the Storm | Quiet |
+
+You cannot change the loudness of an event. You can change whom it Mentions.
+
+## What Loud means in each Destination
+
+Mattermost
+:   A Loud change is a new post with its Mentions: at the top of the attachment of a Root message or a Storm summary,
+    in the text of a reply in the Thread.
+
+    A Quiet change is an edit, or a new post without a Mention.
+
+Slack
+:   A Loud change is a new message, a Root message or a reply in the Thread, with its Mentions.
+
+    A Quiet change is an edit, or a new message without a Mention.
+
+Telegram
+:   A Loud change is a new message, in the channel for a Root message and in the discussion group for a Thread reply.
+
+    A Quiet change is an edit, or a new message sent with `disable_notification`.
+
+Bridge
+:   A Loud change is a new message that the bridge posts with `notify` on, with its Mentions.
+
+    A Quiet change is an edit, or a new message that the bridge posts without a notification where it declares
+    `quiet_messages`.
+
+Outgoing webhook
+:   A Loud change is an event with `notify` true (events mode), or `.Notify` true in a template (template mode).
+
+    A Quiet change is `notify` false.
+
+A few details:
+
+- **Mattermost.** A reply in a Thread notifies the Thread's followers by their own settings, and a Mention makes the
+  person a follower. So Quiet means "without a Mention", not "nobody is notified". A Loud Root message has its Mentions
+  as the first line of its attachment, where a person's Mention, `@channel`, `@here` and `@all` notify; a push or
+  desktop notification shows the summary line of the Alert Group, and an email shows no content. A Thread reply has
+  its Mentions in its text. See [Who gets notified](https://muster-io.github.io/muster/latest/messengers/mattermost.md#who-gets-notified).
+- **Slack.** Slack cannot send a message without a notification: whom a new message notifies depends on each member's
+  settings for the channel and the Thread. So Quiet means "without a Mention", not "nobody is notified". An edit carries
+  no Mention, so it drops the Mentions of the message it edits. See [Who gets
+  notified](https://muster-io.github.io/muster/latest/messengers/slack.md#who-gets-notified).
+- **Telegram.** `disable_notification` silences the sound but does not remove the push. Only members of the channel's
+  discussion group get Thread replies, and the automatic copy of every Root message rings them, even for a Quiet one.
+  Tell the people on call to join the group and mute the channel itself. See [Known limitation: Quiet Root messages ring
+  the group](https://muster-io.github.io/muster/latest/messengers/telegram.md#known-limitation-quiet-root-messages-ring-the-group).
+- **Bridge.** Whether the bridge can post without a notification depends on the bridge. A bridge that does not declare
+  `quiet_messages` posts a Quiet message as an ordinary one, without Mentions.
+- **Outgoing webhook.** Muster rings nothing itself. In events mode every event is sent, Quiet ones too, with `notify`
+  telling what a person-facing system should do with it. Your receiver decides, for example, to call a phone only when
+  `notify` is true. See [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#event-names) and [Recipes](https://muster-io.github.io/muster/latest/outgoing-webhooks/recipes.md).
+
+## Mentions
+
+A **Mention** is a deliberate @-reference that Muster adds to a message so that a person is notified. Muster adds a
+Mention only where this page says it does. Alert data never mention anyone: an `@` in a label or an annotation is
+neutralized with a zero-width space, so `@channel` in a label notifies nobody.
+
+### Whom a Loud change Mentions
+
+Each Destination has a list of **Mention entries**: each one a target — everyone in the chat, a user, a messenger
+group, a Team, or the On-call of a Team — and the Loud changes it applies to: `new_alert_group`, `new_alerts`,
+`reopen`, `ack_timeout`, `snooze_ended`, `rise_to_urgent` and `storm_started`. A Destination without entries mentions
+nobody. [Whom a message mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md) describes the entries and
+[what each messenger supports](https://muster-io.github.io/muster/latest/concepts/mentions.md#what-each-messenger-supports).
+
+Some Mentions are not an entry. A **Reminder** and an auto-unacknowledge always Mention the Owner, a **Takeover**
+Mentions the previous Owner, and a Reopen into acknowledged Mentions only the Owner.
+
+### Account links
+
+A Mention of a user needs an **Account link**: the tie between a Muster user and their account in the messenger. The
+people who are Mentioned, and the Owner above all, link their accounts from their profile; see [Link your messenger
+accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md). Muster renders a Mention in the messenger's own form:
+
+- Mattermost: `@username`;
+- Slack: a Mention of the person's Slack account;
+- Telegram: a link to the person, whose text is the display name;
+- Bridge: a marker that a bridge with `native_mentions` renders as the messenger's mention and any other bridge as the
+  person's name.
+
+**A person whom a Mention entry names is mentioned only through their Account link; without one they are left out.**
+So an entry that names a person, directly or as an On-call, rings their phone only once they have linked their
+account. The Owner of a Reminder, an auto-unacknowledge or a Takeover, and the footer's user — the Owner, who snoozed,
+who resolved — are still named by their display name as text without a link, which notifies nobody.
+
+For an outgoing webhook, Muster does not know the receiver's markup, so the Mention is data: the event's `mentions`
+list, and `.Mentions` in a template, with the target's type, id, name and login. Your receiver or your template turns
+it into whatever the receiving system understands.
+
+## Storm summaries
+
+When many Alert Groups start at once, one Route can flood a Destination. A **Storm** is a Route creating more new Alert
+Groups in one minute than its Storm threshold (`route.storm_threshold`, 20 by default). Then each of the Route's
+Destinations gets one **Storm summary** instead of a message per Alert Group:
+
+- The summary is Loud only when it first appears, and Mentions the Destination's entries for `storm_started`.
+- **Urgent** Alert Groups are still posted on their own, first.
+- Its updates and its final state are Quiet. When the rate has stayed below the threshold for 5 minutes
+  (`delivery.storm_calm_period`), the summary shows its final state, and the Alert Groups that are still open are
+  posted gradually and Quietly. Those that already resolved are not posted.
+- Messengers and the template mode of outgoing webhooks follow Storms. The events mode does not: it receives every event.
+
+## Why the rule is fixed
+
+A rule of thumb for on-call: the phones should ring for problems that need a human, and nothing else. Because an edit is
+always silent, a person can acknowledge, snooze and resolve all day, and the message changes under their eyes without a
+sound; and because the loudness of every change is fixed, a team never has to wonder whether a change will ring. The
+Mention entries are the one place to tune who rings.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md -->
+# Statuses and commands
+
+An Alert Group is always in one of four statuses, and only a few things move it from one to another. Some are
+**Commands** that a person gives, from the web UI, the API, a button in a messenger, or a Text command in a Thread. The
+others are transitions that Muster makes on its own, always with a reason you can read.
+
+## The four statuses
+
+| Status | Meaning |
+|---|---|
+| **Firing** | The Alert Group has a live problem and nobody has taken it. |
+| **Acknowledged** | A person has taken it and is handling it. That person is its **Owner**. |
+| **Snoozed** | It is set aside until a chosen time, or with no end. Muster stays quiet about it meanwhile. |
+| **Resolved** | It is closed, by a person or by Muster because its Alerts are gone. |
+
+New Alerts that join an open Alert Group change its status only through a rise to Urgent, and edits of a Route never
+change a status. Only the transitions below do.
+
+```mermaid
+stateDiagram-v2
+    state "Resolved by the system" as ResolvedBySystem
+    state "Resolved by a user" as ResolvedByUser
+
+    [*] --> Firing : created
+    Firing --> Acknowledged : Acknowledge
+    Snoozed --> Acknowledged : Acknowledge
+    Acknowledged --> Acknowledged : Takeover
+    Acknowledged --> Firing : Unacknowledge
+    Acknowledged --> Firing : auto-unacknowledge (system)
+    Acknowledged --> Firing : rise to Urgent (system)
+    Firing --> Snoozed : Snooze
+    Acknowledged --> Snoozed : Snooze
+    Snoozed --> Snoozed : Snooze with a new end
+    Snoozed --> Firing : Unsnooze
+    Snoozed --> Firing : Snooze ends (system)
+    Snoozed --> Firing : rise to Urgent (system)
+    Firing --> ResolvedByUser : Resolve
+    Acknowledged --> ResolvedByUser : Resolve
+    Snoozed --> ResolvedByUser : Resolve
+    Firing --> ResolvedBySystem : all Alerts resolved (system)
+    Acknowledged --> ResolvedBySystem : all Alerts resolved (system)
+    Snoozed --> ResolvedBySystem : all Alerts resolved (system)
+    ResolvedBySystem --> Firing : Reopen (system)
+    ResolvedBySystem --> Acknowledged : Reopen (system)
+    ResolvedBySystem --> Snoozed : Reopen (system)
+    ResolvedByUser --> Firing : Unresolve
+    ResolvedBySystem --> [*] : Reopen window ends
+    ResolvedByUser --> [*] : Grace period ends
+```
+
+Resolved appears twice because the two ways back differ. After the system resolved an Alert Group, it **reopens** by
+itself if the problem returns within the Reopen window. After a person resolved it, nothing reopens it; the person can
+**Unresolve** it, or Muster starts a new Alert Group if the Alerts still fire after the Grace period. See
+[Reopening](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#reopening).
+
+The ack timeout runs only while an Alert Group is Firing, and an Alert Group is **Unclaimed** after its last notice. See
+[Ack timeouts, Reminders and auto-unacknowledge](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge).
+
+### Transitions Muster makes on its own
+
+Each carries its reason, which you see on the Alert Group page, in its Timeline and, in a messenger, in the Root
+message or a Thread reply.
+
+Open → Resolved
+:   reason you see: the reason of the last Alert
+
+    The last Alert resolved: Alertmanager sent `resolved`, or the Alert went [Gone or Stale](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md), or
+    its Integration was deleted. This also ends a Snooze.
+
+Resolved by the system → previous status
+:   reason you see: the Reopen, with the Reopen count
+
+    An Alert with the same Route and Group key values fires within the Reopen window.
+
+Snoozed → Firing
+:   reason you see: the Snooze ended
+
+    The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated.
+
+Snoozed or Acknowledged → Firing
+:   reason you see: the rise to Urgent
+
+    A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert
+    Group was already Urgent, and removes an acknowledgement when the Route has `route.urgent_rise_removes_ack` on (the
+    default).
+
+Acknowledged → Firing
+:   reason you see: "No answer to the last two Reminders"
+
+    The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering.
+
+Acknowledged → Firing
+:   reason you see: "The owner was disabled" or "The owner was deleted"
+
+    The Owner was disabled or deleted.
+
+## Commands
+
+| Command | Allowed from | Effect |
+|---|---|---|
+| **Acknowledge** | Firing, Snoozed | The caller becomes the Owner. It ends a Snooze. By the current Owner it changes nothing. By another user it is a **Takeover**. |
+| **Unacknowledge** | Acknowledged | The Alert Group is Firing again, without an Owner, and the ack timeout starts over. Any user who may acknowledge can do it, not only the Owner. |
+| **Resolve** | Firing, Acknowledged, Snoozed | The Alert Group is Resolved by the person. A Note can come with it. |
+| **Unresolve** | Resolved by a person | The Alert Group is Firing again without an Owner. Web UI and API only. |
+| **Snooze** | Firing, Acknowledged, Snoozed | The Alert Group is Snoozed until a time in the future, until a [Snooze preset](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets), or with no end. A Snooze with a new end changes the end. |
+| **Unsnooze** | Snoozed | The Alert Group is Firing again without an Owner, and the ack timeout starts over. |
+| **Add Note** | any | A Note appears in the Timeline with its author. Web UI and API only. |
+| **Still on it** | Acknowledged, while a Reminder waits | The Owner answers the Reminder. See below. |
+
+Details:
+
+- **Takeover.** Acknowledging an Alert Group that somebody else owns moves it to you, without asking. The previous Owner
+  is Mentioned in a Loud Thread reply, and your Reminders start from zero. The web UI says "Take over from {Owner}" on the
+  button.
+- **Snooze.** The web UI and the API accept any future time, a [Snooze preset](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets), or no end. The API
+  makes you say which: a request names exactly one of `until`, `no_end` and `preset`. A Snooze with no end asks you to
+  confirm "This Alert Group stays snoozed until someone unsnoozes it".
+  Messengers offer the Route's **Snooze durations** as separate buttons or a menu (`route.snooze_durations`: 1 hour,
+  4 hours and 24 hours on a Paging Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
+  two Snooze presets; see [In messengers](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#in-messengers).
+- **Unresolve** is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
+  when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
+  already resolved.
+- **Notes** are up to 4,000 characters (`alert_group.note_max_length`).
+- **Bulk commands.** In the list, select up to 100 Alert Groups (`alert_group.bulk_max`) and run Acknowledge, Resolve,
+  Snooze or Unsnooze on all of them. Each goes through the rules on its own and the result lists the outcome per Alert
+  Group. One refusal never stops the others. A bulk Acknowledge skips an Alert Group that another user owns ("skipped:
+  owned by {Owner}"), so it never takes over by accident.
+- **Refusals** carry a stable code and a message, such as "already resolved", "not acknowledged" or "not permitted". The
+  API answers `409` for a precondition and `403` for a permission.
+- Commands on one Alert Group are serialized. Two people acknowledging at the same moment leave the later one as Owner and
+  one Takeover in the Timeline.
+
+Every command is a Quiet event except the Takeover. See [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md).
+
+### Snooze presets
+
+A **Snooze preset** ends a Snooze at the start of the working day instead of after a duration. Muster turns it into an
+end when the command runs:
+
+Until tomorrow 09:00
+:   API value: `tomorrow` · ends at: the next start of the working day
+
+Until Monday 09:00
+:   API value: `week_start` · ends at: the next start of the working day on the first day of the week
+
+"Next" is strictly after now. With the working day starting at 09:00:
+
+- At 02:00, "Until tomorrow 09:00" ends at 09:00 the same day. The night belongs to the day before it, so "tomorrow"
+  is the morning about to come, seven hours away.
+- At 08:59 it ends one minute later: the preset means "until the working day starts".
+- At 09:00 sharp, and at any later time of the day, it ends at 09:00 the next day.
+- There is no working-week calendar, so on Friday evening "Until tomorrow 09:00" ends on Saturday at 09:00. For a
+  weekend, use `week_start`, which ends on Monday at 09:00.
+- The start is the time on the clock on the day of the end. A start that the clocks skip moves forward by the change:
+  02:30 on the night the clocks jump from 02:00 to 03:00 is 03:30. A start that the clocks show twice, when they go
+  back, is the first of the two.
+
+The end is stored as a time. A later change of the settings or of a time zone never moves a Snooze already set, and the
+Snooze ends like any other: if Alerts still fire, the Alert Group is Firing again without an Owner, with a Loud message.
+
+**Time zone.** The preset counts in the time zone that the request names in `time_zone`. Without one, it counts in the
+profile time zone of the user who snoozes, also through a Personal access token, and otherwise in the Organization's
+time zone (`organization.time_zone`). A Service account has no profile, so it always gets the Organization's. A press on
+a button in a messenger and a Text command carry no time zone, so they count in the profile time zone of the linked user
+who pressed or wrote, and otherwise in the Organization's.
+
+**Settings.** Two Organization settings define the presets, as the fields `workday_start` and `week_start` of the
+organization in the API:
+
+`organization.workday_start`
+:   default: `09:00`
+
+    The start of the working day, `HH:MM` on the 24-hour clock.
+
+`organization.week_start`
+:   default: `monday`
+
+    The first day of the week, `monday` to `sunday`.
+
+**API.** A Snooze takes `preset`, `tomorrow` or `week_start`, as a third choice beside `until` and `no_end`, with an
+optional `time_zone`:
+
+```json
+{"preset": "tomorrow", "time_zone": "Europe/Berlin"}
+```
+
+A `time_zone` without `preset` is refused with `422` `unsupported`, and a time zone Muster does not know with `422`
+`invalid_format`. A bulk Snooze with a preset computes the end once, so every Alert Group gets the same end.
+`GET /api/v1/snooze-presets`, with an optional `time_zone`, answers the end that each preset would set now and the time
+zone it used; it needs the Permission to snooze and changes nothing. The Audit log entry of a preset Snooze names the
+preset and the time zone beside the end. See the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
+
+#### In the web UI
+
+The Snooze dialog of an Alert Group offers both presets after the Route's Snooze durations and before "Until" and "No
+end", also on a Route without durations; the bulk Snooze of the list, which has no durations, offers them first. Under
+each preset the dialog shows the end it would set now, such as "Ends Oct 20, 2026, 09:00": Muster computes it when the
+dialog opens, on its own clock and in your time zone (the one of your profile, else your browser's), and the dialog sends
+that time zone with the preset. Admins set the start of the working day and the first day of the week on Organization →
+General. In the profile, a hint under the time zone says that presets pressed in messengers end in that time zone, and
+in the Organization's while the profile follows the browser.
+
+![The Snooze dialog with Until tomorrow 09:00 chosen: each preset with the end it would set, after the durations 1 h, 4 h and 24 h](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/01-snooze-presets.png){ .screenshot }
+
+#### In messengers
+
+On a Route with Snooze durations, the Root message of a firing or an acknowledged Alert Group offers both presets as
+two more Snooze buttons after the durations: "Until tomorrow 09:00" and "Until Monday 09:00", or «До завтра 09:00» and
+«До понедельника 09:00» on a Route in Russian. The time is `organization.workday_start` and the day
+`organization.week_start`, so with the week starting on Sunday the second button reads "Until Sunday 09:00". A snoozed
+Alert Group offers no Snooze button, and a Route without Snooze durations offers no preset either, because an empty
+`route.snooze_durations` means no Snooze from messengers. Telegram shows the presets on a row of their own under the
+durations, and a bridge with a limit on buttons drops them first; see
+[Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts). Slack offers the durations and then the presets as the options of
+one **Snooze…** menu, since its web client folds the buttons beyond five in a row.
+
+The labels are part of the message. A change of `organization.workday_start` or `organization.week_start` edits each
+open Root message once, Quietly, so that it shows the new labels, and a press on a button shown before the edit already
+ends at the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
+are [Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands).
+
+### Who may
+
+A **Responder** or an **Admin** may acknowledge, resolve, snooze and add Notes. A **Viewer** may read and may not act:
+the command is refused. A **Service account** may run the commands its Role allows, except Acknowledge and Still on it,
+because an Owner is always a User. A Personal access token acts as its User, with at most that User's Permissions. Every
+command is recorded in the Audit log with its actor and the Transport.
+
+## Commands in the web UI
+
+The page of an Alert Group offers the commands its status allows, and the list offers them for several Alert Groups at
+once ([Bulk commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#commands)).
+
+1. Open the Alert Group from **Alert Groups**. Its command buttons are at the top: **Acknowledge**, **Resolve** and
+   **Snooze** for a firing one.
+
+    ![A firing Alert Group with the buttons Acknowledge, Resolve and Snooze](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/02-command-buttons.png){ .screenshot }
+
+2. To add a Note, type it under **Add a note**, further down the page, and select **Add note**. It appears in the
+   Timeline with you as its author.
+
+    ![The Note box with a Note typed, and Add note](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/03-note-box.png){ .screenshot }
+
+3. **Snooze** opens its dialog: the Route's Snooze durations, the [Snooze presets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets), **Until** a date
+   and time of your choosing, or **No end**, which asks you to confirm with **I understand**. Select **Snooze**.
+
+    ![The Snooze dialog with No end chosen and its warning that the Alert Group stays snoozed until someone unsnoozes it](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/04-snooze-dialog.png){ .screenshot }
+
+4. **Resolve** opens a dialog with an optional Note, recorded with the resolve.
+
+    ![The dialog Resolve with the Note Renewed by cert-manager.](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/05-resolve-dialog.png){ .screenshot }
+
+5. After **Acknowledge**, the page names you as the Owner and offers **Unacknowledge**, **Resolve** and **Snooze**.
+   Another user sees **Take over from {Owner}** instead of **Acknowledge**.
+
+    ![An acknowledged Alert Group with its Owner admin and the buttons Unacknowledge, Resolve and Snooze](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/06-acknowledged.png){ .screenshot }
+
+## Where a command comes from
+
+The **Transport** is the way a command reaches Muster. It is recorded with the command, and Muster applies the same rules
+to all of them.
+
+Web UI
+:   how: buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve · notes: everything above,
+    including bulk commands, Notes and Unresolve
+
+API
+:   how: `POST` to `/api/v1/alert-groups/{id}/acknowledge` and its siblings, with a session or a token · notes: the
+    same; see the [API reference](https://muster-io.github.io/muster/latest/reference/api.md)
+
+Mattermost
+:   how: a button on the message · notes: Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it
+
+Slack
+:   how: a button on the message, and the **Snooze…** menu with the durations and then the presets · notes: the same
+
+Telegram
+:   how: an inline button on the message · notes: the same
+
+Bridge
+:   how: a button on the message, if the bridge declares `buttons`; or a **Text command** in the Thread, if it declares
+    `thread_messages` · notes: the same
+
+`system`
+:   how: Muster itself · notes: the automatic transitions above, shown in the Timeline
+
+Messengers never offer Unresolve or Notes, and never a Snooze with no end. A person who presses a button in a messenger
+must have linked their messenger account to their Muster user; see [Link your messenger
+accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md). A press from an unlinked account changes nothing, and the person is told
+privately how to link it.
+
+### What each button does
+
+The buttons of a Root message depend on the status of its Alert Group, and on the [button set](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#button-sets) of its
+Destination, which shows all of them by default:
+
+| Status | Buttons |
+|---|---|
+| Firing | **Ack**, **Resolve**, **Snooze** |
+| Acknowledged | **Unack**, **Resolve**, **Snooze** |
+| Snoozed | **Ack**, **Unsnooze**, **Resolve** |
+| Resolved | none; a link "Open in Muster" |
+
+- **Ack** takes the Alert Group: you become its Owner, the Reminders start, and the message shows who has it. If somebody
+  else has it, Ack takes it over from them.
+- **Unack** gives it back. The Alert Group becomes Firing again with no Owner, and the ack timeout starts over.
+- **Resolve** closes the Alert Group by hand. If Alerts still fire, the message shows "⚠ N alerts still firing in
+  Alertmanager", and after the Grace period the Alerts that still fire start a new Alert Group.
+- **Snooze** sets it aside. It offers the Route's Snooze durations, such as 1 hour, 4 hours and 24 hours, one choice for
+  each, then the two [Snooze presets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#in-messengers) "Until tomorrow 09:00" and "Until Monday 09:00", which end at the
+  next start of the working day, or at its start on the first day of the week, in your profile time zone, or else the
+  Organization's. When the time is up and Alerts still fire, the Alert Group comes back Firing and a Loud message says
+  so.
+- **Unsnooze** ends the Snooze early. The Alert Group becomes Firing again.
+- On a **Reminder**, **Still on it** tells Muster you are still handling the Alert Group, and **Unack** gives it up.
+- A **Storm summary** and an ack timeout notice carry only links to Muster. A test message carries the buttons of its
+  status and of its Destination's button set, but pressing them changes nothing: you get "This is a test message;
+  nothing was changed".
+
+A press edits the Root message to show the result. A press that Muster refuses, such as a Resolve by a Viewer, is answered
+privately to the person who pressed, and nothing changes.
+
+### Button sets
+
+A busy channel can show fewer buttons. Each messenger Destination shows on its Root messages the buttons of a **button
+set**: the Organization's, which shows every button until an Admin lists them (`organization.buttons`), or a set of its
+own (`destination.buttons`). A Destination "As in the Organization", the default, follows later changes of the
+Organization's set. A set lists:
+
+- **Acknowledge**, which brings **Unack** with it on an acknowledged Alert Group;
+- **Resolve**;
+- each Snooze duration, by its value, such as 24 hours;
+- the [Snooze presets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets) "Until tomorrow" and "Until {first day of the week}".
+
+From its set, a Root message shows the buttons that its status offers and that the set lists, in the order of the table
+above. Of the Route's Snooze durations it shows only those in the set, so a duration in the set that the Route does not
+have shows nothing, and it shows the presets only on a Route with Snooze durations. **Unsnooze** on a snoozed Alert
+Group is not part of any set and always shows. A Destination whose set is Acknowledge, 24 hours and "Until tomorrow"
+shows, on a Route with the durations 1 h, 4 h and 24 h:
+
+| Status | Buttons |
+|---|---|
+| Firing | **Ack**, **Snooze 24 h**, **Until tomorrow 09:00** |
+| Acknowledged | **Unack**, **Snooze 24 h**, **Until tomorrow 09:00** |
+| Snoozed | **Ack**, **Unsnooze** |
+
+To choose the buttons of a Destination:
+
+1. Open **Destinations** and select the Destination, or create one. The form of a Mattermost, Telegram, Slack or Bridge
+   Destination has the section **Buttons**. An outgoing webhook sends no buttons and has no section.
+2. Under **Buttons**, choose **Own for this Destination**. The tick boxes are **Acknowledge** (which brings **Unack**
+   with it), **Resolve**, each Snooze duration of your Routes and both Snooze presets; they start as what the
+   Destination shows now. Untick what the Root message should not show. **What {Destination} shows** lists the buttons
+   of a firing and of an acknowledged Root message, in the order of the table above, and follows each tick box at once.
+3. Select **Save**. Choose **As in the Organization** and save to follow the Organization's set again.
+
+    ![The section Buttons of a Destination with Own for this Destination chosen: Acknowledge, Snooze 24 h and Until tomorrow ticked, and the buttons a firing and an acknowledged Root message show](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/07-destination-buttons.png){ .screenshot }
+
+To change the set of every Destination that follows the Organization, open **Organization → Alert handling** and use
+**Buttons of Root messages**: **All buttons**, the default, or **Only the buttons I tick**, with the same preview. See
+[Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#alert-handling). A Destination of its own set keeps it when the
+Organization's set changes. A ticked Organization list names the Snooze durations it lists: a duration that a Route
+gains later is not shown until you tick it, unlike with **All buttons**. The form offers the Snooze durations of your
+Routes, or those of the Paging profile while no Route has any; a duration that the stored set names and no Route has
+stays ticked, so saving never drops it. The preview of a Destination shows the durations of the first Route that sends
+to it, as its Root message does.
+
+The set changes only the buttons of Root messages. Reminders keep **Still on it** and **Unack**; the
+[Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands) of Bridges, the web UI and the API keep every action; and a press on a button that a
+message showed before its set changed still runs its command. Each messenger lays out the buttons it shows as before:
+Slack leaves the **Snooze…** menu out when the set shows no duration and no preset, and a bridge with a limit on buttons
+still drops the Snooze buttons beyond it. On a bridge without buttons, the line "Reply in the Thread: …" lists only the
+Text commands of the buttons the set shows, while every other Text command still works. A test message and the preview
+of a Destination show the buttons of its set.
+
+A saved change of a set updates the open Root messages of the Destinations that use it within seconds, as edits, which
+notify nobody. With the Organization's set left at every button, a Snooze duration added to a Route shows on the next
+update of its Root messages. The sets are `buttons` of the Organization and of each messenger Destination in the
+[API](https://muster-io.github.io/muster/latest/reference/api.md); an outgoing webhook sends no buttons and has no set. Each change is recorded in the Audit
+log.
+
+### Text commands
+
+Some messengers have no buttons, or a bridge does not offer them. A **Text command** is a Command written as a reply in a
+Thread. Only a **Bridge** Destination takes them, and only when the bridge declares `thread_messages`. A Root message
+that is not resolved then ends with a line such as "Reply in the Thread: ack · resolve · snooze 1h".
+
+A reply is a Text command when its whole text, trimmed, in any case and with an optional leading `/`, is one of:
+
+| Text command | Same in Russian | Command |
+|---|---|---|
+| `ack` | `взял` | Acknowledge |
+| `unack` | `отпускаю` | Unacknowledge |
+| `resolve` | `решено` | Resolve |
+| `snooze <duration>` | `отложить <duration>` | Snooze |
+| `unsnooze` | `вернуть` | Unsnooze |
+| `still on it` | `ещё работаю` (also `еще работаю`) | Still on it |
+
+The `<duration>` is one of the Route's Snooze durations, written in minutes, hours or days: `30m`, `4h` or `1d`, and
+`30м`, `4ч` or `1д` in Russian. It can also name a [Snooze preset](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets): `tomorrow` (`завтра`) for the next
+start of the working day, or the first day of the week (`organization.week_start`), such as `monday` (`понедельник`),
+for the start of the working day on that day. So `snooze tomorrow`, `/Snooze Tomorrow` and `отложить понедельник` (with
+the week starting on Monday) all work. A day is written as it stands alone: `понедельник`, `вторник`, `среда`,
+`четверг`, `пятница`, `суббота`, `воскресенье`. Every word works whatever the Route's language is. The writer needs an
+Account link, and the same permissions as for a button.
+
+Muster answers a Text command in the Thread, for example "Done: Acknowledged #42", or with the reason it refused. A
+duration that is not one of the Route's, or a day other than the first day of the week, is answered with what the Route
+offers: "Snooze for one of: 1h, 4h, 24h, tomorrow, monday". The sentence and the durations are in the writer's profile
+language, and the two preset words in the Route's language. A Route without Snooze durations takes no preset either, and
+answers "This Alert Group's Route has no Snooze durations; nothing was changed." **Any other text is ignored and never
+answered**, so people can talk in the Thread. The Thread of an older Root message works too: a Text command there acts
+on the Alert Group like any other, also when the message is past its
+[edit window](https://muster-io.github.io/muster/latest/messengers/bridge.md#edit-windows). A Text command older than an hour (`bridge.event_max_age`) is
+dropped. If the bridge forwards only the messages that mention its bot, the line says "mentioning the bot", and the
+command must mention it. See [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#events) for how a bridge reports a Thread
+message.
+
+## Ack timeouts, Reminders and auto-unacknowledge
+
+Three timers make sure nobody forgets: one for an Alert Group nobody has taken, one for an Alert Group somebody took and
+then went quiet, and an optional one that takes the Alert Group back. They are Route settings; the Paging profile turns
+the first two on and the Informational profile turns everything off.
+
+### Ack timeout
+
+The ack timeout runs while an Alert Group is Firing. It starts at the Alert Group's first Publication in a Destination, and
+starts over each time it becomes Firing again. Acknowledge, Snooze and Resolve stop it.
+
+When nobody acknowledges, Muster sends up to three **notices**, at doubling intervals from the Route's first interval
+(`route.ack_timeout`, 15 minutes on a Paging Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
+Each is a Loud Thread reply that Mentions whom the Destination's `ack_timeout` setting says. After the last notice the
+Alert Group is **Unclaimed**: its message shows "⚠ Nobody has taken this", and the Alert Group list has an Unclaimed
+filter, column and badge. Unclaimed ends when the Alert Group stops being Firing.
+
+An Alert Group that has not been published, as when its Route has no Destination or only Broken ones, has no ack timeout
+until its first Publication.
+
+### Reminders
+
+When somebody acknowledges, Muster reminds the Owner while the Alert Group stays open (`route.reminders`, on a Paging
+Route). The first **Reminder** comes 4 hours after the acknowledgement, and each next interval doubles up to 24 hours: at 4,
+12, 28 and 52 hours, then every 24 hours. Each is a Loud Thread reply that Mentions the Owner, with the buttons **Still
+on it** and **Unack**.
+
+- **Still on it** is recorded in the Timeline and does not change the interval. The Owner can also answer from the Alert
+  Group page or the API.
+- A **Takeover** starts the Reminders over for the new Owner. A Reopen into acknowledged continues them. A snoozed Alert
+  Group gets none. There are no quiet hours.
+- An Owner who is disabled or deleted loses the acknowledgement: the Alert Group becomes Firing without an Owner, and the
+  ack timeout starts over.
+- After Muster was down, the overdue notices of one Alert Group collapse into one Loud Thread reply that says how many
+  were missed.
+- Buttons on Reminders are signed like the others, but are not updated after a key rotation. Once the old key is removed,
+  a press is answered "This button has expired; use the buttons on the Alert Group's message".
+
+### Auto-unacknowledge
+
+If an Owner goes home and says nothing, the Alert Group would stay acknowledged forever. **Auto-unacknowledge**
+(`route.auto_unacknowledge`, off by default) takes it back. The Owner answers a Reminder by pressing **Still on it**, by
+running any command on the Alert Group or by adding a Note before the next Reminder is due. When the Owner has answered
+neither of the last two Reminders (`timers.auto_unacknowledge_after`), the next Reminder is not sent. Instead Muster
+unacknowledges the Alert Group with the reason "No answer to the last two Reminders". It becomes Firing without an Owner,
+a Loud Thread reply gives the reason and Mentions the Owner, and the ack timeout starts over.
+
+For example, Carol acknowledges at 10:00 and goes home. She answers neither the Reminder at 14:00 nor the one at 22:00.
+At 14:00 the next day, instead of a third Reminder, Muster unacknowledges the Alert Group and Mentions Carol, and the
+ack timeout notices begin again.
+
+The Alert Group page shows the next scheduled notice or Reminder.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/broken-destinations.md -->
+# Broken Destinations
+
+A Destination is **Broken** when Muster has decided that it cannot deliver there until something changes: the messenger
+refused the bot for good, or the messenger kept failing until Muster ran out of patience. A Broken Destination is not an
+error to dismiss. It means that the people it serves are not seeing their alerts, so Muster raises an alert about it.
+
+This page explains when a Destination becomes Broken, what Muster does meanwhile, and how it recovers. For the steps
+when `MusterDestinationBroken` fires, use the [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDestinationBroken.md).
+
+## When a Destination becomes Broken
+
+Every failed attempt is sorted into a class, and the class decides what happens:
+
+Retry after
+:   examples: the messenger answers `429` and says how long to wait
+
+    Muster waits exactly that long and then sends the latest state. It is not counted as an attempt.
+
+Transient
+:   examples: a `5xx`, a timeout, a network error
+
+    Muster retries with exponential backoff and jitter, from 2 seconds up to 5 minutes. After **10 attempts within 30
+    minutes** (`delivery.transient_budget`) the Destination becomes Broken as *unavailable*.
+
+Fatal
+:   examples: the messenger refuses the bot or the request for good
+
+    The Destination becomes Broken **at once**.
+
+Unknown
+:   examples: an answer Muster does not recognize
+
+    Not retried. That one delivery ends as *Not delivered*, and the Destination stays healthy.
+
+What is Fatal depends on the messenger:
+
+- **Mattermost**: `401` or `403`, such as an invalid token or a bot removed from the channel, and `404` for the channel,
+  which is not found or archived.
+- **Slack**: a token that Slack refuses (`invalid_auth`, `token_revoked`, `token_expired` and the like), a missing
+  scope, and a channel the bot cannot use: `channel_not_found`, `not_in_channel` for a bot removed from the channel, and
+  `is_archived`. A `429` is not Fatal: Muster holds the whole Connection for the seconds Slack asks.
+- **Telegram**: `401`, and "bot was kicked" or missing rights, such as a bot that lost its admin rights in the channel.
+- **Bridge**: the bridge answers `forbidden`, for example because the bot was removed from the channel; the bridge's own
+  text becomes the reason. A bridge that does not answer at all becomes Broken through the Transient budget.
+- **Outgoing webhook**: `401`, `403`, `404` and `410`, and a request that the Organization's outbound address policy blocks,
+  since every later request would be blocked too.
+
+Several things look like trouble and do **not** make a Destination Broken:
+
+- A deleted Root message. Muster posts the Alert Group again once, Quietly, with the note "The previous message was
+  deleted at HH:MM"; if that one is deleted too, the pair is marked "deleted in the messenger" and left alone. In Slack
+  this holds while the bot is still in the channel and the channel is not archived; see [Edits and deleted Root
+  messages](https://muster-io.github.io/muster/latest/messengers/slack.md#edits-and-deleted-root-messages).
+- A Telegram Thread that lost the automatic copy of its Root message. The delivery state shows "Thread not attached".
+- A delivery that ends as Not delivered, such as a template that failed or a request the receiver rejected with `400`.
+- A Bridge Connection whose bridge cannot be reached. The Connection does not become Broken itself; its Destinations do,
+  through their own deliveries, and its Connection check shows the cause.
+- Failed polls of a bridge or of Telegram. The poller backs off.
+
+## What you see
+
+- **The Destination and its Routes** show a banner: "Broken since HH:MM: {reason}. Muster tries again every 5 minutes."
+  The reason is the error the messenger answered, or "unavailable after repeated failures" and the last error.
+- **The Internal alert** `MusterDestinationBroken` is raised, with the severity critical and the labels `destination` and
+  `destination_name`. Muster routes it by your Routes like any other Alert, so a Route for Internal alerts should lead to
+  a Destination of **another kind** than the one that failed: if all your Telegram Destinations are Broken because
+  Telegram is unreachable, an alert that goes to Telegram says nothing. See [Routes and Group
+  keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#examples).
+- **The chart rule** `MusterDestinationBroken` is the backup for when Muster cannot deliver its own alert. Send it through
+  an Alertmanager route that bypasses Muster. See [Internal alerts](https://muster-io.github.io/muster/latest/reference/internal-alerts.md) and the
+  [metrics](https://muster-io.github.io/muster/latest/reference/metrics.md).
+- The **Alert Groups** whose delivery waits show a delivery problem. The Alert Group list has the filter **Delivery
+  problem**, and the page of each shows the state "Waiting: {Destination} is Broken".
+- The **System status** page lists the Broken Destinations and since when.
+
+## What Muster does meanwhile
+
+Everything except the delivery to that Destination goes on: ingestion, routing, Alert Groups, commands from the web UI
+and the API, timers, and every other Destination.
+
+- **Deliveries wait instead of failing.** Nothing is dropped, and Muster does not spend retries on a Destination it knows
+  is down.
+- **Muster probes the Destination every 5 minutes** (`delivery.broken_probe_interval`). If a delivery is waiting, the
+  probe is an attempt at the oldest one. If nothing is waiting, the probe is the **Destination check**, which asks the
+  messenger whether the bot can still reach and post to the channel, without posting. An outgoing webhook has no
+  Destination check, so its next delivery is the probe.
+- **A new Alert Group is created and shown in Muster** as usual, but its first Publication waits. Its ack timeout does not
+  start until it is published, so a Route whose only Destinations are Broken sends no notices.
+
+## Recovery
+
+The Broken state ends when **any** of these succeeds:
+
+- the automatic probe;
+- **Check** on the Destination page, which runs the Destination check at once;
+- **Send test message** on the Destination page, when every step succeeds.
+
+Fix the cause first. Typical fixes are a replaced bot token, adding the bot back to the channel or giving it its admin
+rights again, enabling comments on a Telegram channel, correcting the address or the proxy of the Connection or the
+**Outbound addresses** policy, or waiting out a messenger outage. When the fix is made, press **Check**; if you do
+nothing, the next probe notices by itself, with no Alert Group activity needed. The Internal alert then resolves.
+
+### What is sent after recovery
+
+Muster sends only the **current state**. It does not replay what it missed.
+
+| What happened during the outage | After recovery |
+|---|---|
+| An Alert Group started and is still firing | It is published as a Loud new message. |
+| An Alert Group started and is no longer firing, but still open | It is published Quietly. |
+| An Alert Group was already published, then changed | Its Root message is edited once to the current state, with no Thread reply. |
+| An Alert Group started and resolved during the outage | It is **not** published; it stays in the Timeline and in the web UI. |
+| Thread replies came due | They are not sent. |
+
+Urgent Alert Groups are published first, within the Destination's rate limits.
+
+An **outgoing webhook in events mode** is the exception: it is a stream of events, so every event that came due during the
+outage is sent after recovery, in order per Alert Group, with none dropped and no age limit. An outgoing webhook in
+template mode sends only the current state, like a messenger.
+
+If an Alert Group resolved while its first Publication was still waiting for a retry, but the Destination was not yet
+Broken, it is still posted, Quietly, with the note "Delivered late: started HH:MM, resolved HH:MM while this Destination
+was unavailable".
+
+## Republishing past an edit window
+
+Muster edits a Root message for as long as its Alert Group is open, which can take days. Whether a messenger lets it
+depends on the messenger. This is not about a Broken Destination, but the messages that Muster can no longer edit look
+similar from the outside, so here is the whole picture.
+
+Telegram
+:   None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.
+
+Slack
+:   None known for a bot's own messages. Whether a window that a workspace sets applies to a bot's messages hours or
+    days old has not been verified; an edit Slack refuses ends that delivery as Not delivered.
+
+Mattermost
+:   The server setting `ServiceSettings.PostEditTimeLimit`, which is unlimited (`-1`) by default. Keep the default. If
+    an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then
+    answers has not been verified. See [Keep posts editable](https://muster-io.github.io/muster/latest/messengers/mattermost.md#keep-posts-editable).
+
+Bridge
+:   The bridge declares it in its info, as `limits.edit_max_age_seconds`, or declares none.
+
+Outgoing webhook
+:   Muster does not know the chat's rules. In template mode an `update` request that the chat refuses ends as Not
+    delivered or Broken by the usual classes.
+
+For a **Bridge** with an edit window, Muster stops editing a Root message 60 seconds before the window closes
+(`bridge.edit_window_margin`). After that:
+
+- A change that keeps the status of the Alert Group, such as new Alerts or Alerts that resolve, reaches only the Thread.
+  The old Root message keeps the state of its last edit.
+- A **change of status**, such as Acknowledge, Resolve, Snooze or a Reopen, makes Muster publish a **new Root message**
+  Quietly, in the same channel, and reply under the old one: "This message is no longer updated. The current one:
+  {link}". Later Thread replies go under the new Root message.
+- The old message keeps working: a press on its buttons, or a Text command in its Thread, still acts on the Alert Group.
+- The Alert Group page shows "Past the edit window: updated on the next change of status" until then.
+
+A bridge may also refuse an edit before the declared time, with the reason `edit_window_closed`. Muster treats that as the
+end of the window, not as a deletion. See [Edit windows](https://muster-io.github.io/muster/latest/messengers/bridge.md#edit-windows) for the details.
+
+## After you delete a Destination
+
+A deleted Destination receives one last edit of each open Root message, "No longer updated here; current state in Muster:
+{link}", and nothing after that. For a Bridge Root message past its edit window, the last edit is a Thread reply with
+the same text. An outgoing webhook in events mode sends no final event, and its queued events end as Not delivered.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/teams.md -->
+# Teams
+
+A **Team** says who owns what: Routes and Destinations may name the Team that owns them, so that each team finds its
+own configuration with a filter. Alerts and Alert Groups belong to Teams by their labels, so that each team finds its
+Alert Groups. A Route may also deliver to the Destinations of the Teams of its Alerts
+([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md)). Teams are managed in the web UI, under **Teams** in the main navigation, and
+through the API under `/api/v1/teams`.
+
+A Team costs nothing to start with. It may have no people and no Destinations and only name Alerts: it then groups and
+filters them, and you add people, Destinations and Routes when you want them.
+
+## In the web UI
+
+**Teams** lists the Teams with the people in each, and above them the Team label, and below them the values of it that name no
+Team ([Values without a Team](https://muster-io.github.io/muster/latest/concepts/teams.md#values-without-a-team)). **New Team** makes a Team; a value without a Team has its own
+**Create Team**.
+
+![The Teams list with the Teams payments and search, and the values checkout and Payments of the Team label that name no Team](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/01-teams-list.png){ .screenshot }
+
+A Team's page has its people, its identity provider groups, its Working hours, its Destinations, and **Which Alerts
+belong to this Team**: the Team label with its slug and the Team matchers, with an example of what an Alert gets.
+
+![The people of the Team payments: alice and bob added by hand, petr through the identity provider group](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/02-team-people.png){ .screenshot }
+
+The Destinations of a Team are the Destinations of the team, each with a
+[Severity condition](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions). They receive the Alert Groups of the Routes that deliver
+to the Teams, and nothing else: owning a Destination is another thing.
+
+![The Destinations of the Team payments: payments-critical for critical Alert Groups and payments-notice for the rest](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/04-team-destinations.png){ .screenshot }
+
+## What a Team is
+
+A Team has:
+
+- a **name**, unique in the Organization, compared without regard to case;
+- a **slug**, such as `payments`. A slug is 1 to 63 characters — lowercase letters, digits, `-`, `_` and `.` — and
+  starts with a letter or a digit (`team.slug_format`), so `Payments` and `-x` are refused. It is unique in the
+  Organization and compared exactly;
+- a **description**;
+- its **Team matchers**, which pick the Alerts that belong to it beside its slug;
+- the **people** in it, which may be nobody, added by hand or through the groups of the identity provider;
+- its **Team mentions**, the group that mentions it in each messenger ([Team mentions](https://muster-io.github.io/muster/latest/concepts/teams.md#team-mentions));
+- its **Working hours**: its own, else the Organization's.
+
+What a Team owns
+:   A Route or a Destination names its owning Team in the field `owning_team_id`; reads carry it as `owning_team`,
+    with the Team's id, name and slug. `listRoutes` and `listDestinations` take the parameter `team`: a Team's id, or
+    `mine` for the Teams you are in ("My Teams"). The owner only organizes: owning a Destination does not make it
+    deliver to the Team, and a Route's owning Team adds no delivery.
+
+What a Team does not grant
+:   A Team grants no Permission and limits none: Roles stay the same for the whole Organization. A Responder in a Team
+    cannot change the Team, and a Viewer in a Team is refused Acknowledge as any Viewer is. Only an Admin creates,
+    edits and deletes Teams and adds people to them; every Role reads them.
+
+Deleting a Team
+:   The people leave it, its Working hours, Team matchers and Team mentions are removed, and the Routes and
+    Destinations it owned have no owner from then on, each with a new version. Its slug and name are free at once for a
+    new Team, and its slug no longer gives Alerts the Team. The Team itself is kept, marked deleted, for what still
+    names it: the Alert Groups that had it among their Teams list it by its name, with `deleted` true.
+
+Every change of a Team and of the people in it is recorded in the Audit log, and the metric `muster_team_info` has
+one series per Team that is not deleted, with its name ([Metrics](https://muster-io.github.io/muster/latest/reference/metrics.md)). The operations are listed
+in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
+
+## Which Alerts belong to a Team
+
+An Alert belongs to a Team in two ways, and may belong to several Teams.
+
+By the Team label
+:   The Team label is an Organization setting, `team` by default (`organization.team_label`, `team_label` of the
+    Organization's settings). An Alert whose value of the Team label, with the Static labels of its Integration,
+    equals a Team's slug exactly belongs to that Team: with the Team "payments", `team="payments"` belongs to it and
+    `team="Payments"` does not. The Team label cannot be a label that an Internal alert sets itself, such as
+    `alertname`, `severity`, `integration`, `schedule` or `team_id`: such a label is refused with `422`
+    `reserved_label`.
+
+By Team matchers
+:   A Team's `matchers` use the syntax of Route Matchers on any label — `=`, `!=`, `=~` and `!~`, regular expressions
+    anchored at both ends, a missing label counting as empty — and each is enough on its own: an Alert that any one of
+    them picks belongs to the Team. The Team with the matchers `namespace=~"checkout|billing"` and
+    `pod=~"checkout-.*"` gets an Alert with `namespace="billing"` and one with `pod="checkout-api-1"`, and not one
+    with `namespace="search"`. Matchers are saved with the Team, with `If-Match`, and replaced as a whole; an update
+    that omits them keeps them. An expression that is not RE2 is refused with `422` `invalid_regex` at its pointer.
+    A matcher with only a negative operator, such as `env!="prod"`, picks every Alert that lacks the label, Internal
+    alerts included, because a missing label counts as empty.
+
+Muster decides the Teams of an Alert when it starts firing — its first firing, and each firing after it resolved —
+and records them on the Alert with the rule that matched: `label`, or `matcher` with the matcher's text. The Alerts
+view of an Integration shows them as `teams`: the Teams of the Alert's latest firing, which replace those of an earlier
+one. A Continuation is not a new firing and decides nothing. Saving a Team or the Team label also evaluates the Alerts
+that are firing in open Alert Groups again, and only adds Teams to them
+([Values without a Team](https://muster-io.github.io/muster/latest/concepts/teams.md#values-without-a-team)).
+
+The Teams of an Alert Group are those of every Alert that ever joined it. They only grow: a Team stays among them
+after its Alerts resolve. Each Team that joins records the Quiet lifecycle event `team_joined` in the Timeline, naming
+the Team and the rule that brought it; `getAlertGroup` and `listAlertGroups` carry the Teams as `teams`, and outgoing
+webhooks in events mode carry them in `alert_group.teams` ([Events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md)). An event
+carries the state of the Alert Group, not a change: each `team_joined` lists every Team the Alert Group has at that
+moment, the new one included. The
+parameter `team` of `listAlertGroups` and `getAlertGroupCounts` takes a Team's id, or `mine` for the Alert Groups of
+the Teams you are in ("My Teams"). The Teams of an Alert Group exist whatever its Route says: they do not change where
+it is delivered.
+
+A worked example
+:   A rule generator sets `category`, `team` and `system` on every alert rule, so that the rule for a container that
+    was killed for lack of memory, `KubernetesContainerOOMKilled`, reaches Muster with the labels
+    `category="infra"`, `team="payments"` and `system="k8s"`. With the Team label `team` (the default), the slug of
+    each Team is the value its rules carry: the Teams `payments`, `checkout` and `search` pick up their Alerts with no
+    Team matcher at all, and the Alerts with `team="payments"` have `payments` among the Teams of their Alert Group.
+    The labels `category` and `system` belong to the Route: `category="infra"` is the Matcher of the Route
+    "Infrastructure" ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#operations-and-team-destinations-by-severity)), and `system`
+    is a label to group by. A Team matcher is for Alerts that carry no Team label, or a wrong one: the Team `devops`
+    with the matcher `category="infra"` also gets every infrastructure Alert, whichever `team` it says: they belong to it.
+
+Teams without people
+:   A Team does not need people to be useful. A Team with nobody in it, such as `search` above, still names its Alerts
+    and Alert Groups, so that the list of Alert Groups filters by it and an outgoing webhook event carries it in
+    `alert_group.teams`, and may still have Destinations that receive the Alert Groups of its Alerts. People join it
+    later, by hand or through the identity provider, and nothing has to be redone.
+
+Test clusters with one shared namespace
+:   When every team deploys into the same namespace of a test cluster, `namespace` does not tell them apart. Match
+    another label instead: the Pod name (`pod=~"checkout-.*"`), an app label the workloads carry
+    (`app_kubernetes_io_part_of="checkout"`), or put the Team label itself on the workloads, so that their Alerts carry
+    `team="checkout"`. In the first two ways the Team `checkout` has the Team matchers `pod=~"checkout-.*"` and
+    `app_kubernetes_io_part_of="checkout"`, and an Alert that either one picks belongs to it. In the third, no matcher
+    is needed, and the Alerts of a production cluster and a test cluster reach the same Team. The Route
+    [for test clusters](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#a-route-for-test-clusters) then sends them to the team's own Destinations.
+
+## Values without a Team
+
+A value of the Team label that names no Team — a typo, a team without a Team yet, or a case that differs, such as
+`Payments` — adds nothing to the Alert Group: it is delivered to its Route's Destinations as before. Its Timeline
+records the Quiet lifecycle event `unknown_team_value` with the value, once per value and Alert Group, and outgoing
+webhooks in events mode receive it. Create a Team with that value as its slug, or add a Team matcher that picks those
+Alerts, and the Alerts that start firing from then on belong to it. A value that is not a valid slug, such as
+`Payments`, reaches a Team only through a Team matcher.
+
+The values of the Team label seen without a Team in the last 14 days (`organization.team_values_window`) are listed by
+`listTeamLabelValues` (`GET /api/v1/team-label-values`, Permission `teams:read`), the most recently seen first, each
+with when it was last seen, how many Alerts carried it and `valid_slug`, false for a value that is not a valid slug.
+
+Saving a Team — creating one, or changing its slug or its Team matchers — or saving a new Team label evaluates the
+Alerts that are firing in open Alert Groups again, and only adds:
+
+- An Alert that the save now brings to a Team records that Team, and the Team joins the Alert's Alert Group with a
+  Quiet `team_joined`. The Root messages are updated Quietly, with no new message and no Mention, and no Escalation
+  chain starts.
+- A Team that an Alert no longer belongs to stays where it is, on the Alert and in its Alert Group.
+- Saving the name, the description, the people or the Working hours of a Team evaluates nothing. A new name edits the
+  Root messages of the open Alert Groups that have the Team once, Quietly, so that their field Teams shows it.
+
+So "Create Team" for a value without a Team brings the Team the open Alert Groups of that value at once: with an open,
+firing Alert Group of `team="checkout"` and no such Team, creating the Team with the slug `checkout` adds it to the
+Alert Group, and `checkout` leaves the list of values without a Team. The evaluation runs on any replica shortly after
+the save; a replica that stops during it leaves the rest to another one, which goes on where it stopped. It records no
+`unknown_team_value` and leaves an Alert Group that gets no new Team as it is.
+
+With the default Team label `team` and no Teams defined yet, every Alert that carries a `team` label records
+`unknown_team_value` in its Alert Group's Timeline and sends it to outgoing webhooks in events mode. Create the Teams,
+or change the Team label to a label your Alerts do not use for something else, to avoid it.
+
+## People
+
+An Admin adds Users to a Team by hand and removes them, through the API (`addTeamUser`, `removeTeamUser`). A User may be
+in several Teams. The list of a Team's people shows each person's Role, how they are in the Team — `by_hand` for a
+person an Admin added, `idp` for a person the identity provider put in it — and the messengers they linked.
+
+- Disabling a User keeps them in their Teams.
+- Deleting a User takes them out of every Team.
+
+## Membership from the identity provider
+
+A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through
+OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:
+
+![The identity provider groups of the Team payments: the entry teams/payments/*, which reads the groups claim of the OIDC settings](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/03-team-idp.png){ .screenshot }
+
+The claim of an entry
+:   An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster
+    reads it from the ID token, and from userinfo when the ID token lacks it, as for the Role mapping; GitLab, for
+    example, puts its role claims such as `https://gitlab.org/claims/groups/maintainer` in userinfo
+    ([Sign-in with GitLab](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles)).
+
+Exact groups and subtrees
+:   An entry `teams/payments` matches that group exactly, letter case included. A subtree `teams/payments/*` matches
+    `teams/payments` and every group below it, such as `teams/payments/oncall`, at `/` boundaries only: never
+    `teams/paymentsx`. There are no other wildcards; a `*` anywhere else is refused.
+
+Sign-in and re-checks
+:   At every OIDC sign-in, and at every successful background re-check, a person joins each Team with an entry that
+    matches them and leaves each Team they are in only through entries that no longer match. This happens whether or
+    not **Sync Role at sign-in** is on, and never changes a Role. A re-check reads only the refreshed ID token: a claim
+    it lacks counts as no groups once an earlier re-check found it in a refreshed ID token, and until then — as for a
+    claim found only in userinfo — an entry of that claim keeps the person as the last sign-in left them. A refused or failed re-check changes no membership.
+
+People added by hand
+:   The identity provider never takes out a person an Admin added. A person added by hand whom an entry matches has
+    both sources, `by_hand` and `idp`, and the entries that matched them. Removing such a person by hand takes away
+    only `by_hand`: they stay in the Team through the identity provider until a sign-in finds that no entry matches
+    them; removing by hand a person who is in the Team only through the identity provider is refused with `404`.
+
+Identity providers without an offline token
+:   GitLab, and any provider that grants no offline token, cannot be re-checked in the background, so its people join
+    and leave Teams only when they sign in.
+
+A change of a Team's entries changes nobody's membership at once: each person follows the new entries at their next
+sign-in or re-check. Every change the identity provider makes is recorded in the Audit log as `team.user_added` or
+`team.user_removed` by the system, with the source `idp` and the entry that matched.
+
+For example, a Team whose people are the members of the GitLab group `corp/payments` and its subgroups:
+
+```json
+"idp_entries": [{"group": "corp/payments/*"}]
+```
+
+With the groups claim `groups`, which GitLab fills with a person's groups and the groups below them, this takes in a
+person of `corp/payments/oncall` and nobody of `corp/paymentsx`. Subtree entries are safe here, also with a role claim:
+a Team grants no Permission and no Role.
+
+## Team mentions
+
+A **Team mention** is the group that mentions a Team through one Connection: when a message mentions the Team in a
+channel of that Connection, it mentions that group, whose members the messenger notifies. A Team has at most one Team
+mention per Connection, in `team_mentions`, each with its Connection and its group:
+
+```json
+"team_mentions": [
+  {"connection_id": "CNAGK7M3QX9P2R", "group": "payments_team"},
+  {"connection_id": "CNB4R8J2M6Q1TX", "group": "payments-team", "group_id": "S0FAKEPAYTEAM"}
+]
+```
+
+What each messenger takes:
+
+Mattermost
+:   The name of a Mattermost group, as `@payments_team` mentions it. A bot with the role Member reads the groups of the
+    server, so **Check connection** reads them in its step **Groups**, and the API lists them for the Team mention
+    (`listConnectionGroups`). A server that does not list them to the bot fails nothing: the step says so, and a Team
+    mention is still saved by the name you type.
+
+Slack
+:   A Slack user group, chosen from those the Connection lists, by its handle and its id. The bot needs the optional
+    scope `usergroups:read`; until the Connection's check has found it, a Team mention for a Slack Connection is
+    refused. See [The scopes](https://muster-io.github.io/muster/latest/messengers/slack.md#the-scopes).
+
+Bridge
+:   A group name of the bridge's messenger, when the bridge declares group mentions in its `info`
+    (`group_mentions`). Muster does not list the groups of a bridge: you type the name.
+
+Telegram
+:   Telegram has no group mentions, so a Telegram Connection takes no Team mention.
+
+Saving a Team mention for a Connection that cannot carry one — Telegram, a Slack Connection without `usergroups:read`,
+a bridge that declares no group mentions, or a Notification gateway — is refused with `422` and the code
+`group_mentions_unsupported` at the entry's `connection_id`. A read of a Team lists under `mention_connections` every
+Connection that may have a Destination, with the Team's Team mention for it or none, and for those that cannot mention
+a group the reason: `telegram_no_groups`, `usergroups_read_missing` or `bridge_no_group_mentions`. A Notification
+gateway is not listed.
+
+A Team without a Team mention for a Connection is mentioned as nobody through it: Muster never mentions the Team's
+On-call instead. A Team mention whose Connection later loses the ability — a Slack app reinstalled without
+`usergroups:read`, a bridge that stops declaring group mentions — stays, reads `available` false with the reason, and
+mentions nobody until the ability is back. A save that sends it again unchanged, with the same Connection, group and
+user group id, keeps it and is not refused; only a new or changed Team mention is checked against what its Connection
+can mention. Deleting a Connection deletes its Team mentions, each recorded in the Audit
+log of its Team; a change of a Team's Team mentions is recorded in its Audit log as every other change of the Team.
+
+## Working hours
+
+Working hours are days of the week, a start and an end on the 24-hour clock, and a time zone. The end is later than
+the start on the same day: Working hours never span midnight. Holidays are not part of them.
+
+The Organization's Working hours
+:   Monday to Friday, from the start of the working day — the time at which the Snooze presets end, `09:00` by
+    default — to `18:00`, in the Organization's time zone (`organization.working_hours`). An Admin changes the days
+    (`working_days`) and the end (`workday_end`) with the Organization's settings; an end that is not later than the
+    start is refused.
+
+A Team's Working hours
+:   A Team's own Working hours, with days, a start, an end and an IANA time zone such as `Europe/Berlin`
+    (`own_working_hours`), else the Organization's. A Team without its own moves with the Organization: a new start of
+    the working day moves the Team's start too.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md -->
+# Routing to Teams
+
+One Route can serve many teams. Each Destination of a Route, and each Destination of a Team, may be limited by
+Severity level, and a Route may also deliver its Alert Groups to the Destinations of the Teams of their Alerts. Every
+Destination then shows the same Alert Group with one status. The settings are on the Route form, and each links here:
+[the Severity condition of a Destination](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions), ["Also to the Teams from the
+label"](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#also-to-the-teams-from-the-label) with ["Run the Teams' Escalation chains"](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#also-to-the-teams-from-the-label),
+the Group key's [Team label](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#teams-that-want-their-own-alert-groups), the
+[preview](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#preview-where-alerts-go), the [Owning Team](https://muster-io.github.io/muster/latest/concepts/teams.md#what-a-team-is) and the
+[Minimum severity](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md).
+
+The feature is optional. Many installations need only two operations Destinations — one for critical Alert Groups and one
+for the rest — and a Route that names both with a Severity condition each. Teams and their Destinations come in when
+teams want their own Destinations.
+
+## Severity conditions
+
+A Route names its Destinations in `destination_entries`, each with a `severity_condition`, and a Team names the
+Destinations of the Team the same way:
+
+`any`
+:   Every Severity level, the default.
+
+`critical`
+:   Only an Alert Group whose Severity level is critical.
+
+`below_critical`
+:   Every level but critical.
+
+The condition is checked against the Alert Group's Severity level: the highest level of its firing Alerts, raised to
+the Route's Minimum severity. A Destination may be named by several Routes and Teams, each with its own condition, and
+is reached when the condition of any of its entries is met.
+
+![The Destinations of the Route Infrastructure: infra-critical for critical Alert Groups and infra-notice for those below critical](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/05-route-destinations.png){ .screenshot }
+
+Until 0.3.0 Routes still read and take `destination_ids`, derived from `destination_entries`: a request that sends only
+`destination_ids` keeps the condition of each Destination it keeps and gives a new one `any`.
+
+## Also to the Teams from the label
+
+With "Also to the Teams from the label" (`deliver_to_teams`) on, an Alert Group of the Route also goes to the
+Destinations of each of its Teams — the Teams its Alerts belong to by the Team label or by Team matchers
+([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team)) — whose condition its Severity level meets. With it off, the Alert
+Group goes only to the Route's own Destinations. The owning Team of a Route adds nothing: it only organizes and
+filters.
+
+![The option Also to the Teams from the label on the Route form, switched on, with its hint](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/06-route-teams-option.png){ .screenshot }
+
+"Run the Teams' Escalation chains" (`run_team_chains`) is stored with the option; it acts once Escalation chains run.
+
+### Operations and team Destinations by Severity
+
+Operations has `infra-critical` and `infra-notice`, and the Team `payments` has `payments-critical` and
+`payments-notice`. The Route "Infrastructure" takes `category="infra"`, names `infra-critical` for `critical` and
+`infra-notice` for `below_critical`, and has "Also to the Teams from the label" on. The Team `payments` names
+`payments-critical` for `critical` and `payments-notice` for `below_critical`.
+
+A warning Alert of `team="payments"` makes one Alert Group with one Root message in `infra-notice` and one in
+`payments-notice`, and none in the critical Destinations. If a critical Alert joins it, the Alert Group is also published
+in `infra-critical` and `payments-critical`; its messages in the notice Destinations stay and keep being updated, also
+after the critical Alert resolves. The Destinations of an Alert Group only grow, and only when a Team joins it —
+which adds that Team's Destinations — or its Severity level rises: a level that falls again, or a new Alert that
+brings neither, adds no Destination below critical where the Alert Group was not published before.
+
+## One Alert Group, one status
+
+An Alert Group has one status and one list of Alerts in every Destination it is in. Acknowledge it from `payments-notice`
+and its message in `infra-notice` shows the same Owner; resolve it anywhere and every message shows it resolved. The
+Alert Group page names its Teams, and the deliveries of the Alert Group show where it went.
+
+![The header of the Alert Group KubernetesContainerOOMKilled, with its Teams: payments, by the Team label](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/08-alert-group-teams.png){ .screenshot }
+
+The delivery state of the Alert Group (`listAlertGroupDeliveries`) names, for each Destination, the entries that reached
+it — the Route, or a Team — with their conditions.
+
+When an Alert Group reaches a Destination after its first Publication elsewhere — a new Alert raised its Severity level
+into the Destination's condition, or brought a Team — the lifecycle event `destination_joined` publishes it there:
+Loudly, with the Mentions of a new Alert Group, while it is firing; Quietly while it is acknowledged or snoozed. The
+other Destinations see only an update of their Root message. During a Storm of the Route the Destination counts it in
+its Storm summary instead, unless it is Urgent.
+
+A change of configuration publishes Quietly and never with `destination_joined`: a raised Minimum severity, or a new
+Team whose Alerts are already in an open Alert Group, adds that Alert Group to the Destinations it now reaches without
+a Mention.
+
+### Teams that want their own Alert Groups
+
+In a Route whose Group key lacks the Team label, Alerts of different Teams with the same key share one Alert Group,
+shown in the Destinations of all of them: an Alert of "search" that joins a firing Alert Group of "payments" is published
+in `search-notice` with `destination_joined`. Teams that want their own Alert Groups add the Team label, `team` by
+default, to the Group key of the Route: with `alertname`, `system` and `team` as the Group key, the "search" Alert gets
+an Alert Group of its own, with its own status, and the Route form offers **Add team to the key** whenever the Route
+delivers to the Teams and its Group key lacks the Team label.
+
+## Preview where alerts go
+
+Before saving a Route, ask where its Alerts would go. The preview (`previewGroupKey`, `routes:write`) takes the Alerts
+reported firing in the last day that the Route would take, as the Group key preview does, and the settings of the form
+as they are, saved or not: the Minimum severity, the Destinations with their conditions, "Also to the Teams from the
+label" and the proposed Group key. A setting left out is the saved Route's; a Route that is not saved starts from none. The answer has a `delivery` part when the request names a saved Route
+(`route_id`), gives `destination_entries` or gives `deliver_to_teams`; a Minimum severity alone does not add it.
+
+The answer lists the largest Alert Groups the Alerts would form under the key, five by default, each with its Group
+key values, its number of Alerts, its Severity level raised to the Minimum severity, its Teams and the Destinations it
+would reach, with the entries that reach each: the Route's, or a Team's. The Destinations of an Alert Group only grow, so the
+preview follows each Alert Group as its Alerts arrived, by their `startsAt`: it reaches the Destinations of every
+Severity level the group rose through, and of each Team from the Alert that brought it. A Group key without the
+severity can thus list Destinations for `warning` and for `critical`, as the group reached them in turn; the Severity
+level shown is the highest. Alerts that started at the same time count together. When an Alert has no `startsAt`
+there is no order, and the preview lists the Destinations the group may reach: those of each Alert's own level. For every Destination that any of the Alert
+Groups reaches it counts how many of all of them reach it, those listed or not, so that a Destination reached by
+hundreds of Alert Groups is seen before the Route is saved.
+
+Teams are read as they are saved: the Team label and the Team matchers of the Teams now, not any change you have not
+saved on the Teams page. When the Route delivers to the Teams and the Group key lacks the Team label, the answer says
+so (`shared_key_warning`), and the form offers to add the Team label to the key.
+
+The preview only reads: it saves nothing, writes no Audit log entry, publishes nothing and sends no message.
+
+![Where alerts go: the Alert Groups the Route Infrastructure would form, with their Teams and the Destinations each would reach](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/07-route-preview.png){ .screenshot }
+
+## When you change a Route or a Team
+
+A save of a Route's Destination entries or of "Also to the Teams from the label", and a save of a Team's Destination
+entries, reach the open Alert Groups at once, without a lifecycle event in their Timelines:
+
+- A new Destination, a changed condition that is met now, or the Destinations of the Teams when "Also to the Teams
+  from the label" is turned on add Root messages, Quietly and without `destination_joined`: each open Alert Group is
+  published in each of those Destinations that it reaches at its current Severity level and was not in. A save
+  publishes only through the entries it added or changed: an Alert Group whose level fell from critical, and that was
+  never published in a Destination below critical, stays out of it when an unrelated entry is saved. A condition is
+  checked against the level as it is: a Destination named for `critical` receives only the open critical Alert
+  Groups. A change of configuration starts no Escalation chain.
+- No change removes a Root message by a condition. A Destination whose condition is not met any more, or a condition
+  narrowed back, keeps its Root messages, which stay current until their Alert Groups resolve.
+- A Destination taken away — removed from the Route or from the Team, reached only through the Teams when "Also to the
+  Teams from the label" is turned off, or named by a deleted Team — gets the final edit "No longer updated here" with a
+  link to the Alert Group in Muster, for each open Alert Group that no entry still names it for. If the Alert Group
+  reaches it again later — its Severity level rises into a condition, or a Team that names it joins — it is published
+  there afresh with `destination_joined`, Loudly while it is firing. If the final edit has not been carried out yet, as
+  while the Destination is Broken, the Root message is kept instead and edited Quietly back to the current state, with no
+  `destination_joined` and no Mention (C-26.FR-5). An entry that still
+  names it keeps the Root message, whether its condition is met or not: in the example above, if the Route also names
+  `payments-notice` for `critical`, removing `payments-notice` from the Team keeps the Root message of a warning Alert
+  Group there.
+
+## A Route for test clusters
+
+Test alerts should reach the team that owns the workload, in its own Destinations, and Page nobody: the Teams' Destinations still deliver as they are set, but no Escalation chain starts. A Route "Test
+clusters" placed above the Route "Infrastructure", with the Matcher `cluster=~".*-stage|.*-preprod"`, no Destination of
+its own, "Also to the Teams from the label" on and "Run the Teams' Escalation chains" off, does that: the Alert Group of
+`team="payments"` from `shop-stage` goes to the Destinations of the Team `payments` and to nothing else, with their
+Severity conditions, and starts no Escalation chain of the Team. Routes are checked in order, and the first one that
+picks an Alert takes it, so it never reaches "Infrastructure". An Alert of a test cluster whose `team` value names no
+Team goes nowhere: the Route has no Destination of its own, so the Alert Group is only in the web UI. Where that
+matters, give the Route one Destination of its own, such as a Destination for test alerts.
+
+The Teams of such Alerts are those of the Team label and the Team matchers, as everywhere. On a test cluster where
+every team shares one namespace, use a Team matcher on the Pod name or an app label, or put the Team label on the
+workloads ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team)).
+
+A Minimum severity on the Route would make every test alert critical, and so [Urgent](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md); leave it
+at none.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md -->
+# What critical changes
+
+An Alert Group whose Severity level is **critical** is **Urgent**. Nothing else makes an Alert Group Urgent, and there
+is no separate switch: since 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act
+([Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent)). This page lists everything that Urgent changes, and then what the
+[Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of a Route adds, so that you know what a critical Alert,
+or a Route that raises its Alert Groups to critical, makes Muster do.
+
+The Severity level of an Alert Group is the highest level of its firing Alerts, raised to the Minimum severity of its
+Route. It follows the Alerts as they fire and resolve, so an Alert Group may become Urgent and stop being Urgent again.
+
+## What an Urgent Alert Group changes
+
+The order of the delivery queue
+:   The delivery queue of a Destination takes Urgent Alert Groups first. They never pass the rate limit of the
+    Destination: an Urgent Alert Group waits for its place within the limit like any other, only before the rest.
+    The edits of Root messages that only a change of configuration made, such as a new button set, come after the other
+    work of their urgency: those of Urgent Alert Groups right after the Root messages of Urgent Alert Groups and the
+    edits that Alerts and Commands make to them, and before anything that is not Urgent; those of the other Alert Groups
+    last, after the Root messages, the edits, the Thread replies and the events of outgoing webhooks of the other Alert
+    Groups, for as long as those use up the rate limit ([Organization](https://muster-io.github.io/muster/latest/configure/organization.md#alert-handling)).
+    After an outage of a Destination, the Alert Groups that were not published are published Urgent first
+    ([Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md#what-is-sent-after-recovery)).
+
+Individual publication during a Storm
+:   When a Route creates more new Alert Groups in a minute than its Storm threshold, each of its Destinations gets one
+    Storm summary instead of a message per Alert Group. An Urgent Alert Group is not held back by it: it is published
+    on its own, at once and ahead of the queue ([Storm summaries](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md#storm-summaries)). The same holds
+    for a Destination that an Alert Group joins during the Storm: unless the Alert Group is Urgent, the Destination
+    counts it in its Storm summary ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#one-alert-group-one-status)).
+
+The end of a Snooze or of an acknowledgement on a rise
+:   When a rise in Severity level makes an Alert Group Urgent, it ends a Snooze, unless the Snooze was set while the
+    Alert Group was already Urgent. It also removes the acknowledgement where the Route's setting "Rise to Urgent
+    removes the acknowledgement" (`route.urgent_rise_removes_ack`) is on, which it is by default. The Alert Group is
+    Firing again, and the change is Loud, with the reason. It Mentions the Owner it removed and the Destination's
+    Mention entries for `rise_to_urgent` ([Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md#which-changes-are-loud),
+    [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#transitions-muster-makes-on-its-own)). A rise that changes
+    nothing else is Quiet.
+
+The filter and the column of the list
+:   The list of [Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#in-the-web-ui) has the filter **Urgent**, which shows only the Urgent
+    Alert Groups or only those that are not, and the column **Urgent**, which marks each Urgent Alert Group. The API
+    takes the parameter `urgent` of `listAlertGroups`.
+
+`urgent` in outgoing webhook events
+:   An event in events mode carries the Alert Group with `alert_group.urgent`, true exactly when its Severity level is
+    critical ([Events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md)), and a template reads it as `.AlertGroup.Urgent`
+    ([Templates](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#what-the-templates-read)).
+
+The count in Storm summaries
+:   The Storm summary of a Route says how many Alert Groups the Storm holds and how many of them are Urgent, such as
+    "Storm on payments: 24 Alert Groups, 3 urgent", and a template reads `.Storm.UrgentCount`.
+
+Urgent is not a status, and no person sets it: the Root message of an Alert Group shows its Severity level, and the
+page of the Alert Group marks it Urgent.
+
+## What the Minimum severity adds
+
+The Minimum severity of a Route raises the Severity level of its Alert Groups, never that of their Alerts. With the
+Minimum severity critical, every Alert Group of the Route is critical, and so Urgent, from its first Alert, even where
+every Alert says `warning`: everything above applies to it, and the Destinations of the Route with the Severity
+condition `critical` receive it ([Severity conditions](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions)). With the Minimum
+severity `warning`, an Alert Group of `info` Alerts is a warning one, which is not Urgent, and a Destination with the
+condition `below_critical` still receives it.
+
+A change of the Minimum severity applies at once to the open Alert Groups of the Route, and is gentler than a rise of
+an Alert:
+
+- It never removes an acknowledgement and never ends a Snooze, also where it makes an Alert Group Urgent: the Timeline
+  records a Quiet `urgency_raised` with the reason "Minimum severity of the Route", and nothing else.
+- It starts no Escalation chain, and the Root messages are edited Quietly.
+- The Alert Groups it raises into the Severity condition of a Destination reach that Destination Quietly, with no
+  Mention ([When you change a Route or a Team](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#when-you-change-a-route-or-a-team)).
+- A lowered Minimum severity records nothing and lowers the level of the Alert Groups, as a falling level does. The
+  messages that an Alert Group already has stay where they are.
+
+The Alerts keep their own level: the Alerts view, the Alerts of the Alert Group page and `alerts[]` of outgoing webhook
+events show what each Alert says.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/schedules.md -->
+# Schedules
+
+A **Schedule** says who in a Team is On-call and when. It is made of Rotation layers, in which people take Shifts in
+turn, with Overrides on top. Schedules are managed through the API under `/api/v1/schedules`; nothing about a Schedule
+sends a message.
+
+## What a Schedule is
+
+A Schedule belongs to one Team and has:
+
+- a **name**, unique in the Team, compared without regard to case;
+- a **time zone**, such as `Europe/Berlin`. A Schedule created without one takes the Organization's time zone of that
+  moment and keeps it when the Organization's changes later (`schedule.time_zone`);
+- its **Rotation layers**, from the lowest to the highest;
+- its **Overrides**;
+- its **gap alert**, whether it reports its gaps as an Internal alert (see
+  [Gaps and the Internal alert](https://muster-io.github.io/muster/latest/concepts/schedules.md#gaps-and-the-internal-alert)).
+
+The **On-call** of a Schedule at a moment is the person of its Override then; otherwise the person on Shift in the
+highest Rotation layer that has a Shift then; otherwise nobody, which is a **gap**. `getScheduleOnCall` gives the
+**Result** of a period — by default from now to 14 days ahead (`schedule.gap_view`), at most 67 days — cut into
+segments, each with the person On-call or nobody, together with the Shifts of each Rotation layer and the Overrides.
+Muster computes it on its own clock, so the development clock moves it.
+
+Only Admins create, change and delete Schedules (`schedules:write`); everyone reads them (`schedules:read`). Every
+change is recorded in the Audit log, and the metric `muster_schedule_info` has one series per Schedule, with its name
+([Metrics](https://muster-io.github.io/muster/latest/reference/metrics.md)). The operations are listed in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
+
+## Rotation layers
+
+A Schedule has at most 20 Rotation layers. A Rotation layer has a name and the people who take Shifts in turn, in
+order, at most 100. A Shift lasts:
+
+- a **day**, handed over every day at the handover time;
+- a **week**, handed over on a day of the week at the handover time;
+- a number of **whole hours**, given as `shift_seconds`, a multiple of 3600 such as 43200 for 12 hours, up to 28 days.
+
+The first Shift starts on the start date, a day from 2000-01-01 to 2100-12-31, at the handover time, with the first
+person of the list. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 when
+the clocks change. A time that the clocks skip when they move forward, such as 02:30 on the night of the change, is
+the moment they move; a time that happens twice when they move back is its first occurrence.
+
+A Rotation layer may be **limited** to some days of the week and, optionally, a time of day, such as Monday to Friday
+11:00–19:00. Outside the limits it has no Shift. A time of day whose end is earlier than its start crosses midnight,
+and each window belongs to the day it starts on: Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00.
+
+A higher Rotation layer wins wherever it has a Shift. A common Schedule has two:
+
+Around the clock, below
+:   Weekly Shifts handed over on Monday at 10:00 among Petr, Sergey and Olga.
+
+Working hours 11–19, above
+:   Weekly Shifts on weekdays from 11:00 to 19:00 among Olga and Petr.
+
+On a Wednesday at 15:00 the On-call is the person of the upper Rotation layer; at 21:00 and at the weekend, the person
+of the lower one.
+
+A Rotation layer may only add people who can be Paged: Users in the Team who are neither Viewers nor disabled. Adding
+anyone else is refused with `422` `not_pageable` at the person, with the reason `viewer`, `disabled` or `not_in_team`.
+Someone who becomes one of these later stays in the Rotation layer: their Shifts are skipped — the Rotation layer
+below, or a gap, takes the time — and the Result lists a warning about them until an Admin removes them.
+
+## Several Schedules
+
+A Team may have several Schedules, such as a first and a second line. One of them is its **main Schedule**, whose
+On-call is the Team's On-call: the first Schedule of a Team is its main one, and an Admin makes another one main with
+`main` set to true, which takes the mark off the previous one. The main Schedule cannot be unmarked on its own; deleting
+it leaves the Team without one until an Admin marks another.
+
+A Team that has Schedules cannot be deleted: `deleteTeam` answers `409` `team_in_use` and names them.
+
+## Overrides
+
+An **Override** makes one person On-call from one time to another, on top of every Rotation layer: within its span it
+wins over all of them, and so it also closes a gap. It may name the person whose Shift it takes, which changes nothing
+in the On-call. Where Overrides overlap, the one created last wins.
+
+Who may make them
+:   Responders and Admins (`schedule-overrides:write`). A Responder must be in the Schedule's Team, else `409`
+    `not_in_team`; an Admin need not. The person who takes the Shift must be able to be Paged, else `422`
+    `not_pageable` at `user_id`; the person whose Shift it takes may be anyone.
+
+When
+:   An Override may be planned any time ahead, but it may not rewrite the past. It starts at most 5 minutes before now
+    (`422` `out_of_range` at `start`), ends after its start and after now, and lasts at most 31 days (`422`
+    `out_of_range` at `end`). A span that would overlap 1000 other Overrides of the Schedule is refused the same way.
+
+Changing and deleting
+:   Before an Override begins, everything in it may change, and deleting it removes it. Once it has begun, only its end
+    may change — another start or person is refused with `422` `unsupported` — and deleting it ends it now: the part
+    that has passed stays in the Schedule. Once it has ended, it can be neither changed nor deleted (`409`
+    `override_ended`), so the past stays as it was.
+
+No messages
+:   Overrides need no approval and send no message, and neither do Shifts: who is On-call is shown by Muster and its
+    API, and every Override is recorded in the Audit log with its people and span.
+
+## iCal feed
+
+Each User may subscribe a calendar application to a personal **iCal feed** of the times when they are On-call. The
+feed has one event for each span in which the User is On-call in a Schedule of any of their Teams, named
+"{Team} · {Schedule}", from 7 days back to 60 days ahead (`ical.window`), counted in whole days in UTC:
+
+- It follows the Result: where a higher Rotation layer or someone else's Override has the time, it is not in the feed.
+  With the two Rotation layers above, a week in which Petr has the lower Rotation layer shows only its nights and its
+  weekend.
+- An Override that makes the User On-call is an event of its own span; adjacent spans of one Schedule are otherwise
+  one event, so a Rotation layer limited to Friday 19:00–09:00 is one event from Friday 19:00 to Saturday 09:00.
+- Times are in UTC, so a calendar application shows them in its own time zone, across the changes of the clocks too.
+
+The link
+:   `issueMyIcalFeed` (`POST /api/v1/me/ical-feed`) gives the link, `MUSTER_PUBLIC_URL/ical/{token}.ics`, from the web
+    session only. It is shown once: Muster keeps only a hash of its token (`ical.token`, starting with `mstr_cal_`), so
+    copy it at once. `getMyIcalFeed` tells whether a feed exists and when it was issued.
+
+A new link revokes the old one
+:   Each User has one feed. Issuing a new link stops the old one at once, and `revokeMyIcalFeed` stops the current one;
+    a stopped link, and the link of a disabled or deleted User, answers `404`. Deleting a User deletes their feed.
+    After a link stops, calendar applications keep showing the copy they last fetched.
+
+An Admin revokes the feed of a User
+:   If a link leaked, an Admin revokes it for the User: "Revoke iCal feed" on the User's page, or `revokeUserIcalFeed`
+    (`DELETE /api/v1/users/{user_id}/ical-feed`, permission `users:write`). The link stops at once on every replica,
+    the Audit log records `ical_feed.revoked` with the reason `revoked_by_admin`, and the User can issue a new link
+    from the profile.
+
+Counting the fetches
+:   `muster_ical_feed_requests_total{outcome}` counts the fetches: `served`, `not_found` (a malformed, unknown or
+    revoked token, or a disabled or deleted User's) and `failed`. It has no label for the token or the User.
+
+Calendar applications fetch the link without signing in, so treat it as a password: anyone who has it sees the times.
+Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`; a reverse proxy or ingress in
+front of Muster records the real path in its own access log, so keep that log private or mask `/ical/` there.
+Schedules are not imported from iCal: the feed only shows what the Schedules say.
+
+## Gaps and the Internal alert
+
+A **gap** is a time when no Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is
+On-call. The people whose Shifts are skipped are Viewers, disabled Users and Users who are no longer in the Team — after
+the groups of the identity provider changed, for example: the Rotation layer below takes their time, or a gap does.
+`getScheduleOnCall` lists a warning `gap` with its `start` and `end` for each gap of the period, besides the warnings
+`disabled`, `viewer` and `not_in_team` about those people, and every Schedule carries `next_gap`, the first gap of the
+next 14 days (`schedule.gap_view`), or null. A Rotation layer limited to Friday 19:00–09:00 alone has its gaps from
+Saturday 09:00 to Friday 19:00; the night from Friday to Saturday is no gap.
+
+A Schedule may report its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`):
+
+`by_default`
+:   The default: on while the Schedule is its Team's main one, off otherwise. When an Admin makes another Schedule
+    main, the alert follows it at the next scan.
+
+`on`
+:   On whether or not the Schedule is main.
+
+`off`
+:   Never.
+
+`gap_alert_active` says whether it is on now. Every 5 minutes (`schedule.gap_scan_interval`) the Leader looks at the
+next 7 days (`schedule.gap_alert_horizon`) of each Schedule whose gap alert is active. A gap now, or one that starts
+within those 7 days, raises `MusterScheduleGap` with the Schedule's and its Team's id and name, the Team's slug under
+the Organization's Team label, so that the alert belongs to the Team, and the start of the nearest gap in the annotation
+`gap_start`. The alert stays raised while the gap lasts and resolves at the next scan once no gap is current or within
+the 7 days — an Override or a change of the Rotation layers closed it, or it is past — and when the gap alert is turned
+off or the Schedule is deleted. Renaming the Schedule or its Team updates the open alert. The metric
+`muster_schedule_gap` is 1 for each Schedule with such a gap and 0 for the others, and the chart rule of the same name
+is the backup for the Internal alert; its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md) says how to fill a gap.
+
+A Schedule that covers only part of the day on purpose, such as a second line in working hours, has gaps every evening:
+keep its gap alert off. With `by_default` it already is, as long as it is not its Team's main Schedule.
+
+## On call now
+
+`getOnCallNow` lists every Team by name — or with `teams=mine` the Teams of the caller — with the On-call of its main
+Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
+within the next 14 days. A Team without a main Schedule has `no_schedule` true.
+
+## Unreachable On-calls
+
+A Mention of the On-call notifies them only where it reaches them. For each segment of the period in which someone is
+On-call, `getScheduleOnCall` lists a warning `unreachable` for each [Destination of their
+Team](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md) that a Mention of the person cannot reach, whatever its Severity condition, with the
+Destination, its `messenger` and the `reason`; `getOnCallNow` lists the same, for the On-call now, in `unreachable`.
+The warning changes nothing that Muster sends: it says ahead of time what a Mention would not do.
+
+`no_account_link`
+:   The person has no Account link where the Destination posts: a Mattermost, Slack or Bridge Destination needs a link
+    through its Connection, a Telegram one a Telegram link. The person links their account in their profile
+    ([Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md)); the warning goes once the link is made.
+
+`bridge_no_native_mentions`
+:   The bridge of a Bridge Destination does not declare `native_mentions` in its
+    [info](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#getinfo), or Muster has not read its info yet, so a Mention is the person's
+    name in plain text, which notifies nobody, linked or not. A bridge that renders Mentions declares it; check the
+    Connection again once it does.
+
+`webhook_no_thread_reply`
+:   An [outgoing webhook in template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md) has no **Reply in thread** request, so
+    the follow-ups that carry Mentions are never sent. Add the request; an outgoing webhook in events mode mentions
+    nobody and gets no warning.
+
+`not_in_discussion_group`
+:   The last Destination check of a Telegram Destination saw the person outside the discussion group of its channel,
+    and Telegram notifies only the members of the group about the replies in a Thread, a reply that mentions them
+    included. The person joins the discussion group
+    ([Join the discussion group](https://muster-io.github.io/muster/latest/messengers/telegram.md#join-the-discussion-group-and-mute-the-channel)), and
+    then someone selects **Check** on the Destination page, or saves the Destination.
+
+The check of a Telegram Destination — on save, on **Check** and in `muster doctor`, which prints the people it found
+outside the group without recording them — asks Telegram, with `getChatMember`, about every active person of the Teams
+that name the Destination who has a Telegram Account link and is not a Viewer (a disabled User or a Viewer is never
+On-call), and lists those outside the group in its item **Members of the discussion group**, which always passes. It
+makes one request per person, one after the other, limited by the Connection's limiter, not by the Destination's, as
+it sends nothing to the chat; on save and on **Check** it stops after 10 seconds
+(`destination.telegram.group_people_budget`), and `muster doctor` paces its requests at the Connection's limiter and
+stops after as long. A Team with hundreds of linked people may so leave some unasked.
+
+The warning is as old as the last check. A leave reaches Telegram's answer only some time later, about a minute, so a
+check right after someone left the group may still see them in it; check again later. A person the check could not
+tell — Telegram answered with an error, did not answer in time, or was not asked before the check stopped — keeps what
+the check before saw: the warning of someone who was outside the group stays until a check sees them in it, and
+someone never seen outside it gets no warning.
+
+One case the warning cannot see: the creator of the discussion group, who is anonymous there, was not notified of a
+Mention in a group they had muted, while an ordinary member who muted it was. The check sees the creator in the group,
+so they get no warning; a creator who is On-call should keep the discussion group unmuted.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/notification-rules.md -->
+# Notification rules
+
+A **Notification rule** says how a Page reaches a person. Every User has two: the **normal** rule and the
+**important** rule. A rule is a short sequence of actions:
+
+- **Mention**: a Thread reply that mentions the person;
+- **Call**: a call through a [Notification gateway](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md) to the person's confirmed
+  contact there;
+- **Wait**: a pause of whole minutes before the next action.
+
+Actions without a wait between them happen at the same moment. Muster sends no direct messages to Page anyone. The
+rules are read and changed through the API under `/api/v1/me/notification-rules` and
+`/api/v1/users/{user_id}/notification-rules`, listed in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
+
+## Normal and important
+
+The Organization sets the default rules, the field `notification_rules` of the Organization
+(`organization.notification_rules`):
+
+- **normal**: a Mention;
+- **important**: a Mention, a wait of 5 minutes and a second Mention.
+
+In 0.2.0 an Admin changes them only through the API, with `updateOrganization`; the change is recorded in the Audit
+log as `organization.updated`, at `/notification_rules/normal` and `/notification_rules/important`. A call in the
+Organization's rules needs only an existing Notification gateway.
+
+A rule has at least one Mention or call and at most 10 actions, and a wait lasts from 1 to 60 minutes
+(`notification_rule.limits`). The API gives a wait in seconds, `wait_seconds`, a multiple of 60 from 60 to 3600: a wait
+of 5 minutes is `{"kind": "wait", "wait_seconds": 300}`. A rule outside the limits is refused with `422`: `out_of_range`
+at the rule for more than 10 actions or at its `wait_seconds` for a wait such as 90 or 3660, and `required` at the rule
+when it has no Mention or call.
+
+A call names its gateway with `gateway_id`, which may be left out while only one Notification gateway exists. A call
+whose gateway is deleted later, or at which the person no longer has a confirmed contact, stays in the rule: a read
+shows it with `available` false and `unavailable_reason` `gateway_deleted` or `no_confirmed_contact`.
+
+## The switch
+
+Each person's rules are in one of four states. The switch "Also call through the Notification gateway" chooses among
+the first three:
+
+`organization`, "As in the Organization"
+:   The default. The person follows the Organization's current rules: when an Admin changes them, the change reaches
+    the person at once.
+
+`call`, "Call"
+:   The Organization's rules as they were when the person chose "Call", with a call through the gateway at the start
+    of the important rule, at the same moment as its first action. With the default rules, the important rule becomes
+    a call and a Mention, a wait of 5 minutes and a Mention; the normal rule stays a Mention. When the Organization's
+    important rule already calls through that gateway, nothing is added.
+
+`no_call`, "Don't call"
+:   The Organization's rules as they were when the person chose "Don't call", without any call. A rule left without a
+    Mention gets one in place of its first call and keeps its waits.
+
+A later change of the Organization's rules does not reach a person in "Call" or "Don't call": they keep the rules of
+the moment they chose. "Reset to the Organization's rules", `resetMyNotificationRules`, returns a person to "As in the
+Organization".
+
+"Call" needs a Notification gateway and a confirmed contact of the person there
+([Contact for calls and SMS](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#contact-for-calls-and-sms)). With contacts at
+several gateways, `gateway_id` names the one; without it the answer is `422` `required` at `/gateway_id`. While no
+gateway exists the answer is `422` `gateway_required`, and for a gateway without the person's confirmed contact
+`contact_required`.
+
+A person changes their own rules from their web session only: a Personal access token gets `403`
+(`session_required`) on `/me/notification-rules`. An Admin sees and changes any User's rules with
+`getUserNotificationRules` and `updateUserNotificationRules`, by session or token, except their own, which they change
+from their web session. Every change is recorded in the Audit log as `notification_rules.updated` with a before/after
+diff of the state, the gateway and both rules. A change needs `If-Match` with the ETag of the last read, and a stale
+one gets `412`.
+
+## Custom rules
+
+The state `custom` takes any normal and important rule within the limits, through the API:
+
+```json
+{
+  "state": "custom",
+  "normal": [{"kind": "mention"}, {"kind": "wait", "wait_seconds": 600}, {"kind": "mention"}],
+  "important": [{"kind": "mention"}, {"kind": "call", "gateway_id": "CN0000000000G1"}]
+}
+```
+
+A call in a person's custom rules needs their confirmed contact at its gateway (`contact_required` at the action), and
+a call while no gateway exists is `gateway_required` at the action. Custom rules stay as they are when the
+Organization's rules change. "Reset to the Organization's rules" brings back "As in the Organization".
+
+Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described with the
+Escalation chains.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/mentions.md -->
+# Whom a message mentions
+
+Mention entries say who is mentioned. Each Destination has one list of them, each entry one target and the Loud events
+it applies to, so that one Destination can mention `@here` for a new Alert Group and the On-call of the Alert Group's
+Team on every Loud event. A Quiet message mentions nobody, and an edit never adds a Mention.
+
+## Mention entries
+
+The targets of an entry (`mention_entries[].target.kind`):
+
+`everyone`
+:   Everyone in the chat, with the word of the messenger: `channel`, `here`, `all` or `everyone`.
+
+`user`
+:   A person, by User. The message mentions them through their linked account in the Destination's messenger; a
+    person without a linked account there is not mentioned.
+
+`group`
+:   A messenger group by its name, such as a Mattermost group; in Slack a user group with its id (`group_id`).
+
+`team`
+:   A [Team](https://muster-io.github.io/muster/latest/concepts/teams.md), by its [Team mention](https://muster-io.github.io/muster/latest/concepts/teams.md#team-mentions) for the Destination's Connection.
+
+`teams_from_label`
+:   Each Team of the Alert Group, by its Team mention.
+
+`on_call_of_team`
+:   The On-call of a Team: the person whom the Team's main [Schedule](https://muster-io.github.io/muster/latest/concepts/schedules.md) has on Shift at the moment of the
+    event.
+
+`on_call_of_teams_from_label`
+:   The On-call of each Team of the Alert Group.
+
+The Loud events an entry applies to (`events`), all of them for a new entry:
+
+`new_alert_group`
+:   A new Alert Group; it also applies when an Alert Group joins the Destination Loudly (`destination_joined`).
+
+`new_alerts`, `reopen`, `snooze_ended`, `rise_to_urgent`
+:   New Alerts, a Reopen, the end of a Snooze and a rise to critical.
+
+`ack_timeout`
+:   The ack timeout notice.
+
+`storm_started`
+:   The first publication of a [Storm](https://muster-io.github.io/muster/latest/concepts/mentions.md#start-of-a-storm) summary.
+
+A Destination without entries mentions nobody. Each person and group is mentioned once in a message, however many
+entries name them. The rules for the Owner stay as they were: Reminders and auto-unacknowledge always mention the
+Owner, a Takeover the previous Owner, and a Reopen into acknowledged only the Owner.
+
+The API saves the entries in order with `If-Match`, and the Audit log shows the change in the diff of
+`destination.updated`. A read gives each entry with `available`, whether the Connection can mention it now, and
+`resolves_to`, what it mentions now: for the targets from the label, one item per Team.
+
+```json
+"mention_entries": [
+  {"target": {"kind": "on_call_of_teams_from_label"}},
+  {"target": {"kind": "everyone", "everyone": "here"}, "events": ["new_alert_group", "storm_started"]}
+]
+```
+
+## What each messenger supports
+
+A Destination takes only the targets its Connection can mention. Any other target is refused with `422` and the code
+`mention_unsupported` at `/mention_entries/{i}/target`:
+
+| Destination type | Everyone in the chat | Groups and Teams | People and the On-call |
+|---|---|---|---|
+| Mattermost | `channel`, `here`, `all` | Mattermost groups | linked people |
+| Slack | `channel`, `here` | user groups, with the scope `usergroups:read` | linked people |
+| Telegram | none | none | linked people |
+| Bridge | the words the bridge declares | when the bridge declares group mentions | linked people |
+| Outgoing webhook | every target, as data | every target, as data | every target, as data |
+
+Slack has no `everyone`: a bot's `<!everyone>` mentions only in the workspace's general channel, where `<!channel>`
+reaches the same people. A Slack Connection takes user groups and Teams once its check found the optional scope
+`usergroups:read` ([Slack](https://muster-io.github.io/muster/latest/messengers/slack.md)). A bridge declares in its `info` the mentions of everyone it has
+(`everyone_mentions`) and whether it has group mentions (`group_mentions`).
+
+An entry stays when its Connection later loses an ability, such as a Slack app reinstalled without the scope: it reads
+`available: false` with the reason in `unavailable_reason`, and mentions nobody. An entry whose User or Team was deleted
+stays too, shows them as deleted and mentions nobody.
+
+Slack user groups, and the group mentions and mentions of everyone of bridges, are saved and resolved, but Muster does
+not write them in Slack and bridge messages yet.
+
+An outgoing webhook receives the targets as data in `mentions` and `.Mentions`: a Team as `{"type": "team", "slug":
+…, "name": …}`, one per Team of the Alert Group for "Team from the label", and the On-call as a `user`.
+
+## Teams and the On-call
+
+"Team payments" mentions the Team mention of payments for the Destination's Connection, such as `@payments_team` in
+Mattermost. When the Team has no Team mention for that Connection, the entry mentions nobody: Muster never mentions the
+On-call instead. To reach the On-call, add "On-call of a Team" or "On-call of the Team from the label".
+
+The On-call is taken from the Team's main Schedule at the moment of the event, also when the message is sent later.
+A Team without a main Schedule, or one with a gap at that moment, gives nobody. A Team mention that is set later, or an
+On-call who links an account later, is mentioned from the next Loud event on.
+
+When a Destination becomes a Destination of a Team, Muster adds the entry "Team {Team}" for every Loud event, unless
+the Destination already has an entry naming that Team or has 100 entries, the most a Destination has. A Telegram
+Destination gets none, since Telegram cannot mention Teams. An Admin may remove the entry; naming the Destination
+again later adds it again only when it has none.
+
+## Start of a Storm
+
+The first publication of a Storm summary mentions the Destination's entries for `storm_started`. "Team from the label"
+and "On-call of the Team from the label" take the Teams of the Alert Groups the Storm counts. The summary's later edits
+mention nobody, and the summary starts no Escalation chain.
+
+## Upgrading from 0.1
+
+Version 0.1 kept one Mention setting per kind of Loud event: nobody, everyone in the chat, chosen Users or messenger
+groups. The 0.2.0 migration turns them into entries with the same effect: each target chosen for a kind becomes one
+entry for the kinds it was chosen for. An entry for `new_alert_group` also applies to `storm_started`, since a 0.1
+Storm summary mentioned the targets of a new Alert Group. A Destination that mentioned nobody has no entries.
+
+For example, "`@channel` for new Alert Groups, Alice for the ack timeout" becomes two entries: `channel` for
+`new_alert_group` and `storm_started`, and Alice for `ack_timeout`.
+
+Until 0.3.0 the API still returns `mentions`, the 0.1 form, computed from the entries that 0.1 could express on the
+Destination's type, and still takes it in a request without `mention_entries`. Such a request replaces only those
+entries and keeps the others, and a request that sends back the `mentions` it read changes nothing, so that 0.1 clients
+keep working. The 0.1 form read back has the same Users and groups for each kind, but lists them in the order of the
+first kind that lists each, since the entries are one list. 0.3.0 removes the field. The
+[upgrade notes](https://muster-io.github.io/muster/latest/install/versions.md#upgrade-notes) describe the migration.
