@@ -11,10 +11,10 @@ code: the implementation writes the code in the repository against compiler and 
 the review checks the code against.
 
 Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24` and the [core of
-L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`. Every functional requirement (`C-NN.FR-n`) and acceptance statement
-(`C-NN.AC-n`) of a capability is covered by its stories; the [coverage table](coverage.md) shows which story covers
-which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices are in the
-[ADRs](../adr/README.md).
+L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`, with the statistics by people and by Team that L2 adds to
+`C-09`. Every functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of a capability is covered
+by its stories; the [coverage table](coverage.md) shows which story covers which ID. Terms follow
+[`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices are in the [ADRs](../adr/README.md).
 
 Contents: [1. File format](#1-file-format) · [2. Repository layout](#2-repository-layout) ·
 [3. Sizing and slicing](#3-sizing-and-slicing) · [4. Shared contracts](#4-shared-contracts) ·
@@ -136,7 +136,8 @@ under `docs/assets/screenshots/` — are generated and checked in too, and never
   S-091, then the pre-release stories S-092 to S-096, then the Slack stories S-097 to S-105, and last the guides with
   screenshots and the documentation links of the web UI, S-106 to S-110. After the phases of L1, the L2 core follows
   in the three stages of its adoption ([L2 §1.3](../prd/L2.md#13-adoption)): "L2 Teams" (C-25, C-26, the buttons of
-  C-28 and C-29), "L2 On call" (C-27, Team mentions and the Mention entries) and "L2 Paging" (C-30 – C-32). The
+  C-28 and C-29), "L2 On call" (C-27, Team mentions and the Mention entries) and "L2 Paging" (C-30 – C-32); beside
+  them, "L2 Statistics" (S-174 to S-176, for C-09) needs only the Teams of Alert Groups and runs in parallel. The
   architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
@@ -270,7 +271,8 @@ deployment, `docs` documentation. A story for another repository names it after 
 | L2 Teams | C-25, C-26, the buttons of C-28, C-29 | S-111 – S-130, S-162, S-163, S-166, S-170 | 24 |
 | L2 On call | C-27, the Team mentions of C-25, the Mention entries of C-28 | S-131 – S-144, S-164, S-165, S-171 | 17 |
 | L2 Paging | C-30 – C-32, the chains' part of C-27.FR-8 | S-145 – S-161, S-167 – S-169, S-172, S-173 | 22 |
-| **L2 core** | 8 | | **63** |
+| L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
+| **L2 core** | 8 | | **66** |
 
 ### Foundation
 
@@ -679,6 +681,23 @@ S-115 with the Team read, and S-117, S-118 and S-121 extend it. S-167 no longer 
 the warnings about unreachable On-calls, for which alone it waited, moved with its Go code to S-150, which shows it and
 already follows both S-164 (through S-136) and S-167 (through S-149); S-155 still follows S-164, and S-139 still waits
 for the spike S-138.
+
+### L2 Statistics
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-174](S-174-first-acknowledged-by-and-statistics-by-team-and-by-people.md) | C-25 | Who made the first acknowledgement, filled from the Timeline, and the statistics By Team and By people with the filters of every view (BE) | be | S-118 |
+| [S-175](S-175-statistics-page-by-team-by-people-and-the-filters.md) | C-25 | The views By Team and By people and the filters of every view on the statistics page (FE) | fe | S-174, S-120 |
+| [S-176](S-176-documentation-statistics-by-team-and-by-people.md) | C-25 | Documentation: statistics By Team and By people, the first acknowledgement and the filters | docs | S-174, S-175 |
+
+S-174 to S-176 were added for 0.2.0 from production use (journal D688), after the contracts of the L2 core: the first
+acknowledgement records who made it, and the statistics page gains the views By Team and By people and the list's
+filters Route, Integration, Severity level, Urgent, Team, Reopened and labels, with "Acknowledged first by". They extend
+C-09, whose new requirements are marked as added for L2, and are filed under C-25, since the stories of one capability
+share one layer and milestone (`scripts/stories-sync`), as S-117 covers C-03.FR-5 from C-25. Of the L2 core they need
+only the Teams of Alert Groups and the filter by Team, S-118 for the API and S-120 for the list's filter on the page, so
+a lead runs them beside the remaining chains of the stages above. S-174's migration takes the next free number when it
+starts, as section 4 says for a story merged out of the map's order.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

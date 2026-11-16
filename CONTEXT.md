@@ -198,6 +198,12 @@ _Avoid_: Assignee, Acknowledger, Responder
 An acknowledgement by another user, which moves ownership of the Alert Group to them.
 _Avoid_: Reassign, Steal
 
+**First acknowledgement**:
+The first time anyone acknowledged an Alert Group, and who did it. It never changes afterwards: a Takeover, an
+Unacknowledge or a Reopen leaves it. Time to acknowledge ends at it, and the statistics by people credit it to that
+person.
+_Avoid_: First responder, Initial owner
+
 **Ack timeout**:
 How long a Firing Alert Group may wait for someone to take it before Muster calls for attention again. Where an
 Escalation chain runs, the chain takes its place.
