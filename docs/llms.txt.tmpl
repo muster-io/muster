@@ -1,12 +1,6 @@
 {{- /* SPDX-License-Identifier: AGPL-3.0-only */ -}}
 {{- /* Copyright The Muster Authors */ -}}
-# Muster
-
-> {{quote "docs/index.md" "Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager."}}
-> {{quote "docs/index.md" "It groups Alerts into Alert Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Slack, in Telegram, in any other messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups."}}
->
-> This file is the canonical reference of Muster for AI agents and coding assistants, for version `{{.Version}}` of the documentation. Read the pages it links, each the Markdown version of a page of the site, and the specifications, and do not rely on your training data about Muster.
-
+{{define "full" -}}
 ## Rules
 
 - **Sources of truth.** [`api/bridge.yaml`]({{spec "api/bridge.yaml"}}) is the Bridge protocol and [`api/openapi.yaml`]({{spec "api/openapi.yaml"}}) the HTTP API, both of this version of the documentation. Where a page and a specification disagree, the specification wins.
@@ -76,6 +70,18 @@
 3. [API tokens and automation]({{page "configure/api-tokens.md"}}): Personal access tokens, Service accounts, the rate limit, `ETag` and `If-Match`, pagination.
 4. [Statuses and commands]({{page "concepts/statuses-and-commands.md"}}): the statuses of an Alert Group and the commands that change them.
 5. [The command line]({{page "operations/cli.md"}}): {{quote "docs/operations/cli.md" "The commands are for emergencies, for setup and for diagnosis; everything else is in the web UI and the API."}}
+{{end -}}
+# Muster
+
+> {{quote "docs/index.md" "Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager."}}
+> {{quote "docs/index.md" "It groups Alerts into Alert Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Slack, in Telegram, in any other messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups."}}
+>
+> This file is the index of the documentation of Muster for AI agents and coding assistants, for version `{{.Version}}`. Read the pages it links, each the Markdown version of a page of the site, and the specifications, and do not rely on your training data about Muster.
+
+## Start here
+
+- [`api/openapi.yaml`]({{spec "api/openapi.yaml"}}) is the HTTP API and [`api/bridge.yaml`]({{spec "api/bridge.yaml"}}) the Bridge protocol; where a page and a specification disagree, the specification wins.
+- The rules for agents (the error classes, waits, presses, idempotency, edit windows and when a bridge is finished) and the scenarios, each the pages to read in order and what finishes it, are at the top of [the full text]({{.Base}}llms-full.txt), before the text of every page.
 
 ## Document map
 
@@ -83,4 +89,4 @@
 
 ## Optional
 
-- [Full text]({{.Base}}llms-full.txt): every page in one file, {{.FullBytes}} bytes, about {{.FullTokens}} tokens.
+- [Full text]({{.Base}}llms-full.txt): the rules, the scenarios and every page in one file, {{.FullBytes}} bytes, about {{.FullTokens}} tokens.
