@@ -1443,6 +1443,10 @@ A `thread_message`
 An `account_link`
 :   In the direct chat it came from (`direct`).
 
+A `notification_acknowledged`
+:   In the call, or in the reply to the message of the notification (`notification`); see [Answering during a
+    call](#answering-during-a-call).
+
 An event that the bridge no longer knows, or can no longer answer anywhere, is `gone`.
 
 ```mermaid
@@ -1972,6 +1976,405 @@ sequenceDiagram
     W->>M: confirms, and the link is made
   end
 ```
+
+## A gateway bridge
+
+A bridge in the role `gateway` is a **Notification gateway**: it reaches a person outside a messenger, by phone call or
+SMS for example, through a provider of your choice. Muster ships none. This section is for the authors of one; to
+connect a gateway that already exists, read [Notification gateways](notification-gateways.md). A gateway is the
+same kind of service as a messenger bridge, with the same token, the same `info`, the same
+[`Idempotency-Key`](#idempotency-key) and the same events, and fewer operations:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor P as Person
+  participant R as Provider
+  participant G as Gateway bridge
+  participant M as Muster
+
+  M->>G: POST /v1/notifications, with the contact, the text and the action
+  G->>R: places the call, or sends the SMS
+  G-->>M: 201 with notification_id
+  R-->>P: rings and reads the text out
+  P->>R: presses 1
+  R->>G: the provider's callback
+  G->>G: queues notification_acknowledged with the action's data
+  G->>M: push mode: POST the signed event to the callback address
+  M->>M: verifies the data and acknowledges as the person
+  M->>G: POST /v1/answers with event_id and text
+  G->>R: reads the answer out
+  R-->>P: "Acknowledged: #42"
+  G-->>M: 200 with shown_as
+  M-->>G: 204 to the push
+```
+
+The libraries do the protocol's part, as for a messenger bridge: validate every request, keep the idempotency of
+`sendNotification`, keep the action data of each notification for 24 hours and queue, poll and push the events. You write
+the calls to your provider and the callback of your provider that says the person pressed.
+
+!!! note "Library versions"
+    The gateway role is in the `master` branch of both libraries, after `0.1.1`. Until their next release carries it,
+    take it from there: `go get github.com/muster-io/muster-bridge-go@master`, or install `muster-bridge` from the
+    repository of `muster-bridge-python`.
+
+### The role in `info`
+
+A bridge declares its role in `info`, with `roles`. A bridge without `roles` is a messenger. A gateway that is not also a
+messenger still sends every required member of `info`, with the members that are a messenger's empty:
+
+```json
+{
+  "protocol_version": "1",
+  "bridge": { "name": "parley-calls", "version": "0.1.0" },
+  "roles": ["gateway"],
+  "messenger": { "name": "Parley Voice" },
+  "capabilities": {},
+  "limits": { "max_body_length": 1000, "edit_max_age_seconds": null },
+  "user_lookup": "none",
+  "event_delivery": ["poll", "push"]
+}
+```
+
+`messenger.name` names your provider; it is shown on the Connection. `capabilities` is empty, `user_lookup` is `none`
+and there is no `link_url_template`. A bridge of both roles has `"roles": ["messenger", "gateway"]` and declares
+everything of a messenger too. Muster reads the roles when it checks the Connection: a bridge whose only role is
+`gateway` cannot be a Destination ([Roles](bridge.md#roles)), and Muster calls `sendNotification` only on a bridge that
+declares `gateway`. A bridge that does not declare it answers `invalid` to the call.
+
+In Go, set `Config.Roles` to `[]bridge.Role{bridge.RoleGateway}` (or both roles), give the implementation as
+`Config.Gateway`, and pass a nil `Messenger` to `bridge.New`. `bridge.New` refuses a role without its implementation and
+an implementation without its role, and a gateway-only `Config` that declares a messenger's capabilities. In Python, set
+`roles=["gateway"]` and `gateway=` in `Config`, and give `BridgeApp(config)` no `Messenger`; `BridgeApp` raises
+`ConfigError` for what does not fit.
+
+### `sendNotification`
+
+Muster reaches a person through your gateway with one request:
+
+```http
+POST /v1/notifications HTTP/1.1
+Authorization: Bearer <token>
+Idempotency-Key: calls/<id of the call>
+Content-Type: application/json
+```
+
+```json
+{
+  "contact": "+10000000001",
+  "text": "Muster: 1 Alert Group needs you. #42 DiskFull, critical. Press 1 to acknowledge.",
+  "language": "en",
+  "action": { "data": "a1.k2.QmFzZTY0U2lnbmF0dXJlRXhhbXBsZQ", "label": "Press 1 to acknowledge" }
+}
+```
+
+```json
+{ "notification_id": "n-1001", "replayed": false }
+```
+
+`contact`
+:   Where the person is reached, as they entered it in Muster and as your provider understands it, such as a phone
+    number: 1 to 200 characters. Muster does not check it, so you do: a contact your provider refuses for good is
+    `invalid`.
+
+`text`
+:   Plain text of 1 to 1,000 characters, which you read out or send, as your provider can.
+
+`language`
+:   `en` or `ru`: the language of the person, which `text` and `action.label` are in. Pick the voice of a call by it.
+
+`action`
+:   How the person acknowledges: `label` tells them ("Press 1 to acknowledge"), and `data` is opaque, up to 64 printable
+    ASCII characters, signed by Muster. Return it unchanged in `notification_acknowledged`. Without `action` there is
+    nothing to acknowledge, as for the code that confirms a contact.
+
+The answer's `notification_id` is yours, 1 to 512 characters, and names the notification in `notification_acknowledged`.
+Make it unique per bot, as the id your provider gives the call, for example.
+
+**`Idempotency-Key`.** Muster sends the same key, `calls/<id of the call>`, on every attempt of a call. Answer a repeated
+key with the first result and `replayed: true` and place no second call, or the person's phone rings twice after a
+restart of a Muster replica. The libraries do this for you. A failed request stores nothing, so its retry is a new
+attempt ([`Idempotency-Key`](#idempotency-key)).
+
+The text and the contact are personal data: never log them.
+
+### Answering during a call
+
+When the person acknowledges, you report `notification_acknowledged`, Muster acknowledges the Alert Groups as them, and
+Muster answers with `answerEvent` — "Acknowledged: #42", "Already taken by Alice", "Already resolved" — which you show
+to the person: in a call, you read it out. The answer must come while the person is still on the line, and that needs
+the **push** mode: Muster answers a pushed event **before** it answers the push, with an `answerEvent` request within a
+few seconds of receiving the event. Keep the call open for a short wait after the press, read out what `answerEvent`
+brings, and then end the call. In the poll mode the time of the answer depends on Muster's next read of the event, so
+it may come after the person has hung up; use the push mode for calls.
+
+```http
+POST /v1/answers HTTP/1.1
+Authorization: Bearer <token>
+Idempotency-Key: <key>
+Content-Type: application/json
+```
+
+```json
+{ "event_id": "ev-2001", "text": "Acknowledged: #42" }
+```
+
+```json
+{ "shown_as": "notification", "replayed": false }
+```
+
+`shown_as` is `notification` for the answer in a call, or in the reply to the message of a notification. Muster sends
+`answerEvent` within a few seconds of receiving the event, or not at all. An event that you no longer know, or can no longer
+answer anywhere, is `gone`. The answer is in the language of the person's profile.
+
+### `notification_acknowledged`
+
+The event of a person who acknowledged a notification that carried an `action`, only from a bridge in the role `gateway`
+and only for a `sendNotification` of Muster:
+
+```json
+{
+  "id": "ev-2001",
+  "type": "notification_acknowledged",
+  "occurred_at": "2026-10-18T02:14:40Z",
+  "notification_id": "n-1001",
+  "data": "a1.k2.QmFzZTY0U2lnbmF0dXJlRXhhbXBsZQ"
+}
+```
+
+`notification_id` is the one you answered, `data` is the notification's `action.data`, unchanged. Muster verifies the
+data, which names the call and its Connection, and acknowledges each Alert Group of the call as the person the call was
+for, with the Transport `gateway`, only while nobody owns it; see [Acknowledging from a
+call](notification-gateways.md#acknowledging-from-a-call). Report an acknowledgement as soon as it happens: Muster drops
+one that comes more than an hour after it happened (`bridge.event_max_age`). Muster handles each event `id` once, so
+report it with the same `id` if you are not sure it arrived. The events are delivered as for any bridge, by
+[polling or push](#events).
+
+### The error classes of calls
+
+Muster acts on the class of the answer to `sendNotification` as for any bridge ([Error classes](#error-classes)):
+
+`invalid`
+:   The call cannot succeed as sent: a contact the provider refuses for good, a text it cannot take. That call ends
+    Not delivered, without a retry, and the gateway stays healthy.
+
+`forbidden`
+:   Your provider refuses your credentials, or its account is blocked. Muster treats it, like a `401` or `403`, as a Fatal
+    error and the gateway becomes **Broken**.
+
+`transient`
+:   A temporary failure of the provider. Muster retries the call, with the same `Idempotency-Key`, within its retry
+    budget (`delivery.transient_budget`). When the budget runs out the call ends Not delivered, and the gateway becomes
+    Broken.
+
+`rate_limited`
+:   The provider throttles: answer with `Retry-After`. Muster waits exactly that long, and the waits count toward the
+    time of the retry budget. A wait longer than 15 minutes (`bridge.retry_after_max`), or none given, is treated as
+    `transient`.
+
+A gateway is **Broken** after a Fatal error or an exhausted retry budget; no call is sent while it is Broken, and the
+calls that came due meanwhile are lost for good. Muster reads `info` every 5 minutes and ends the state at the first
+success. A passing `info` does not prove that calls go through, since a bridge answers it also while its provider
+refuses its credentials: run [`muster bridge check`](#muster-bridge-check) with `--contact` before you trust a
+recovery. See [Broken gateways](notification-gateways.md#broken-gateways) and its
+[runbook](../operations/runbooks/MusterNotificationGatewayBroken.md).
+
+### With the Go library
+
+Implement `bridge.Gateway`. It has two methods, each given the name of the bot whose token Muster sent:
+`SendNotification` and `Answer`. The sketch is for Parley Voice, a fictional provider; its client `parleyVoice` stands
+for whatever library your provider has.
+
+```go
+// parleyGateway is the bridge's calls to the fictional provider Parley Voice.
+type parleyGateway struct{ api *parleyVoice }
+
+func (g *parleyGateway) SendNotification(ctx context.Context, bot string, in bridge.NotificationInput) (
+	bridge.NotificationSent, error) {
+	callID, err := g.api.Call(ctx, in.Contact, in.Text, string(in.Language), in.Action != nil)
+	switch {
+	case errors.Is(err, errBadNumber):
+		return bridge.NotificationSent{}, bridge.InvalidError("The number cannot be called.")
+	case errors.Is(err, errCredentials):
+		return bridge.NotificationSent{}, bridge.ForbiddenError("Parley Voice refused the credentials of the bridge.")
+	case err != nil:
+		return bridge.NotificationSent{}, err // anything else is answered transient
+	}
+	return bridge.NotificationSent{NotificationId: callID}, nil
+}
+
+// Answer reads out what Muster answers the person who pressed 1, while they are still on the line.
+func (g *parleyGateway) Answer(ctx context.Context, bot string, ev bridge.ReportedEvent, text string) (
+	bridge.AnswerShownShownAs, error) {
+	if err := g.api.Say(ctx, ev.NotificationID, text); err != nil {
+		return "", bridge.GoneError("The call has ended.")
+	}
+	return bridge.AnswerShownShownAsNotification, nil
+}
+```
+
+A method returns the protocol's answer, or an error: an `*bridge.Error` answers its class, and any other error is answered
+`transient` with a generic detail. The library validates every request before it calls your method and every answer
+before it sends it, keeps the `Idempotency-Key` and refuses a text over 1,000 characters and action data over 64 bytes
+as `invalid` before your code runs. `SendNotification` returns the `NotificationId`, 1 to 512 characters and unique per
+bot; the library keeps the action of the first notification of an id for 24 hours in the `Store`.
+
+Build the bridge with a nil `Messenger`, push its events to Muster and serve it:
+
+```go
+b, err := bridge.New(bridge.Config{
+	Name:          "parley-calls",
+	Version:       "0.1.0",
+	MessengerName: "Parley Voice",
+	Roles:         []bridge.Role{bridge.RoleGateway},
+	Gateway:       &parleyGateway{api: voice},
+	Bots: []bridge.Bot{{
+		Name:  "main",
+		Token: token,
+		Push:  &bridge.PushTarget{URL: callbackURL, Secret: pushSecret},
+	}},
+	Limits: bridge.Limits{MaxBodyLength: 1000},
+}, nil)
+if err != nil {
+	log.Fatal(err)
+}
+mux := http.NewServeMux()
+mux.Handle("/v1/", b.Handler())
+// ... serve mux, and on shutdown call b.Close(ctx), which stops the pushers
+```
+
+When your provider's callback says the person pressed 1, report it:
+
+```go
+switch err := b.Acknowledge(ctx, "main", callID); {
+case errors.Is(err, bridge.ErrNoAction), errors.Is(err, bridge.ErrUnknownNotification):
+	// a notification without an action, or one the bridge did not send or no longer keeps
+case err != nil:
+	// report again: the event was not queued
+}
+```
+
+`Acknowledge` queues `notification_acknowledged` with the data of the notification's action, for polling and push, and
+returns once it is queued. Acknowledging a notification twice queues one event. Then `Gateway.Answer` is called with the
+event, in `ev.NotificationID`, when Muster answers.
+
+`examples/gateway` of `muster-io/muster-bridge-go` is a whole gateway in one file, with a provider in memory that logs
+each notification, and the page `/demo/acknowledge` that stands in for the person pressing 1:
+
+```sh
+printf example-token > /tmp/bt
+go run ./examples/gateway -token-file /tmp/bt
+```
+
+It listens on `127.0.0.1:18095`. Check it with your contact, and acknowledge from its page when the check asks:
+
+```sh
+docker run --rm --network host -v /tmp/bt:/token:ro ghcr.io/muster-io/muster:edge bridge check \
+  http://127.0.0.1:18095 --token-file /token --contact +10000000001
+```
+
+### With the Python library
+
+Implement the protocol `Gateway`, two coroutines: `send_notification(bot, notification)` and `answer(bot, event,
+text)`. The sketch is for the same provider; `ParleyVoice` stands for its asynchronous client.
+
+```python
+from muster_bridge import (
+    AcknowledgedNotification,
+    Bot,
+    BridgeApp,
+    Config,
+    Forbidden,
+    Invalid,
+    Limits,
+    NotificationInput,
+    NotificationSent,
+    PushTarget,
+    UnknownNotificationError,
+)
+
+
+class ParleyGateway:
+    """The bridge's calls to the fictional provider Parley Voice."""
+
+    def __init__(self, api: ParleyVoice) -> None:
+        self.api = api
+
+    async def send_notification(self, bot: str, notification: NotificationInput) -> NotificationSent:
+        try:
+            call_id = await self.api.call(
+                notification.contact, notification.text, notification.language.value, notification.action is not None
+            )
+        except BadNumber:
+            raise Invalid("The number cannot be called.") from None
+        except BadCredentials:
+            raise Forbidden("Parley Voice refused the credentials of the bridge.") from None
+        return NotificationSent(notification_id=call_id, replayed=False)
+
+    async def answer(self, bot: str, event: AcknowledgedNotification, text: str) -> None:
+        """Read out what Muster answers the person who pressed 1, while they are still on the line."""
+        await self.api.say(event.notification_id, text)
+```
+
+A method raises a `BridgeError` subclass to answer its class, and any other exception is answered `transient` with a
+generic detail. The library validates every request and answer, keeps the `Idempotency-Key`, and refuses a text over
+1,000 characters and action data over 64 bytes as `invalid` before your code runs. `notification_id` is 1 to 512
+characters and unique per bot. The library keeps the action of each notification for 24 hours in the `Store`:
+`MemoryStore`, the default, does; a `Store` of your own also implements `NotificationStore`, with `save_notification`
+and `find_notification`, which `Config` checks when the role is declared.
+
+```python
+config = Config(
+    name="parley-calls",
+    version="0.1.0",
+    messenger_name="Parley Voice",
+    bots=[Bot(name="main", token=token, push=PushTarget(url=callback_url, secret=push_secret))],
+    limits=Limits(max_body_length=1000, edit_max_age_seconds=None),
+    roles=["gateway"],  # ["messenger", "gateway"] for a bridge of both, with a Messenger as before
+    gateway=ParleyGateway(voice),
+)
+bridge = BridgeApp(config)
+```
+
+`BridgeApp(config, messenger=None)` is an ASGI application: serve it with uvicorn, or mount it under a path of a
+Starlette application, with `lifespan=bridge.lifespan`. When your provider's callback says the person pressed 1,
+report it:
+
+```python
+try:
+    await bridge.acknowledge("main", call_id, chat=call_id)
+except UnknownNotificationError:
+    ...  # a notification the bridge did not send, no longer keeps, or that carried no action
+```
+
+`acknowledge` queues `notification_acknowledged` with the `action.data` of the notification, delivered by polling and by
+push, and returns once it is queued. `chat`, such as a call id, comes back in `AcknowledgedNotification.chat` when Muster's
+answer reaches `Gateway.answer`, and is never sent to Muster; `update_id` makes an update reported twice queue one event.
+`UnknownNotificationError` is a `ValueError`; `NotOfferedError` is raised without the role `gateway`.
+
+`examples/gateway_bridge.py` of `muster-io/muster-bridge-python` is a whole gateway in one file, which prints each
+notification and acknowledges one from `POST /demo/acknowledge` with `{"notification_id": "n1"}`:
+
+```sh
+printf example-token > /tmp/bt
+python examples/gateway_bridge.py --token-file /tmp/bt
+```
+
+### A gateway without a library
+
+A gateway in another language implements, with the conventions of [The protocol without a library](#the-protocol-without-a-library):
+
+1. [`getInfo`](#getinfo) with `roles` containing `gateway`, as [above](#the-role-in-info);
+2. `sendNotification`, `POST /v1/notifications`, with the `Idempotency-Key` semantics of [`Idempotency-Key`](#idempotency-key),
+   answering `201` with `notification_id` and `replayed`;
+3. `answerEvent`, `POST /v1/answers`, which shows the answer to the person who caused the event;
+4. events in at least one delivery mode, with `notification_acknowledged` in the [events](#events) of poll and push, and
+   the push mode if the answer must reach a person still on the line;
+5. the error classes of [Error classes](#error-classes).
+
+Check the result with [`muster bridge check`](#muster-bridge-check) and its `--contact` flag: it runs the steps
+`notification` and `notification_acknowledged`, and skips the steps of a messenger for a bridge whose only role is
+`gateway`.
 
 ## Test your bridge
 
