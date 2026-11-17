@@ -31,10 +31,12 @@ import {
   newEntryKey,
 } from "../components/claim-entries-editor";
 import { DocsLink, PageTitle } from "../components/docs-link";
+import { TeamOnCallNow } from "../components/on-call-now";
 import { TeamAlertRules } from "../components/team-alert-rules";
 import { TeamDestinations } from "../components/team-destinations";
 import { TeamForm } from "../components/team-form";
 import { TeamPeople } from "../components/team-people";
+import { TeamSchedules } from "../components/team-schedules";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button, buttonVariants } from "../components/ui/button";
 import {
@@ -610,6 +612,7 @@ function DeleteTeam({ team, onReload }: { team: Team; onReload: () => void }) {
 export function TeamDetails({ team, reload }: { team: Team; reload: () => void }) {
   const { t } = useTranslation();
   const canWrite = useCan("teams:write");
+  const canSchedules = useCan("schedules:read");
   // The version the sections were read at: a newer one on the server never replaces what the Admin sees unasked.
   const [base, setBase] = useState(team);
   const [conflict, setConflict] = useState(false);
@@ -656,6 +659,8 @@ export function TeamDetails({ team, reload }: { team: Team; reload: () => void }
           }}
         />
       </Section>
+      {canSchedules && <TeamOnCallNow teamId={team.id} />}
+      {canSchedules && <TeamSchedules teamId={team.id} />}
       <AlertRules session={session} canWrite={canWrite} />
       <DestinationsSection session={session} canWrite={canWrite} />
       <TeamPeople teamId={team.id} canWrite={canWrite} />

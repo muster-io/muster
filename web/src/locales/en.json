@@ -1430,6 +1430,22 @@
     },
     "title": "Heartbeat"
   },
+  "home": {
+    "title": "Home"
+  },
+  "ical": {
+    "copyNow": "Copy the link now: it will not be shown again",
+    "hint": "A personal link for your calendar application. It is shown once; a revoked link stops working at once.",
+    "issued": "A link was issued {{time}}. It is not shown again.",
+    "link": "Your link",
+    "newLink": "New link",
+    "none": "You have no link yet.",
+    "replaceConfirm": "New link",
+    "replaceDescription": "The old link stops working at once. Give the new link to every calendar application that used it.",
+    "replaceTitle": "Issue a new link?",
+    "revoke": "Revoke",
+    "title": "iCal subscription"
+  },
   "integrations": {
     "builtin": {
       "badge": "Built-in",
@@ -1821,6 +1837,20 @@
       "nobodyCanSignIn": "Nobody will be able to sign in through OIDC.",
       "secretExpiring": "The client secret expires on {{date}}. Issue a new one in the identity provider and enter it here."
     }
+  },
+  "onCallNow": {
+    "all": "All Teams",
+    "empty": "No Teams yet.",
+    "emptyMine": "You are in no Team.",
+    "hint": "By the main Schedule of each Team.",
+    "mine": "My Teams",
+    "nextGap": "next: gap",
+    "nobody": "Nobody on call",
+    "noSchedule": "No Schedule",
+    "scope": "Teams shown",
+    "title": "On call now",
+    "unreachable": "unreachable in {{messenger}}",
+    "until": "until {{time}}"
   },
   "organization": {
     "alertHandling": {
@@ -3025,7 +3055,15 @@
       "tooMany": "A Team has at most {{max}} matchers."
     },
     "schedules": {
-      "all": "All Schedules"
+      "all": "All Schedules",
+      "hint": "The main Schedule names the Team's On-call shown under 'On call now'; Escalation steps may Page the On-call of any of them.",
+      "layers_one": "{{count}} Rotation layer",
+      "layers_other": "{{count}} Rotation layers",
+      "nobody": "Nobody is on call now",
+      "none": "The Team has no Schedules yet.",
+      "now": "On-call: {{who}}",
+      "noWarnings": "No warnings",
+      "title": "Schedules"
     },
     "title": "Teams",
     "values": {

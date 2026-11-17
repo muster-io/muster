@@ -526,6 +526,36 @@ describe("live updates in the shell", () => {
   });
 });
 
+describe("the Home page", () => {
+  test("the logo leads to it and the main navigation has no entry of its own for it", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(SESSION_QUERY_KEY, {
+      ...ACTIVE,
+      session: { ...ACTIVE.session, permissions: ["alert-groups:read", "teams:read"] },
+    });
+    const rootRoute = createRootRoute({
+      component: () => (
+        <AppShell>
+          <p>The page</p>
+        </AppShell>
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    const screen = await render(withProviders(queryClient, <RouterProvider router={router} />));
+    await expect
+      .element(screen.getByRole("link", { name: /^Muster/ }))
+      .toHaveAttribute("href", "/");
+    const navigation = screen.getByRole("navigation");
+    await expect.element(navigation.getByRole("link", { name: "Alert Groups" })).toBeVisible();
+    expect(navigation.getByRole("link", { name: "Home" }).elements()).toHaveLength(0);
+    expect(NAVIGATION.some((entry) => entry.to === "/")).toBe(false);
+  });
+});
+
 describe("translations", () => {
   test("Russian plural forms", () => {
     const tr = i18n.getFixedT("ru");

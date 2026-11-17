@@ -120,8 +120,8 @@ test("lists Alert Groups with counts, filters, search and live updates in the UR
   await prepare();
   await signInAdmin(page);
 
-  // 1. "/" opens "Alert Groups" on "Open" with counts on every tab.
-  await page.goto("/");
+  // 1. "/alert-groups" opens "Alert Groups" on "Open" with counts on every tab; "/" is the Home page.
+  await page.goto("/alert-groups");
   await expect(page).toHaveURL(`${APP}/alert-groups`);
   await expect(page.getByRole("heading", { name: "Alert Groups", level: 1 })).toBeVisible();
   await expect(tab(page, "Open")).toHaveAttribute("aria-selected", "true");

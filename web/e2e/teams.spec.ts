@@ -23,6 +23,11 @@ import {
   deleteRoute,
   expectNoHorizontalScroll,
   nextIdpUser,
+  ON_CALL,
+  berlinStamp,
+  onCallNames,
+  removeOnCall,
+  seedOnCall,
   removeIntegration,
   removeTeamsBySlug,
   seedTeamAlerts,
@@ -995,6 +1000,136 @@ test("the Team page has Destinations of the Team with their conditions, and a De
     await context.close();
   } finally {
     await dropRouting(DEST_PREFIX);
+  }
+  expect(csp).toEqual([]);
+});
+
+test("the Teams list shows each Team's On-call, and the Team page its On call now and its Schedules", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const csp = watchCsp(page);
+  const names = onCallNames("oc-");
+  const admin = await adminApi();
+  try {
+    await seedOnCall(admin, "oc-");
+    await ensureUser(admin, RU_ADMIN, "admin");
+    const now = await admin.call<{ items: { team: { slug: string }; until: string | null }[] }>(
+      "GET",
+      "/api/v1/on-call-now",
+    );
+    const until = now.items.find((item) => item.team.slug === names.devops)?.until ?? "";
+
+    await signInAdmin(page);
+    await page.goto("/teams");
+    const table = page.getByRole("table", { name: "Teams" });
+    await expect(table.getByRole("columnheader", { name: "On call now" })).toBeVisible();
+    const rowOf = (slug: string) => table.getByRole("row").filter({ hasText: slug });
+    await expect(rowOf(names.devops).getByTestId("team-on-call")).toHaveText("@ivan");
+    await expect(rowOf(names.payments).getByTestId("team-on-call")).toContainText("@petr");
+    await expect(rowOf(names.payments).getByTestId("on-call-unreachable")).toHaveText(
+      "unreachable in Mattermost",
+    );
+    await expect(rowOf(names.payments).getByTestId("on-call-gap")).toHaveText("next: gap");
+    await expect(rowOf(names.search).getByTestId("team-on-call")).toHaveText("No Schedule");
+    await shot(page, "teams-list-on-call");
+
+    await page.getByRole("link", { name: names.payments, exact: true }).click();
+    await expect(page.getByRole("heading", { name: names.payments, level: 1 })).toBeVisible();
+    const now5 = page.getByTestId("team-on-call-now");
+    await expect(now5.getByRole("heading", { name: "On call now", level: 2 })).toBeVisible();
+    await expect(now5.getByTestId("on-call-row")).toContainText("@petr");
+    await expect(now5.getByTestId("on-call-row")).toContainText("Main");
+    await expect(now5.getByTestId("on-call-unreachable")).toHaveText("unreachable in Mattermost");
+    await expect(now5.getByTestId("on-call-gap")).toHaveText("next: gap");
+
+    const schedules = page.getByTestId("team-schedules");
+    await expect(schedules.getByRole("heading", { name: "Schedules", level: 2 })).toBeVisible();
+    await expect(
+      schedules.getByText(
+        "The main Schedule names the Team's On-call shown under 'On call now'; Escalation steps may Page the On-call of any of them.",
+      ),
+    ).toBeVisible();
+    const main = schedules.getByTestId("team-schedule");
+    await expect(main).toHaveCount(1);
+    await expect(main.getByRole("link", { name: "Main", exact: true })).toBeVisible();
+    await expect(main.getByTestId("schedule-main")).toHaveText("main");
+    await expect(main.getByTestId("team-schedule-layers")).toHaveText(
+      "2 Rotation layers · Midnight, Noon",
+    );
+    await expect(main.getByTestId("team-schedule-on-call")).toContainText("On-call: @petr");
+    await expect(main.getByTestId("team-schedule-warnings")).toContainText("Gap:");
+    await expect(main.getByTestId("team-schedule-warnings")).toContainText(
+      "@petr: Unreachable in Mattermost: no linked account.",
+    );
+    await expect(schedules.getByRole("link", { name: "New Schedule" })).toBeVisible();
+    await shot(page, "team-on-call-and-schedules");
+
+    // The devops row of its own Team page shows the Shift's end the API gives.
+    await page.goto("/teams");
+    await page.getByRole("link", { name: names.devops, exact: true }).click();
+    await expect(page.getByTestId("team-on-call-now").getByTestId("on-call-until")).toHaveText(
+      `until ${berlinStamp(until)}`,
+    );
+
+    await page
+      .getByTestId("team-schedules")
+      .getByRole("link", { name: "Main", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/schedules\/SC[0-9A-Z]+$/);
+
+    // A Responder of the Team reads both sections, and cannot start a Schedule.
+    const responder = await viaBrowser(browser, ON_CALL.petr);
+    await responder.goto("/teams");
+    await responder.getByRole("link", { name: names.payments, exact: true }).click();
+    await expect(responder.getByTestId("team-schedule")).toHaveCount(1);
+    await expect(responder.getByRole("link", { name: "New Schedule" })).toHaveCount(0);
+    await responder.context().close();
+
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, RU_ADMIN, PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/teams");
+    await expect(
+      ru
+        .getByRole("table", { name: "Команды" })
+        .getByRole("columnheader", { name: "Сейчас дежурит" }),
+    ).toBeVisible();
+    await expect(
+      ru.getByRole("row").filter({ hasText: names.search }).getByTestId("team-on-call"),
+    ).toHaveText("Без расписания");
+    await expectNoHorizontalScroll(ru);
+    await ru.getByRole("link", { name: names.payments, exact: true }).click();
+    const ruNow = ru.getByTestId("team-on-call-now");
+    await expect(ruNow.getByRole("heading", { name: "Сейчас дежурит", level: 2 })).toBeVisible();
+    await expect(ruNow.getByTestId("on-call-unreachable")).toHaveText("недостижим в Mattermost");
+    await expect(ruNow.getByTestId("on-call-gap")).toHaveText("дальше дыра");
+    const ruSchedules = ru.getByTestId("team-schedules");
+    await expect(ruSchedules.getByRole("heading", { name: "Расписания", level: 2 })).toBeVisible();
+    await expect(
+      ruSchedules.getByText(
+        "Главное расписание показывается на главной в «Сейчас дежурит»; шаги цепочки могут звать дежурного любого из них.",
+      ),
+    ).toBeVisible();
+    await expect(ruSchedules.getByRole("link", { name: "Новое расписание" })).toBeVisible();
+    await expect(ruSchedules.getByTestId("schedule-main")).toHaveText("главное");
+    await expect(ruSchedules.getByTestId("team-schedule-layers")).toHaveText(
+      "2 слоя ротации · Midnight, Noon",
+    );
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "team-on-call-and-schedules-ru-360");
+    expect(ruCsp).toEqual([]);
+    await ru.goto("/profile");
+    await ru.getByLabel("Язык").selectOption("en");
+    await context.close();
+  } finally {
+    await removeOnCall(admin, "oc-");
+    await admin.dispose();
   }
   expect(csp).toEqual([]);
 });
