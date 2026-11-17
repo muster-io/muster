@@ -148,6 +148,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   hours and the time is outside them, when the Alert Group's Severity level does not meet its condition, when the
   Schedule it Pages has a gap, when its gateway or the person's confirmed contact is gone, or for a person it names who
   has become a Viewer or been disabled since the step was saved; the chain goes on with its next step at once.
+  _Revised for L2 (2026-11-17, #589):_ a step "Send to an outgoing webhook" is also skipped when its Destination has
+  been deleted (`destination_deleted`) or is no longer an outgoing webhook in events mode or both
+  (`webhook_events_required`) since the step was saved.
 - **C-32.FR-15** A step "Repeat from step K, up to N times" goes back to step K until it has done so N times and then
   goes on; each pass makes its steps again.
   _Revised for L2 (2026-11-17, #585):_ a repeat among the steps that a pass makes counts its own passes afresh on each

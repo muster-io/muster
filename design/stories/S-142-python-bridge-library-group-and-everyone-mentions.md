@@ -13,6 +13,7 @@ files_touched:
   - src/muster_bridge/config.py
   - src/muster_bridge/mentions.py
   - src/muster_bridge/app.py
+  - examples/memory_bridge.py
   - README.md
   - tests/test_config.py
   - tests/test_mentions.py
@@ -20,7 +21,7 @@ files_touched:
   - tests/test_spec.py
 acceptance:
   - "[C-28.FR-2] `api/bridge.yaml` is Muster's copy from `master` byte for byte, `make spec-check` passes, and `make generate-check` finds `src/muster_bridge/models.py` current with `Capabilities.group_mentions`, `Capabilities.everyone_mentions` and `Mention.kind`; a `Mention` without `kind` reads as `user`."
-  - "[C-28.FR-2, C-25.FR-8] The configuration takes `group_mentions` and `everyone_mentions`, which `info` declares; a name outside `channel`, `here`, `all` and `everyone`, or a repeated one, raises `ConfigError` naming the reason (`test_config.py`)."
+  - "[C-28.FR-2, C-25.FR-8] The configuration takes `group_mentions` and `everyone_mentions` in `Config.capabilities`, which `info` declares; a name outside `channel`, `here`, `all` and `everyone`, or a repeated one, raises `ConfigError` naming the reason (`test_config.py`)."
   - "[C-28.FR-2] `replace_mentions` hands the render function each entry with its kind, a `group` entry carries the group's name in `external_id` and `display_name`, an `everyone` entry the symbolic name, and a body whose `group` or `everyone` entry arrives at a bridge that did not declare it is never refused for its kind: the entry is shown as its marker's link text (`test_mentions.py`, `test_app.py`)."
   - "[C-28.FR-2] README.md shows a bridge that declares group mentions and `here` and renders a user, a group and `here`, and `tests/test_mentions.py` runs that example."
   - "[C-28.FR-2] `make ci conformance` passes, the conformance check from `ghcr.io/muster-io/muster:edge` included."
@@ -49,7 +50,8 @@ issue: 431
   says `Part of muster-io/muster#<issue>` and `Story: S-142`, and the issue here is closed by hand once it merges.
 - **Specification copy** (`api/bridge.yaml`): replaced by Muster's from `master` after S-171, which also carries the
   `layout` that S-128 took; `src/muster_bridge/models.py` is regenerated (never listed).
-- **Package**: `Config.group_mentions` and `Config.everyone_mentions` go into `info.capabilities` and are validated as
+- **Package**: `group_mentions` and `everyone_mentions` are fields of `Config.capabilities` (`Capabilities.group_mentions`
+  and `Capabilities.everyone_mentions`), not of `Config` itself; they go into `info.capabilities` and are validated as
   the specification does (`config.py`); `replace_mentions(body, mentions, render)` passes the entry with its `kind`
   (`mentions.py`; an entry without `kind` is a `user`); a `group` entry carries the group's name in both fields and an
   `everyone` entry the symbolic name; the application never refuses an entry for its kind, since Muster decides from a
@@ -82,6 +84,11 @@ None.
 - **Maintainer** (operator attention): merges the release pull request that release-please opens, which releases a new
   `0.x` minor version to PyPI; an agent never merges a release pull request.
 - The copy check fails on the library's `master` from S-139's merge until this story merges; that failure is expected.
+- `Config` holds `capabilities: Capabilities`, so the fields live in `Config.capabilities` and not in
+  `Config.group_mentions` and `Config.everyone_mentions` (muster-bridge-python#31). The render function of
+  `replace_mentions` may return `None`, which gives the marker's link text, so that the function knows nothing of the
+  declared capabilities. `examples/memory_bridge.py` gains the features `group_mentions` and `everyone_mentions`, which
+  the Verification needs.
 
 ## Coverage
 
