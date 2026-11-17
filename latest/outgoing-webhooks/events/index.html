@@ -3465,6 +3465,10 @@ event carries it.</dd>
 <dd>Only on <code>page_not_delivered</code>: the people the Page names in <code>users</code> (<code>id</code>, <code>name</code>, <code>login</code>), the Notification
 gateway of a call in <code>gateway</code> (<code>id</code>, <code>name</code>), null for a Page by Mention, and the <code>reason</code>. No other event
 carries it.</dd>
+<dt><code>escalation_step</code></dt>
+<dd>Only on <code>escalation_step_skipped</code>: the Escalation chain in <code>chain</code> (<code>id</code>, <code>name</code>), null once the chain was deleted,
+the number of the step in <code>step</code>, the <code>reason</code> and, for a person the step names who was skipped, that person in
+<code>users</code> (<code>id</code>, <code>name</code>, <code>login</code>), empty otherwise. No other event carries it.</dd>
 </dl>
 <p>The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.</p>
 <h3 id="event-names">Event names<a class="headerlink" href="#event-names" title="Permanent link">&para;</a></h3>
@@ -3523,6 +3527,12 @@ refused it (<code>call_refused</code>), answered what Muster cannot classify (<c
 budget was used (<code>call_budget_used</code>), the person had no confirmed contact at the gateway
 (<code>no_confirmed_contact</code>), or the gateway was deleted before the call was sent (<code>gateway_deleted</code>); named in
 <code>page</code> (<a href="../../messengers/notification-gateways/">Notification gateways</a>).</dd>
+<dt><code>escalation_step_skipped</code></dt>
+<dd><code>notify</code>: false. A step of an Escalation chain on the Alert Group was skipped, and the chain went on with its next
+step: outside the Working hours of its chain (<code>outside_working_hours</code>), for a Severity level its condition does not
+meet (<code>severity</code>), in a gap of the Schedule it Pages (<code>schedule_gap</code>), or for a person it names who became a Viewer
+(<code>viewer</code>) or was disabled (<code>disabled</code>) since it was saved; named in <code>escalation_step</code>
+(<a href="../../concepts/escalation-chains/#when-chains-run">Escalation chains</a>).</dd>
 </dl>
 <p>The event <code>test</code> is sent only by a Destination test: it carries <code>test: true</code> and <code>sequence</code> 0 and belongs to no Alert
 Group's order.</p>

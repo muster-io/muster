@@ -3277,6 +3277,50 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#escalation_run_ran_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_ran_out</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escalation_run_started" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_started</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escalation_run_step_limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_step_limit</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escalation_run_stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_stopped</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#fallback_template_used" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4954,6 +4998,50 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#escalation_run_ran_out" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_ran_out</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escalation_run_started" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_started</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escalation_run_step_limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_step_limit</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#escalation_run_stopped" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>escalation_run_stopped</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#fallback_template_used" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -6068,7 +6156,7 @@ the event.</p>
 <p>An Alert Group changed status: group is its #N, route the public_id of its Route, from and to the statuses (from is empty for a new Alert Group), reason the reason of an automatic change and transport how the change reached Muster.</p>
 <h3 id="alert_groups_purged"><code>alert_groups_purged</code><a class="headerlink" href="#alert_groups_purged" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>details</code>, <code>summaries</code> · C-09</p>
-<p>The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).</p>
+<p>The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago and the steps of the runs of the Escalation chains of Alert Groups resolved then (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).</p>
 <h3 id="alerts_stale"><code>alerts_stale</code><a class="headerlink" href="#alerts_stale" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>integration</code>, <code>count</code> · C-06</p>
 <p>The Stale scan resolved Alerts of an Integration with a live Heartbeat as Stale, because Alertmanager had not listed them for stale_after of live time in any Alertmanager group: integration is the public_id of the Integration and count how many Alerts resolved.</p>
@@ -6162,6 +6250,18 @@ the event.</p>
 <h3 id="downtime_recorded"><code>downtime_recorded</code><a class="headerlink" href="#downtime_recorded" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>started_at</code>, <code>ended_at</code>, <code>duration_seconds</code> · C-02</p>
 <p>Muster was unavailable: no Leader wrote the alive mark and no replica refreshed its record for the period between started_at and ended_at. The new Leader recorded it and opened the recovery window (recovery.banner_duration).</p>
+<h3 id="escalation_run_ran_out"><code>escalation_run_ran_out</code><a class="headerlink" href="#escalation_run_ran_out" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>group</code>, <code>chain</code>, <code>run</code> · C-32</p>
+<p>A run of an Escalation chain passed its last step without an acknowledgement: group is the public_id of the Alert Group, chain that of the chain, empty once it was deleted, and run that of the run.</p>
+<h3 id="escalation_run_started"><code>escalation_run_started</code><a class="headerlink" href="#escalation_run_started" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>group</code>, <code>chain</code>, <code>run</code> · C-32</p>
+<p>A run of an Escalation chain started on an Alert Group at its first step, at its first Publication, at its creation without a Destination that reaches it, when it became firing again, or for a rise or a Team that joined: group is the public_id of the Alert Group, chain that of the chain and run that of the run.</p>
+<h3 id="escalation_run_step_limit"><code>escalation_run_step_limit</code><a class="headerlink" href="#escalation_run_step_limit" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>group</code>, <code>chain</code>, <code>run</code>, <code>steps</code> · C-32</p>
+<p>A run of an Escalation chain made the most steps a run makes, escalation.MaxStepsPerRun, as repeats nested without a wait between them can, and ran out there as after its last step, so that its Alert Group becomes Unclaimed: group is the public_id of the Alert Group, chain that of the chain, empty once it was deleted, run that of the run and steps how many steps it made and skipped. Review the repeats of the chain.</p>
+<h3 id="escalation_run_stopped"><code>escalation_run_stopped</code><a class="headerlink" href="#escalation_run_stopped" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>group</code>, <code>chain</code>, <code>run</code>, <code>command</code> · C-32</p>
+<p>A run of an Escalation chain stopped before its last step: group is the public_id of the Alert Group, chain that of the chain, empty once it was deleted, run that of the run and command acknowledge, snooze, resolve or started_over.</p>
 <h3 id="fallback_template_used"><code>fallback_template_used</code><a class="headerlink" href="#fallback_template_used" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>route</code>, <code>group</code>, <code>template</code>, <code>error</code> · C-12</p>
 <p>A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.</p>

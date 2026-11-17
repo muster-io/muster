@@ -312,7 +312,7 @@ when it has no Alert Groups, nor when **Acknowledged first by** is set.
 `retention.alert_details`
 :   kept for: 90 days
 
-    Alerts in Alert Groups, Timeline entries, delivery events.
+    Alerts in Alert Groups, Timeline entries, delivery events, the steps of the runs of Escalation chains.
 
 `retention.alert_group_summaries`
 :   kept for: 2 years
@@ -2503,8 +2503,10 @@ Schedule, chosen people or a whole Team, call through a [Notification gateway](h
 wait, send to an outgoing webhook and repeat. Routes and Teams name their chains. Chains are managed through the API under
 `/api/v1/escalation-chains`, listed in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
 
-In this version a chain is configuration only: it is saved, checked and named on Routes and Teams, and runs nothing
-yet. Where no chain runs, the ack timeout of a Route keeps working as before.
+Chains run on Alert Groups at the points described under [When chains run](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#when-chains-run): their steps follow one
+another with their waits and repeats, and a step is skipped where it cannot be made. In this version a step that Pages
+or sends is made without Paging anyone yet; the Pages by Mention, the calls and the webhook step follow in later
+versions. Where no chain runs, the ack timeout of a Route keeps working as before.
 
 ## What an Escalation chain is
 
@@ -2593,6 +2595,72 @@ Naming a chain on a Route needs `routes:write`, and on a Team `teams:write`. A c
 own Destinations: a chain of a Route in those of the Route's Destinations that have the Alert Group's Root message; a
 chain of a Team in those of the Team's Destinations that have it, and, where none has, in those of the Route's
 Destinations. So a step that Pages everyone in the chat never rings another team's chat.
+
+## When chains run
+
+The chains that run on an Alert Group are those its Route names and — where the Route has "Also to the Teams from the
+label" (`deliver_to_teams`) and "Run the Teams' Escalation chains" (`run_team_chains`) on — those that each of its Teams
+names, each whose Severity condition its Severity level meets. Several chains may run on one Alert Group at the same
+time. A chain that the Route and a Team both name, or several Teams, runs once, with all of them as its sources. With
+"Run the Teams' Escalation chains" off, the Teams' Destinations still receive the Alert Group, but their chains do not
+start.
+
+A chain runs only while the Alert Group is firing, and only Alerts and Commands start chains:
+
+| Point | What happens to the chains |
+|---|---|
+| The Alert Group's first Publication; for one that a Storm summary stood for, its own Publication; for an outgoing webhook in events mode, its delivered `created` event | The chains that apply start at their first step |
+| The Alert Group is created while no Destination reaches it, or only Broken ones | The chains that apply start at once |
+| It becomes firing again: a Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to critical that ends an acknowledgement or a Snooze, an auto-unacknowledge, its Owner disabled or deleted | The chains that apply start over at their first step |
+| Its Severity level rises by its Alerts while it is firing and nobody owns it | The chains whose condition it now meets start; running chains go on |
+| A Team joins it by a new Alert while it is firing and nobody owns it | That Team's chains start, where the Route runs the chains of Teams |
+| A change of configuration: saving a Team, turning on "Also to the Teams from the label" or "Run the Teams' Escalation chains", naming a chain on a Route or a Team or changing its condition, changing the Minimum severity | No chain starts, and the running chains go on |
+| Acknowledge, Snooze, Resolve | Every chain stops |
+
+A chain whose condition the Alert Group no longer meets after its Severity level falls goes on. A chain that a change of
+configuration would apply to starts at the next point that starts or starts over the chains, such as an Unacknowledge.
+A held Alert Group that a raised Minimum severity releases is published Quietly and starts its ack timeout, but no
+chain: that release is a change of configuration.
+
+Each run keeps the steps its chain had when it started, until it stops or starts over: a change of the chain applies to
+the runs that start after it. A step that Pages or sends, limited to Working hours, is skipped outside the Working hours
+of the chain's owning Team, else the Organization's; a step whose Severity condition the Alert Group does not meet, a
+step that Pages the On-call of a Schedule with a gap now, and each person a step names who has become a Viewer or been
+disabled since the step was saved are skipped too. Each skip records the Quiet lifecycle event
+`escalation_step_skipped` in the Timeline, of the kind `escalation`, with the chain, the step and the reason —
+`outside_working_hours`, `severity`, `schedule_gap`, `viewer` or `disabled` — and the chain goes on with its next step
+at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
+steps 3 to the repeat three times in all, then goes on. Outgoing webhooks in the mode events receive
+`escalation_step_skipped` with the chain, the step and the reason ([Events](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md)).
+
+Steps are timer rows that any replica claims, and each step is a change of its Alert Group made by Muster, so a replica
+that stops never stops a chain. `getAlertGroup` gives the runs of the chains since they last started in
+`escalation_chains`: each with its chain, its sources, its state — `running`, `ran_out` once it passed its last step,
+`stopped` by Acknowledge, Snooze or Resolve —, the step it is at and `next_step_at`, when its next step is due.
+`listEscalationChainRuns` (`GET /api/v1/escalation-chains/{escalation_chain_id}/runs`) lists the recent runs of a chain,
+newest first: each with its Alert Group, the steps it made and skipped with their reasons, and what stopped it — the
+Command and the person who ran it — or that it ran out. An Alert Group whose chains started over has a run per start.
+
+## Chains and the ack timeout
+
+When the first chain of an Alert Group starts, its running ack timeout stops and sends no more notices: the steps take
+their place. When the Alert Group becomes firing again, its ack timeout starts over only if none of its chains starts.
+An Alert Group on which no chain applies keeps the ack timeout of its Route, as in L1
+([Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge)).
+
+!!! warning "Until the Pages follow, a chain silences the ack timeout"
+    In this version a step that Pages makes no Page yet, but the first chain that starts still removes the ack
+    timeout. An Alert Group on a Route or a Team with a chain then gets neither ack timeout notices nor Pages. Until
+    the Pages by Mention follow, name no Escalation chain on the Routes and Teams of an installation that relies on the
+    ack timeout.
+
+## Unclaimed
+
+A chain has run out when it has passed its last step. An Alert Group with chains is Unclaimed once every chain started
+on it has run out without an acknowledgement: it records `unclaimed`, and the Root message and the UI show "Nobody has
+taken this", as after the last ack timeout notice. A chain that starts later on an Unclaimed Alert Group — for a Team
+that joins, or a rise — makes it no longer Unclaimed while that chain runs, and it is Unclaimed again, recording
+`unclaimed` again, once that chain has run out too. Acknowledge, Snooze and Resolve end Unclaimed.
 
 <!-- Source: https://muster-io.github.io/muster/latest/concepts/mentions.md -->
 # Whom a message mentions

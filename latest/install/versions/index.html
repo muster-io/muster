@@ -3433,6 +3433,15 @@ critical, and a Route raises the level of its Alert Groups with its
   gets, and <code>escalation-chains:write</code>, which Admins get. Roles get them at once; a Personal access token keeps the
   Permissions it was issued with, so issue a new one to reach the Escalation chains. It is expand only: a replica
   without it reads and writes none of them, and no chain runs on 0.2.0 before a later version.</li>
+<li>Migration 0047 adds the runs of the Escalation chains on Alert Groups, the steps they made and skipped, and the
+  timers of their steps, which name the run rather than the Alert Group, none after the upgrade: chains start at
+  the next point that starts them, such as a first Publication or an Unacknowledge, never on the upgrade. It is
+  expand only: a replica without it never claims the timers of runs, as it claims only the kinds it knows, and
+  keeps setting the ack timeout, Reminder and Snooze timers of Alert Groups as before, and never marks the release
+  of a held Alert Group by a raised Minimum severity, whose first Publication then starts chains. Such a replica
+  starts no
+  chain on the Alert Groups it changes, and a chain whose Alert Group it acknowledges, snoozes or resolves stops at
+  its next step, without making it; let the rollout finish before relying on chains.</li>
 </ul>
 <p><strong>Slack apps get an optional scope.</strong> Team mentions in Slack need the bot scope <code>usergroups:read</code>, which the
 <a href="../../messengers/slack/#create-the-app-from-a-manifest">manifest</a> now has. A Slack app installed before 0.2.0 keeps
@@ -4012,6 +4021,39 @@ but the schema recorded as dirty at version 46. To recover, with the same databa
 <code>muster migrate</code>. Going back below 0046 loses every Escalation chain with its steps and the chains that Routes and
 Teams name, and Personal access tokens lose the Permissions <code>escalation-chains:read</code> and <code>escalation-chains:write</code>;
 the Audit log keeps its entries about chains.</p>
+<p>Migration 0047 adds the runs of the chains in three transactions: the first adds the tables, the columns and the
+new CHECKs of the timers, <code>NOT VALID</code>; the second validates them; the third drops the CHECKs they replace. Each
+gives up after 5 seconds of waiting for a lock (<code>lock_timeout</code>), and PostgreSQL may end the first on a deadlock
+with the running replicas, which change the timers, Alert Groups, deliveries and Timeline it alters; run the
+upgrade at a quiet time. Any such failure leaves the schema recorded as dirty at version 47, and the 0.2.0 replica
+refuses to start with <code>schema_dirty</code>. To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">tables</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'escalation_runs'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 46, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, finish the second and the third transactions and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timers</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">timers_kind_v2_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timers</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">timers_subject_v2_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timers</span>
+<span class="w">    </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">timers_kind_check</span><span class="p">,</span>
+<span class="w">    </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">timers_subject_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
+<p>Going back below 0047 deletes the timers of runs and loses every run with its steps, and the escalation entries of
+the Timeline lose the chain and the step they named; the Alert Groups keep the ack timeout as the chains left it,
+stopped where a chain had started, until they next become firing.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that

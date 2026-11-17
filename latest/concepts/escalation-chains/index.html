@@ -1862,6 +1862,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#when-chains-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When chains run
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chains-and-the-ack-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chains and the ack timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unclaimed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Unclaimed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3116,6 +3149,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#when-chains-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When chains run
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chains-and-the-ack-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Chains and the ack timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unclaimed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Unclaimed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3141,8 +3207,10 @@
 Schedule, chosen people or a whole Team, call through a <a href="../../messengers/notification-gateways/">Notification gateway</a>,
 wait, send to an outgoing webhook and repeat. Routes and Teams name their chains. Chains are managed through the API under
 <code>/api/v1/escalation-chains</code>, listed in the <a href="../../reference/api/">API reference</a>.</p>
-<p>In this version a chain is configuration only: it is saved, checked and named on Routes and Teams, and runs nothing
-yet. Where no chain runs, the ack timeout of a Route keeps working as before.</p>
+<p>Chains run on Alert Groups at the points described under <a href="#when-chains-run">When chains run</a>: their steps follow one
+another with their waits and repeats, and a step is skipped where it cannot be made. In this version a step that Pages
+or sends is made without Paging anyone yet; the Pages by Mention, the calls and the webhook step follow in later
+versions. Where no chain runs, the ack timeout of a Route keeps working as before.</p>
 <h2 id="what-an-escalation-chain-is">What an Escalation chain is<a class="headerlink" href="#what-an-escalation-chain-is" title="Permanent link">&para;</a></h2>
 <p>An Escalation chain has:</p>
 <ul>
@@ -3257,6 +3325,91 @@ entries and the chains by name, <code>chains</code>, and the Audit log of the Ro
 own Destinations: a chain of a Route in those of the Route's Destinations that have the Alert Group's Root message; a
 chain of a Team in those of the Team's Destinations that have it, and, where none has, in those of the Route's
 Destinations. So a step that Pages everyone in the chat never rings another team's chat.</p>
+<h2 id="when-chains-run">When chains run<a class="headerlink" href="#when-chains-run" title="Permanent link">&para;</a></h2>
+<p>The chains that run on an Alert Group are those its Route names and — where the Route has "Also to the Teams from the
+label" (<code>deliver_to_teams</code>) and "Run the Teams' Escalation chains" (<code>run_team_chains</code>) on — those that each of its Teams
+names, each whose Severity condition its Severity level meets. Several chains may run on one Alert Group at the same
+time. A chain that the Route and a Team both name, or several Teams, runs once, with all of them as its sources. With
+"Run the Teams' Escalation chains" off, the Teams' Destinations still receive the Alert Group, but their chains do not
+start.</p>
+<p>A chain runs only while the Alert Group is firing, and only Alerts and Commands start chains:</p>
+<table>
+<thead>
+<tr>
+<th>Point</th>
+<th>What happens to the chains</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The Alert Group's first Publication; for one that a Storm summary stood for, its own Publication; for an outgoing webhook in events mode, its delivered <code>created</code> event</td>
+<td>The chains that apply start at their first step</td>
+</tr>
+<tr>
+<td>The Alert Group is created while no Destination reaches it, or only Broken ones</td>
+<td>The chains that apply start at once</td>
+</tr>
+<tr>
+<td>It becomes firing again: a Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to critical that ends an acknowledgement or a Snooze, an auto-unacknowledge, its Owner disabled or deleted</td>
+<td>The chains that apply start over at their first step</td>
+</tr>
+<tr>
+<td>Its Severity level rises by its Alerts while it is firing and nobody owns it</td>
+<td>The chains whose condition it now meets start; running chains go on</td>
+</tr>
+<tr>
+<td>A Team joins it by a new Alert while it is firing and nobody owns it</td>
+<td>That Team's chains start, where the Route runs the chains of Teams</td>
+</tr>
+<tr>
+<td>A change of configuration: saving a Team, turning on "Also to the Teams from the label" or "Run the Teams' Escalation chains", naming a chain on a Route or a Team or changing its condition, changing the Minimum severity</td>
+<td>No chain starts, and the running chains go on</td>
+</tr>
+<tr>
+<td>Acknowledge, Snooze, Resolve</td>
+<td>Every chain stops</td>
+</tr>
+</tbody>
+</table>
+<p>A chain whose condition the Alert Group no longer meets after its Severity level falls goes on. A chain that a change of
+configuration would apply to starts at the next point that starts or starts over the chains, such as an Unacknowledge.
+A held Alert Group that a raised Minimum severity releases is published Quietly and starts its ack timeout, but no
+chain: that release is a change of configuration.</p>
+<p>Each run keeps the steps its chain had when it started, until it stops or starts over: a change of the chain applies to
+the runs that start after it. A step that Pages or sends, limited to Working hours, is skipped outside the Working hours
+of the chain's owning Team, else the Organization's; a step whose Severity condition the Alert Group does not meet, a
+step that Pages the On-call of a Schedule with a gap now, and each person a step names who has become a Viewer or been
+disabled since the step was saved are skipped too. Each skip records the Quiet lifecycle event
+<code>escalation_step_skipped</code> in the Timeline, of the kind <code>escalation</code>, with the chain, the step and the reason —
+<code>outside_working_hours</code>, <code>severity</code>, <code>schedule_gap</code>, <code>viewer</code> or <code>disabled</code> — and the chain goes on with its next step
+at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
+steps 3 to the repeat three times in all, then goes on. Outgoing webhooks in the mode events receive
+<code>escalation_step_skipped</code> with the chain, the step and the reason (<a href="../../outgoing-webhooks/events/">Events</a>).</p>
+<p>Steps are timer rows that any replica claims, and each step is a change of its Alert Group made by Muster, so a replica
+that stops never stops a chain. <code>getAlertGroup</code> gives the runs of the chains since they last started in
+<code>escalation_chains</code>: each with its chain, its sources, its state — <code>running</code>, <code>ran_out</code> once it passed its last step,
+<code>stopped</code> by Acknowledge, Snooze or Resolve —, the step it is at and <code>next_step_at</code>, when its next step is due.
+<code>listEscalationChainRuns</code> (<code>GET /api/v1/escalation-chains/{escalation_chain_id}/runs</code>) lists the recent runs of a chain,
+newest first: each with its Alert Group, the steps it made and skipped with their reasons, and what stopped it — the
+Command and the person who ran it — or that it ran out. An Alert Group whose chains started over has a run per start.</p>
+<h2 id="chains-and-the-ack-timeout">Chains and the ack timeout<a class="headerlink" href="#chains-and-the-ack-timeout" title="Permanent link">&para;</a></h2>
+<p>When the first chain of an Alert Group starts, its running ack timeout stops and sends no more notices: the steps take
+their place. When the Alert Group becomes firing again, its ack timeout starts over only if none of its chains starts.
+An Alert Group on which no chain applies keeps the ack timeout of its Route, as in L1
+(<a href="../statuses-and-commands/#ack-timeouts-reminders-and-auto-unacknowledge">Statuses and commands</a>).</p>
+<div class="admonition warning">
+<p class="admonition-title">Until the Pages follow, a chain silences the ack timeout</p>
+<p>In this version a step that Pages makes no Page yet, but the first chain that starts still removes the ack
+timeout. An Alert Group on a Route or a Team with a chain then gets neither ack timeout notices nor Pages. Until
+the Pages by Mention follow, name no Escalation chain on the Routes and Teams of an installation that relies on the
+ack timeout.</p>
+</div>
+<h2 id="unclaimed">Unclaimed<a class="headerlink" href="#unclaimed" title="Permanent link">&para;</a></h2>
+<p>A chain has run out when it has passed its last step. An Alert Group with chains is Unclaimed once every chain started
+on it has run out without an acknowledgement: it records <code>unclaimed</code>, and the Root message and the UI show "Nobody has
+taken this", as after the last ack timeout notice. A chain that starts later on an Unclaimed Alert Group — for a Team
+that joins, or a rise — makes it no longer Unclaimed while that chain runs, and it is Unclaimed again, recording
+<code>unclaimed</code> again, once that chain has run out too. Acknowledge, Snooze and Resolve end Unclaimed.</p>
 
 
 

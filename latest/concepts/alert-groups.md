@@ -307,7 +307,7 @@ when it has no Alert Groups, nor when **Acknowledged first by** is set.
 `retention.alert_details`
 :   kept for: 90 days
 
-    Alerts in Alert Groups, Timeline entries, delivery events.
+    Alerts in Alert Groups, Timeline entries, delivery events, the steps of the runs of Escalation chains.
 
 `retention.alert_group_summaries`
 :   kept for: 2 years
