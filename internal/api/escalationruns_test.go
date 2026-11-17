@@ -179,7 +179,8 @@ func TestTimelineChainOf(t *testing.T) {
 }
 
 // TestTimelineEscalationEntries: escalation_step_skipped gives its reason in skip_reason, with the chain and the step
-// and the skipped person in paged_users, and page_not_delivered keeps its reason in reason.
+// and the skipped person in paged_users, page_not_delivered keeps its reason in reason, and escalation_webhook names
+// its outgoing webhook Destination in destination, with the chain and the step.
 func TestTimelineEscalationEntries(t *testing.T) {
 	step, skip, page := 3, "viewer", "call_refused"
 	vic := &groups.ActorRef{Kind: "user", PublicID: "SRDDDDDDDDDDDD", Name: "Vic", Login: "vic"}
@@ -204,7 +205,25 @@ func TestTimelineEscalationEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, _ = e.AsTimelineEscalationEntry()
-	if v.Reason.MustGet() != "call_refused" || !v.SkipReason.IsNull() || !v.Step.IsNull() || !v.Chain.IsNull() {
+	if v.Reason.MustGet() != "call_refused" || !v.SkipReason.IsNull() || !v.Step.IsNull() || !v.Chain.IsNull() ||
+		v.Destination != nil {
 		t.Errorf("page not delivered %+v", v)
+	}
+	step = 1
+	e, err = timelineEntryOf(groups.TimelineEntry{PublicID: "TEAAAAAAAAAAB3", At: t0, Kind: groups.KindEscalation,
+		Event: string(groups.EventEscalationWebhook), Loudness: groups.Quiet, Mentions: []string{},
+		Actor: groups.TimelineActor{Kind: "system", Transport: "system"}, Step: &step, ChainName: "payments",
+		Chain: &groups.ChainRef{PublicID: chainID, Name: "payments"},
+		Destination: &groups.TimelineDestination{PublicID: "DSAAAAAAAAAAWB", Name: "ops-bot", Type: "webhook",
+			Health: "healthy"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err = e.AsTimelineEscalationEntry()
+	if err != nil || v.Event != gen.LifecycleEventEscalationWebhook || v.Destination == nil ||
+		v.Destination.Id != "DSAAAAAAAAAAWB" || v.Destination.Name != "ops-bot" || v.Destination.Type != "webhook" ||
+		v.Destination.Health.State != "healthy" || !v.SkipReason.IsNull() || v.Step.MustGet() != 1 ||
+		v.Chain.MustGet().Name != "payments" || len(v.PagedUsers) != 0 {
+		t.Errorf("escalation_webhook %+v, %v", v, err)
 	}
 }

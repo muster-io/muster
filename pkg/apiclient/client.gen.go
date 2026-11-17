@@ -1104,17 +1104,21 @@ func (e EscalationRunStopCommand) Valid() bool {
 
 // Defines values for EscalationSkipReason.
 const (
-	EscalationSkipReasonDisabled            EscalationSkipReason = "disabled"
-	EscalationSkipReasonLessThannil         EscalationSkipReason = "<nil>"
-	EscalationSkipReasonOutsideWorkingHours EscalationSkipReason = "outside_working_hours"
-	EscalationSkipReasonScheduleGap         EscalationSkipReason = "schedule_gap"
-	EscalationSkipReasonSeverity            EscalationSkipReason = "severity"
-	EscalationSkipReasonViewer              EscalationSkipReason = "viewer"
+	EscalationSkipReasonDestinationDeleted    EscalationSkipReason = "destination_deleted"
+	EscalationSkipReasonDisabled              EscalationSkipReason = "disabled"
+	EscalationSkipReasonLessThannil           EscalationSkipReason = "<nil>"
+	EscalationSkipReasonOutsideWorkingHours   EscalationSkipReason = "outside_working_hours"
+	EscalationSkipReasonScheduleGap           EscalationSkipReason = "schedule_gap"
+	EscalationSkipReasonSeverity              EscalationSkipReason = "severity"
+	EscalationSkipReasonViewer                EscalationSkipReason = "viewer"
+	EscalationSkipReasonWebhookEventsRequired EscalationSkipReason = "webhook_events_required"
 )
 
 // Valid indicates whether the value is a known member of the EscalationSkipReason enum.
 func (e EscalationSkipReason) Valid() bool {
 	switch e {
+	case EscalationSkipReasonDestinationDeleted:
+		return true
 	case EscalationSkipReasonDisabled:
 		return true
 	case EscalationSkipReasonLessThannil:
@@ -1126,6 +1130,8 @@ func (e EscalationSkipReason) Valid() bool {
 	case EscalationSkipReasonSeverity:
 		return true
 	case EscalationSkipReasonViewer:
+		return true
+	case EscalationSkipReasonWebhookEventsRequired:
 		return true
 	default:
 		return false
@@ -1514,6 +1520,7 @@ const (
 	LifecycleEventCreated               LifecycleEvent = "created"
 	LifecycleEventDestinationJoined     LifecycleEvent = "destination_joined"
 	LifecycleEventEscalationStepSkipped LifecycleEvent = "escalation_step_skipped"
+	LifecycleEventEscalationWebhook     LifecycleEvent = "escalation_webhook"
 	LifecycleEventMovedToDefaultRoute   LifecycleEvent = "moved_to_default_route"
 	LifecycleEventNoteAdded             LifecycleEvent = "note_added"
 	LifecycleEventNoticesMissed         LifecycleEvent = "notices_missed"
@@ -1559,6 +1566,8 @@ func (e LifecycleEvent) Valid() bool {
 	case LifecycleEventDestinationJoined:
 		return true
 	case LifecycleEventEscalationStepSkipped:
+		return true
+	case LifecycleEventEscalationWebhook:
 		return true
 	case LifecycleEventMovedToDefaultRoute:
 		return true
@@ -4283,6 +4292,7 @@ const (
 	WebhookEventNameCreated               WebhookEventName = "created"
 	WebhookEventNameDestinationJoined     WebhookEventName = "destination_joined"
 	WebhookEventNameEscalationStepSkipped WebhookEventName = "escalation_step_skipped"
+	WebhookEventNameEscalationWebhook     WebhookEventName = "escalation_webhook"
 	WebhookEventNameMovedToDefaultRoute   WebhookEventName = "moved_to_default_route"
 	WebhookEventNameNoteAdded             WebhookEventName = "note_added"
 	WebhookEventNameNoticesMissed         WebhookEventName = "notices_missed"
@@ -4329,6 +4339,8 @@ func (e WebhookEventName) Valid() bool {
 	case WebhookEventNameDestinationJoined:
 		return true
 	case WebhookEventNameEscalationStepSkipped:
+		return true
+	case WebhookEventNameEscalationWebhook:
 		return true
 	case WebhookEventNameMovedToDefaultRoute:
 		return true
@@ -6172,7 +6184,7 @@ type EscalationRunStep struct {
 	Number  int                      `json:"number"`
 	Outcome EscalationRunStepOutcome `json:"outcome"`
 
-	// Reason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved. Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[EscalationSkipReason] `json:"reason"`
 }
 
@@ -6189,7 +6201,7 @@ type EscalationRunStop struct {
 // EscalationRunStopCommand defines model for EscalationRunStop.Command.
 type EscalationRunStopCommand string
 
-// EscalationSkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved. Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+// EscalationSkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
 type EscalationSkipReason string
 
 // EscalationStep defines model for EscalationStep.
@@ -7985,10 +7997,10 @@ type OutgoingWebhookEvent struct {
 	// Alerts One element per Alert, by fingerprint.
 	Alerts []WebhookAlert `json:"alerts"`
 
-	// Destination The Destination the Alert Group joined, only on `destination_joined`.
+	// Destination The Destination the Alert Group joined, only on `destination_joined`; the outgoing webhook Destination the step sent to, only on `escalation_webhook`.
 	Destination *WebhookDestinationRef `json:"destination,omitempty"`
 
-	// EscalationStep The chain, the step and the reason, only on `escalation_step_skipped`.
+	// EscalationStep The chain, the step and the reason, only on `escalation_step_skipped` and `escalation_webhook`, whose reason is null.
 	EscalationStep *WebhookEscalationStep `json:"escalation_step,omitempty"`
 
 	// Event One of the lifecycle event names (see `LifecycleEvent`) or `test`, which only a Destination test sends. New names are added within `version` 1; receivers ignore names they do not know.
@@ -10275,7 +10287,7 @@ type TimelineEntryList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered, or `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person.
+// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, or `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`.
 type TimelineEscalationEntry struct {
 	// Actor Who caused the entry. `system` entries carry the reason in `reason`.
 	Actor TimelineActor `json:"actor"`
@@ -10286,6 +10298,9 @@ type TimelineEscalationEntry struct {
 
 	// ChainName The name of the chain when its run started; null for an event of no chain.
 	ChainName nullable.Nullable[string] `json:"chain_name,omitempty"`
+
+	// Destination The outgoing webhook Destination the step sent to, for `escalation_webhook`.
+	Destination *DestinationRef `json:"destination,omitempty"`
 
 	// Event Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row's kind, loudness and Mentions).
 	// The Timeline kind of each event is given in `x-event-kinds`.
@@ -10306,7 +10321,7 @@ type TimelineEscalationEntry struct {
 	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason,omitempty"`
 
-	// SkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved. Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+	// SkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
 	SkipReason nullable.Nullable[EscalationSkipReason] `json:"skip_reason,omitempty"`
 
 	// Step The number of the step of the chain; null for an event of no chain.
@@ -10786,12 +10801,12 @@ type WebhookDestinationRef struct {
 	Type DestinationType `json:"type"`
 }
 
-// WebhookEscalationStep A step of an Escalation chain as an outgoing webhook event names it, on `escalation_step_skipped`; `users` names the person of a skip of a person, and is empty otherwise.
+// WebhookEscalationStep A step of an Escalation chain as an outgoing webhook event names it, on `escalation_step_skipped` and `escalation_webhook`; `users` names the person of a skip of a person, and is empty otherwise.
 type WebhookEscalationStep struct {
 	// Chain The chain, null once it was deleted.
 	Chain nullable.Nullable[WebhookChainRef] `json:"chain"`
 
-	// Reason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved. Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why the step was skipped on `escalation_step_skipped`; null on `escalation_webhook`, whose step was made.
 	Reason nullable.Nullable[EscalationSkipReason] `json:"reason"`
 	Step   int                                     `json:"step"`
 	Users  []WebhookUser                           `json:"users"`

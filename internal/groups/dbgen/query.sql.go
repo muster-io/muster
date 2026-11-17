@@ -4640,8 +4640,8 @@ type ListTimelineDestinationsRow struct {
 	BrokenReason pgtype.Text
 }
 
-// ListTimelineDestinations names the Destinations of destination_joined entries, deleted ones included, with their
-// health.
+// ListTimelineDestinations names the Destinations of destination_joined and escalation_webhook entries, deleted ones
+// included, with their health.
 func (q *Queries) ListTimelineDestinations(ctx context.Context, arg ListTimelineDestinationsParams) ([]ListTimelineDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listTimelineDestinations, arg.OrgID, arg.Ids)
 	if err != nil {

@@ -309,6 +309,8 @@ export function entryText(
           return t("timeline.escalation.event", { event: entry.event });
         case "escalation_step_skipped":
           return t("timeline.escalation.event", { event: entry.event });
+        case "escalation_webhook":
+          return t("timeline.escalation.event", { event: entry.event });
         default:
           return t("timeline.escalation.event", { event: entry.event });
       }

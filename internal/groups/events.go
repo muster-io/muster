@@ -63,8 +63,8 @@ const EventDestinationJoined Event = "destination_joined"
 // EventPageNotDelivered is the lifecycle event of C-30.FR-7 and C-32.FR-10 (revised C-09.FR-22): a Page that reached
 // its person nowhere, here a call through a Notification gateway that ended Not delivered — Quiet, without Mentions,
 // of the Timeline kind escalation, nothing in a messenger. Its entry names the people in paged_user_ids, the gateway
-// and the reason. escalation_step_skipped is in escalation.go; the other events of the kind escalation (paged,
-// assignees_changed, escalation_webhook) join the table with the stories that record them.
+// and the reason. escalation_step_skipped and escalation_webhook are in escalation.go; the other events of the kind
+// escalation (paged, assignees_changed) join the table with the stories that record them.
 const EventPageNotDelivered Event = "page_not_delivered"
 
 // ReachEvents are the lifecycle events by which the Destinations an Alert Group reaches can grow (C-26.FR-4, FR-5): a
@@ -184,6 +184,7 @@ var Table = []Row{
 	{EventNoticesMissed, VariantAny, KindTimers, Loud, nil},
 	{EventPageNotDelivered, VariantAny, KindEscalation, Quiet, nil},
 	{EventEscalationStepSkipped, VariantAny, KindEscalation, Quiet, nil},
+	{EventEscalationWebhook, VariantAny, KindEscalation, Quiet, nil},
 }
 
 // rowOf is the row of the event and variant; an event outside the table is a programming error.

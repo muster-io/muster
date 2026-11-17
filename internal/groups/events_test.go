@@ -222,6 +222,12 @@ func TestLifecycleEventTable(t *testing.T) {
 				return h.chainStep(t, ChainProgress{Skips: []StepSkip{{ChainEntry: ChainEntry{Run: runID, Step: 3},
 					Reason: SkipSeverity}}})
 			}},
+		{"escalation webhook", want{EventEscalationWebhook, KindEscalation, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				return h.chainStep(t, ChainProgress{Webhooks: []StepWebhook{{ChainEntry: ChainEntry{Run: runID,
+					Step: 1}, Destination: JoinedDestination{ID: 77, PublicID: "DSAAAAAAAAAAOB", Name: "ops-bot",
+					Type: "webhook"}}}})
+			}},
 		{"unclaimed when every chain ran out", want{EventUnclaimed, KindTimers, Quiet, nil},
 			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
 				return h.chainStep(t, ChainProgress{RanOut: true})
@@ -268,6 +274,91 @@ func TestLifecycleEventTable(t *testing.T) {
 		if !produced[r.Event] {
 			t.Errorf("no case covers %s", r.Event)
 		}
+	}
+}
+
+// TestEscalationWebhook is C-32.FR-13, C-32.AC-11 and C-09.FR-22: a step that sent to an outgoing webhook records the
+// Quiet escalation_webhook of the kind escalation, without Mentions and with Muster as the actor, whose entry names the
+// run, the chain, the step and the Destination (timeline_entries.destination_id), read back into the Timeline; the
+// re-render step gets the event with its chain and its Destination, which delivery sends to that Destination only.
+// The skips and the webhooks of one firing are recorded in the order of the steps, and a webhook without its
+// Destination is refused.
+func TestEscalationWebhook(t *testing.T) {
+	h := newHarness(t)
+	h.withChains()
+	g := h.firing(t, "x")
+	h.publish(t, g, t0)
+	h.clock.Advance(time.Minute)
+	var rendered []Rendering
+	h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		rendered = append(rendered, r)
+		return nil
+	})
+	ops := JoinedDestination{ID: 77, PublicID: "DSAAAAAAAAAAOB", Name: "ops-bot", Type: "webhook"}
+	h.db.reach.dests = map[int64]JoinedDestination{77: ops}
+	chain := ChainEntry{Run: runID, Chain: 5, ChainPublicID: "EC0000000000PA", ChainName: "payments"}
+	at := func(step int) ChainEntry { c := chain; c.Step = step; return c }
+	p := ChainProgress{
+		Skips: []StepSkip{{ChainEntry: at(1), Reason: SkipSeverity},
+			{ChainEntry: at(3), Reason: SkipDestinationDeleted}, {ChainEntry: at(4), Reason: SkipWebhookEventsRequired}},
+		Webhooks: []StepWebhook{{ChainEntry: at(2), Destination: ops, After: 1},
+			{ChainEntry: at(5), Destination: ops, After: 3}},
+		Changed: true,
+	}
+	after, err := h.svc.ChainStep(t.Context(), nil, g.ID, func(context.Context, *Group) (ChainProgress, error) {
+		return p, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after(t.Context())
+	var got []string
+	var hooks []*fakeEntry
+	for _, e := range h.entriesOf(g) {
+		if e.Kind != string(KindEscalation) {
+			continue
+		}
+		got = append(got, e.Event.String)
+		if e.Event.String == string(EventEscalationWebhook) {
+			hooks = append(hooks, e)
+		}
+	}
+	if want := []string{"escalation_step_skipped", "escalation_webhook", "escalation_step_skipped",
+		"escalation_step_skipped", "escalation_webhook"}; !slices.Equal(got, want) {
+		t.Fatalf("events %v, want %v", got, want)
+	}
+	e := hooks[0]
+	if e.Loudness.String != "quiet" || len(e.Mentions) != 0 || e.ActorKind != "system" || e.Transport != "system" ||
+		e.DestinationID.Int64 != 77 || e.EscalationRunID.Int64 != runID || e.EscalationChainID.Int64 != 5 ||
+		e.StepNumber.Int32 != 2 || e.Reason.Valid || len(e.PagedUserIds) != 0 {
+		t.Errorf("entry %+v", e.InsertTimelineEntryParams)
+	}
+	if len(rendered) != 1 || len(rendered[0].Events) != 5 {
+		t.Fatalf("renderings %+v", rendered)
+	}
+	r := rendered[0].Events[1]
+	if r.Event != EventEscalationWebhook || r.Loudness != Quiet || len(r.Mentions) != 0 || r.Destination == nil ||
+		r.Destination.PublicID != ops.PublicID || r.Chain == nil || r.Chain.Step != 2 || r.Chain.ChainName != "payments" ||
+		r.Seq != rendered[0].Events[0].Seq+1 || rendered[0].Configuration {
+		t.Errorf("rendered %+v", r)
+	}
+	if len(rendered[0].Joined()) != 0 {
+		t.Errorf("an escalation_webhook joins no destination: %v", rendered[0].Joined())
+	}
+	page, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Kinds: []Kind{KindEscalation}, Limit: 10,
+		Ascending: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Entries) != 5 || page.Entries[1].Destination == nil ||
+		page.Entries[1].Destination.PublicID != ops.PublicID || page.Entries[1].Destination.Name != "ops-bot" ||
+		page.Entries[1].Chain == nil || *page.Entries[1].Step != 2 || page.Entries[0].Destination != nil {
+		t.Errorf("timeline %+v", page.Entries)
+	}
+	if _, err := h.svc.ChainStep(t.Context(), nil, g.ID, func(context.Context, *Group) (ChainProgress, error) {
+		return ChainProgress{Webhooks: []StepWebhook{{ChainEntry: at(2)}}}, nil
+	}); err == nil || !strings.Contains(err.Error(), "without its destination") {
+		t.Errorf("a webhook without its destination: %v", err)
 	}
 }
 

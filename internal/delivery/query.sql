@@ -47,6 +47,7 @@ ORDER BY d.id;
 -- ListGroupDestinations lists the Destinations that are not deleted that an Alert Group reached before: those it has a
 -- delivery in, with its state, the Storm that holds it and whether its final edit waits, and the outgoing webhooks in
 -- the events mode that have an event of it, with what ListRouteDestinations reads of them, in id order (C-26.FR-4).
+-- An escalation_webhook does not make its step's Destination one the Alert Group reached (C-32.FR-13).
 -- name: ListGroupDestinations :many
 SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
        coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
@@ -60,7 +61,7 @@ WHERE d.org_id = @org_id AND d.deleted_at IS NULL
        OR EXISTS (SELECT 1
                   FROM webhook_events w
                   WHERE w.org_id = @org_id AND w.alert_group_id = @alert_group_id::bigint
-                    AND w.destination_id = d.id))
+                    AND w.destination_id = d.id AND w.event <> 'escalation_webhook'))
 ORDER BY d.id;
 
 -- ShareRouteMembership takes, until the transaction ends, the shared membership lock of a Route, which a change of its
@@ -1972,12 +1973,16 @@ WHERE t.org_id = @org_id
 -- least once and never collapsed.
 
 -- InsertWebhookEvent queues one lifecycle event of an Alert Group for an events-mode Destination, due now, with its
--- body rendered now; the event is queued once whatever the retries of the change.
+-- body rendered now; the event is queued once whatever the retries of the change, and not for a Destination that is
+-- deleted, as one whose deletion committed while a webhook step read it (C-32.FR-13).
 -- name: InsertWebhookEvent :exec
 INSERT INTO webhook_events (org_id, destination_id, alert_group_id, sequence, webhook_id, event, notify, occurred_at,
                             body, state, next_attempt_at, received_at, created_at)
-VALUES (@org_id, @destination_id, @alert_group_id, @sequence, @webhook_id, @event, @notify, @now::timestamptz, @body,
-        'pending', @now::timestamptz, sqlc.narg('received_at')::timestamptz, @now::timestamptz)
+SELECT @org_id::bigint, d.id, @alert_group_id::bigint, @sequence::bigint, @webhook_id::text, @event::text,
+       @notify::boolean, @now::timestamptz, @body::jsonb, 'pending', @now::timestamptz,
+       sqlc.narg('received_at')::timestamptz, @now::timestamptz
+FROM destinations d
+WHERE d.org_id = @org_id::bigint AND d.id = @destination_id::bigint AND d.deleted_at IS NULL
 ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING;
 
 -- ClaimDueWebhookEvents leases the due head events of the healthy Destinations that are not deleted: the pending event

@@ -355,6 +355,66 @@ func TestBodyEscalationStepSkipped(t *testing.T) {
 	}
 }
 
+// TestBodyEscalationWebhook is C-32.FR-13, C-32.AC-9 and C-15.FR-2 revised: escalation_webhook carries the Alert Group
+// as every event, the chain and the step in escalation_step with a null reason and no users, and the step's
+// Destination in destination, valid against OutgoingWebhookEvent, Quiet without Mentions and with no reason of the
+// actor; a deleted chain is null. No other event but destination_joined carries a destination.
+func TestBodyEscalationWebhook(t *testing.T) {
+	schema := eventSchema(t)
+	s, f := newService(t)
+	render, err := s.eventBodies(t.Context(), f, bodyFixture(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := &groups.JoinedDestination{ID: 77, PublicID: "DSAAAAAAAAAAOB", Name: "ops-bot", Type: "webhook"}
+	for _, c := range []struct {
+		event       groups.Event
+		chain       *groups.ChainEntry
+		dest        *groups.JoinedDestination
+		escalation  string
+		destination string
+	}{
+		{groups.EventEscalationWebhook,
+			&groups.ChainEntry{Run: 3, Chain: 5, ChainPublicID: "ECAAAAAAAAAADO", ChainName: "devops", Step: 1}, ops,
+			`{"chain":{"id":"ECAAAAAAAAAADO","name":"devops"},"step":1,"reason":null,"users":[]}`,
+			`{"id":"DSAAAAAAAAAAOB","name":"ops-bot","type":"webhook"}`},
+		{groups.EventEscalationWebhook, &groups.ChainEntry{Run: 3, Step: 4}, ops,
+			`{"chain":null,"step":4,"reason":null,"users":[]}`,
+			`{"id":"DSAAAAAAAAAAOB","name":"ops-bot","type":"webhook"}`},
+		{groups.EventEscalationStepSkipped, &groups.ChainEntry{Run: 3, Step: 2}, ops,
+			`{"chain":null,"step":2,"reason":null,"users":[]}`, ``},
+	} {
+		raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: 7, Event: c.event, Loudness: groups.Quiet,
+			Chain: c.chain, Destination: c.dest}, OccurredAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		_ = json.Unmarshal(raw, &v)
+		if err := schema.VisitJSON(v); err != nil {
+			t.Fatalf("%s: %v\n%s", c.event, err, raw)
+		}
+		var b struct {
+			Event       string          `json:"event"`
+			Notify      bool            `json:"notify"`
+			Mentions    []any           `json:"mentions"`
+			Sequence    int64           `json:"sequence"`
+			Actor       map[string]any  `json:"actor"`
+			AlertGroup  map[string]any  `json:"alert_group"`
+			Alerts      []any           `json:"alerts"`
+			Escalation  json.RawMessage `json:"escalation_step"`
+			Destination json.RawMessage `json:"destination"`
+			Page        json.RawMessage `json:"page"`
+		}
+		_ = json.Unmarshal(raw, &b)
+		if b.Event != string(c.event) || b.Notify || len(b.Mentions) != 0 || b.Sequence != 7 ||
+			string(b.Escalation) != c.escalation || string(b.Destination) != c.destination || len(b.Page) != 0 ||
+			b.Actor["reason"] != nil || b.AlertGroup["id"] == nil || b.Alerts == nil {
+			t.Errorf("%s: %s", c.event, raw)
+		}
+	}
+}
+
 // TestBodyPageNotDelivered is C-15.FR-2 revised by C-30.FR-7: page_not_delivered carries the Page in its page {users,
 // gateway, reason}, valid against OutgoingWebhookEvent, Quiet without Mentions; no other event carries a page, even
 // one recorded with a Page by mistake, and a Page by Mention has a null gateway.
