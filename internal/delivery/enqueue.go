@@ -137,6 +137,9 @@ const (
 	DeliveryRepublication      = "republication_after_deletion"
 	DeliveryFinalEdit          = "final_edit"
 	DeliveryPastEditWindow     = "republication_past_edit_window"
+	// DeliveryMentionNotDelivered is a person whom a Mention entry names and a delivered Loud message does not
+	// mention as their messenger mentions them (C-28.FR-3): nothing is sent, the delivery event is recorded.
+	DeliveryMentionNotDelivered = "mention_not_delivered"
 )
 
 // DeliveryEvents is the closed Loud/Quiet table of delivery events (C-11.FR-20, reference.md): every message delivery
@@ -154,6 +157,7 @@ var DeliveryEvents = []EventRow{
 	{DeliveryRepublication, FormPublication, groups.Quiet, nil, false},
 	{DeliveryFinalEdit, FormUpdate, groups.Quiet, nil, false},
 	{DeliveryPastEditWindow, FormPublication, groups.Quiet, nil, false},
+	{DeliveryMentionNotDelivered, FormNothing, groups.Quiet, nil, false},
 }
 
 // deliveryEvent is the row name of DeliveryEvents; a name outside the table is a programming error.

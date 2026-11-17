@@ -563,13 +563,18 @@ ORDER BY CASE WHEN @descending::boolean THEN created_at END DESC, CASE WHEN @des
 LIMIT @lim;
 
 -- ListTimelineDeliveryEvents reads the delivery events of an Alert Group for the Timeline, newest first with
--- @descending, after a position.
+-- @descending, after a position: every kind but mention_delivered, which only closes the warnings of a Destination
+-- (C-28.FR-3), with the detail of a mention_not_delivered and the Team its entry's target names.
 -- name: ListTimelineDeliveryEvents :many
 SELECT e.id, e.public_id, e.occurred_at, e.kind, e.loudness, e.mentions, e.error, d.public_id AS destination_public_id,
-       d.name AS destination_name
+       d.name AS destination_name, e.detail, coalesce(mt.public_id, '')::text AS mention_team_public_id,
+       coalesce(mt.name, '')::text AS mention_team_name, coalesce(mt.slug, '')::text AS mention_team_slug,
+       (mt.deleted_at IS NOT NULL)::boolean AS mention_team_deleted
 FROM delivery_events e
 JOIN destinations d ON d.org_id = e.org_id AND d.id = e.destination_id
-WHERE e.org_id = @org_id AND e.alert_group_id = @alert_group_id::bigint
+LEFT JOIN teams mt ON mt.org_id = e.org_id AND e.kind = 'mention_not_delivered'
+                  AND mt.public_id = e.detail -> 'target' ->> 'team_id'
+WHERE e.org_id = @org_id AND e.alert_group_id = @alert_group_id::bigint AND e.kind <> 'mention_delivered'
   AND (sqlc.narg('at')::timestamptz IS NULL
        OR (@descending::boolean
            AND (e.occurred_at, 2, e.id) < (sqlc.narg('at')::timestamptz, @source::int, @id::bigint))

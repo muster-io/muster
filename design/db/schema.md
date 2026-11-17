@@ -120,7 +120,10 @@
   [`0047_escalation_runs`](../../internal/db/migrations/0047_escalation_runs.up.sql)
   (the runs of the chains on Alert Groups, `escalation_runs` and `escalation_run_steps`, the timer kind
   `escalation_step` whose subject is the run, `timers.escalation_run_id`, the columns of the escalation entries of the
-  Timeline and `alert_groups.chain_generation`, C-32.FR-4 to FR-7, FR-14 to FR-18, S-169), in
+  Timeline and `alert_groups.chain_generation`, C-32.FR-4 to FR-7, FR-14 to FR-18, S-169) and
+  [`0048_mention_delivery_events`](../../internal/db/migrations/0048_mention_delivery_events.up.sql)
+  (the delivery events `mention_not_delivered` and `mention_delivered` of undelivered Mentions and the partial index
+  `delivery_events_mentions_idx` that the warnings of the Destinations read, C-28.FR-3, C-11.FR-21, S-165), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1586,7 +1589,23 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   `delivery_events_kind_check` in a third, each under the migration's `lock_timeout`. The `mentions` CHECK takes
   `storm_started` from migration 0043, the Mention of the first publication of a Storm summary (C-28.FR-7), in the same
   three steps (`delivery_events_mentions_v2_check`); its down migration turns `storm_started` back into
-  `new_alert_group`, which an L1 summary carried, and restores `delivery_events_mentions_check`.
+  `new_alert_group`, which an L1 summary carried, and restores `delivery_events_mentions_check`. Migration 0048 widens
+  the `kind` CHECK in the same three steps (`delivery_events_kind_v3_check`) with the events of undelivered Mentions
+  (C-28.FR-3): `mention_not_delivered`, recorded after a delivered Loud message for each person whom a Mention entry
+  named and the message did not mention as their messenger mentions them, and `mention_delivered`, recorded only for
+  a person and entry whose latest such event on the Destination is `mention_not_delivered`, which closes that
+  warning. Both are Quiet, without Mentions; their `detail` holds the person (`user_id`), the entry (`entry_id`,
+  `position` and `target`, the target in the API's form, which identifies the entry across saves of the Destination,
+  which write its entries again), the Loud event (`event`) and, for `mention_not_delivered`, the `reason`
+  (`no_account_link` or `bridge_cannot_mention_people`). The Timeline lists `mention_not_delivered` and never
+  `mention_delivered`. The warnings of a Destination are computed from them, never stored, on the partial index
+  `delivery_events_mentions_idx` `(org_id, destination_id, kind, occurred_at DESC) WHERE kind IN
+  ('mention_not_delivered', 'mention_delivered')`: created on the parent alone, invalid, which every partition created
+  later gets too, then built on each existing partition, oldest first, and attached, in a fourth transaction, so that
+  writes of the current month wait only while its partition is scanned; a partition whose `DETACH … CONCURRENTLY`
+  retention left unfinished (`pg_inherits.inhdetachpending`) is skipped, since it takes no attached index, and the
+  parent's index is valid without it. Its down migration deletes the rows of both
+  kinds, drops the index and restores `delivery_events_kind_v2_check`.
 - **`telegram_post_copies`** — the Telegram Thread mapping buffer: the automatic copy of a channel post in the
   discussion group, keyed by `(connection_id, channel_chat_id, channel_message_id)`, written by whichever replica sees
   the update (the Leader's poller or the webhook) — before or after the send call returns — and learned from the copy or

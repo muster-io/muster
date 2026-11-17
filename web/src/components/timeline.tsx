@@ -298,6 +298,8 @@ export function entryText(
           return t("timeline.delivery.finalEdit", { destination });
         case "republished_past_edit_window":
           return t("timeline.delivery.republishedPastEditWindow", { destination });
+        case "mention_not_delivered":
+          return t("timeline.delivery.mentionNotDelivered", { destination });
         default:
           return t("timeline.delivery.other", { destination });
       }

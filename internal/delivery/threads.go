@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -77,6 +78,8 @@ type replyAttempt struct {
 	root        Root
 	chain       bool
 	anchor      string
+	// resolved are the Mentions of a Loud reply, whose people its delivery records (C-28.FR-3).
+	resolved mentions.Result
 	// after is what its render left to run once the transaction that prepared it committed.
 	after []func(context.Context)
 }
@@ -147,9 +150,9 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		}
 		g := GroupView{ID: row.AlertGroupID, PublicID: row.AlertGroupPublicID, Number: row.Number, Title: row.Title,
 			Status: groups.Status(row.Status), Urgent: row.Urgent}
-		mentions := make([]groups.Mention, len(row.Mentions))
+		ms := make([]groups.Mention, len(row.Mentions))
 		for i, m := range row.Mentions {
-			mentions[i] = groups.Mention(m)
+			ms[i] = groups.Mention(m)
 		}
 		var seq int64
 		if len(row.EventSeqs) > 0 {
@@ -176,14 +179,14 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 				return err
 			}
 		}
-		targets, err := w.targets(ctx, tx, org, d, row.AlertGroupID, 0, seq, groups.Loudness(row.Loudness), mentions)
+		resolved, err := w.targets(ctx, tx, org, d, row.AlertGroupID, 0, seq, groups.Loudness(row.Loudness), ms)
 		if err != nil {
 			return err
 		}
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
-				Mentions: mentions, Targets: targets, Webhook: webhook},
-			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, after: pending}
+				Mentions: ms, Targets: resolved.Targets, Webhook: webhook},
+			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, resolved: resolved, after: pending}
 		if idem, ok := w.idempotent(d.Type); ok {
 			a.call.Key = idem.ReplyKey(d, row.ID)
 		}

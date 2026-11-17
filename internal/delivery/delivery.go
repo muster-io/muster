@@ -213,21 +213,22 @@ type Requests interface {
 // entries for storm_started apply to (C-28.FR-7, C-11.FR-6 revised for L2); an L1 summary carried new_alert_group.
 const MentionStormStarted = groups.Mention(mentions.EventStormStarted)
 
-// Mentioner resolves the symbolic Mentions of a Loud message into the targets of its Destination (C-12.FR-8), reading
-// through the transaction of the call's preparation; declared by its consumer, *mentions.Service implements it.
+// Mentioner resolves the symbolic Mentions of a Loud message into the targets of its Destination (C-12.FR-8), and the
+// people its entries named into those it mentions and those it does not (C-28.FR-3), reading through the transaction
+// of the call's preparation; declared by its consumer, *mentions.Service implements it.
 type Mentioner interface {
-	Resolve(ctx context.Context, db mentions.DBTX, org int64, r mentions.Request) ([]mentions.Target, error)
+	Resolve(ctx context.Context, db mentions.DBTX, org int64, r mentions.Request) (mentions.Result, error)
 }
 
-// targets are the targets of a call of the Destination d about the Alert Group group and its lifecycle event seq, or
-// about the Storm storm of a Storm summary (C-28.FR-3, FR-7): none for a Quiet one, without Mentions or without a
-// Mentioner. The request carries no time: the Mentioner takes the On-call at the time of the event, which it reads in
+// targets are the resolved Mentions of a call of the Destination d about the Alert Group group and its lifecycle event
+// seq, or about the Storm storm of a Storm summary (C-28.FR-3, FR-7): none for a Quiet one, without Mentions or without
+// a Mentioner. The request carries no time: the Mentioner takes the On-call at the time of the event, which it reads in
 // the transaction db, so that a send the limiter delayed or a retry mentions the On-call of the event, not of the
 // attempt.
 func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Destination, group, storm, seq int64,
-	loud groups.Loudness, ms []groups.Mention) ([]mentions.Target, error) {
+	loud groups.Loudness, ms []groups.Mention) (mentions.Result, error) {
 	if w.Mentions == nil || loud != groups.Loud || len(ms) == 0 {
-		return nil, nil
+		return mentions.Result{}, nil
 	}
 	names := make([]string, len(ms))
 	for i, m := range ms {
@@ -236,7 +237,7 @@ func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Des
 	out, err := w.Mentions.Resolve(ctx, db, org, mentions.Request{DestinationID: d.ID, DestinationType: d.Type,
 		ConnectionID: d.Connection, AlertGroupID: group, StormID: storm, Seq: seq, Mentions: names})
 	if err != nil {
-		return nil, fmt.Errorf("resolve the mentions: %w", err)
+		return mentions.Result{}, fmt.Errorf("resolve the mentions: %w", err)
 	}
 	return out, nil
 }
@@ -418,11 +419,12 @@ type queries interface {
 	GetLeasedReply(ctx context.Context, arg dbgen.GetLeasedReplyParams) (dbgen.GetLeasedReplyRow, error)
 	RenewReplyLease(ctx context.Context, arg dbgen.RenewReplyLeaseParams) error
 	RescheduleReply(ctx context.Context, arg dbgen.RescheduleReplyParams) error
-	RecordReplySent(ctx context.Context, arg dbgen.RecordReplySentParams) error
+	RecordReplySent(ctx context.Context, arg dbgen.RecordReplySentParams) (int64, error)
 	RecordReplyRetry(ctx context.Context, arg dbgen.RecordReplyRetryParams) (dbgen.RecordReplyRetryRow, error)
 	NextDeliveryWork(ctx context.Context, arg dbgen.NextDeliveryWorkParams) (dbgen.NextDeliveryWorkRow, error)
 	LimiterDues(ctx context.Context, arg dbgen.LimiterDuesParams) ([]dbgen.LimiterDuesRow, error)
 	InsertDeliveryEvent(ctx context.Context, arg dbgen.InsertDeliveryEventParams) error
+	ListOpenMentions(ctx context.Context, arg dbgen.ListOpenMentionsParams) ([]dbgen.ListOpenMentionsRow, error)
 	GetGroupForDeliveries(ctx context.Context, arg dbgen.GetGroupForDeliveriesParams) (int64, error)
 	ListGroupDeliveries(ctx context.Context, arg dbgen.ListGroupDeliveriesParams) ([]dbgen.ListGroupDeliveriesRow, error)
 	CountDeliveryQueues(ctx context.Context, arg dbgen.CountDeliveryQueuesParams) ([]dbgen.CountDeliveryQueuesRow,

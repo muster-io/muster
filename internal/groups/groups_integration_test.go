@@ -1791,3 +1791,141 @@ func TestIntegrationReminders(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationTimelineMentionEvents is C-28.FR-3, AC-4 and C-11.FR-21 revised for L2 on PostgreSQL, on delivery
+// events as delivery writes them: the Timeline merges mention_not_delivered with its person, the position and target
+// of its entry — the Team of an On-call entry from its join, the person of a person entry — the Loud event and the
+// reason, and leaves out mention_delivered, which only closes the warnings of a Destination; the kind filter
+// delivery does too, and pages of one, newest first and oldest first, walk past the left-out row to the same entries
+// as one page; another Organization's event and another Alert Group's are not listed.
+func TestIntegrationTimelineMentionEvents(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		e.route(t, "db", "db", "alertname")
+		const s1 = "2026-10-07T11:00:00Z"
+		e.process(t, `{}:{alertname=\"a\"}`, alert("firing", s1, "alertname", "a", "team", "db", "pod", "a"))
+		e.process(t, `{}:{alertname=\"b\"}`, alert("firing", s1, "alertname", "b", "team", "db", "pod", "b"))
+		ga, gb := e.groupOf(t, "a"), e.groupOf(t, "b")
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			if _, err := e.d.Pool.Exec(ctx, sql, args...); err != nil {
+				t.Fatalf("%s: %v", sql, err)
+			}
+		}
+		var conn, dest, other int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+			mattermost_server_url, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit,
+			limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAA1', 'mattermost', 'bot',
+			'https://mm.example.org', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, e.orgID, t0).Scan(
+			&conn); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+			mattermost_team_id, mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at,
+			updated_at) VALUES ($1, 'DSAAAAAAAAAAA1', 'mattermost', 'payments-notice', $2, 'team', 'chan', '{}', 1000,
+			1, 'healthy', $3, $3) RETURNING id`, e.orgID, conn, t0).Scan(&dest); err != nil {
+			t.Fatal(err)
+		}
+		exec(`INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			VALUES ($1, 'TMAAAAAAAAAAP1', 'Payments', 'payments', $2, $2)`, e.orgID, t0)
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO organizations (public_id, name, time_zone, severity_label,
+			severity_mapping, severity_styles, critical_is_urgent, instance_labels, retention_stored_snapshots_days,
+			retention_alert_details_days, retention_alert_group_summaries_days, retention_audit_log_days,
+			totp_required, oidc_token_grace_seconds, created_at, updated_at)
+			VALUES ('RG0000000000BB', 'Other', 'UTC', 'severity', '[]', '[]', true, '{}', 14, 90, 730, 365, 'nobody',
+			604800, $1, $1) RETURNING id`, t0).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		bob := e.user(t, "SRAAAAAAAAAAB1", "bob")
+		onCall := `{"kind":"on_call_of_team","team_id":"TMAAAAAAAAAAP1"}`
+		person := `{"kind":"user","user_id":"SRAAAAAAAAAAB1"}`
+		n := 0
+		event := func(org int64, group, kind, detail string, at time.Duration) {
+			t.Helper()
+			n++
+			exec(`INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, alert_group_id, kind,
+				loudness, detail) SELECT $1, $2, $3, $4, id, $5, 'quiet', $6::jsonb FROM alert_groups
+				WHERE public_id = $7`, org, fmt.Sprintf("DE%012d", n), t0.Add(at), dest, kind, detail, group)
+		}
+		detail := func(target, event, reason string) string {
+			return fmt.Sprintf(`{"user_id":%d,"entry_id":7,"position":1,"target":%s,"event":%q,"reason":%q}`, bob,
+				target, event, reason)
+		}
+		exec(`INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, alert_group_id, kind,
+			loudness) SELECT $1, 'DE00000000PB01', $2, $3, id, 'publication', 'loud' FROM alert_groups
+			WHERE public_id = $4`, e.orgID, t0.Add(time.Second), dest, ga)
+		event(e.orgID, ga, "mention_not_delivered", detail(onCall, "new_alert_group", "no_account_link"), 2*time.Second)
+		event(e.orgID, ga, "mention_delivered", detail(onCall, "new_alerts", ""), 3*time.Second)
+		event(e.orgID, ga, "mention_not_delivered", detail(person, "reopen", "bridge_cannot_mention_people"),
+			4*time.Second)
+		event(e.orgID, gb, "mention_not_delivered", detail(person, "new_alert_group", "no_account_link"),
+			5*time.Second)
+		event(other, ga, "mention_not_delivered", detail(person, "new_alert_group", "no_account_link"),
+			6*time.Second)
+
+		describe := func(es []groups.TimelineEntry) []string {
+			var out []string
+			for _, x := range es {
+				if x.Kind != groups.KindDelivery {
+					continue
+				}
+				s := x.Delivery.Event
+				if m := x.Delivery.Mention; m != nil {
+					team, user := "", ""
+					if m.Target.Team != nil {
+						team = m.Target.Team.Slug
+					}
+					if m.Target.User != nil {
+						user = m.Target.User.Login
+					}
+					s += fmt.Sprintf(" %s/%d/%s/%s%s/%s/%s", m.User.Login, m.Position, m.Target.Kind, team, user,
+						m.Event, m.Reason)
+				}
+				out = append(out, s)
+			}
+			return out
+		}
+		want := []string{"mention_not_delivered bob/1/user/bob/reopen/bridge_cannot_mention_people",
+			"mention_not_delivered bob/1/on_call_of_team/payments/new_alert_group/no_account_link", "publication"}
+		walk := func(f groups.TimelineFilter) []groups.TimelineEntry {
+			t.Helper()
+			var out []groups.TimelineEntry
+			for {
+				page, err := e.groups.Timeline(ctx, ga, f)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, page.Entries...)
+				if page.Next == nil {
+					return out
+				}
+				f.After = page.Next
+			}
+		}
+		all := walk(groups.TimelineFilter{Limit: 100})
+		if got := describe(all); !slices.Equal(got, want) {
+			t.Errorf("one page = %q, want %q", got, want)
+		}
+		if got := describe(walk(groups.TimelineFilter{Limit: 100, Kinds: []groups.Kind{groups.KindDelivery}})); !slices.
+			Equal(got, want) {
+			t.Errorf("kind delivery = %q", got)
+		}
+		paged := walk(groups.TimelineFilter{Limit: 1})
+		if len(paged) != len(all) || !slices.Equal(describe(paged), want) {
+			t.Errorf("pages of one = %d entries %q, one page %d", len(paged), describe(paged), len(all))
+		}
+		asc := walk(groups.TimelineFilter{Limit: 1, Ascending: true})
+		slices.Reverse(want)
+		if got := describe(asc); len(asc) != len(all) || !slices.Equal(got, want) {
+			t.Errorf("oldest first in pages of one = %q", got)
+		}
+		if got := describe(walk(groups.TimelineFilter{Limit: 1, Kinds: []groups.Kind{groups.KindDelivery}})); len(
+			got) != 3 {
+			t.Errorf("kind delivery in pages of one = %q", got)
+		}
+		if n := e.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'mention_delivered'`); n != 1 {
+			t.Errorf("%d mention_delivered rows", n)
+		}
+	})
+}

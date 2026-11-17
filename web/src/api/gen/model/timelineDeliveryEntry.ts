@@ -8,6 +8,7 @@ import type { Loudness } from './loudness';
 import type { MentionName } from './mentionName';
 import type { TimelineDeliveryEntryKind } from './timelineDeliveryEntryKind';
 import type { TimelineEntryBase } from './timelineEntryBase';
+import type { UndeliveredMention } from './undeliveredMention';
 
 export type TimelineDeliveryEntry = TimelineEntryBase & ({
   kind: TimelineDeliveryEntryKind;
@@ -21,4 +22,6 @@ export type TimelineDeliveryEntry = TimelineEntryBase & ({
   loudness: Loudness;
   /** Mentions the delivery event carried (see the Loud and Quiet table of delivery events). */
   mentions: MentionName[];
+  /** For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); nothing was written in the Thread for it. */
+  mention?: UndeliveredMention;
 });

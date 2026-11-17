@@ -36,6 +36,11 @@ const (
 	// EventRepublishedPastEditWindow is a Bridge Root message past its edit window published again on a change of
 	// status (C-22.FR-9).
 	EventRepublishedPastEditWindow EventKind = "republished_past_edit_window"
+	// EventMentionNotDelivered is a person whom a Mention entry named and a delivered Loud message did not mention as
+	// their messenger mentions them (C-28.FR-3); EventMentionDelivered a later one that did, recorded only to close
+	// the warning of the person and the entry, never listed by the Timeline (mentions.go).
+	EventMentionNotDelivered EventKind = "mention_not_delivered"
+	EventMentionDelivered    EventKind = "mention_delivered"
 )
 
 // Event is one delivery event: when it happened, its Destination and, when it concerns one, its Alert Group or the

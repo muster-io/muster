@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1229,18 +1230,19 @@ func (f *fakeDB) RescheduleReply(_ context.Context, arg dbgen.RescheduleReplyPar
 	return nil
 }
 
-func (f *fakeDB) RecordReplySent(_ context.Context, arg dbgen.RecordReplySentParams) error {
+func (f *fakeDB) RecordReplySent(_ context.Context, arg dbgen.RecordReplySentParams) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("RecordReplySent"); err != nil {
-		return err
+		return 0, err
 	}
 	f.replyLocks = append(f.replyLocks, "sent")
 	if r := f.reply(arg.ID); r.owner == arg.Owner {
 		r.state, r.sentAt, r.messageID, r.owner, r.until = "sent", at(arg.Now), strOf(arg.MessageID), "", time.Time{}
 		r.buttonKeyID = strOf(arg.ButtonKeyID)
+		return 1, nil
 	}
-	return nil
+	return 0, nil
 }
 
 func (f *fakeDB) RecordReplyRetry(_ context.Context, arg dbgen.RecordReplyRetryParams) (dbgen.RecordReplyRetryRow,
@@ -1314,6 +1316,49 @@ func (f *fakeDB) InsertDeliveryEvent(_ context.Context, arg dbgen.InsertDelivery
 	}
 	f.events = append(f.events, arg)
 	return nil
+}
+
+// ListOpenMentions is the latest mention event of the Destination per person and target since arg.Since, among the
+// people, where it is mention_not_delivered.
+func (f *fakeDB) ListOpenMentions(_ context.Context, arg dbgen.ListOpenMentionsParams) ([]dbgen.ListOpenMentionsRow,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListOpenMentions"); err != nil {
+		return nil, err
+	}
+	type key struct{ user, target string }
+	latest := map[key]string{}
+	var order []key
+	for _, e := range f.events {
+		if e.OrgID != arg.OrgID || e.DestinationID != arg.DestinationID || e.OccurredAt.Before(arg.Since) ||
+			(e.Kind != "mention_not_delivered" && e.Kind != "mention_delivered") {
+			continue
+		}
+		var d struct {
+			UserID int64           `json:"user_id"`
+			Target json.RawMessage `json:"target"`
+		}
+		if err := json.Unmarshal(e.Detail, &d); err != nil {
+			return nil, err
+		}
+		k := key{strconv.FormatInt(d.UserID, 10), string(d.Target)}
+		if !slices.Contains(arg.UserIds, k.user) {
+			continue
+		}
+		if _, ok := latest[k]; !ok {
+			order = append(order, k)
+		}
+		latest[k] = e.Kind
+	}
+	var out []dbgen.ListOpenMentionsRow
+	for _, k := range order {
+		if latest[k] == "mention_not_delivered" {
+			id, _ := strconv.ParseInt(k.user, 10, 64)
+			out = append(out, dbgen.ListOpenMentionsRow{UserID: id, Target: []byte(k.target)})
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeDB) GetGroupForDeliveries(_ context.Context, arg dbgen.GetGroupForDeliveriesParams) (int64, error) {

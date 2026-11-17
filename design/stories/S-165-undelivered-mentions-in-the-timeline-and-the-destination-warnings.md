@@ -8,23 +8,45 @@ depends_on: [S-140]
 covers: [C-28.FR-3, C-28.AC-3, C-28.AC-4, C-11.FR-21, C-12.FR-12, C-22.FR-16]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0035_mention_delivery_events.up.sql
-  - internal/db/migrations/0035_mention_delivery_events.down.sql
+  - internal/db/migrations/0048_mention_delivery_events.up.sql
+  - internal/db/migrations/0048_mention_delivery_events.down.sql
   - design/db/schema.md
+  - docs/install/versions.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/mentions/mentions.go
   - internal/mentions/mentions_test.go
+  - internal/mentions/entries.go
+  - internal/mentions/entries_test.go
+  - internal/mentions/query.sql
+  - internal/mentions/connection_integration_test.go
   - internal/delivery/events.go
+  - internal/delivery/enqueue.go
   - internal/delivery/mentions.go
   - internal/delivery/mentions_test.go
+  - internal/delivery/mentions_integration_test.go
+  - internal/delivery/membership_test.go
+  - internal/delivery/live_test.go
   - internal/delivery/worker.go
+  - internal/delivery/delivery.go
+  - internal/delivery/outcomes.go
+  - internal/delivery/threads.go
+  - internal/delivery/webhookevents.go
   - internal/delivery/query.sql
+  - internal/delivery/threads_test.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/lockorder_integration_test.go
   - internal/groups/read.go
   - internal/groups/query.sql
+  - internal/groups/dispatcher_test.go
+  - internal/groups/groups_integration_test.go
   - internal/destinations/warnings.go
   - internal/destinations/warnings_test.go
+  - internal/destinations/warnings_integration_test.go
+  - internal/destinations/destinations.go
+  - internal/destinations/destinations_test.go
   - internal/destinations/query.sql
+  - internal/runtime/runtime_test.go
   - internal/api/destinations.go
   - internal/api/destinations_test.go
   - internal/api/alertgroups.go
@@ -33,13 +55,14 @@ files_touched:
   - web/src/test/fixtures/destinations.ts
   - docs/concepts/mentions.md
   - web/src/components/timeline.tsx
+  - web/src/components/timeline.test.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
 acceptance:
   - "[C-28.FR-3, C-28.AC-4, C-11.FR-21, C-12.FR-12] When the On-call whom an entry names has no Account link in the Destination's Identity space, nothing is posted in the Thread for them, and the Alert Group's Timeline has one delivery event `mention_not_delivered` per person, entry and message, with the person, the entry, the Loud event and the reason `no_account_link` (`mentions_test.go`, `mention_warnings_test.go`)."
-  - "[C-28.FR-3, C-28.AC-3, C-22.FR-16] Through a bridge without `native_mentions`, a linked person is sent by the plain name and the Timeline records `mention_not_delivered` with the reason `bridge_cannot_mention_people` (`mentions_test.go`)."
+  - "[C-28.FR-3, C-28.AC-3, C-22.FR-16] Through a bridge without `native_mentions`, a linked person is sent by the plain name and the Timeline records `mention_not_delivered` with the reason `bridge_cannot_mention_people` (`mentions_test.go`, `TestIntegrationNativeMentions` in `internal/mentions`, e2e `TestMentionWarnings`)."
   - "[C-28.FR-3, C-28.AC-4] `getDestination` carries `mention_warnings` — each person and entry whose latest such delivery event is not followed by a delivered Mention of that person through that entry, with the messenger, the reason and since when — computed from the delivery events, not stored; after the person links an account, the next Loud message that mentions them through that entry records `mention_delivered` and the warning is gone (`warnings_test.go`, `mention_warnings_test.go`)."
-  - "[C-11.FR-21] `mention_delivered` is recorded only for a person and entry with an open warning on that Destination, is not merged into the Timeline, and both kinds are kept for `retention.alert_details` like every delivery event (`mentions_test.go`, `alertgroups_test.go`)."
+  - "[C-11.FR-21] `mention_delivered` is recorded only for a person and entry with an open warning on that Destination, is not merged into the Timeline, and both kinds are kept for `retention.alert_details` like every delivery event (`TestMentionEvents`, `TestMentionDeliveredRetention` and `TestIntegrationListOpenMentions` in `internal/delivery`, `TestIntegrationTimelineMentionEvents` in `internal/groups`, `TestIntegrationMentionWarnings` in `internal/destinations`, e2e `TestMentionWarnings`)."
   - "[C-28.FR-3] Concepts → Whom a message mentions has \"Undelivered Mentions\": nothing in the Thread, the Timeline entry and the warning on the Destination page, and how it clears; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -74,23 +97,36 @@ issue: 454
     `mention_not_delivered`.
   - The Destination reads gain `mention_warnings` (`MentionWarning`[] {`user`, `entry`, `messenger` (`ConnectionType`),
     `reason`, `since`}).
-- **Schema** (migration `0035_mention_delivery_events`, expand only; `schema.md` §4.11):
+- **Schema** (migration `0048_mention_delivery_events`, expand only; `schema.md` §4.11; upgrade and recovery notes in
+  `docs/install/versions.md`):
   `delivery_events_kind_v3_check` adds `mention_not_delivered` and `mention_delivered`, `NOT VALID` on the partitioned
   table, validated in a second transaction, `delivery_events_kind_v2_check` dropped in a third, as `0010` does; the
-  `detail` of these events holds the person's id, the entry's id and position, the Loud event and the reason. An index
+  `detail` of these events holds the person's id, the entry's id, position and target, the Loud event and the reason.
+  The target identifies the entry across saves of the Destination, which write its entries again with new ids. An index
   `(org_id, destination_id, kind, occurred_at DESC) WHERE kind IN ('mention_not_delivered', 'mention_delivered')` backs
-  the warnings. The down migration restores `_v2`, after deleting the rows of the new kinds.
+  the warnings: created on the partitioned table alone first, invalid, then built on each partition, oldest first, and
+  attached in a fourth transaction, so that only the scan of the current month's partition holds back its writes; a
+  partition whose concurrent detach by retention is pending is skipped. The
+  down migration restores `_v2`, after deleting the rows of the new kinds, and drops the index.
 - **Mentions** (`internal/mentions/mentions.go`): `Resolve` also returns, for each person an entry named and the
   message left out — no Account link — or named by the plain name — a bridge without `native_mentions` — an
   `Undelivered` with the entry and the reason, and for each person it mentioned the entry.
-- **Delivery** (`internal/delivery/mentions.go`, `events.go`, `worker.go`): after a Loud message is delivered, the
-  worker records one `mention_not_delivered` per `Undelivered`, and one `mention_delivered` for each mentioned person
-  and entry that has an open warning on the Destination; a message that ends Not delivered records neither. Nothing is
-  posted for them (ADR-0005, journal D567).
+- **Delivery** (`internal/delivery/mentions.go`, `events.go`, `worker.go`, `outcomes.go`, `threads.go`): after a Loud
+  message is delivered — a first Publication or a Thread reply, in the transaction that records it delivered under its
+  lease, so that a delivery retried after a lost lease or a crash records them once — the worker records one
+  `mention_not_delivered` per `Undelivered`, and one `mention_delivered` for each mentioned person and entry that has an
+  open warning on the Destination; a message that ends Not delivered records neither. The first publication of a Storm
+  summary records them with its Storm and no Alert Group, so that they warn on the Destination and appear in no
+  Timeline. Nothing is posted for them (ADR-0005, journal D567): the closed Loud/Quiet table of delivery events
+  (`DeliveryEvents` in `enqueue.go`) gains the row `mention_not_delivered` of `reference.md`, not sent, and its
+  C-11.AC-10 checks (`TestDeliveryEventRows`, the live `deliveryEventRows`) a scenario for it.
 - **Groups** (`internal/groups/read.go`): the Timeline merges `mention_not_delivered` with its `mention` fields, and
   leaves `mention_delivered` out.
 - **Destinations** (`internal/destinations/warnings.go`, `query.sql`): `mention_warnings`, the latest event per person
-  and entry of the Destination's delivery events still kept, those whose latest is `mention_not_delivered`. The field is
+  and entry of the Destination's delivery events still kept, those whose latest is `mention_not_delivered`, with the
+  reason of the latest and since the first `mention_not_delivered` after the person's last `mention_delivered` through
+  the entry; the entry as it is on the Destination now, so that a warning whose entry was removed since is dropped, and
+  none for a deleted User. The field is
   required on every Destination read, so `listDestinations` computes it in one query for the whole page — the
   Destinations of the page as an array parameter, the latest event per Destination, person and entry over the
   partitioned `delivery_events` — and never once per item; `warnings_test.go` covers a page of several Destinations
@@ -153,8 +189,8 @@ None.
 ## Notes
 
 - Suggested commit: `feat(delivery): record undelivered mentions and warn about them on the destination`.
-- Migration `0035` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request (S-131's Notes).
+- Migration `0048`: the story map gave it `0035`, and stories merged before it took `0035` to `0047`, so it takes the
+  next free number in its own pull request (S-131's Notes).
 - Split from S-140 at the contract boundary between whom a message mentions and what is recorded when it cannot: S-140
   would have exceeded the size of a story with it. It takes the next free ID, S-165, and keeps its place after S-140 in
   the story map.

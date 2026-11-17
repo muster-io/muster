@@ -23,4 +23,5 @@ export const DeliveryEventKind = {
   storm_summary: 'storm_summary',
   final_edit: 'final_edit',
   republished_past_edit_window: 'republished_past_edit_window',
+  mention_not_delivered: 'mention_not_delivered',
 } as const;

@@ -4406,10 +4406,14 @@ func (q *Queries) ListTimelineChains(ctx context.Context, arg ListTimelineChains
 
 const listTimelineDeliveryEvents = `-- name: ListTimelineDeliveryEvents :many
 SELECT e.id, e.public_id, e.occurred_at, e.kind, e.loudness, e.mentions, e.error, d.public_id AS destination_public_id,
-       d.name AS destination_name
+       d.name AS destination_name, e.detail, coalesce(mt.public_id, '')::text AS mention_team_public_id,
+       coalesce(mt.name, '')::text AS mention_team_name, coalesce(mt.slug, '')::text AS mention_team_slug,
+       (mt.deleted_at IS NOT NULL)::boolean AS mention_team_deleted
 FROM delivery_events e
 JOIN destinations d ON d.org_id = e.org_id AND d.id = e.destination_id
-WHERE e.org_id = $1 AND e.alert_group_id = $2::bigint
+LEFT JOIN teams mt ON mt.org_id = e.org_id AND e.kind = 'mention_not_delivered'
+                  AND mt.public_id = e.detail -> 'target' ->> 'team_id'
+WHERE e.org_id = $1 AND e.alert_group_id = $2::bigint AND e.kind <> 'mention_delivered'
   AND ($3::timestamptz IS NULL
        OR ($4::boolean
            AND (e.occurred_at, 2, e.id) < ($3::timestamptz, $5::int, $6::bigint))
@@ -4440,10 +4444,16 @@ type ListTimelineDeliveryEventsRow struct {
 	Error               pgtype.Text
 	DestinationPublicID string
 	DestinationName     string
+	Detail              []byte
+	MentionTeamPublicID string
+	MentionTeamName     string
+	MentionTeamSlug     string
+	MentionTeamDeleted  bool
 }
 
 // ListTimelineDeliveryEvents reads the delivery events of an Alert Group for the Timeline, newest first with
-// @descending, after a position.
+// @descending, after a position: every kind but mention_delivered, which only closes the warnings of a Destination
+// (C-28.FR-3), with the detail of a mention_not_delivered and the Team its entry's target names.
 func (q *Queries) ListTimelineDeliveryEvents(ctx context.Context, arg ListTimelineDeliveryEventsParams) ([]ListTimelineDeliveryEventsRow, error) {
 	rows, err := q.db.Query(ctx, listTimelineDeliveryEvents,
 		arg.OrgID,
@@ -4471,6 +4481,11 @@ func (q *Queries) ListTimelineDeliveryEvents(ctx context.Context, arg ListTimeli
 			&i.Error,
 			&i.DestinationPublicID,
 			&i.DestinationName,
+			&i.Detail,
+			&i.MentionTeamPublicID,
+			&i.MentionTeamName,
+			&i.MentionTeamSlug,
+			&i.MentionTeamDeleted,
 		); err != nil {
 			return nil, err
 		}
