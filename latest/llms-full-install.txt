@@ -788,6 +788,13 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       its Destination reads have no `mention_warnings`, and its Timeline lists both kinds, `mention_delivered`
       included, as delivery events of a kind it does not know, which its web UI shows as "Delivery event in
       {Destination}".
+    - Migration 0049 adds the [Pages by Mention](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page) of the Escalation
+      chains, the people they name, the runs of the Notification rules and the timers of their waits, which name the
+      rule run rather than the Alert Group, and the Thread replies of Pages, none after the upgrade: the chains Page
+      from their next step on. It is expand only: a replica without it makes no Page — its steps that Page are made
+      without a Thread reply, as before — never claims the timers of rule runs, and stops no rule run when it
+      acknowledges, snoozes or resolves an Alert Group, whose rule runs then stop at their next action, without making
+      it; let the rollout finish before relying on Pages.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -1439,6 +1446,45 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Going back below 0048 deletes every `mention_not_delivered` and `mention_delivered`: the Timelines no longer say
     that a Mention was not delivered, and the Destinations warn of nothing until a replica with 0048 records the next
     undelivered Mention.
+
+    Migration 0049 adds the Pages in three transactions: the first adds the tables, the columns, and the new CHECKs
+    and the foreign keys of the new columns of the Thread replies and the timers, `NOT VALID`; the second validates
+    them; the third drops the CHECKs they replace. Each gives up after 5 seconds of waiting for a lock (`lock_timeout`), and PostgreSQL may end the first on
+    a deadlock with the running replicas, which change the timers, Thread replies and Timeline it alters; run the
+    upgrade at a quiet time. Any such failure leaves the schema recorded as dirty at version 49, and the 0.2.0 replica
+    refuses to start with `schema_dirty`. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'pages';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 48, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE thread_replies VALIDATE CONSTRAINT thread_replies_page_id_fkey;
+        ALTER TABLE thread_replies VALIDATE CONSTRAINT thread_replies_event_v2_check;
+        ALTER TABLE thread_replies VALIDATE CONSTRAINT thread_replies_mentions_v2_check;
+        ALTER TABLE timers VALIDATE CONSTRAINT timers_notification_rule_run_id_fkey;
+        ALTER TABLE timers VALIDATE CONSTRAINT timers_kind_v3_check;
+        ALTER TABLE timers VALIDATE CONSTRAINT timers_subject_v3_check;
+        ALTER TABLE thread_replies
+            DROP CONSTRAINT IF EXISTS thread_replies_event_check,
+            DROP CONSTRAINT IF EXISTS thread_replies_mentions_check;
+        ALTER TABLE timers
+            DROP CONSTRAINT IF EXISTS timers_kind_v2_check,
+            DROP CONSTRAINT IF EXISTS timers_subject_v2_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0049 deletes the timers of rule runs and the Thread replies of Pages, and loses every Page with the
+    people it named and every run of a Notification rule; the Timeline keeps its `paged` and `page_not_delivered`
+    entries without the Team mention or token and the importance of a Page.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

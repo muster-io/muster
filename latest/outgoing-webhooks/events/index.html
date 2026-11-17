@@ -3547,19 +3547,29 @@ value and Alert Group.</dd>
 <dd><code>notify</code>: true while firing; false while acknowledged or snoozed. The Alert Group, already published elsewhere,
 reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
 Destination, named in <code>destination</code> (<a href="../../concepts/routing-to-teams/">Routing to Teams</a>).</dd>
+<dt><code>paged</code></dt>
+<dd><code>notify</code>: true. A step of an Escalation chain, or an action of a person's Notification rule, Paged people, a Team
+or everyone in the chat by a Mention in the Threads of the chain's Destinations
+(<a href="../../concepts/escalation-chains/#where-chains-page">Where chains Page</a>). The people as <code>mentions</code> data come in
+a later version; until then <code>mentions</code> is empty.</dd>
 <dt><code>page_not_delivered</code></dt>
 <dd><code>notify</code>: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
 refused it (<code>call_refused</code>), answered what Muster cannot classify (<code>call_unknown</code>), kept failing until the retry
 budget was used (<code>call_budget_used</code>), the person had no confirmed contact at the gateway
-(<code>no_confirmed_contact</code>), or the gateway was deleted before the call was sent (<code>gateway_deleted</code>); named in
-<code>page</code> (<a href="../../messengers/notification-gateways/">Notification gateways</a>).</dd>
+(<code>no_confirmed_contact</code>), or the gateway was deleted before the call was sent (<code>gateway_deleted</code>); or a Page by
+Mention reached its person nowhere: no Destination of the chain has the Alert Group's Root message
+(<code>no_root_message</code>), the person has no Account link in any of their Identity spaces (<code>no_account_link</code>), or every
+Thread reply that would mention them ended Not delivered or was withheld (<code>not_delivered</code>); named in <code>page</code>
+(<a href="../../messengers/notification-gateways/">Notification gateways</a>,
+<a href="../../concepts/escalation-chains/#undelivered-pages">Undelivered Pages</a>).</dd>
 <dt><code>escalation_step_skipped</code></dt>
 <dd><code>notify</code>: false. A step of an Escalation chain on the Alert Group was skipped, and the chain went on with its next
 step: outside the Working hours of its chain (<code>outside_working_hours</code>), for a Severity level its condition does not
 meet (<code>severity</code>), in a gap of the Schedule it Pages (<code>schedule_gap</code>), for a person it names who became a Viewer
 (<code>viewer</code>) or was disabled (<code>disabled</code>) since it was saved, or for a step "Send to an outgoing webhook" whose
 Destination was deleted (<code>destination_deleted</code>) or is no longer an outgoing webhook in the mode events or both
-(<code>webhook_events_required</code>); named in <code>escalation_step</code>
+(<code>webhook_events_required</code>), or for a step "Page the whole Team" that none of its chain's Destinations can
+mention (<code>no_mention_possible</code>); named in <code>escalation_step</code>
 (<a href="../../concepts/escalation-chains/#when-chains-run">Escalation chains</a>).</dd>
 <dt><code>escalation_webhook</code></dt>
 <dd><code>notify</code>: false. A step "Send to an outgoing webhook" of an Escalation chain on the Alert Group was made. Unlike

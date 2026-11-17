@@ -3261,6 +3261,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#muster_pages_total" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>muster_pages_total</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#muster_request_log_pruned_total" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4030,6 +4041,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#muster_pages_total" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>muster_pages_total</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#muster_request_log_pruned_total" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4416,6 +4438,14 @@ metric is exported only by the replica that is the Leader. The capability is the
 <p>Background re-checks of OIDC users at the identity provider, by outcome.</p>
 <ul>
 <li><code>outcome</code>: <code>ok</code>, <code>refused</code>, <code>unavailable</code>, <code>skipped</code> — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider</li>
+</ul>
+<h3 id="muster_pages_total"><code>muster_pages_total</code><a class="headerlink" href="#muster_pages_total" title="Permanent link">&para;</a></h3>
+<p>counter · labels: <code>chain</code>, <code>kind</code>, <code>outcome</code> · C-32 · exported by every replica</p>
+<p>Pages of Escalation chains and Notification rules, one per Page once it ended, by the chain, the kind (mention, call) and the outcome (delivered, not_delivered); a Page whose chain was deleted is not counted.</p>
+<ul>
+<li><code>chain</code> (entity): the public_id of the chain</li>
+<li><code>kind</code>: <code>mention</code>, <code>call</code> — mention, a Thread reply that mentions; call, a call through a Notification gateway</li>
+<li><code>outcome</code>: <code>delivered</code>, <code>not_delivered</code> — delivered, or not_delivered</li>
 </ul>
 <h3 id="muster_request_log_pruned_total"><code>muster_request_log_pruned_total</code><a class="headerlink" href="#muster_request_log_pruned_total" title="Permanent link">&para;</a></h3>
 <p>counter · no labels · C-23 · exported by every replica</p>
