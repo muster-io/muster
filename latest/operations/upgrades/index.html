@@ -3218,6 +3218,11 @@ single replica nothing else is needed.</p>
 <p>Migrations are SQL files built into the binary. They run through <code>muster migrate</code> or, when
 <code>MUSTER_MIGRATE_ON_START</code> is <code>true</code>, at server start, in both cases under a session advisory lock and with the
 applied versions in the log.</p>
+<p>A transaction of a migration that PostgreSQL ends on a deadlock or a lock timeout, as it can with the replicas of the
+previous version during a rolling update, is rolled back and runs again after one second, then after two, each retry
+logged as <a href="../../reference/log-events/#migration_retried"><code>migration_retried</code></a>; the transactions of the migration that
+already committed do not run again. When the third attempt fails too, the migration fails and leaves the schema dirty
+at its version.</p>
 <p>Every migration follows <strong>expand and contract</strong>: a release only adds what the previous release can ignore, and removes
 what the previous release no longer uses in a later release. That is why a rolling update between adjacent minor
 versions works: while the new schema is in place, the replicas of the old version still run on it.</p>

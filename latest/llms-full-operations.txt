@@ -133,6 +133,12 @@ Migrations are SQL files built into the binary. They run through `muster migrate
 `MUSTER_MIGRATE_ON_START` is `true`, at server start, in both cases under a session advisory lock and with the
 applied versions in the log.
 
+A transaction of a migration that PostgreSQL ends on a deadlock or a lock timeout, as it can with the replicas of the
+previous version during a rolling update, is rolled back and runs again after one second, then after two, each retry
+logged as [`migration_retried`](https://muster-io.github.io/muster/latest/reference/log-events.md#migration_retried); the transactions of the migration that
+already committed do not run again. When the third attempt fails too, the migration fails and leaves the schema dirty
+at its version.
+
 Every migration follows **expand and contract**: a release only adds what the previous release can ignore, and removes
 what the previous release no longer uses in a later release. That is why a rolling update between adjacent minor
 versions works: while the new schema is in place, the replicas of the old version still run on it.

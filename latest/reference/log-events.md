@@ -482,6 +482,12 @@ INFO · fields: `connection`, `group`, `command`, `outcome`, `answer`, `error` �
 
 The callback of a Mattermost Connection received a button press and answered 200 with a JSON object, never with update: connection is the public_id of the Connection, empty when it does not exist; group the public_id of the Alert Group and command the Command, once the signed action id is verified; outcome done or unchanged for a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing and was answered, a not_verified one only on a post delivered to a Destination of the Connection in the channel of the press; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, answered that the button has expired; test for a press of a test message by a person, answered that nothing changed, and test_press for the bot's own press of it during a Destination test, answered with nothing; invalid_request for a body that is not a press, unknown_connection, or failed, answered once the press is bound to its post; answer how the person was answered: ephemeral_post for an ephemeral post in the channel, or in the Thread of the Root message for a press on a Reminder, ephemeral_text for the text in the callback's answer, shown in the Thread, when that post was not made, absent when nothing was answered; error why the press failed or why its ephemeral post was not sent, masked of secrets, never the 403 of a bot without the permission to make ephemeral posts.
 
+### `migration_retried`
+
+WARN · fields: `version`, `attempt`, `sqlstate` · C-02
+
+A transaction of the migration to version ended on a deadlock (sqlstate 40P01) or a lock timeout (55P03), usually with the replicas that still run during a rolling update: it was rolled back and runs again, with the rest of the migration, after a wait of attempt seconds; the transactions of the migration that committed do not run again. attempt is the attempt that failed, of three; when the third fails, the migration fails.
+
 ### `migrations_applied`
 
 INFO · fields: `from`, `to` · C-02

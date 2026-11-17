@@ -3546,6 +3546,10 @@ to the Teams from the label" after every replica runs 0.2.0.</p>
 that exact group name, is a subtree: <code>platform/*</code> matches <code>platform</code> and every group below it. An entry with <code>*</code>
 anywhere else still matches only that exact group name, but saving the OIDC settings is refused with <code>422</code>
 <code>invalid_format</code> at that entry until it is changed or removed.</p>
+<p><strong>Migrations that wait for locks.</strong> A transaction of a migration that gives up on a lock timeout or ends on a
+deadlock runs again twice, after one second and then after two, each retry logged as <code>migration_retried</code> (see
+<a href="../../operations/upgrades/#migrations">Upgrades</a>); the transactions of the migration that committed before it stay
+applied. The failures that the notes below describe are those of the third attempt.</p>
 <p>Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
 and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
 waiting for a lock (<code>lock_timeout</code>) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
