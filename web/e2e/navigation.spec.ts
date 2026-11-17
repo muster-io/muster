@@ -69,6 +69,25 @@ async function user(login: string, role: string, password: string) {
   }
 }
 
+test("the logo leads to the Home page, which signing in lands on and the navigation has no entry for", async ({
+  page,
+}) => {
+  const csp = watchCsp(page);
+  await signInAdmin(page);
+  await expect(page).toHaveURL(`${APP}/`);
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+  await expect(main(page).getByRole("link", { name: "Home" })).toHaveCount(0);
+  for (const target of ["/teams", "/alert-groups", "/profile"]) {
+    await page.goto(target);
+    const logo = page.getByRole("banner").getByRole("link", { name: /^Muster/ });
+    await expect(logo).toHaveAttribute("href", "/");
+    await logo.click();
+    await expect(page).toHaveURL(`${APP}/`);
+    await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+  }
+  expect(csp).toEqual([]);
+});
+
 test("an Admin's main navigation has nine entries that fit 1280 px wide", async ({ page }) => {
   const csp = watchCsp(page);
   await signInAdmin(page);

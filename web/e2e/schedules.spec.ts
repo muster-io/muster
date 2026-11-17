@@ -774,3 +774,93 @@ test("the Schedule page reads in Russian and fits 360 px", async ({ browser }) =
   await context.close();
   expect(csp).toEqual([]);
 });
+
+test("the iCal subscription shows the link once, a reload does not show it again, Revoke ends it and a new link replaces the old one", async ({
+  page,
+}) => {
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  try {
+    await admin.call("DELETE", "/api/v1/me/ical-feed");
+  } finally {
+    await admin.dispose();
+  }
+  await signIn(page, "admin@example.org", "muster-dev-password");
+  await openMain(page);
+  const section = page.getByTestId("ical-subscription");
+  await expect(section.getByRole("heading", { name: "iCal subscription", level: 2 })).toBeVisible();
+  await expect(
+    section.getByText(
+      "A personal link for your calendar application. It is shown once; a revoked link stops working at once.",
+    ),
+  ).toBeVisible();
+  await expectTarget(
+    docsLink(section, "Learn more", "iCal subscription"),
+    "concepts/schedules/",
+    "#ical-feed",
+  );
+  await expect(section.getByRole("button", { name: "New link" })).toBeVisible();
+  await expect(section.getByRole("button", { name: "Revoke" })).toHaveCount(0);
+
+  await section.getByRole("button", { name: "New link" }).click();
+  const link = section.getByTestId("ical-link");
+  await expect(link).toContainText("Copy the link now: it will not be shown again");
+  const first = ((await section.getByTestId("ical-url").textContent()) ?? "").trim();
+  expect(first).toMatch(/^http:\/\/localhost:8080\/ical\/mstr_cal_[A-Za-z0-9_-]+\.ics$/);
+  await shot(page, "ical-link-shown");
+  const feed = await page.request.get(first);
+  expect(feed.status()).toBe(200);
+  expect(await feed.text()).toContain("BEGIN:VCALENDAR");
+
+  // Reloading shows no link: only that one exists, with New link and Revoke.
+  await page.reload();
+  await expect(section.getByRole("button", { name: "Revoke" })).toBeVisible();
+  await expect(section.getByRole("button", { name: "New link" })).toBeVisible();
+  await expect(section.getByTestId("ical-link")).toHaveCount(0);
+  await expect(page.getByText("mstr_cal_")).toHaveCount(0);
+  await shot(page, "ical-link-hidden");
+
+  // A new link asks first, and the old one stops working at once.
+  await section.getByRole("button", { name: "New link" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Issue a new link?")).toBeVisible();
+  await dialog.getByRole("button", { name: "New link" }).click();
+  const second = ((await section.getByTestId("ical-url").textContent()) ?? "").trim();
+  expect(second).not.toBe(first);
+  expect((await page.request.get(first)).status()).toBe(404);
+  expect((await page.request.get(second)).status()).toBe(200);
+
+  await section.getByRole("button", { name: "Revoke" }).click();
+  await expect(section.getByRole("button", { name: "Revoke" })).toHaveCount(0);
+  await expect(section.getByRole("button", { name: "New link" })).toBeVisible();
+  await expect(section.getByTestId("ical-link")).toHaveCount(0);
+  expect((await page.request.get(second)).status()).toBe(404);
+  expect(csp).toEqual([]);
+});
+
+test("the iCal subscription reads in Russian", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+  const page = await context.newPage();
+  const csp = watchCsp(page);
+  await signIn(page, RU_ADMIN, TEAM_SPEC_PASSWORD);
+  await page.goto("/profile");
+  await page.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+  await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
+  await page.goto(`/schedules/${ids.main}`);
+  const section = page.getByTestId("ical-subscription");
+  await expect(section.getByRole("heading", { name: "Подписка iCal", level: 2 })).toBeVisible();
+  await expect(
+    section.getByText(
+      "Личная ссылка для календаря. Показывается один раз; отозванная перестаёт работать сразу.",
+    ),
+  ).toBeVisible();
+  await section.getByRole("button", { name: "Новая ссылка" }).click();
+  await expect(section.getByText("Скопируйте ссылку сейчас — больше её не покажем")).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await shot(page, "ical-ru-360");
+  await section.getByRole("button", { name: "Отозвать" }).click();
+  await expect(section.getByRole("button", { name: "Отозвать" })).toHaveCount(0);
+  await expect(section.getByRole("button", { name: "Новая ссылка" })).toBeVisible();
+  await context.close();
+  expect(csp).toEqual([]);
+});

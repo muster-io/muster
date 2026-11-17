@@ -13,6 +13,7 @@ import { getListTeamsQueryKey, listTeams } from "../api/gen/endpoints/teams/team
 import type { Team } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { OnCallCell } from "../components/on-call-now";
 import { PageTitle } from "../components/docs-link";
 import { TeamLabelLine, TeamLabelValues } from "../components/team-label-values";
 import { buttonVariants } from "../components/ui/button";
@@ -45,8 +46,13 @@ function PeopleCell({ row }: { row: Team }) {
   );
 }
 
+function OnCallNowCell({ row }: { row: Team }) {
+  return <OnCallCell teamId={row.id} />;
+}
+
 function TeamsTable() {
   const { t } = useTranslation();
+  const canSchedules = useCan("schedules:read");
   const list = useCursorList<Team>(getListTeamsQueryKey(), (cursor, signal) =>
     listTeams({ cursor }, { signal }),
   );
@@ -55,8 +61,18 @@ function TeamsTable() {
       { id: "name", header: t("teams.fields.name"), className: "min-w-32", Cell: NameCell },
       { id: "slug", header: t("teams.fields.slug"), className: "min-w-28", Cell: SlugCell },
       { id: "people", header: t("teams.fields.people"), Cell: PeopleCell },
+      ...(canSchedules
+        ? [
+            {
+              id: "on-call",
+              header: t("onCallNow.title"),
+              className: "min-w-40",
+              Cell: OnCallNowCell,
+            },
+          ]
+        : []),
     ],
-    [t],
+    [t, canSchedules],
   );
   return (
     <DataTable
