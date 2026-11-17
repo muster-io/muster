@@ -13,7 +13,7 @@ files_touched:
   - docs/index.md
   - docs/llms.txt.tmpl
   - mkdocs.yml
-  - web/e2e/screenshots/schedules.spec.ts
+  - web/e2e/screenshots/schedules.clock.spec.ts
 acceptance:
   - "[C-27.FR-14] Concepts → Schedules has the worked example of a weekly Rotation layer around the clock under a working-hours Rotation layer with other people — the Schedule \"Main\" of \"payments\" of scenario 1 — and shows who is On-call on a Wednesday at 15:00 and at 21:00; several Schedules for a first and a second line, with the main Schedule naming the Team's On-call; Overrides, who may make them and that they send no message; gaps and the people whose Shifts are skipped; the Internal alert `MusterScheduleGap`, and that a Schedule which covers only part of the day, such as a second line in working hours, keeps it off; unreachable On-calls; and the iCal feed."
   - "[C-27.FR-14] The page has screenshots of the Schedule page with its two-week view and the Override form, and of \"On call now\" on the Home page; Concepts → Teams and the runbook of `MusterScheduleGap` link to it."
@@ -53,8 +53,9 @@ issue: 426
   had muted it, so an On-call who created the discussion group or is anonymous in it does not mute it, which the
   Destination check cannot see (F-129); and a person who leaves the discussion group may show as unreachable only some
   time later, about a minute in F-128.
-- **Screenshots** (`web/e2e/screenshots/schedules.spec.ts`, Playwright on `muster dev`): the Schedule page with the
-  two-week view, a gap and a warning; the Override form in the mode "I give my Shift to…"; "On call now" on the Home
+- **Screenshots** (`web/e2e/screenshots/schedules.clock.spec.ts`, a clock spec: it moves the development clock to a
+  fixed Tuesday 15:00, so that the weeks the images show are the same in every run; Playwright on `muster dev`): the
+  Schedule page with a gap and a warning and its two-week view; the Override form in the mode "I give my Shift to…"; "On call now" on the Home
   page; the images go to `docs/assets/screenshots/concepts/schedules/` and are never listed.
 - **llms-full-guide.txt** (the template `full` of `docs/llms.txt.tmpl`): a scenario "Set up who is On-call" with Concepts → Teams and Concepts →
   Schedules.
@@ -83,6 +84,9 @@ None.
 - Suggested commit: `docs: describe schedules, overrides, gaps and the ical feed`.
 - Placed after S-136 so that the screenshots show the finished pages; the BE stories wrote the sections the pages link
   to, so no link waits for this story.
+- The spec is a clock spec (`schedules.clock.spec.ts`, which `GUIDES=schedules` also takes): the page shows weekdays and
+  dates of the weeks around now, which no rewrite of `capture` fixes, so the spec moves the development clock to the
+  Tuesday 15:00 Berlin of the 52-week series from 2027-01-12 that lies after the real now.
 
 ## Coverage
 

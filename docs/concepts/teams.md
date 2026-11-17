@@ -17,7 +17,8 @@ Team ([Values without a Team](#values-without-a-team)). **New Team** makes a Tea
 
 ![The Teams list with the Teams payments and search, and the values checkout and Payments of the Team label that name no Team](../assets/screenshots/concepts/teams/01-teams-list.png){ .screenshot }
 
-A Team's page has its people, its identity provider groups, its Working hours, its Destinations, and **Which Alerts
+A Team's page has its people, its identity provider groups, its Working hours, its Destinations, its
+[Schedules](schedules.md) with who is On-call now, and **Which Alerts
 belong to this Team**: the Team label with its slug and the Team matchers, with an example of what an Alert gets.
 
 ![The people of the Team payments: alice and bob added by hand, petr through the identity provider group](../assets/screenshots/concepts/teams/02-team-people.png){ .screenshot }
@@ -169,6 +170,13 @@ person an Admin added, `idp` for a person the identity provider put in it — an
 
 - Disabling a User keeps them in their Teams.
 - Deleting a User takes them out of every Team.
+
+## Schedules
+
+A Team may have Schedules that say who in it is On-call. The Team's On-call is the On-call of its main Schedule, which
+Mentions of the Team's On-call use, and a Team that has Schedules cannot be deleted. The Team page lists its Schedules
+and shows who is On-call now. See [Schedules](schedules.md): Rotation layers, several Schedules, Overrides, gaps and the
+iCal feed.
 
 ## Membership from the identity provider
 

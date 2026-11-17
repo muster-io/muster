@@ -60,7 +60,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
   [Routes and Group keys](concepts/routes-and-group-keys.md) group Alerts, the rules of
   [Snapshots](concepts/snapshot-semantics.md), [Loud and Quiet](concepts/loud-and-quiet.md) messages, the
   [statuses and commands](concepts/statuses-and-commands.md), [Broken Destinations](concepts/broken-destinations.md),
-  [Teams](concepts/teams.md) and [Routing to Teams](concepts/routing-to-teams.md), and
+  [Teams](concepts/teams.md), [Schedules](concepts/schedules.md) and
+  [Routing to Teams](concepts/routing-to-teams.md), and
   [what critical changes](concepts/what-critical-changes.md).
 - [Operations](operations/backup-and-restore.md): [back up and restore](operations/backup-and-restore.md),
   [upgrade](operations/upgrades.md), [rotate the master keys](operations/key-rotation.md), run

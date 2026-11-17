@@ -63,6 +63,15 @@
 4. [What critical changes]({{page "concepts/what-critical-changes.md"}}): {{quote "docs/concepts/what-critical-changes.md" "Nothing else makes an Alert Group Urgent"}}; read it before setting a Minimum severity.
 5. Finished when the [preview]({{page "concepts/routing-to-teams.md#preview-where-alerts-go"}}) of the Route lists the Teams and Destinations you expect.
 
+### Set up who is On-call
+
+1. [Teams]({{page "concepts/teams.md#schedules"}}): a Team's On-call is the On-call of its main Schedule; the Team must exist first, with its people ([People]({{page "concepts/teams.md#people"}})).
+2. [Schedules]({{page "concepts/schedules.md#rotation-layers"}}): Rotation layers, whose people must be able to be Paged, and [a worked example]({{page "concepts/schedules.md#a-worked-example"}}): {{quote "docs/concepts/schedules.md" "A higher Rotation layer wins wherever it has a Shift"}}.
+3. [Several Schedules]({{page "concepts/schedules.md#several-schedules"}}): the first is the main one, whose On-call is the Team's; an Escalation chain step may Page another.
+4. [Overrides]({{page "concepts/schedules.md#overrides"}}), which send no message, and [gaps]({{page "concepts/schedules.md#gaps-and-the-internal-alert"}}): the Internal alert `MusterScheduleGap` and its [runbook]({{page "operations/runbooks/MusterScheduleGap.md"}}); keep the gap alert off for a Schedule that covers only part of the day.
+5. [Unreachable On-calls]({{page "concepts/schedules.md#unreachable-on-calls"}}) and [the iCal feed]({{page "concepts/schedules.md#ical-feed"}}).
+6. Finished when [On call now]({{page "concepts/schedules.md#on-call-now"}}) shows the person you expect for each Team, with no unreachable mark.
+
 ### Automate through the API
 
 1. [API]({{page "reference/api.md"}}): the conventions of the API and its tokens. {{quote "docs/reference/api.md" "Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token."}} [Sign-in]({{page "sign-in/index.md#ways-to-sign-in"}}) describes both.
