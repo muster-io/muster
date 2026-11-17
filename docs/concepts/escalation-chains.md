@@ -7,8 +7,9 @@ wait, send to an outgoing webhook and repeat. Routes and Teams name their chains
 
 Chains run on Alert Groups at the points described under [When chains run](#when-chains-run): their steps follow one
 another with their waits and repeats, and a step is skipped where it cannot be made. A webhook step sends its event
-to its outgoing webhook ([Webhook steps](#webhook-steps)). In this version a step that Pages is made without Paging
-anyone yet; the Pages by Mention and the calls follow in later versions. Where no chain runs, the ack timeout of a Route keeps working as before.
+to its outgoing webhook ([Webhook steps](#webhook-steps)). A step that Pages people or a Team writes a Mention in the
+Threads of its chain's own Destinations ([Where chains Page](#where-chains-page)); the calls through a Notification
+gateway follow in a later version. Where no chain runs, the ack timeout of a Route keeps working as before.
 
 ## What an Escalation chain is
 
@@ -150,8 +151,10 @@ of the chain's owning Team, else the Organization's; a step whose Severity condi
 step that Pages the On-call of a Schedule with a gap now, and each person a step names who has become a Viewer or been
 disabled since the step was saved are skipped too. Each skip records the Quiet lifecycle event
 `escalation_step_skipped` in the Timeline, of the kind `escalation`, with the chain, the step and the reason —
-`outside_working_hours`, `severity`, `schedule_gap`, `viewer` or `disabled`, and for a webhook step
-`destination_deleted` or `webhook_events_required` ([Webhook steps](#webhook-steps)) — and the chain goes on with its
+`outside_working_hours`, `severity`, `schedule_gap`, `viewer` or `disabled`, for a webhook step
+`destination_deleted` or `webhook_events_required` ([Webhook steps](#webhook-steps)), and for a step "Page the whole
+Team" that none of its chain's Destinations can mention `no_mention_possible` ([Where chains Page](#where-chains-page))
+— and the chain goes on with its
 next step at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
 steps 3 to the repeat three times in all, then goes on. Outgoing webhooks in the mode events receive
 `escalation_step_skipped` with the chain, the step and the reason ([Events](../outgoing-webhooks/events.md)).
@@ -171,11 +174,87 @@ their place. When the Alert Group becomes firing again, its ack timeout starts o
 An Alert Group on which no chain applies keeps the ack timeout of its Route, as in L1
 ([Statuses and commands](statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge)).
 
-!!! warning "Until the Pages follow, a chain silences the ack timeout"
-    In this version a step that Pages makes no Page yet, but the first chain that starts still removes the ack
-    timeout. An Alert Group on a Route or a Team with a chain then gets neither ack timeout notices nor Pages. Until
-    the Pages by Mention follow, name no Escalation chain on the Routes and Teams of an installation that relies on the
-    ack timeout.
+## Where chains Page
+
+A chain Pages only in the Threads of its own Destinations, so that a step that Pages everyone in the chat never rings
+another team's chat:
+
+- a chain of the Route, in those of the Route's Destinations that have the Alert Group's Root message;
+- a chain of a Team, in those of the Team's Destinations that have it, and, where none of them has, in those of the
+  Route's Destinations;
+- a chain that the Route and a Team both name, which runs once, in the Threads of both.
+
+A Destination whose first Publication of the Alert Group is still on its way counts as one with the Root message: the
+chains start with the first Publication in one Destination, and the Page waits there for the Root message to reply
+under. One that a Storm holds does not.
+
+Which Destinations a Route or a Team reaches is the rule of [Routing to Teams](routing-to-teams.md): the Severity
+condition of each entry against the Alert Group's Severity level. A Destination is the Route's or a Team's when that
+Route's or Team's own entry reached it, at a level the Alert Group had, and still names it. Destinations only grow, so
+a Destination stays the Route's or the Team's after the level falls: when the critical Alerts resolve and the level
+falls to warning, the chain of a Team still Pages in the Team's critical channel, which has the Root message, and does
+not fall back to the Route's. A channel that several name belongs only to those whose entry reached it: when Team
+devops names a shared channel for any level and Team payments names it for critical only, a warning Alert Group that
+was never critical has its Root message there by devops' entry, so the chain of payments does not Page there, and its
+`@here` never rings devops' channel. A Page is a Thread reply that delivery sends like any
+other: Loud, due at once without the Thread batching window, never combined with another reply. It says which step
+and which chain it comes from:
+
+```text
+Step 1: @ivan, you are needed
+Chain of the Route Infrastructure · On-call of devops Main · normal
+```
+
+- **The people.** A step "Page the On-call of a Schedule" Pages the On-call of that moment, and a step "Page people"
+  each person it names; each person by their [Notification rule](notification-rules.md) of the step's importance. The
+  first Mentions of the rules that come due together are one reply per Destination naming them all. An important
+  Page says "important, again in 5 min" when the person's rule Mentions them again — for a Page naming several people,
+  only when every one of their rules does after the same time — and that later Mention repeats the first line with
+  "· important, again". The rule stops when the Alert Group is acknowledged, snoozed or resolved, or
+  when its chain starts over, and a Mention that comes due after that is not made.
+- **A whole Team or everyone in the chat.** A step "Page the whole Team" writes the Team's Team mention for the
+  Destination's Connection — the chain's owning Team when the step names none, the owning Team the chain had when its
+  run started — or the word for everyone in the chat, `@here` for example. Where a Destination's Connection can
+  mention neither, the step makes no reply there; where it can reply in none of the chain's Destinations, as when the
+  only one is a Telegram channel, it records `escalation_step_skipped` with `no_mention_possible`.
+- **The Timeline.** Each Page records the Loud lifecycle event `paged`, of the kind `escalation`, with its people,
+  its chain and its step; outgoing webhooks in events mode receive it as every event
+  ([Events](../outgoing-webhooks/events.md)).
+
+In this version a Page by Mention replies in Mattermost and Slack Destinations. Telegram and Bridge Destinations and
+outgoing webhooks take Pages in a later version: until then a chain makes no Thread reply there.
+
+## How a Page reaches a person
+
+A Page names each person as a Mention only where they have an Account link in the Identity space of that Destination's
+Connection ([Account links](../messengers/account-links.md)); a person without one is named in the line "Page not
+delivered: @petr has no linked Mattermost account" instead, which mentions nobody.
+
+| Where | A Page is | It reaches the person when |
+|---|---|---|
+| Mattermost | a Thread reply with `@username` | they have an Account link for the Connection |
+| Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection |
+| Telegram, Bridge, outgoing webhooks | from a later version | — |
+| Notification gateway | a call to the confirmed contact, from a later version | the gateway reaches them, whatever the messengers do |
+
+!!! warning "At night, only a Notification gateway is reliable"
+    Whether a Mention in a Thread pushes a notification to a phone is still to be verified for Mattermost and Slack.
+    Until it is, rely on a call through a Notification gateway for Pages at night.
+
+## Undelivered Pages
+
+A Page that reaches its person nowhere records the Quiet `page_not_delivered` with the person and the reason:
+
+- `no_root_message`: none of the chain's Destinations has the Alert Group's Root message — such as a Route with a
+  chain and no Destination, whose chains start when the Alert Group is created;
+- `no_account_link`: the person has no Account link in the Identity space of any of the chain's Destinations;
+- `not_delivered`: every Thread reply that would mention them ended Not delivered, or was withheld while its
+  Destination was [Broken](broken-destinations.md); a reply withheld while Broken is not sent after the Destination
+  recovers.
+
+A Page counts in `muster_pages_total{chain,kind,outcome}` once it ended: `delivered` once a delivered reply mentioned
+one of its people — for a Team or everyone in the chat, once one of its replies was delivered — and `not_delivered`
+otherwise; a Page whose chain was deleted before it ended is not counted ([Metrics](../reference/metrics.md)).
 
 ## Unclaimed
 

@@ -2740,18 +2740,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (48)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (49)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":48`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":49`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":48`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":49`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2767,10 +2767,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (48)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (49)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":48`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":49`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -5047,6 +5047,126 @@ func TestIntegrationMentionIndexDetachPending(t *testing.T) {
 		}
 		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 48 {
 			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
+// TestIntegrationPages runs 0049 over a database at 48 with an Alert Group, a run of a chain and an ack timeout timer:
+// up adds the runs of Notification rules, whose timer names its rule run — one per rule run, beside the Alert Group's
+// own timer and the run's — the Pages with their people, the columns of the Thread replies and of the Timeline, and
+// swaps the CHECKs of thread_replies and of the timers for validated _v2 and _v3 ones, with the foreign keys of their
+// new columns, added NOT VALID and validated with them; the rows cascade from the Alert
+// Group; down removes all of it with the rule runs' timers, and up runs again.
+func TestIntegrationPages(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 48)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000PG', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', true, 900,
+				false, 60, 60, false, '2026-11-17', '2026-11-17'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000PG', 1, id, '{alertname}', '{}', sha256('g'), 't', '{}', '{}', '{}', 'firing',
+				'warning', false, '2026-11-17', '2026-11-17'
+			FROM routes`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, u.public_id, u.login, u.login, 'responder', 'local', 'active', '2026-11-17', '2026-11-17'
+			FROM organizations, (VALUES ('SR0000000000JV', 'ivan'), ('SR0000000000PE', 'petr')) AS u (public_id, login)`)
+		e.exec(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, sources, steps, state,
+			generation, started_at)
+			SELECT org_id, 'ER0000000000PG', id, 'devops', '[{"kind":"route"}]', '[]', 'running', 1, '2026-11-17'
+			FROM alert_groups`)
+		e.exec(t, `INSERT INTO timers (org_id, alert_group_id, kind, deadline, notice_number, created_at, updated_at)
+			SELECT org_id, id, 'ack_timeout', '2026-11-17 00:15', 1, '2026-11-17', '2026-11-17' FROM alert_groups`)
+		e.exec(t, `INSERT INTO timers (org_id, escalation_run_id, kind, deadline, created_at, updated_at)
+			SELECT org_id, id, 'escalation_step', '2026-11-17', '2026-11-17', '2026-11-17' FROM escalation_runs`)
+		e.step(t, 1)
+		if got := e.count(t, `SELECT count(*) FROM pg_constraint WHERE conname IN ('thread_replies_event_check',
+			'thread_replies_mentions_check', 'timers_kind_v2_check', 'timers_subject_v2_check')`); got != 0 {
+			t.Errorf("%d old CHECKs left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_constraint WHERE convalidated AND conname IN (
+			'thread_replies_event_v2_check', 'thread_replies_mentions_v2_check', 'timers_kind_v3_check',
+			'timers_subject_v3_check', 'thread_replies_page_id_fkey', 'timers_notification_rule_run_id_fkey')`); got != 6 {
+			t.Errorf("%d validated new CHECKs and foreign keys", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname IN ('timers_notification_rule_run_key',
+			'notification_rule_runs_run_idx', 'pages_run_idx', 'thread_replies_page_idx', 'pages_pending_idx',
+			'pages_schedule_idx')`); got != 6 {
+			t.Errorf("%d indexes", got)
+		}
+		rule := func(user, extra, values string) string {
+			return `INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number, user_id,
+				importance, actions, state, started_at` + extra + `)
+				SELECT r.org_id, r.alert_group_id, r.id, 1, u.id, 'important', '[]', 'running', '2026-11-17'` + values +
+				` FROM escalation_runs r, users u WHERE u.login = '` + user + `'`
+		}
+		e.exec(t, rule("ivan", "", ""))
+		e.exec(t, rule("petr", "", ""))
+		refusedBy := func(t *testing.T, sql, constraint string) {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), sql)
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.ConstraintName != constraint {
+				t.Errorf("%s: refused by %v, want %s", sql, err, constraint)
+			}
+		}
+		refusedBy(t, rule("ivan", ", ended_at", ", '2026-11-17'"), "notification_rule_runs_ended_check")
+		// Two people Paged by one step keep two timers beside the Alert Group's and the run's.
+		e.exec(t, `INSERT INTO timers (org_id, notification_rule_run_id, kind, deadline, created_at, updated_at)
+			SELECT org_id, id, 'notification_rule_action', '2026-11-17 00:05', '2026-11-17', '2026-11-17'
+			FROM notification_rule_runs`)
+		if got := e.count(t, `SELECT count(*) FROM timers`); got != 4 {
+			t.Errorf("%d timers, want the ack timeout, the run's and two rule runs'", got)
+		}
+		refusedBy(t, `INSERT INTO timers (org_id, notification_rule_run_id, kind, deadline, created_at, updated_at)
+			SELECT org_id, id, 'notification_rule_action', '2026-11-18', '2026-11-17', '2026-11-17'
+			FROM notification_rule_runs LIMIT 1`, "timers_notification_rule_run_key")
+		refusedBy(t, `INSERT INTO timers (org_id, alert_group_id, notification_rule_run_id, kind, deadline, created_at,
+			updated_at)
+			SELECT org_id, alert_group_id, id, 'notification_rule_action', '2026-11-17', '2026-11-17', '2026-11-17'
+			FROM notification_rule_runs LIMIT 1`, "timers_subject_v3_check")
+		refusedBy(t, `INSERT INTO timers (org_id, escalation_run_id, notification_rule_run_id, kind, deadline,
+			created_at, updated_at)
+			SELECT org_id, escalation_run_id, id, 'escalation_step', '2026-11-17', '2026-11-17', '2026-11-17'
+			FROM notification_rule_runs LIMIT 1`, "timers_subject_v3_check")
+		e.exec(t, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id, step_number, kind, importance, state,
+			created_at)
+			SELECT org_id, alert_group_id, id, 1, 'mention', 'important', 'pending', '2026-11-17' FROM escalation_runs`)
+		e.exec(t, `INSERT INTO page_users (org_id, page_id, user_id, outcome, reason)
+			SELECT p.org_id, p.id, u.id, 'not_delivered', 'no_account_link' FROM pages p, users u WHERE u.login = 'petr'`)
+		refusedBy(t, `INSERT INTO page_users (org_id, page_id, user_id, outcome)
+			SELECT p.org_id, p.id, u.id, 'not_delivered' FROM pages p, users u WHERE u.login = 'ivan'`,
+			"page_users_outcome_reason_check")
+		refusedBy(t, `INSERT INTO pages (org_id, alert_group_id, step_number, kind, state, created_at)
+			SELECT org_id, id, 1, 'mention', 'delivered', '2026-11-17' FROM alert_groups`, "pages_ended_check")
+		refusedBy(t, `INSERT INTO pages (org_id, alert_group_id, step_number, kind, state, reason, created_at, ended_at)
+			SELECT org_id, id, 1, 'mention', 'delivered', 'no_account_link', '2026-11-17', '2026-11-17'
+			FROM alert_groups`, "pages_state_reason_check")
+		e.exec(t, `DELETE FROM alert_groups`)
+		if got := e.count(t, `SELECT count(*) FROM notification_rule_runs`) + e.count(t, `SELECT count(*) FROM pages`) +
+			e.count(t, `SELECT count(*) FROM page_users`) + e.count(t, `SELECT count(*) FROM timers`); got != 0 {
+			t.Errorf("after the alert group's deletion: %d rows left", got)
+		}
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM information_schema.tables WHERE table_name IN
+			('notification_rule_runs', 'pages', 'page_users')`) + e.count(t, `SELECT count(*)
+			FROM information_schema.columns WHERE column_name IN ('notification_rule_run_id', 'page_id',
+			'paged_user_ids', 'page_source', 'page_everyone', 'page_importance') AND table_name IN ('timers',
+			'thread_replies', 'timeline_entries')`); got != 1 {
+			// timeline_entries.paged_user_ids of 0034 stays.
+			t.Errorf("after down: %d tables and columns left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_constraint WHERE conname IN ('thread_replies_event_check',
+			'thread_replies_mentions_check', 'timers_kind_v2_check', 'timers_subject_v2_check')`); got != 4 {
+			t.Errorf("after down: %d CHECKs of 0047 and 0001", got)
+		}
+		if err := e.mm.Migrate(49); err != nil {
+			t.Errorf("up again: %v", err)
 		}
 	})
 }

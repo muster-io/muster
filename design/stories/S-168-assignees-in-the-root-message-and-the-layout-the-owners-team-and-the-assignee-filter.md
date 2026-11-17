@@ -97,7 +97,8 @@ issue: 457
 - **Packages**: as S-169 and S-155 state them — the Assignees are Alert Group state that only `groups` writes; delivery
   (and from S-157 `gateways`) report a Page's outcome to it as Commands, and `groups` imports neither.
 - **Groups** (`internal/groups/assignees.go`, `dispatcher.go`, `events.go`, `read.go`, `list.go`, `filters.go`): the
-  system transition `PageReached` of S-155 — which delivery dispatches when a Page reaches a person — updates the
+  system transition `PageReached` of S-155 — `SettlePage`, which delivery calls with the people a delivered reply
+  mentioned — updates the
   Assignees of the run by the rule of C-32.FR-12 and records `assignees_changed` (Quiet, no Mentions, kind `escalation`,
   a Root message update) when they change; Acknowledge, Snooze and Resolve delete them in their transaction with the
   same event; the Owner's Teams of P-89; the filter `assignee`.

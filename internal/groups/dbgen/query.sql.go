@@ -563,6 +563,30 @@ func (q *Queries) CountOpenGroupsByRoute(ctx context.Context, orgID int64) ([]Co
 	return items, nil
 }
 
+const countPageUsers = `-- name: CountPageUsers :one
+SELECT count(*)::bigint AS total, count(*) FILTER (WHERE outcome = 'delivered')::bigint AS delivered
+FROM page_users
+WHERE org_id = $1 AND page_id = $2
+`
+
+type CountPageUsersParams struct {
+	OrgID  int64
+	PageID int64
+}
+
+type CountPageUsersRow struct {
+	Total     int64
+	Delivered int64
+}
+
+// CountPageUsers counts the people of a Page and those it reached.
+func (q *Queries) CountPageUsers(ctx context.Context, arg CountPageUsersParams) (CountPageUsersRow, error) {
+	row := q.db.QueryRow(ctx, countPageUsers, arg.OrgID, arg.PageID)
+	var i CountPageUsersRow
+	err := row.Scan(&i.Total, &i.Delivered)
+	return i, err
+}
+
 const deleteExpiredGroups = `-- name: DeleteExpiredGroups :execrows
 DELETE FROM alert_groups g
 WHERE g.org_id = $1 AND g.id IN (
@@ -683,6 +707,32 @@ type DeleteTimerParams struct {
 // DeleteTimer stops an Alert Group's timer of a kind.
 func (q *Queries) DeleteTimer(ctx context.Context, arg DeleteTimerParams) error {
 	_, err := q.db.Exec(ctx, deleteTimer, arg.OrgID, arg.AlertGroupID, arg.Kind)
+	return err
+}
+
+const endPage = `-- name: EndPage :exec
+UPDATE pages
+SET state = $1, reason = $2, ended_at = $3::timestamptz
+WHERE org_id = $4 AND id = $5 AND state = 'pending'
+`
+
+type EndPageParams struct {
+	State  string
+	Reason pgtype.Text
+	Now    time.Time
+	OrgID  int64
+	ID     int64
+}
+
+// EndPage ends a Page with its outcome.
+func (q *Queries) EndPage(ctx context.Context, arg EndPageParams) error {
+	_, err := q.db.Exec(ctx, endPage,
+		arg.State,
+		arg.Reason,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
 	return err
 }
 
@@ -1421,13 +1471,95 @@ func (q *Queries) InsertNote(ctx context.Context, arg InsertNoteParams) error {
 	return err
 }
 
+const insertPage = `-- name: InsertPage :one
+INSERT INTO pages (org_id, alert_group_id, escalation_run_id, notification_rule_run_id, step_number, kind, team_id,
+                   everyone, importance, schedule_id, chain_team_id, again_seconds, again, state, reason, created_at,
+                   ended_at)
+VALUES ($1, $2, $3, $4,
+        $5, 'mention', $6, $7, $8,
+        $9, $10, $11, $12, $13,
+        $14, $15, $16)
+RETURNING id
+`
+
+type InsertPageParams struct {
+	OrgID                 int64
+	AlertGroupID          int64
+	EscalationRunID       pgtype.Int8
+	NotificationRuleRunID pgtype.Int8
+	StepNumber            int32
+	TeamID                pgtype.Int8
+	Everyone              pgtype.Text
+	Importance            pgtype.Text
+	ScheduleID            pgtype.Int8
+	ChainTeamID           pgtype.Int8
+	AgainSeconds          pgtype.Int4
+	Again                 bool
+	State                 string
+	Reason                pgtype.Text
+	Now                   time.Time
+	EndedAt               pgtype.Timestamptz
+}
+
+// InsertPage writes a Page by Mention of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18):
+// pending until its Thread replies end, or ended at once, as not_delivered for no_root_message.
+func (q *Queries) InsertPage(ctx context.Context, arg InsertPageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertPage,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.EscalationRunID,
+		arg.NotificationRuleRunID,
+		arg.StepNumber,
+		arg.TeamID,
+		arg.Everyone,
+		arg.Importance,
+		arg.ScheduleID,
+		arg.ChainTeamID,
+		arg.AgainSeconds,
+		arg.Again,
+		arg.State,
+		arg.Reason,
+		arg.Now,
+		arg.EndedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertPageUser = `-- name: InsertPageUser :exec
+INSERT INTO page_users (org_id, page_id, user_id, outcome, reason)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertPageUserParams struct {
+	OrgID   int64
+	PageID  int64
+	UserID  int64
+	Outcome string
+	Reason  pgtype.Text
+}
+
+// InsertPageUser writes a person a Page names with their outcome and its reason.
+func (q *Queries) InsertPageUser(ctx context.Context, arg InsertPageUserParams) error {
+	_, err := q.db.Exec(ctx, insertPageUser,
+		arg.OrgID,
+		arg.PageID,
+		arg.UserID,
+		arg.Outcome,
+		arg.Reason,
+	)
+	return err
+}
+
 const insertTimelineEntry = `-- name: InsertTimelineEntry :exec
 INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
     period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
-    paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
+    paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, page_everyone,
+    page_importance
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
@@ -1439,7 +1571,8 @@ VALUES (
     $27, $28, $29, $30,
     $31, $32, $33, $34,
     $35, $36::bigint[], $37,
-    $38, $39, $40
+    $38, $39, $40,
+    $41, $42
 )
 `
 
@@ -1484,6 +1617,8 @@ type InsertTimelineEntryParams struct {
 	EscalationRunID       pgtype.Int8
 	EscalationChainID     pgtype.Int8
 	StepNumber            pgtype.Int4
+	PageEveryone          pgtype.Text
+	PageImportance        pgtype.Text
 }
 
 // InsertTimelineEntry records one Timeline entry: a lifecycle event or a system entry.
@@ -1529,6 +1664,8 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.EscalationRunID,
 		arg.EscalationChainID,
 		arg.StepNumber,
+		arg.PageEveryone,
+		arg.PageImportance,
 	)
 	return err
 }
@@ -5217,6 +5354,54 @@ func (q *Queries) LockOpenGroupUpdate(ctx context.Context, arg LockOpenGroupUpda
 	return i, err
 }
 
+const lockPage = `-- name: LockPage :one
+SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
+       p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
+       coalesce(r.chain_name, '')::text AS chain_name
+FROM pages p
+LEFT JOIN escalation_runs r ON r.org_id = p.org_id AND r.id = p.escalation_run_id
+LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+WHERE p.org_id = $1 AND p.id = $2 AND p.alert_group_id = $3
+FOR NO KEY UPDATE OF p
+`
+
+type LockPageParams struct {
+	OrgID        int64
+	ID           int64
+	AlertGroupID int64
+}
+
+type LockPageRow struct {
+	ID              int64
+	AlertGroupID    int64
+	State           string
+	StepNumber      int32
+	Team            bool
+	EscalationRunID pgtype.Int8
+	ChainID         pgtype.Int8
+	ChainPublicID   string
+	ChainName       string
+}
+
+// LockPage locks a Page whose outcome its Thread replies settle, after its Alert Group, with the run, the chain and the
+// step that made it.
+func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow, error) {
+	row := q.db.QueryRow(ctx, lockPage, arg.OrgID, arg.ID, arg.AlertGroupID)
+	var i LockPageRow
+	err := row.Scan(
+		&i.ID,
+		&i.AlertGroupID,
+		&i.State,
+		&i.StepNumber,
+		&i.Team,
+		&i.EscalationRunID,
+		&i.ChainID,
+		&i.ChainPublicID,
+		&i.ChainName,
+	)
+	return i, err
+}
+
 const lockRouteForMove = `-- name: LockRouteForMove :one
 SELECT id, public_id, name, is_default
 FROM routes
@@ -5362,6 +5547,40 @@ func (q *Queries) LockTeamEvaluation(ctx context.Context, arg LockTeamEvaluation
 	return err
 }
 
+const missPageUsers = `-- name: MissPageUsers :many
+UPDATE page_users
+SET outcome = 'not_delivered', reason = 'not_delivered'
+WHERE org_id = $1 AND page_id = $2 AND outcome = 'pending'
+RETURNING user_id
+`
+
+type MissPageUsersParams struct {
+	OrgID  int64
+	PageID int64
+}
+
+// MissPageUsers marks not_delivered, with the reason not_delivered, the people of a Page still pending once every
+// Thread reply of it ended without reaching them.
+func (q *Queries) MissPageUsers(ctx context.Context, arg MissPageUsersParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, missPageUsers, arg.OrgID, arg.PageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const moveMemberships = `-- name: MoveMemberships :exec
 UPDATE alert_group_alerts m
 SET state = 'moved', ended_at = $1::timestamptz, moved_to_alert_group_id = r.moved_to
@@ -5458,6 +5677,40 @@ func (q *Queries) PeekGroup(ctx context.Context, arg PeekGroupParams) (PeekGroup
 	var i PeekGroupRow
 	err := row.Scan(&i.RouteID, &i.GraceDeadline)
 	return i, err
+}
+
+const reachPageUsers = `-- name: ReachPageUsers :many
+UPDATE page_users
+SET outcome = 'delivered'
+WHERE org_id = $1 AND page_id = $2 AND outcome = 'pending' AND user_id = ANY($3::bigint[])
+RETURNING user_id
+`
+
+type ReachPageUsersParams struct {
+	OrgID   int64
+	PageID  int64
+	UserIds []int64
+}
+
+// ReachPageUsers marks delivered the people of a Page still pending whom a delivered Thread reply mentioned.
+func (q *Queries) ReachPageUsers(ctx context.Context, arg ReachPageUsersParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, reachPageUsers, arg.OrgID, arg.PageID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resolveMemberships = `-- name: ResolveMemberships :exec

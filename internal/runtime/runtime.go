@@ -549,6 +549,9 @@ type process struct {
 	// chains holds the Escalation chains (C-32), kept in the main pool, and chainRuns their runs on Alert Groups.
 	chains    *escalation.Service
 	chainRuns *escalation.Runs
+	// pages makes the Pages of the steps, and ruleRuns runs the Notification rules of the people they Page (C-31.FR-3).
+	pages     *escalation.Pages
+	ruleRuns  *notificationrules.Runs
 	icalFeeds *schedules.Feeds
 	snapshots *ingest.Service
 	signals   *heartbeat.Service
@@ -1017,11 +1020,6 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
 			return routing.RestampAlerts(ctx, tx, orgID, alertIDs, routeID)
 		}})
-	// The dispatcher starts and stops the runs of the Escalation chains in its transaction, and each step of a run is a
-	// system transition of the dispatcher (C-32.FR-5, ADR-0016); no step Pages anyone until S-155.
-	p.chainRuns = p.chains.Runs(escalation.RunsConfig{DB: p.db.AccountLinksDB(), Groups: p.groups,
-		OnCalls: p.schedules, Log: p.log})
-	p.groups.SetChainRuns(p.chainRuns)
 	// Lookup tables and Link rules give every Alert Group its links (C-12.FR-9); Mention entries name users by their
 	// Account links (C-12.FR-8, FR-12), Teams by their Team mentions and the On-call by the Teams' main Schedules on the
 	// business clock (C-28.FR-3), which mentions imports neither for (ADR-0016).
@@ -1057,8 +1055,21 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.delivery = delivery.New(delivery.Config{OrgID: orgID, Store: p.db.DeliveryStore(), Business: p.clocks.Business,
 		Renderer: delivery.MessageRenderer{Renderer: p.renderer}, Log: p.log,
 		RunbookBase: p.cfg.RunbookBaseURL.String(), Real: p.clocks.Real, Bodies: p.webhooks, Mentions: p.mentions,
-		Requests: p.requests})
+		Requests: p.requests, TeamMentions: p.teams})
 	p.groups.SetRerender(p.delivery.Enqueue)
+	// The dispatcher starts and stops the runs of the Escalation chains in its transaction, and each step of a run is a
+	// system transition of the dispatcher (C-32.FR-5, ADR-0016). A step Pages people by runs of their Notification
+	// rules and a Team by its Team mention, in the Threads of its chain's Destinations, which delivery finds and fans
+	// the paged events out into (C-32.FR-8, C-31.FR-3); the calls follow with S-157.
+	p.ruleRuns = notificationrules.New(notificationrules.Config{OrgID: orgID,
+		Store: notificationrules.NewStore(p.db.AccountLinksDB()), Business: p.clocks.Business}).Runs(
+		notificationrules.RunsConfig{Business: p.clocks.Business, TimersChannel: groups.TimersChannel})
+	p.pages = escalation.NewPages(escalation.PagesConfig{OnCalls: p.schedules, Rules: p.ruleRuns,
+		Targets: p.delivery, Business: p.clocks.Business})
+	p.groups.SetPageTargets(p.delivery)
+	p.chainRuns = p.chains.Runs(escalation.RunsConfig{DB: p.db.AccountLinksDB(), Groups: p.groups,
+		OnCalls: p.schedules, Pages: p.pages, Log: p.log})
+	p.groups.SetChainRuns(p.chainRuns)
 	p.groups.SetReminderReached(p.delivery.ReminderReached)
 	// Destinations that a change of a Route's or a Team's Destination entries adds to the reach of the open Alert
 	// Groups publish there Quietly, and those that no entry names any more, or that are deleted, get their final edit
@@ -1642,6 +1653,8 @@ func (p *process) configureWorker() {
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}
 	p.deliverer.Mentions = p.mentions
+	p.deliverer.TeamMentions = p.teams
+	p.deliverer.Pages = p.groups
 	p.deliverer.Events = p.requests
 	p.deliverer.Published = p.groups.MarkPublished
 	// The gateway sender runs on every replica, under leases of its own, as the delivery worker does; it is not a
@@ -1693,6 +1706,14 @@ func (p *process) configureWorker() {
 				return nil, nil
 			}
 			return p.chainRuns.FireStep(ctx, tx, *t.EscalationRunID, t.Deadline)
+		},
+		// The timer of a Notification rule's next action names its rule run, not its Alert Group (schema.md §4.10).
+		notificationrules.TimerKind: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
+			func(context.Context), error) {
+			if org != p.orgID || t.NotificationRuleRunID == nil {
+				return nil, nil
+			}
+			return p.pages.FireRule(ctx, p.groups, tx, *t.NotificationRuleRunID, t.Deadline)
 		},
 	}
 }

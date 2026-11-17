@@ -446,6 +446,16 @@ func TestReplyPost(t *testing.T) {
 	if p := replyPost(m, testLook(), []string{"@channel"}); !strings.HasPrefix(p.Message, "@channel\nNew alerts (1):") {
 		t.Errorf("loud reply = %q", p.Message)
 	}
+	// A Page writes its Mentions in its Lead (C-32.FR-9), and without Mentions no Lead.
+	page := messages.PageMessage("en", "Infrastructure", "UTC", messages.ColourFiring, messages.PageInput{Step: 1,
+		Mentioned: true, Source: messages.PageSourceRoute, OnCallTeam: "devops", Schedule: "Main", Importance: "normal"})
+	if p := replyPost(page, testLook(), []string{"@ivan"}); p.Message != "Step 1: @ivan, you are needed\n"+
+		"Chain of the Route Infrastructure · On-call of devops Main · normal" {
+		t.Errorf("page = %q", p.Message)
+	}
+	if p := replyPost(page, testLook(), nil); p.Message != "Chain of the Route Infrastructure · On-call of devops Main · normal" {
+		t.Errorf("page without mentions = %q", p.Message)
+	}
 	m = messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourAcknowledged,
 		Lines: []string{"Reminder: bob_1, are you still on it?"},
 		Buttons: []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "x", KeyID: "k"},

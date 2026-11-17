@@ -4,7 +4,7 @@
  */
 
 /**
- * Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+ * Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered or was withheld while its Destination was Broken (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
  * @nullable
  */
 export type PageNotDeliveredReason = typeof PageNotDeliveredReason[keyof typeof PageNotDeliveredReason] | null;
@@ -17,4 +17,7 @@ export const PageNotDeliveredReason = {
   no_confirmed_contact: 'no_confirmed_contact',
   gateway_deleted: 'gateway_deleted',
   gateway_broken: 'gateway_broken',
+  no_root_message: 'no_root_message',
+  no_account_link: 'no_account_link',
+  not_delivered: 'not_delivered',
 } as const;

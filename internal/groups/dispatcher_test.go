@@ -125,6 +125,8 @@ type fakeDB struct {
 	teams fakeTeams
 	// reach is what the reach of an Alert Group is computed from (events_test.go).
 	reach fakeReach
+	// pages are the Pages by Mention and their people (pages_test.go).
+	pages fakePages
 }
 
 func newDB() *fakeDB {

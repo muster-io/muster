@@ -35,11 +35,11 @@ var person = groups.Actor{Kind: audit.ActorUser, Transport: audit.TransportUI}
 // TestTableMatchesLifecycleEvents: the table of delivery has a row for every row of the lifecycle event tables of
 // C-09.FR-22 and C-10.FR-15, with the same loudness and Mentions, resolved split by who resolved; the six rows of
 // C-17.FR-11, the two of C-25 — team_joined, a Root message update, and unknown_team_value, nothing (C-11.FR-20
-// revised) — the three of destination_joined of C-26, a new Root message, page_not_delivered of C-30, and
-// escalation_step_skipped and escalation_webhook of C-32, nothing in a messenger, complete the 40; a Loud event is
-// always a new message and an edit is always Quiet (C-11.FR-7).
+// revised) — the three of destination_joined of C-26, a new Root message, page_not_delivered of C-30, paged of C-32,
+// a Thread reply in the Threads of its chain, and escalation_step_skipped and escalation_webhook of C-32, nothing in a
+// messenger, complete the 41; a Loud event is always a new message and an edit is always Quiet (C-11.FR-7).
 func TestTableMatchesLifecycleEvents(t *testing.T) {
-	if len(delivery.Table) != 40 {
+	if len(delivery.Table) != 41 {
 		t.Errorf("%d rows", len(delivery.Table))
 	}
 	seen := map[string]bool{}
@@ -101,6 +101,12 @@ func TestLifecycleRows(t *testing.T) {
 			if row.EventMentions {
 				ev.Mentions = []groups.Mention{groups.MentionAckTimeout}
 			}
+			if row.Event == groups.EventPaged {
+				// paged replies in the Destinations of its Page (C-32.FR-8).
+				e.db.pageDB.init()
+				e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"})
+				ev.Page = &groups.Page{ID: pageID, Targets: []groups.PageTarget{{DestinationID: destMM}}}
+			}
 			want := row.Mentions
 			if row.EventMentions {
 				want = ev.Mentions
@@ -147,8 +153,9 @@ func TestLifecycleRows(t *testing.T) {
 				}
 			}
 			for _, r := range replies {
+				// The reply of a Page says its chain rather than its event.
 				if r.Loudness != row.Loudness || !slices.Equal(r.Mentions, want) || r.MessageID != "m1" ||
-					!strings.Contains(textOf(r), string(row.Event)) {
+					(!strings.Contains(textOf(r), string(row.Event)) && !strings.Contains(textOf(r), "Chain of")) {
 					t.Errorf("reply %+v", r)
 				}
 			}

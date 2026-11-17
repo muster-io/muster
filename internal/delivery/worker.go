@@ -134,7 +134,11 @@ type Worker struct {
 	Renderer Renderer
 	// Mentions resolves the Mentions of Loud calls; nil mentions nobody.
 	Mentions Mentioner
-	Log      *logging.Logger
+	// TeamMentions are the Team mentions the replies of page_team steps mention; Pages settles the outcome of the
+	// replies of Pages (pages.go). Without Pages no Page settles.
+	TeamMentions mentions.TeamMentions
+	Pages        PageSettler
+	Log          *logging.Logger
 	// MaxWait bounds the wait between rounds, and Batch the rows one claim takes; zero is the default.
 	MaxWait time.Duration
 	Batch   int32
@@ -156,6 +160,10 @@ type Worker struct {
 	// memos keeps the memo of each Organization's reconcile between rounds (refused).
 	memoMu sync.Mutex
 	memos  map[int64]*refused
+	// pagesAfter is where the next round goes on settling the Pages of each Organization (settlePages): the id of the
+	// last Page a round listed, none to start again from the oldest. It is this replica's own, and only Round, on the
+	// worker's goroutine, reads and writes it.
+	pagesAfter map[int64]int64
 }
 
 func (w *Worker) init() {
@@ -223,8 +231,9 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // Batch at a time, in six ranks: 1, the Urgent deliveries that are not configuration only; 2, the Urgent configuration
 // edits (ClaimDueDeliveries); 3, the other deliveries that are not configuration only; 4, the Thread replies; 5, the
 // head events of outgoing webhooks; 6, last, the other configuration edits. It returns how long until the next one can
-// be claimed, at most MaxWait. A row that fails is logged and attempted again once its lease runs out; the round goes
-// on.
+// be claimed, at most MaxWait, or at most MinWait when it settled as many batches of ended Pages as a round settles
+// and more may wait (settlePages), so that a backlog of them drains a round after another. A row that fails is logged
+// and attempted again once its lease runs out; the round goes on.
 //
 // They share the buckets of each Destination and Connection, and the order decides who gets a token (C-11.FR-3): a row
 // denied one is due again at the token's time plus TokenMargin, as every row denied before that token is, and the first
@@ -324,6 +333,11 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	var errs []error
 	for _, org := range orgs {
 		errs = append(errs, w.probe(ctx, org), w.reconcile(ctx, org))
+		more, err := w.settlePages(ctx, org)
+		errs = append(errs, err)
+		if more {
+			next = min(next, MinWait)
+		}
 		n, err := w.next(ctx, org, next)
 		if err != nil {
 			errs = append(errs, err)

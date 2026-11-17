@@ -279,7 +279,8 @@ INSERT INTO timeline_entries (
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
     period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
-    paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
+    paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, page_everyone,
+    page_importance
 )
 VALUES (
     @org_id, @public_id, @alert_group_id, @at, @kind, sqlc.narg('event'), sqlc.narg('event_seq'),
@@ -291,7 +292,8 @@ VALUES (
     sqlc.narg('period_to'), sqlc.narg('detail'), sqlc.narg('notice_number'), sqlc.narg('missed_count'),
     sqlc.narg('team_id'), sqlc.narg('team_rule'), sqlc.narg('team_matcher'), sqlc.narg('team_value'),
     sqlc.narg('destination_id'), sqlc.narg('paged_user_ids')::bigint[], sqlc.narg('gateway_connection_id'),
-    sqlc.narg('escalation_run_id'), sqlc.narg('escalation_chain_id'), sqlc.narg('step_number')
+    sqlc.narg('escalation_run_id'), sqlc.narg('escalation_chain_id'), sqlc.narg('step_number'),
+    sqlc.narg('page_everyone'), sqlc.narg('page_importance')
 );
 
 -- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
@@ -1616,3 +1618,59 @@ WHERE org_id = @org_id AND id = @id;
 SELECT id, public_id, name
 FROM connections
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+
+-- InsertPage writes a Page by Mention of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18):
+-- pending until its Thread replies end, or ended at once, as not_delivered for no_root_message.
+-- name: InsertPage :one
+INSERT INTO pages (org_id, alert_group_id, escalation_run_id, notification_rule_run_id, step_number, kind, team_id,
+                   everyone, importance, schedule_id, chain_team_id, again_seconds, again, state, reason, created_at,
+                   ended_at)
+VALUES (@org_id, @alert_group_id, sqlc.narg('escalation_run_id'), sqlc.narg('notification_rule_run_id'),
+        @step_number, 'mention', sqlc.narg('team_id'), sqlc.narg('everyone'), sqlc.narg('importance'),
+        sqlc.narg('schedule_id'), sqlc.narg('chain_team_id'), sqlc.narg('again_seconds'), @again, @state,
+        sqlc.narg('reason'), @now, sqlc.narg('ended_at'))
+RETURNING id;
+
+-- InsertPageUser writes a person a Page names with their outcome and its reason.
+-- name: InsertPageUser :exec
+INSERT INTO page_users (org_id, page_id, user_id, outcome, reason)
+VALUES (@org_id, @page_id, @user_id, @outcome, sqlc.narg('reason'));
+
+-- LockPage locks a Page whose outcome its Thread replies settle, after its Alert Group, with the run, the chain and the
+-- step that made it.
+-- name: LockPage :one
+SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
+       p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
+       coalesce(r.chain_name, '')::text AS chain_name
+FROM pages p
+LEFT JOIN escalation_runs r ON r.org_id = p.org_id AND r.id = p.escalation_run_id
+LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+WHERE p.org_id = @org_id AND p.id = @id AND p.alert_group_id = @alert_group_id
+FOR NO KEY UPDATE OF p;
+
+-- ReachPageUsers marks delivered the people of a Page still pending whom a delivered Thread reply mentioned.
+-- name: ReachPageUsers :many
+UPDATE page_users
+SET outcome = 'delivered'
+WHERE org_id = @org_id AND page_id = @page_id AND outcome = 'pending' AND user_id = ANY(@user_ids::bigint[])
+RETURNING user_id;
+
+-- MissPageUsers marks not_delivered, with the reason not_delivered, the people of a Page still pending once every
+-- Thread reply of it ended without reaching them.
+-- name: MissPageUsers :many
+UPDATE page_users
+SET outcome = 'not_delivered', reason = 'not_delivered'
+WHERE org_id = @org_id AND page_id = @page_id AND outcome = 'pending'
+RETURNING user_id;
+
+-- CountPageUsers counts the people of a Page and those it reached.
+-- name: CountPageUsers :one
+SELECT count(*)::bigint AS total, count(*) FILTER (WHERE outcome = 'delivered')::bigint AS delivered
+FROM page_users
+WHERE org_id = @org_id AND page_id = @page_id;
+
+-- EndPage ends a Page with its outcome.
+-- name: EndPage :exec
+UPDATE pages
+SET state = @state, reason = sqlc.narg('reason'), ended_at = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND state = 'pending';

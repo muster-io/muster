@@ -56,7 +56,8 @@ type Row struct {
 // that delivery turns into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row
 // per variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those
 // it leaves, a Quiet Publication in those it joins, an update in those of both. destination_joined is a new Root message
-// in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update. page_not_delivered and
+// in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update. paged is a Thread reply
+// only in the Destinations of its Page, those of its chain (C-32.FR-8, where.go). page_not_delivered and
 // escalation_step_skipped show nothing in a messenger (C-30.FR-7, C-32.FR-14): outgoing webhooks in events mode receive
 // them. escalation_webhook shows nothing in a messenger either, and goes only to the outgoing webhook Destination its
 // step names, whether or not the Alert Group is delivered there (C-32.FR-13, C-15.FR-2 revised): queueEvents.
@@ -85,6 +86,7 @@ var Table = []Row{
 	{groups.EventResolved, VariantSystem, FormReplyAndUpdate, groups.Quiet, nil, false},
 	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
+	{groups.EventPaged, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionPaged}, false},
 	{groups.EventPageNotDelivered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventEscalationStepSkipped, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventEscalationWebhook, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
@@ -735,6 +737,10 @@ type enqueueing struct {
 func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d Destination, broken bool,
 	how enqueueing) error {
 	g, now := r.Group, how.now
+	how.replies = slices.DeleteFunc(slices.Clone(how.replies), func(rp reply) bool {
+		_, ok := pageOf(rp.event, d.ID)
+		return rp.event.Event == groups.EventPaged && !ok
+	})
 	entries := how.entries
 	if entries == nil {
 		entries = []byte("[]")
@@ -899,10 +905,12 @@ func ended(state string) bool {
 // statePending is a delivery with work to do.
 const statePending = "pending"
 
-// The states a Thread reply is queued in.
+// The states a Thread reply is queued in, the open batch of new Alerts, and a reply that was sent.
 const (
-	replyPending = "pending"
-	replyDropped = "dropped"
+	replyPending    = "pending"
+	replyDropped    = "dropped"
+	replyCollecting = "collecting"
+	replySent       = "sent"
 )
 
 // replyParams queue the Thread reply of one lifecycle event in a state, due now.
@@ -912,10 +920,14 @@ func (s *Service) replyParams(deliveryID, groupID int64, d Destination, rp reply
 	if fingerprints == nil {
 		fingerprints = []string{}
 	}
-	return dbgen.InsertThreadReplyParams{OrgID: s.orgID, DeliveryID: deliveryID, AlertGroupID: groupID,
+	p := dbgen.InsertThreadReplyParams{OrgID: s.orgID, DeliveryID: deliveryID, AlertGroupID: groupID,
 		DestinationID: d.ID, Event: string(rp.event.Event), EventSeqs: []int64{rp.event.Seq},
 		Loudness: string(rp.row.Loudness), Mentions: rp.row.mentionsOf(rp.event), Fingerprints: fingerprints,
 		State: state, Due: now, Now: now}
+	if t, ok := pageOf(rp.event, d.ID); ok && rp.event.Event == groups.EventPaged {
+		p = pageParams(p, rp.event, t)
+	}
+	return p
 }
 
 // queueReply queues the Thread reply of one lifecycle event and returns the end of the Thread batching window

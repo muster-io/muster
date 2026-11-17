@@ -1533,7 +1533,7 @@ func (q *Queries) LockOwningTeam(ctx context.Context, arg LockOwningTeamParams) 
 
 const lockRun = `-- name: LockRun :one
 SELECT r.id, r.public_id, r.alert_group_id, r.chain_id, r.chain_name, r.steps, r.step_index, r.repeats, r.state,
-       r.generation, c.public_id AS chain_public_id, r.owning_team_id,
+       r.generation, c.public_id AS chain_public_id, r.owning_team_id, r.sources,
        (SELECT coalesce(max(s.seq), 0)
         FROM escalation_run_steps s
         WHERE s.org_id = r.org_id AND s.run_id = r.id)::bigint AS steps_made,
@@ -1565,12 +1565,14 @@ type LockRunRow struct {
 	Generation    int64
 	ChainPublicID pgtype.Text
 	OwningTeamID  pgtype.Int8
+	Sources       []byte
 	StepsMade     int64
 	Deadline      time.Time
 }
 
 // LockRun locks a run for its step, after its Alert Group, with the deadline of its timer — none, the zero time
-// 0001-01-01, once it was stopped or replaced — and the number of steps it made and skipped so far.
+// 0001-01-01, once it was stopped or replaced — the number of steps it made and skipped so far, and its sources, which
+// say where its Pages go.
 func (q *Queries) LockRun(ctx context.Context, arg LockRunParams) (LockRunRow, error) {
 	row := q.db.QueryRow(ctx, lockRun, arg.OrgID, arg.ID)
 	var i LockRunRow
@@ -1587,6 +1589,7 @@ func (q *Queries) LockRun(ctx context.Context, arg LockRunParams) (LockRunRow, e
 		&i.Generation,
 		&i.ChainPublicID,
 		&i.OwningTeamID,
+		&i.Sources,
 		&i.StepsMade,
 		&i.Deadline,
 	)

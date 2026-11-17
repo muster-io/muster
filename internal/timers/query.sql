@@ -20,7 +20,8 @@ UPDATE timers t
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz, attempts = t.attempts + 1
 FROM due
 WHERE t.org_id = @org_id AND t.id = due.id
-RETURNING t.id, t.alert_group_id, t.storm_id, t.escalation_run_id, t.kind, t.deadline, t.attempts;
+RETURNING t.id, t.alert_group_id, t.storm_id, t.escalation_run_id, t.notification_rule_run_id, t.kind, t.deadline,
+          t.attempts;
 
 -- HoldsTimer reports whether the lease of a claimed timer is still this replica's at now: a timer that was
 -- rescheduled meanwhile lost its lease.

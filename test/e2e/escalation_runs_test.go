@@ -225,7 +225,8 @@ func TestEscalationRuns(t *testing.T) {
 	tp := team("payments", []map[string]string{entry("payments-critical", "critical"),
 		entry("payments-notice", "below_critical")}, map[string]any{"own_working_hours": true,
 		"working_hours": map[string]any{"days": []string{"monday", "tuesday", "wednesday", "thursday", "friday"},
-			"start": "11:00", "end": "19:00", "time_zone": "Europe/Berlin"}})
+			"start": "11:00", "end": "19:00", "time_zone": "Europe/Berlin"},
+		"team_mentions": []map[string]string{{"connection_id": conn, "group": "payments-oncall"}}})
 	td := team("devops", nil, nil)
 	ts := team("search", []map[string]string{entry("search-notice", "below_critical")}, nil)
 	monday := readClock(t, rep).Now.UTC().AddDate(0, 0, -7).Format(time.DateOnly)

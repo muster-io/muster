@@ -12,6 +12,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteRuleTimers = `-- name: DeleteRuleTimers :exec
+DELETE FROM timers
+WHERE org_id = $1 AND notification_rule_run_id = ANY($2::bigint[]) AND kind = 'notification_rule_action'
+`
+
+type DeleteRuleTimersParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+// DeleteRuleTimers deletes the timers of the rule runs.
+func (q *Queries) DeleteRuleTimers(ctx context.Context, arg DeleteRuleTimersParams) error {
+	_, err := q.db.Exec(ctx, deleteRuleTimers, arg.OrgID, arg.Ids)
+	return err
+}
+
 const deleteRules = `-- name: DeleteRules :execrows
 DELETE FROM notification_rules
 WHERE org_id = $1 AND user_id = $2
@@ -49,6 +65,25 @@ func (q *Queries) GetOrganizationRules(ctx context.Context, orgID int64) (GetOrg
 	var i GetOrganizationRulesRow
 	err := row.Scan(&i.NotificationRules, &i.Version)
 	return i, err
+}
+
+const getRuleRunGroup = `-- name: GetRuleRunGroup :one
+SELECT alert_group_id
+FROM notification_rule_runs
+WHERE org_id = $1 AND id = $2
+`
+
+type GetRuleRunGroupParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// GetRuleRunGroup reads the Alert Group of a rule run, which the action of its timer locks first.
+func (q *Queries) GetRuleRunGroup(ctx context.Context, arg GetRuleRunGroupParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getRuleRunGroup, arg.OrgID, arg.ID)
+	var alert_group_id int64
+	err := row.Scan(&alert_group_id)
+	return alert_group_id, err
 }
 
 const getRules = `-- name: GetRules :one
@@ -146,6 +181,49 @@ func (q *Queries) GetRulesUserByID(ctx context.Context, arg GetRulesUserByIDPara
 	return i, err
 }
 
+const insertRuleRun = `-- name: InsertRuleRun :one
+INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number, user_id, importance,
+                                    actions, position, state, started_at, ended_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+        $10::timestamptz, $11)
+RETURNING id
+`
+
+type InsertRuleRunParams struct {
+	OrgID           int64
+	AlertGroupID    int64
+	EscalationRunID int64
+	StepNumber      int32
+	UserID          int64
+	Importance      string
+	Actions         []byte
+	Position        int32
+	State           string
+	Now             time.Time
+	EndedAt         pgtype.Timestamptz
+}
+
+// InsertRuleRun starts the run of a person's rule for a step that Paged them (C-31.FR-3), at its position and state
+// after the actions it made at once.
+func (q *Queries) InsertRuleRun(ctx context.Context, arg InsertRuleRunParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertRuleRun,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.EscalationRunID,
+		arg.StepNumber,
+		arg.UserID,
+		arg.Importance,
+		arg.Actions,
+		arg.Position,
+		arg.State,
+		arg.Now,
+		arg.EndedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listRuleGateways = `-- name: ListRuleGateways :many
 SELECT c.id, c.public_id, c.name,
        (c.deleted_at IS NULL AND coalesce(c.bridge_info -> 'roles' @> '["gateway"]'::jsonb, false))::boolean AS live,
@@ -200,6 +278,80 @@ func (q *Queries) ListRuleGateways(ctx context.Context, arg ListRuleGatewaysPara
 	return items, nil
 }
 
+const lockRuleRun = `-- name: LockRuleRun :one
+SELECT n.id, n.alert_group_id, n.escalation_run_id, n.step_number, n.user_id, n.importance, n.actions, n.position,
+       n.state, r.state AS run_state, coalesce(r.chain_id, 0)::bigint AS chain_id, r.chain_name, r.sources,
+       coalesce(r.owning_team_id, 0)::bigint AS owning_team_id, coalesce(c.public_id, '')::text AS chain_public_id,
+       coalesce((SELECT s.id
+                 FROM schedules s
+                 WHERE s.org_id = n.org_id AND s.id = (r.steps -> (n.step_number - 1) ->> 'schedule_id')::bigint),
+                0)::bigint AS schedule_id,
+       coalesce((SELECT t.deadline
+                 FROM timers t
+                 WHERE t.org_id = n.org_id AND t.notification_rule_run_id = n.id
+                   AND t.kind = 'notification_rule_action'),
+                '0001-01-01 00:00:00+00')::timestamptz AS deadline
+FROM notification_rule_runs n
+JOIN escalation_runs r ON r.org_id = n.org_id AND r.id = n.escalation_run_id
+LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+WHERE n.org_id = $1 AND n.id = $2
+FOR NO KEY UPDATE OF n
+`
+
+type LockRuleRunParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockRuleRunRow struct {
+	ID              int64
+	AlertGroupID    int64
+	EscalationRunID int64
+	StepNumber      int32
+	UserID          int64
+	Importance      string
+	Actions         []byte
+	Position        int32
+	State           string
+	RunState        string
+	ChainID         int64
+	ChainName       string
+	Sources         []byte
+	OwningTeamID    int64
+	ChainPublicID   string
+	ScheduleID      int64
+	Deadline        time.Time
+}
+
+// LockRuleRun locks a rule run for its next action, after its Alert Group, with the deadline of its timer — the zero
+// time 0001-01-01 once it was removed — and the run of its chain: its state, its chain, its sources, the owning Team it
+// had when it started and the Schedule of the step that Paged the person, 0 once that Schedule was deleted: the run's
+// steps are a snapshot, which a deleted Schedule outlives.
+func (q *Queries) LockRuleRun(ctx context.Context, arg LockRuleRunParams) (LockRuleRunRow, error) {
+	row := q.db.QueryRow(ctx, lockRuleRun, arg.OrgID, arg.ID)
+	var i LockRuleRunRow
+	err := row.Scan(
+		&i.ID,
+		&i.AlertGroupID,
+		&i.EscalationRunID,
+		&i.StepNumber,
+		&i.UserID,
+		&i.Importance,
+		&i.Actions,
+		&i.Position,
+		&i.State,
+		&i.RunState,
+		&i.ChainID,
+		&i.ChainName,
+		&i.Sources,
+		&i.OwningTeamID,
+		&i.ChainPublicID,
+		&i.ScheduleID,
+		&i.Deadline,
+	)
+	return i, err
+}
+
 const lockRulesUser = `-- name: LockRulesUser :one
 
 
@@ -237,6 +389,105 @@ func (q *Queries) LockRulesUser(ctx context.Context, arg LockRulesUserParams) (L
 		&i.Status,
 	)
 	return i, err
+}
+
+const notifyRuleTimers = `-- name: NotifyRuleTimers :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyRuleTimers wakes the timer workers of every replica once the transaction commits.
+func (q *Queries) NotifyRuleTimers(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyRuleTimers, channel)
+	return err
+}
+
+const saveRuleRun = `-- name: SaveRuleRun :exec
+UPDATE notification_rule_runs
+SET position = $1, state = $2, ended_at = $3
+WHERE org_id = $4 AND id = $5
+`
+
+type SaveRuleRunParams struct {
+	Position int32
+	State    string
+	EndedAt  pgtype.Timestamptz
+	OrgID    int64
+	ID       int64
+}
+
+// SaveRuleRun writes where a rule run is after its actions.
+func (q *Queries) SaveRuleRun(ctx context.Context, arg SaveRuleRunParams) error {
+	_, err := q.db.Exec(ctx, saveRuleRun,
+		arg.Position,
+		arg.State,
+		arg.EndedAt,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const stopRuleRuns = `-- name: StopRuleRuns :many
+UPDATE notification_rule_runs
+SET state = 'stopped', ended_at = $1::timestamptz
+WHERE org_id = $2 AND alert_group_id = $3 AND state = 'running'
+RETURNING id
+`
+
+type StopRuleRunsParams struct {
+	Now          time.Time
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// StopRuleRuns stops the rule runs that still run on an Alert Group whose chains stopped or started over
+// (C-31.FR-3): those of runs that ran out included, whose rule may still repeat.
+func (q *Queries) StopRuleRuns(ctx context.Context, arg StopRuleRunsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, stopRuleRuns, arg.Now, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const upsertRuleTimer = `-- name: UpsertRuleTimer :exec
+INSERT INTO timers (org_id, notification_rule_run_id, kind, deadline, created_at, updated_at)
+VALUES ($1, $2::bigint, 'notification_rule_action', $3, $4, $4)
+ON CONFLICT (notification_rule_run_id) WHERE notification_rule_run_id IS NOT NULL
+DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NULL, attempts = 0,
+              updated_at = excluded.updated_at
+`
+
+type UpsertRuleTimerParams struct {
+	OrgID                 int64
+	NotificationRuleRunID int64
+	Deadline              time.Time
+	Now                   time.Time
+}
+
+// UpsertRuleTimer sets the timer of a rule run at the end of its wait, a new lease to claim. The subject is the rule
+// run: the Alert Group, the Storm and the run of the chain are null, and the conflict is on
+// timers_notification_rule_run_key, never timers_alert_group_key (schema.md §4.10).
+func (q *Queries) UpsertRuleTimer(ctx context.Context, arg UpsertRuleTimerParams) error {
+	_, err := q.db.Exec(ctx, upsertRuleTimer,
+		arg.OrgID,
+		arg.NotificationRuleRunID,
+		arg.Deadline,
+		arg.Now,
+	)
+	return err
 }
 
 const upsertRules = `-- name: UpsertRules :one

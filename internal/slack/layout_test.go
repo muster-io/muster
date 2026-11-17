@@ -973,6 +973,18 @@ func TestLinkedMentions(t *testing.T) {
 		len(o.Attachments) != 0 {
 		t.Errorf("reminder = %q, %q", o.Text, o.Blocks[0].Text.Text)
 	}
+	// A Page writes its Mentions in its Lead, which is also its `text`, in a section and as text alone (C-32.FR-9).
+	page := messages.PageMessage("en", "Infrastructure", "UTC", messages.ColourFiring, messages.PageInput{Step: 1,
+		Mentioned: true, Source: messages.PageSourceRoute, OnCallTeam: "devops", Schedule: "Main", Importance: "normal"})
+	o = layout(page, testLook(), mentionText([]mentions.Target{linked}, nil))
+	if o.Text != "Step 1: <@U0FAKEALICE>, you are needed" || o.Blocks[0].Text.Text != "Step 1: <@U0FAKEALICE>, you "+
+		"are needed\nChain of the Route Infrastructure · On-call of devops Main · normal" {
+		t.Errorf("page = %q, %q", o.Text, o.Blocks[0].Text.Text)
+	}
+	if o = layout(page, plainLook(), mentionText([]mentions.Target{linked}, nil)); !strings.HasPrefix(o.Text,
+		"Step 1: <@U0FAKEALICE>, you are needed\n") {
+		t.Errorf("plain page = %q", o.Text)
+	}
 	// The footer mentions the Owner, who snoozed and who resolved by <@U…> where they have an Account link for the
 	// Connection, in an edit — a Quiet call without Mentions — as in a new message and in plain text (C-12.FR-12);
 	// another Connection names them by their display name.

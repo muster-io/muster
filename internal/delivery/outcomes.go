@@ -546,18 +546,19 @@ func (w *Worker) settleRequest(ctx context.Context, q queries, org int64, d Dest
 
 // recordReply records the outcome of a Thread reply's call in the transaction of q, by the rules above, then what it
 // did to a Telegram Thread; lost is the first answer of a reply whose Thread was lost. The reply's delivery is locked
-// first, as a Root message found deleted changes the delivery after the reply.
+// first, as a Root message found deleted changes the delivery after the reply. ended says whether the reply ended,
+// sent or Not delivered, under this replica's lease.
 func (w *Worker) recordReply(ctx context.Context, q queries, org int64, a replyAttempt, out Outcome,
-	rejected, lost *Outcome, logs *after) error {
+	rejected, lost *Outcome, logs *after) (bool, error) {
 	if err := lockReplyDelivery(ctx, q, org, a.row.ID); err != nil {
-		return err
+		return false, err
 	}
 	thread := changesThread(a, out, lost)
 	var th dbgen.LockDeliveryThreadRow
 	if thread || out.ThreadOpened {
 		var err error
 		if th, err = lockThread(ctx, q, org, a); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if out.ThreadOpened {
@@ -565,35 +566,48 @@ func (w *Worker) recordReply(ctx context.Context, q queries, org int64, a replyA
 		if err := q.RecordThreadOpened(ctx, dbgen.RecordThreadOpenedParams{OrgID: org, ID: a.row.DeliveryID,
 			ResponseValues: valuesJSON(out.Values), PublishedAt: a.row.PublishedAt.Time,
 			Now: w.Lease.Clocks.Business.Now().UTC()}); err != nil {
-			return fmt.Errorf("record the opened thread: %w", err)
+			return false, fmt.Errorf("record the opened thread: %w", err)
 		}
 	}
-	recorded, err := w.recordReplyOutcome(ctx, q, org, a, out, logs)
-	if err != nil || !recorded {
-		return err
+	rec, err := w.recordReplyOutcome(ctx, q, org, a, out, logs)
+	if err != nil || rec == replyNotRecorded {
+		return false, err
 	}
+	ended := rec == replyDone
 	if sendsRequests(a.destination.Type) {
 		group := a.row.AlertGroupID
 		if err := w.settleRequest(ctx, q, org, a.destination, &group, a.row.AlertGroupPublicID, out,
 			w.Lease.Clocks.Business.Now().UTC(), logs); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if thread {
 		if err := w.recordThread(ctx, q, org, a, th, out, lost, w.Lease.Clocks.Business.Now().UTC()); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if rejected == nil {
-		return nil
+		return ended, nil
 	}
-	return RecordEvent(ctx, q, org, Event{At: w.Lease.Clocks.Business.Now().UTC(), DestinationID: a.destination.ID,
-		AlertGroupID: &a.row.AlertGroupID, Kind: EventMarkupRejected, Error: rejected.Error,
-		Detail: map[string]any{"kind": kindReply}})
+	return ended, RecordEvent(ctx, q, org, Event{At: w.Lease.Clocks.Business.Now().UTC(),
+		DestinationID: a.destination.ID, AlertGroupID: &a.row.AlertGroupID, Kind: EventMarkupRejected,
+		Error: rejected.Error, Detail: map[string]any{"kind": kindReply}})
 }
 
+// replyRecord is what recordReplyOutcome did with a Thread reply.
+type replyRecord int
+
+const (
+	// replyNotRecorded: the lease went to another replica, which records the reply instead.
+	replyNotRecorded replyRecord = iota
+	// replyAgain: the reply is attempted again, or waits for its Root message.
+	replyAgain
+	// replyDone: the reply ended, sent or Not delivered.
+	replyDone
+)
+
 func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a replyAttempt, out Outcome,
-	logs *after) (bool, error) {
+	logs *after) (replyRecord, error) {
 	now := w.Lease.Clocks.Business.Now().UTC()
 	id := a.row.ID
 	switch out.Kind {
@@ -601,74 +615,78 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		n, err := q.RecordReplySent(ctx, dbgen.RecordReplySentParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 			MessageID: nonEmpty(out.MessageID), ButtonKeyID: nonEmpty(buttonKeyOf(a.message)), Now: now})
 		if err != nil {
-			return false, fmt.Errorf("record the sent thread reply: %w", err)
+			return replyNotRecorded, fmt.Errorf("record the sent thread reply: %w", err)
 		}
 		// Under the lease only, so that a reply another replica sends again records its Mentions once.
 		if n == 1 {
 			group := a.row.AlertGroupID
 			if err := recordMentions(ctx, q, org, a.destination, &group, nil, a.resolved, now); err != nil {
-				return false, err
+				return replyNotRecorded, err
 			}
 		}
 		if out.ThreadRef == "" {
-			return true, nil
+			return replyDone, nil
 		}
 		// The bridge's thread_ref goes with the next reply under the same Root message (C-22.FR-6).
 		if err := q.RecordThreadRef(ctx, dbgen.RecordThreadRefParams{OrgID: org, ID: a.row.DeliveryID,
 			ThreadRef: out.ThreadRef, MessageID: a.row.MessageID.String, Now: now}); err != nil {
-			return false, fmt.Errorf("record the thread_ref of the thread reply: %w", err)
+			return replyNotRecorded, fmt.Errorf("record the thread_ref of the thread reply: %w", err)
 		}
-		return true, nil
+		return replyDone, nil
 	case OutcomeRetryAfter:
 		until := now.Add(out.RetryAfter)
 		if _, ok, err := w.retryReply(ctx, q, org, id, until.Add(TokenMargin), false, out, now); err != nil || !ok {
-			return ok, err
+			return replyNotRecorded, err
 		}
-		return true, holdBucket(ctx, q, org, a.destination, out, until)
+		return replyAgain, holdBucket(ctx, q, org, a.destination, out, until)
 	case OutcomeTransient:
 		r, ok, err := w.retryReply(ctx, q, org, id, now.Add(w.backoff(a.row.Attempts+1)), true, out, now)
 		if err != nil || !ok {
-			return ok, err
+			return replyNotRecorded, err
 		}
-		return true, w.transient(ctx, q, org, a.destination, false, r.Attempts, r.FirstFailedAt, out, now, logs)
+		return replyAgain, w.transient(ctx, q, org, a.destination, false, r.Attempts, r.FirstFailedAt, out, now,
+			logs)
 	case OutcomeFatal:
 		if _, ok, err := w.retryReply(ctx, q, org, id, now, false, out, now); err != nil || !ok {
-			return ok, err
+			return replyNotRecorded, err
 		}
-		return true, breakDestination(ctx, q, w.raiser(org), org, a.destination, causeFatal,
+		return replyAgain, breakDestination(ctx, q, w.raiser(org), org, a.destination, causeFatal,
 			failure(out, "fatal error"), now, logs)
 	case OutcomeGone:
 		// The reply waits for the Root message published again, or is dropped with the rest of its Thread.
 		if err := q.RescheduleReply(ctx, dbgen.RescheduleReplyParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 			At: now}); err != nil {
-			return false, fmt.Errorf("release the thread reply: %w", err)
+			return replyNotRecorded, fmt.Errorf("release the thread reply: %w", err)
 		}
 		group := a.row.AlertGroupID
-		return true, rootGone(ctx, q, org, rootOf{delivery: a.row.DeliveryID, group: &group,
+		return replyAgain, rootGone(ctx, q, org, rootOf{delivery: a.row.DeliveryID, group: &group,
 			destination: a.destination.ID, groupPublicID: a.row.AlertGroupPublicID,
 			resolved:    a.row.Status == string(groups.StatusResolved),
 			republished: a.row.RepublishedAfterDelete}, now)
 	case OutcomeThreadLost:
-		_, ok, err := w.retryReply(ctx, q, org, id, now.Add(TransientFirstStep), false, out, now)
-		return ok, err
+		if _, ok, err := w.retryReply(ctx, q, org, id, now.Add(TransientFirstStep), false, out, now); err != nil ||
+			!ok {
+			return replyNotRecorded, err
+		}
+		return replyAgain, nil
 	default:
 		text := failure(out, unknownText)
 		class := endClass(out.Kind)
 		_, err := q.RecordReplyNotDelivered(ctx, dbgen.RecordReplyNotDeliveredParams{OrgID: org, ID: id,
 			Owner: w.Lease.Owner, ErrorClass: class, Error: text})
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
+			return replyNotRecorded, nil
 		}
 		if err != nil {
-			return false, fmt.Errorf("record the thread reply as not delivered: %w", err)
+			return replyNotRecorded, fmt.Errorf("record the thread reply as not delivered: %w", err)
 		}
 		if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: a.destination.ID,
 			AlertGroupID: &a.row.AlertGroupID, Kind: EventNotDelivered, ErrorClass: class,
 			Error: outbound.Untrusted(text), Detail: map[string]any{"kind": kindReply, "event": a.row.Event}}); err != nil {
-			return false, err
+			return replyNotRecorded, err
 		}
 		logs.add(notDeliveredLine(a.destination.PublicID, a.row.AlertGroupPublicID, kindReply, class))
-		return true, nil
+		return replyDone, nil
 	}
 }
 

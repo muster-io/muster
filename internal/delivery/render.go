@@ -55,6 +55,8 @@ type ReplyView struct {
 	Markup       messages.Markup
 	After        func(f func(context.Context))
 	Fallback     func(detail string)
+	// Page is what the reply of a Page by Mention says (C-32.FR-9), nil for another reply.
+	Page *messages.PageInput
 }
 
 // Roots are the Root messages of one Alert Group, one per markup of its Destinations, as one render produced them:
@@ -117,8 +119,11 @@ func (r MessageRenderer) Roots(ctx context.Context, db messages.DBTX, g GroupVie
 	return out, nil
 }
 
-// Reply renders a Thread reply of g.
+// Reply renders a Thread reply of g, the reply of a Page from its PageInput.
 func (r MessageRenderer) Reply(ctx context.Context, db messages.DBTX, rv ReplyView, g GroupView) (Message, error) {
+	if rv.Page != nil {
+		return r.Page(ctx, db, g.ID, *rv.Page)
+	}
 	return r.Renderer.Reply(ctx, db, g.ID, messages.ReplyInput{Event: string(rv.Event), Seq: rv.Seq,
 		Fingerprints: rv.Fingerprints, Listed: rv.Listed, Markup: rv.Markup, After: rv.After, Fallback: rv.Fallback})
 }

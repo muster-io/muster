@@ -4,7 +4,7 @@ title: Pages through a Notification gateway from Escalation steps and Notificati
 capability: C-32
 kind: be
 layer: L2
-depends_on: [S-149, S-156, S-168, S-173]
+depends_on: [S-149, S-156, S-168, S-173, S-178]
 covers: [C-32.FR-3, C-32.FR-10, C-32.FR-11, C-32.FR-12, C-32.FR-14, C-32.AC-7, C-30.FR-4, C-30.FR-7, C-30.FR-9, C-31.FR-3, C-31.AC-2, C-31.AC-6]
 files_touched:
   - api/openapi.yaml
@@ -63,7 +63,7 @@ issue: 446
 ## Contracts
 
 - **Spec** (`api/openapi.yaml`): `EscalationSkipReason` gains `gateway_deleted` and `no_confirmed_contact`;
-  `EscalationRun.steps[].pages[]` gains the `kind` `call` with its `gateway`; `TimelineEscalationEntry` names the
+  `EscalationRun.steps[].pages[]` (S-178) gains the `kind` `call` with its `gateway`; `TimelineEscalationEntry` names the
   `gateway` of a call's `paged`.
 - **Schema** (migration `0044_gateway_pages`, expand only; `schema.md` §4.17, §4.18): `gateway_call_items` gains
   `escalation_run_id` (FK, `ON DELETE SET NULL`), `notification_rule_run_id` (FK, `ON DELETE SET NULL`) and `page_id`

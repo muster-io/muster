@@ -38,6 +38,7 @@ export const WebhookEventName = {
   team_joined: 'team_joined',
   unknown_team_value: 'unknown_team_value',
   destination_joined: 'destination_joined',
+  paged: 'paged',
   page_not_delivered: 'page_not_delivered',
   escalation_step_skipped: 'escalation_step_skipped',
   escalation_webhook: 'escalation_webhook',

@@ -48,6 +48,9 @@ const (
 	// DanaUserID is a person in no channel, whom only direct messages reach.
 	DanaUserID   = "u-dana"
 	DanaUsername = "dana"
+	// IvanUserID is the On-call whom the Pages of Escalation chains mention (C-32.FR-9), a member of no channel.
+	IvanUserID   = "u-ivan"
+	IvanUsername = "ivan"
 
 	TeamID   = "team-dev"
 	TeamName = "dev"
@@ -192,6 +195,7 @@ var (
 		{ID: AliceUserID, Username: AliceUsername, FirstName: "Alice", Roles: "system_user"},
 		{ID: BobUserID, Username: BobUsername, FirstName: "Bob", Roles: "system_user"},
 		{ID: DanaUserID, Username: DanaUsername, FirstName: "Dana", Roles: "system_user"},
+		{ID: IvanUserID, Username: IvanUsername, FirstName: "Ivan", Roles: "system_user"},
 	}
 	devTeam = Team{ID: TeamID, Name: TeamName, DisplayName: "Dev", Type: "O"}
 )

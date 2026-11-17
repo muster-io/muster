@@ -283,10 +283,12 @@ func rootRequest(m messages.Message, l look, mentions []string) outgoing {
 }
 
 // replyRequest is a Thread reply, a Reminder or a Storm summary: the Mentions and the text in one section, a
-// Reminder's buttons in an `actions` block, no attachment, and `text` its first line with the Mentions.
+// Reminder's buttons in an `actions` block, no attachment, and `text` its first line with the Mentions. A Page writes
+// its Mentions in its Lead, "Step 1: <@U…>, you are needed", which is also its `text`.
 func replyRequest(m messages.Message, l look, mentions []string) outgoing {
 	o := request(l)
-	line := strings.Join(fitMentions(mentions, bound{limit: LengthLimit / 2, size: utf8.RuneCountInString}), " ")
+	line := m.MentionLine(fitMentions(mentions, bound{limit: LengthLimit / 2, size: utf8.RuneCountInString}), " ",
+		messages.EscapeMrkdwn)
 	body := bodyText(m, l, sectionBound.after(line))
 	if text := joinLines(line, body); text != "" {
 		o.Blocks = append(o.Blocks, section(blockText, text))
@@ -296,6 +298,9 @@ func replyRequest(m messages.Message, l look, mentions []string) outgoing {
 	}
 	first, _, _ := strings.Cut(body, "\n")
 	o.Text = withMentions(cutText(first, bound{limit: textTitleLimit, size: utf8.RuneCountInString}), mentions)
+	if m.Lead != nil && line != "" {
+		o.Text = line
+	}
 	return o
 }
 
@@ -308,7 +313,8 @@ func plainRequest(m messages.Message, l look, mentions []string) outgoing {
 	if m.Heading != nil {
 		top = cutText(head(m, l, "\n", 0), bound{limit: plainLimit / 2, size: plainSize})
 	}
-	line := strings.Join(fitMentions(mentions, bound{limit: plainLimit / 2, size: plainSize}), " ")
+	line := m.MentionLine(fitMentions(mentions, bound{limit: plainLimit / 2, size: plainSize}), " ",
+		messages.EscapeMrkdwn)
 	top = joinLines(top, line)
 	o.Text = joinLines(top, bodyText(m, l, plainBound.after(top)))
 	return o

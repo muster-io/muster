@@ -4,6 +4,7 @@
 package groups
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -29,9 +30,10 @@ const EventEscalationStepSkipped Event = "escalation_step_skipped"
 // the run, the chain, the step and that Destination.
 const EventEscalationWebhook Event = "escalation_webhook"
 
-// The reasons of escalation_step_skipped (EscalationSkipReason); S-155 and S-157 add theirs. A webhook step whose
+// The reasons of escalation_step_skipped (EscalationSkipReason); S-157 adds its own. A webhook step whose
 // Destination was deleted, or is no longer an outgoing webhook in the mode events or both, is skipped with
-// SkipDestinationDeleted or SkipWebhookEventsRequired.
+// SkipDestinationDeleted or SkipWebhookEventsRequired; a page_team step that none of its chain's Destinations can
+// carry, such as one whose only Destination is a Telegram channel, with SkipNoMentionPossible (C-32.FR-9).
 const (
 	SkipOutsideWorkingHours   = "outside_working_hours"
 	SkipSeverity              = "severity"
@@ -40,11 +42,12 @@ const (
 	SkipDisabled              = "disabled"
 	SkipDestinationDeleted    = "destination_deleted"
 	SkipWebhookEventsRequired = "webhook_events_required" //nolint:gosec // G101: a skip reason, not a credential
+	SkipNoMentionPossible     = "no_mention_possible"
 )
 
 // SkipReasons are the reasons of escalation_step_skipped, a closed list.
 var SkipReasons = []string{SkipOutsideWorkingHours, SkipSeverity, SkipScheduleGap, SkipViewer, SkipDisabled,
-	SkipDestinationDeleted, SkipWebhookEventsRequired}
+	SkipDestinationDeleted, SkipWebhookEventsRequired, SkipNoMentionPossible}
 
 // The Commands that stop the runs of the chains of an Alert Group (stop_command), and started_over for a run that a
 // start-over found still running.
@@ -245,33 +248,50 @@ type StepSkip struct {
 
 // StepWebhook is one escalation_webhook (C-32.FR-13): the run, the chain and the step, and the outgoing webhook
 // Destination it is sent to, which the run checked in the step's transaction. After is its place among the skips of
-// the same ChainProgress: it was made after the first After of them, so that the events keep the order of the steps.
+// the same ChainProgress: it was made after the first After of them, so that the events keep the order of the steps;
+// Seq orders it among the Pages with the same After.
 type StepWebhook struct {
 	ChainEntry
 	Destination JoinedDestination
 	After       int
+	Seq         int
 }
 
-// ChainProgress is what one step of a run did to its Alert Group: the skips and the webhooks to record, whether the
-// run ran out, and whether anything of the run changed, which the Alert Group's read shows.
+// ChainProgress is what one step of a run, or one action of a Notification rule, did to its Alert Group: the skips,
+// the webhooks and the Pages by Mention to record, whether the run ran out, and whether anything of the run changed,
+// which the Alert Group's read shows.
 type ChainProgress struct {
 	Skips    []StepSkip
 	Webhooks []StepWebhook
+	Pages    []StepPage
 	RanOut   bool
 	Changed  bool
 }
 
-// chainSteps records, in the order of the steps, the Quiet escalation_step_skipped of each skip (C-32.FR-14) and the
-// Quiet escalation_webhook of each step that sent to an outgoing webhook (C-32.FR-13), which ChainStep dispatches,
-// whatever the status: a system transition that changes no status.
+// chainSteps records, in the order of the steps, the Quiet escalation_step_skipped of each skip (C-32.FR-14), the
+// Quiet escalation_webhook of each step that sent to an outgoing webhook (C-32.FR-13) and the Pages by Mention with
+// their paged and page_not_delivered (C-32.FR-9, FR-10, pages.go), which ChainStep dispatches, whatever the status: a
+// system transition that changes no status. ended collects the Pages that ended at once.
 type chainSteps struct {
 	skips    []StepSkip
 	webhooks []StepWebhook
+	pages    []StepPage
+	targets  PageTargets
+	orgID    int64
+	now      time.Time
+	ended    *[]pageEnd
 }
 
 func (chainSteps) precondition(*Group) error { return nil }
 
-func (t chainSteps) apply(_ context.Context, _ Queries, _ *Group, c *change) error {
+// stepItem is a webhook or a Page of a ChainProgress, at its place among the skips.
+type stepItem struct {
+	after, seq int
+	webhook    *StepWebhook
+	page       *StepPage
+}
+
+func (t chainSteps) apply(ctx context.Context, q Queries, g *Group, c *change) error {
 	next := 0
 	skipsTo := func(n int) {
 		for ; next < n && next < len(t.skips); next++ {
@@ -284,10 +304,29 @@ func (t chainSteps) apply(_ context.Context, _ Queries, _ *Group, c *change) err
 			c.add(e)
 		}
 	}
-	for _, w := range t.webhooks {
-		skipsTo(w.After)
-		chain, dest := w.ChainEntry, w.Destination
-		c.add(entry{Event: EventEscalationWebhook, Chain: &chain, Destination: &dest})
+	items := make([]stepItem, 0, len(t.webhooks)+len(t.pages))
+	for i := range t.webhooks {
+		items = append(items, stepItem{after: t.webhooks[i].After, seq: t.webhooks[i].Seq, webhook: &t.webhooks[i]})
+	}
+	for i := range t.pages {
+		items = append(items, stepItem{after: t.pages[i].After, seq: t.pages[i].Seq, page: &t.pages[i]})
+	}
+	slices.SortStableFunc(items, func(a, b stepItem) int {
+		return cmp.Or(cmp.Compare(a.after, b.after), cmp.Compare(a.seq, b.seq))
+	})
+	for _, it := range items {
+		skipsTo(it.after)
+		if w := it.webhook; w != nil {
+			chain, dest := w.ChainEntry, w.Destination
+			c.add(entry{Event: EventEscalationWebhook, Chain: &chain, Destination: &dest})
+			continue
+		}
+		if t.targets == nil {
+			continue
+		}
+		if err := t.page(ctx, q, g, *it.page, c); err != nil {
+			return err
+		}
 	}
 	skipsTo(len(t.skips))
 	return nil
@@ -324,8 +363,9 @@ func (t chainsRanOut) apply(ctx context.Context, _ Queries, g *Group, c *change)
 // ChainStep makes one step of a run of an Escalation chain on the Alert Group groupID in the timer's transaction tx
 // (C-32.FR-5, FR-13, FR-14): it locks the Alert Group first, as every change of it does, runs step on it — which reads
 // and writes the run under that lock — and records what step did through the dispatcher as system transitions with
-// Muster as the actor: escalation_step_skipped for each skip and escalation_webhook for each step that sent to an
-// outgoing webhook, in the order of the steps (chainSteps), and, when the run ran out, unclaimed once every run of the
+// Muster as the actor: escalation_step_skipped for each skip, escalation_webhook for each step that sent to an
+// outgoing webhook and paged and page_not_delivered for each Page by Mention, in the order of the steps (chainSteps);
+// the timer of a Notification rule's next action goes through it too. When the run ran out, unclaimed once every run of the
 // current start has (ChainsRanOut). An Alert Group that no longer exists changes nothing. It returns what to run once
 // tx committed.
 func (s *Service) ChainStep(ctx context.Context, tx DBTX, groupID int64,
@@ -353,12 +393,19 @@ func (s *Service) ChainStep(ctx context.Context, tx DBTX, groupID int64,
 			return nil, fmt.Errorf("escalation_webhook of step %d without its destination", w.Step)
 		}
 	}
+	for _, pg := range p.Pages {
+		if len(pg.People) == 0 && !pg.teamPage() {
+			return nil, fmt.Errorf("a page of step %d names nobody", pg.Step)
+		}
+	}
 	var after committed
-	if len(p.Skips) > 0 || len(p.Webhooks) > 0 {
-		if err := s.d.dispatch(ctx, q, g, System, chainSteps{skips: p.Skips, webhooks: p.Webhooks},
-			&after); err != nil {
+	if len(p.Skips) > 0 || len(p.Webhooks) > 0 || len(p.Pages) > 0 {
+		var ended []pageEnd
+		if err := s.d.dispatch(ctx, q, g, System, chainSteps{skips: p.Skips, webhooks: p.Webhooks, pages: p.Pages,
+			targets: s.d.pages, orgID: s.orgID, now: s.clock.Now().UTC(), ended: &ended}, &after); err != nil {
 			return nil, err
 		}
+		countPages(&after, ended)
 	}
 	if p.RanOut && s.d.chains != nil {
 		err := s.d.dispatch(ctx, q, g, System, chainsRanOut{chains: s.d.chains, tx: tx}, &after)

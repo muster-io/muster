@@ -339,6 +339,16 @@ Background re-checks of OIDC users at the identity provider, by outcome.
 
 - `outcome`: `ok`, `refused`, `unavailable`, `skipped` — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider
 
+### `muster_pages_total`
+
+counter · labels: `chain`, `kind`, `outcome` · C-32 · exported by every replica
+
+Pages of Escalation chains and Notification rules, one per Page once it ended, by the chain, the kind (mention, call) and the outcome (delivered, not_delivered); a Page whose chain was deleted is not counted.
+
+- `chain` (entity): the public_id of the chain
+- `kind`: `mention`, `call` — mention, a Thread reply that mentions; call, a call through a Notification gateway
+- `outcome`: `delivered`, `not_delivered` — delivered, or not_delivered
+
 ### `muster_request_log_pruned_total`
 
 counter · no labels · C-23 · exported by every replica

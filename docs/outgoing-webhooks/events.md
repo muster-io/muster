@@ -267,12 +267,22 @@ never sent.
     reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
     Destination, named in `destination` ([Routing to Teams](../concepts/routing-to-teams.md)).
 
+`paged`
+:   `notify`: true. A step of an Escalation chain, or an action of a person's Notification rule, Paged people, a Team
+    or everyone in the chat by a Mention in the Threads of the chain's Destinations
+    ([Where chains Page](../concepts/escalation-chains.md#where-chains-page)). The people as `mentions` data come in
+    a later version; until then `mentions` is empty.
+
 `page_not_delivered`
 :   `notify`: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
     refused it (`call_refused`), answered what Muster cannot classify (`call_unknown`), kept failing until the retry
     budget was used (`call_budget_used`), the person had no confirmed contact at the gateway
-    (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); named in
-    `page` ([Notification gateways](../messengers/notification-gateways.md)).
+    (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); or a Page by
+    Mention reached its person nowhere: no Destination of the chain has the Alert Group's Root message
+    (`no_root_message`), the person has no Account link in any of their Identity spaces (`no_account_link`), or every
+    Thread reply that would mention them ended Not delivered or was withheld (`not_delivered`); named in `page`
+    ([Notification gateways](../messengers/notification-gateways.md),
+    [Undelivered Pages](../concepts/escalation-chains.md#undelivered-pages)).
 
 `escalation_step_skipped`
 :   `notify`: false. A step of an Escalation chain on the Alert Group was skipped, and the chain went on with its next
@@ -280,7 +290,8 @@ never sent.
     meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer
     (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose
     Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both
-    (`webhook_events_required`); named in `escalation_step`
+    (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can
+    mention (`no_mention_possible`); named in `escalation_step`
     ([Escalation chains](../concepts/escalation-chains.md#when-chains-run)).
 
 `escalation_webhook`

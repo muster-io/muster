@@ -115,11 +115,12 @@ func fallback(m messages.Message) string {
 	return messages.Neutralize(line)
 }
 
-// replyPost lays out a Thread reply: its Mentions first, then its text. A reply with buttons — a Reminder's "Still on
-// it" and "Unack" — keeps its Mentions in its message and has its text and buttons in one attachment.
+// replyPost lays out a Thread reply: its Mentions first, in the Lead of a Page — "Step 1: @ivan, you are needed" —
+// then its text. A reply with buttons — a Reminder's "Still on it" and "Unack" — keeps its Mentions in its message and
+// has its text and buttons in one attachment.
 func replyPost(m messages.Message, l look, mentions []string) post {
 	m, _ = messages.Shorten(l.withFooter(m), l.limit, l.markup)
-	line := strings.Join(mentions, " ")
+	line := m.MentionLine(mentions, " ", messages.Escaper(l.markup))
 	if len(m.Buttons) == 0 {
 		return post{Message: cutEnd(joinLines(line, text(m, l, nil)), l.limit)}
 	}

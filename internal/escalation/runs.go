@@ -133,19 +133,31 @@ type OnCalls interface {
 }
 
 // StepPages makes what a step that Pages does — a Page of the On-call, of chosen people or of a whole Team, a call —
-// once the run decided to make it, with the people it may Page: S-155 and S-157 implement it. Until they do none is
-// wired, so such a step is made without Paging anyone. A webhook step does not reach it: the run records its
-// escalation_webhook itself (webhook.go).
+// once the run decided to make it, with the people it may Page (pages.go; calls from S-157), and stops the runs of
+// the Notification rules of the runs that stop or start over (C-31.FR-3). A webhook step does not reach it: the run
+// records its escalation_webhook itself (webhook.go).
 type StepPages interface {
-	MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, run RunRef, step StepRef, people []int64) error
+	MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, run RunRef, step StepRef, people []int64) (
+		StepMade, error)
+	StopRules(ctx context.Context, tx groups.DBTX, groupID int64, at time.Time) error
 }
 
-// RunRef names a run and its chain for StepPages.
+// StepMade is what StepPages made of a step: its Pages by Mention, or the reason to skip it.
+type StepMade struct {
+	Pages []groups.StepPage
+	Skip  string
+}
+
+// RunRef names a run and its chain for StepPages, with the owning Team the chain had when the run started and its
+// sources.
 type RunRef struct {
-	ID       int64
-	PublicID string
-	ChainID  int64
-	Sources  []RunSource
+	ID            int64
+	PublicID      string
+	ChainID       int64
+	ChainPublicID string
+	ChainName     string
+	OwningTeamID  int64
+	Sources       []RunSource
 }
 
 // RunSource is a source of a run: the Route, or a Team by id.
@@ -154,12 +166,14 @@ type RunSource struct {
 	TeamID int64
 }
 
-// StepRef is the step of a run that StepPages makes, as the chain had it when the run started.
+// StepRef is the step of a run that StepPages makes, as the chain had it when the run started, its Schedule by id and
+// by public_id.
 type StepRef struct {
 	Number     int
 	Kind       string
 	Importance string
 	ScheduleID int64
+	Schedule   string
 	TeamID     int64
 	Everyone   string
 	GatewayID  int64
@@ -177,8 +191,8 @@ type Runs struct {
 	log     *logging.Logger
 }
 
-// RunsConfig is what the runs need: the main pool for the reads, the dispatcher, the On-call of Schedules and the log;
-// Pages is nil until S-155.
+// RunsConfig is what the runs need: the main pool for the reads, the dispatcher, the On-call of Schedules, the Pages
+// of the steps (NewPages) and the log; without Pages a step Pages nobody.
 type RunsConfig struct {
 	DB      DBTX
 	Groups  Dispatcher
@@ -270,7 +284,8 @@ func (r *Runs) Start(ctx context.Context, tx groups.DBTX, g *groups.Group, st gr
 		}
 	}
 	if st.All {
-		if err := r.stop(ctx, q, g, groups.ChainStop{Command: groups.StopStartedOver, At: st.At}, st.After); err != nil {
+		if err := r.stop(ctx, tx, q, g, groups.ChainStop{Command: groups.StopStartedOver, At: st.At},
+			st.After); err != nil {
 			return 0, err
 		}
 	}
@@ -358,10 +373,10 @@ func (r *Runs) addSources(ctx context.Context, q runQueries, run dbgen.ListGener
 // Stop stops every run of g that still runs, with the Command and the lifecycle event that stopped it, and deletes
 // their timers (groups.ChainRuns); runs that ran out stay as they are (C-32.FR-5).
 func (r *Runs) Stop(ctx context.Context, tx groups.DBTX, g *groups.Group, st groups.ChainStop) error {
-	return r.stop(ctx, r.queries(tx), g, st, st.After)
+	return r.stop(ctx, tx, r.queries(tx), g, st, st.After)
 }
 
-func (r *Runs) stop(ctx context.Context, q runQueries, g *groups.Group, st groups.ChainStop,
+func (r *Runs) stop(ctx context.Context, tx groups.DBTX, q runQueries, g *groups.Group, st groups.ChainStop,
 	after func(func(context.Context))) error {
 	p := dbgen.StopRunsParams{OrgID: r.s.orgID, AlertGroupID: g.ID, Now: pgtype.Timestamptz{Time: st.At, Valid: true},
 		StopCommand: pgtype.Text{String: st.Command, Valid: true}}
@@ -371,6 +386,13 @@ func (r *Runs) stop(ctx context.Context, q runQueries, g *groups.Group, st group
 	stopped, err := q.StopRuns(ctx, p)
 	if err != nil {
 		return fmt.Errorf("stop the runs of alert group #%d: %w", g.Number, err)
+	}
+	if r.pages != nil {
+		// The runs of the Notification rules of the Alert Group stop with its chains (C-31.FR-3), those of runs that
+		// ran out included, whose rules may still repeat.
+		if err := r.pages.StopRules(ctx, tx, g.ID, st.At); err != nil {
+			return fmt.Errorf("stop the notification rules of alert group #%d: %w", g.Number, err)
+		}
 	}
 	if len(stopped) == 0 {
 		return nil

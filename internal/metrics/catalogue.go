@@ -560,6 +560,28 @@ var ScheduleGap = newGauge(Definition{
 	LeaderOnly: true,
 })
 
+// The kinds and outcomes of muster_pages_total.
+var (
+	PageKinds    = []string{"mention", "call"}
+	PageOutcomes = []string{"delivered", "not_delivered"}
+)
+
+// Pages counts the Pages of Escalation chains once each ended, by chain, kind and outcome (C-32.FR-19): a Page by
+// Mention is delivered once a delivered Thread reply mentioned one of its people — for a Team or everyone in the chat,
+// once one of its replies was delivered — and not delivered otherwise; calls are counted from S-157. A Page whose chain
+// was deleted before it ended is not counted.
+var Pages = newCounter(Definition{
+	Name: "muster_pages_total",
+	Help: "Pages of Escalation chains and Notification rules, one per Page once it ended, by the chain, the kind " +
+		"(mention, call) and the outcome (delivered, not_delivered); a Page whose chain was deleted is not counted.",
+	Labels: []Label{
+		entity("chain"),
+		closed("kind", "mention, a Thread reply that mentions; call, a call through a Notification gateway", PageKinds...),
+		closed("outcome", "delivered, or not_delivered", PageOutcomes...),
+	},
+	Capability: "C-32",
+})
+
 // The outcome values of muster_gateway_calls_total: accepted, or the error class of the answer.
 const OutcomeAccepted = "accepted"
 

@@ -111,6 +111,33 @@ type Message struct {
 	// and neither is stored.
 	FooterMention string `json:"-"`
 	FooterName    string `json:"-"`
+	// Lead is the text around the Mentions of a Page (C-32.FR-9): an adapter that lays the Mentions out in a line of
+	// their own writes Before, the Mentions and After as that line, "Step 1: @ivan, you are needed", and leaves the
+	// line out without Mentions.
+	Lead *Lead `json:"lead,omitempty"`
+}
+
+// Lead is the text before and after the Mentions of a message whose Mentions stand in its text, neutral and in the
+// message's language; an adapter escapes it for its markup.
+type Lead struct {
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+// MentionLine is the line of the Mentions of m that an adapter writes first, joined by sep: the Mentions alone, or,
+// with a Lead, the Lead's text around them, escaped by escape; empty without Mentions.
+func (m Message) MentionLine(names []string, sep string, escape func(string) string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	line := strings.Join(names, sep)
+	if m.Lead == nil {
+		return line
+	}
+	if escape == nil {
+		escape = func(s string) string { return s }
+	}
+	return escape(Neutralize(m.Lead.Before)) + line + escape(Neutralize(m.Lead.After))
 }
 
 // FooterUser is the user a footer names in an identity space where they have an Account link, with only what its

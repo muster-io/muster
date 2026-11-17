@@ -4,7 +4,7 @@ title: "Documentation: Escalation chains, Notification rules and How an alert re
 capability: C-32
 kind: docs
 layer: L2
-depends_on: [S-124, S-137, S-151, S-153, S-157, S-159, S-160]
+depends_on: [S-124, S-137, S-151, S-153, S-157, S-159, S-160, S-177]
 covers: [C-32.FR-11, C-32.FR-20, C-31.FR-6]
 files_touched:
   - docs/concepts/escalation-chains.md
@@ -21,7 +21,7 @@ files_touched:
   - mkdocs.yml
   - web/e2e/screenshots/escalation-chains.spec.ts
 acceptance:
-  - "[C-32.FR-20, C-32.FR-11] Concepts → Escalation chains joins the sections S-154, S-169, S-155, S-168 and S-157 wrote into one page: the steps with the payments chain of scenario 1, the table of C-32.FR-5 of when chains start, start over and stop, the ack timeout and Unclaimed, where chains Page, the table of C-32.FR-11, undelivered Pages, Assignees and the Owner's Team; it says, per messenger, what the facts of S-160 found, and, where they do not confirm a push, that at night only a Notification gateway is reliable."
+  - "[C-32.FR-20, C-32.FR-11] Concepts → Escalation chains joins the sections S-154, S-169, S-155, S-177, S-168 and S-157 wrote into one page: the steps with the payments chain of scenario 1, the table of C-32.FR-5 of when chains start, start over and stop, the ack timeout and Unclaimed, where chains Page, the table of C-32.FR-11, undelivered Pages, Assignees and the Owner's Team; it says, per messenger, what the facts of S-160 found, and, where they do not confirm a push, that at night only a Notification gateway is reliable."
   - "[C-31.FR-6] Concepts → Notification rules describes the two rules and their defaults, the switch and custom rules, how a rule combines with the steps of a chain — a step Pages each person by their normal or important rule, the rule stops with its chain — that calls combine per person and gateway, and that a Mention reaches a person only through an Account link in the Identity space of the Destination's Connection."
   - "[C-32.FR-20] The new page Concepts → How an alert reaches people walks one Alert of `team=\"payments\"` from its Route and Alert Group to its Destinations, its Teams, its Escalation chains and their Pages, by Mention and by call, with two diagrams — the path of the Alert, and the timeline of the chains with their steps — that render in both themes; Teams, Schedules and Routing to Teams link to it, and Messages and templates and Write a bridge describe the Assignees of `layout` and item 7 of the Root message."
   - "[C-32.FR-20] The pages have screenshots of the chain page and of the Alert Group page with its running chains and Assignees, taken by `web/e2e/screenshots/escalation-chains.spec.ts`; `make docs-screenshots GUIDES=escalation-chains` takes them, every image has its alternative text, `make docs-check` passes, and `llms-full-guide.txt` lists the new page in a scenario on Paging people."
@@ -97,6 +97,6 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-32.FR-11 | partial | the table in the documentation with the facts; the behaviour is S-155 and S-157 |
+| C-32.FR-11 | partial | the table in the documentation with the facts; the behaviour is S-155, S-177 and S-157 |
 | C-32.FR-20 | full | |
 | C-31.FR-6 | full | |
