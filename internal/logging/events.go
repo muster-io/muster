@@ -79,6 +79,14 @@ var MigrationsCurrent = newEvent("migrations_current", LevelInfo, "C-02",
 	"No migration was applied: the schema already has the newest version this binary knows.",
 	"version")
 
+// MigrationRetried is logged when a transaction of a migration ended on a deadlock or a lock timeout and runs again.
+var MigrationRetried = newEvent("migration_retried", LevelWarn, "C-02",
+	"A transaction of the migration to version ended on a deadlock (sqlstate 40P01) or a lock timeout (55P03), "+
+		"usually with the replicas that still run during a rolling update: it was rolled back and runs again, with the "+
+		"rest of the migration, after a wait of attempt seconds; the transactions of the migration that committed do "+
+		"not run again. attempt is the attempt that failed, of three; when the third fails, the migration fails.",
+	"version", "attempt", "sqlstate")
+
 // SchemaTooNew is logged when the database schema is newer than the binary knows; the process refuses to run.
 var SchemaTooNew = newEvent("schema_too_new", LevelError, "C-02",
 	"The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that "+

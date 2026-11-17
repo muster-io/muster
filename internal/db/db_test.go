@@ -835,7 +835,7 @@ func TestMigrate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d, _, session := fakeDB()
-			d.newMigrator = func(context.Context, conn) (migrator, error) { return tt.m, nil }
+			d.newMigrator = func(context.Context, *logging.Logger, conn) (migrator, error) { return tt.m, nil }
 			var out bytes.Buffer
 			err := d.Migrate(t.Context(), logging.New(&out, logging.LevelInfo))
 			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.HasPrefix(err.Error(), tt.wantErr)) {
@@ -875,7 +875,9 @@ func TestMigrationLock(t *testing.T) {
 		t.Errorf("the error of f is lost: %v", err)
 	}
 
-	d.newMigrator = func(context.Context, conn) (migrator, error) { return nil, errors.New("prepare the migrations: no") }
+	d.newMigrator = func(context.Context, *logging.Logger, conn) (migrator, error) {
+		return nil, errors.New("prepare the migrations: no")
+	}
 	if err := d.Migrate(t.Context(), logging.New(io.Discard, logging.LevelInfo)); err == nil ||
 		err.Error() != "prepare the migrations: no" {
 		t.Errorf("a migrator that fails: %v", err)
@@ -884,7 +886,7 @@ func TestMigrationLock(t *testing.T) {
 
 func TestDriver(t *testing.T) {
 	c := &stubConn{rows: map[string]stubRow{"SELECT version, dirty": {err: pgx.ErrNoRows}}}
-	m, err := newMigrate(t.Context(), c)
+	m, err := newMigrate(t.Context(), logging.New(io.Discard, logging.LevelInfo), c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1046,7 +1048,10 @@ func TestDriver(t *testing.T) {
 		t.Errorf("statements %q", c.execs)
 	}
 
-	d := &driver{ctx: t.Context(), conn: c}
+	d, err := newDriver(t.Context(), logging.New(io.Discard, logging.LevelInfo), c)
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.execs = nil
 	if err := d.SetVersion(-1, false); err != nil || c.execs[0] != "TRUNCATE schema_migrations" {
 		t.Errorf("SetVersion(nil) = %v, %q", err, c.execs)
@@ -1076,7 +1081,7 @@ func TestDriver(t *testing.T) {
 		t.Error("Run of an unreadable migration succeeded")
 	}
 	c.execErrs = map[string]error{"CREATE TABLE": errors.New("permission denied")}
-	if _, err := newMigrate(t.Context(), c); err == nil ||
+	if _, err := newMigrate(t.Context(), logging.New(io.Discard, logging.LevelInfo), c); err == nil ||
 		err.Error() != "create the schema_migrations table: permission denied" {
 		t.Errorf("newMigrate = %v", err)
 	}

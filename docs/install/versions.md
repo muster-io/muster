@@ -355,6 +355,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     anywhere else still matches only that exact group name, but saving the OIDC settings is refused with `422`
     `invalid_format` at that entry until it is changed or removed.
 
+    **Migrations that wait for locks.** A transaction of a migration that gives up on a lock timeout or ends on a
+    deadlock runs again twice, after one second and then after two, each retry logged as `migration_retried` (see
+    [Upgrades](../operations/upgrades.md#migrations)); the transactions of the migration that committed before it stay
+    applied. The failures that the notes below describe are those of the third attempt.
+
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
     waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
