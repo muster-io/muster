@@ -240,25 +240,33 @@ mention per Connection, in `team_mentions`, each with its Connection and its gro
 ]
 ```
 
+The Team page edits them in the section **How to mention the Team**, and a Destination's entry "Team" mentions them:
+[Whom a message mentions](mentions.md) says which entries, and what each messenger supports.
+
 What each messenger takes:
 
 Mattermost
-:   The name of a Mattermost group, as `@payments_team` mentions it. A bot with the role Member reads the groups of the
-    server, so **Check connection** reads them in its step **Groups**, and the API lists them for the Team mention
-    (`listConnectionGroups`). A server that does not list them to the bot fails nothing: the step says so, and a Team
-    mention is still saved by the name you type.
+:   The name of a Mattermost group, as `@payments_team` mentions it: its members are mentioned in a Root message and in
+    a Thread reply, and a custom group can always be mentioned. A bot with the role Member and no added permission
+    reads the groups of the server, so **Check connection** reads them in its step **Groups**, and the API lists them
+    for the Team mention (`listConnectionGroups`). A server that does not list them to the bot fails nothing: the step
+    says so, and a Team mention is still saved by the name you type. This was checked on Mattermost 11.2.2 with the
+    Entry licence; groups synced from LDAP were not checked (F-121, F-122, F-123).
 
 Slack
-:   A Slack user group, chosen from those the Connection lists, by its handle and its id. The bot needs the optional
-    scope `usergroups:read`; until the Connection's check has found it, a Team mention for a Slack Connection is
-    refused. See [The scopes](../messengers/slack.md#the-scopes).
+:   A Slack user group, chosen from those the Connection lists, by its handle and its id. `<!subteam^…>` mentions the
+    group's members in a Root message and in a Thread reply (F-126). The bot needs the optional scope
+    `usergroups:read`; until the Connection's check has found it, a Team mention for a Slack Connection is refused.
+    See [The scopes](../messengers/slack.md#the-scopes). A workspace may let only its Admins and Owners create user
+    groups (F-125), so ask one of them for the group.
 
 Bridge
 :   A group name of the bridge's messenger, when the bridge declares group mentions in its `info`
     (`group_mentions`). Muster does not list the groups of a bridge: you type the name.
 
 Telegram
-:   Telegram has no group mentions, so a Telegram Connection takes no Team mention.
+:   Telegram has no group mentions, so a Telegram Connection takes no Team mention. The Team's On-call is still
+    mentioned, as a person, by the entry "On-call of a Team".
 
 Saving a Team mention for a Connection that cannot carry one — Telegram, a Slack Connection without `usergroups:read`,
 a bridge that declares no group mentions, or a Notification gateway — is refused with `422` and the code
@@ -274,6 +282,9 @@ mentions nobody until the ability is back. A save that sends it again unchanged,
 user group id, keeps it and is not refused; only a new or changed Team mention is checked against what its Connection
 can mention. Deleting a Connection deletes its Team mentions, each recorded in the Audit
 log of its Team; a change of a Team's Team mentions is recorded in its Audit log as every other change of the Team.
+
+Which buttons a Destination's messages show is a separate setting of the Destination:
+[Button sets](statuses-and-commands.md#button-sets).
 
 ## Working hours
 

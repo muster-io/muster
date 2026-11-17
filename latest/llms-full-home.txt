@@ -67,7 +67,7 @@ of each Alert Group there up to date until the Alert Group is resolved.
   [Snapshots](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md), [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md) messages, the
   [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md), [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md),
   [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md), [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md) and
-  [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md), and
+  [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md), [whom a message mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md), and
   [what critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md).
 - [Operations](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md): [back up and restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md),
   [upgrade](https://muster-io.github.io/muster/latest/operations/upgrades.md), [rotate the master keys](https://muster-io.github.io/muster/latest/operations/key-rotation.md), run

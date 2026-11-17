@@ -197,12 +197,7 @@ With the API:
 curl -X POST https://muster.example.org/api/v1/destinations \
   -H "Authorization: Bearer $MUSTER_TOKEN" -H 'Content-Type: application/json' \
   -d '{"type":"bridge","name":"alerts","connection_id":"CNK7M3QX9P2RTA","channel_id":"C024BE91L",
-       "mentions":{"new_alert_group":{"everyone":"none","user_ids":[],"groups":[]},
-                   "new_alerts":{"everyone":"none","user_ids":[],"groups":[]},
-                   "reopen":{"everyone":"none","user_ids":[],"groups":[]},
-                   "ack_timeout":{"everyone":"none","user_ids":[],"groups":[]},
-                   "snooze_ended":{"everyone":"none","user_ids":[],"groups":[]},
-                   "rise_to_urgent":{"everyone":"none","user_ids":[],"groups":[]}},
+       "mention_entries":[{"target":{"kind":"everyone","everyone":"here"},"events":["new_alert_group"]}],
        "limiter":{"limit":30,"per_seconds":60}}'
 ```
 
@@ -242,9 +237,11 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
     A bridge that declares group mentions or a mention of everyone renders the markers of those entries as its
     messenger's mentions, `@payments_team` or `@here` for example, whether or not it has native mentions. A bridge with
     native mentions renders the markers of people as its mentions of their accounts, and any other bridge shows them by
-    their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's `info`
-    does not declare is left out of the message, and so is a person whom an entry names without an Account link. That
-    copy is at most `bridge.info_max_age` (10 minutes) old: Muster reads `info` again when it is older, and when a
+    their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's
+    `info` does not declare is left out of the message, and so is a person whom an entry names without an Account
+    link; a bridge that nevertheless receives a `group` or an `everyone` entry it does not declare, because its `info`
+    changed since, shows the marker's link text, which notifies nobody, and never refuses the message. See
+    [Whom a message mentions](../concepts/mentions.md#undelivered-mentions). That copy is at most `bridge.info_max_age` (10 minutes) old: Muster reads `info` again when it is older, and when a
     Connection check runs. A long line of Mentions keeps, in their order, the whole markers that fit half of the
     bridge's longest text, with their entries, and leaves out the others. Only the Owner's Mentions — of a Reminder, an
     auto-unacknowledge or a Takeover — the footer and the Assignees name a person without one, by their display name as

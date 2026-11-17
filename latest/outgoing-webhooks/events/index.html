@@ -3363,7 +3363,7 @@ Alert Group on none of its Routes (<a href="#escalation_webhook">escalation_webh
 <span class="w">    </span><span class="nt">"headers"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Authorization"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Bearer {{ .Secrets.token }}"</span><span class="w"> </span><span class="p">}]</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">"proxy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w"> </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">"mentions"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"Mention settings, as for any Destination"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"mention_entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team"</span><span class="p">,</span><span class="w"> </span><span class="nt">"team_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"TE7D2K9M4QX1PV"</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}],</span>
 <span class="w">  </span><span class="nt">"limiter"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"limit"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nt">"per_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -3464,7 +3464,9 @@ field, for example <code>/events/headers/0/value</code>: the value is shown to e
 <dd>Who the event mentions under the Destination's Mention entries, as data: <code>{"type": "everyone"}</code>,
 <code>{"type": "group", "name": …}</code>, <code>{"type": "user", "id": …, "name": …, "login": …}</code> — the On-call of a Team too —
 or <code>{"type": "team", "slug": …, "name": …}</code>, with one target per Team of the Alert Group for "Team from the label".
-Always <code>[]</code> for a Quiet event.</dd>
+Always <code>[]</code> for a Quiet event. A Team is a target of the Destination's
+<a href="../../concepts/mentions/#what-each-messenger-supports">Mention entries</a>, given by its <code>team_id</code>, and the receiver
+gets its slug and name.</dd>
 <dt><code>sequence</code></dt>
 <dd>The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
 and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".</dd>

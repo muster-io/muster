@@ -3479,12 +3479,7 @@ default, sends and edits together.</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/destinations<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"type":"bridge","name":"alerts","connection_id":"CNK7M3QX9P2RTA","channel_id":"C024BE91L",</span>
-<span class="s1">       "mentions":{"new_alert_group":{"everyone":"none","user_ids":[],"groups":[]},</span>
-<span class="s1">                   "new_alerts":{"everyone":"none","user_ids":[],"groups":[]},</span>
-<span class="s1">                   "reopen":{"everyone":"none","user_ids":[],"groups":[]},</span>
-<span class="s1">                   "ack_timeout":{"everyone":"none","user_ids":[],"groups":[]},</span>
-<span class="s1">                   "snooze_ended":{"everyone":"none","user_ids":[],"groups":[]},</span>
-<span class="s1">                   "rise_to_urgent":{"everyone":"none","user_ids":[],"groups":[]}},</span>
+<span class="s1">       "mention_entries":[{"target":{"kind":"everyone","everyone":"here"},"events":["new_alert_group"]}],</span>
 <span class="s1">       "limiter":{"limit":30,"per_seconds":60}}'</span>
 </code></pre></div>
 <p>Saving the Destination runs its <strong>Destination check</strong>, the one item <code>channel</code>: the bridge's <code>checkChannel</code>, which
@@ -3521,9 +3516,11 @@ its messenger's group. It comes only while Muster's copy of the bridge's <code>i
 <p>A bridge that declares group mentions or a mention of everyone renders the markers of those entries as its
 messenger's mentions, <code>@payments_team</code> or <code>@here</code> for example, whether or not it has native mentions. A bridge with
 native mentions renders the markers of people as its mentions of their accounts, and any other bridge shows them by
-their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's <code>info</code>
-does not declare is left out of the message, and so is a person whom an entry names without an Account link. That
-copy is at most <code>bridge.info_max_age</code> (10 minutes) old: Muster reads <code>info</code> again when it is older, and when a
+their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's
+<code>info</code> does not declare is left out of the message, and so is a person whom an entry names without an Account
+link; a bridge that nevertheless receives a <code>group</code> or an <code>everyone</code> entry it does not declare, because its <code>info</code>
+changed since, shows the marker's link text, which notifies nobody, and never refuses the message. See
+<a href="../../concepts/mentions/#undelivered-mentions">Whom a message mentions</a>. That copy is at most <code>bridge.info_max_age</code> (10 minutes) old: Muster reads <code>info</code> again when it is older, and when a
 Connection check runs. A long line of Mentions keeps, in their order, the whole markers that fit half of the
 bridge's longest text, with their entries, and leaves out the others. Only the Owner's Mentions — of a Reminder, an
 auto-unacknowledge or a Takeover — the footer and the Assignees name a person without one, by their display name as

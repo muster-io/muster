@@ -214,7 +214,10 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_IN
 2. In **Integrations → Bot Accounts**, add a bot, for example `muster`. Give it the role **Member**: Muster needs no
    system admin role and no **post:all** or **post:channels** permission, because it posts only to channels the bot
    is a member of. With the role Member, the answers to button presses show in the Thread of the Root message; see
-   [Where answers to presses show](https://muster-io.github.io/muster/latest/messengers/mattermost.md#where-answers-to-presses-show).
+   [Where answers to presses show](https://muster-io.github.io/muster/latest/messengers/mattermost.md#where-answers-to-presses-show). The role Member is also enough to read the
+   server's custom groups, which Muster lists so that a Team can be mentioned by its group; it needs no permission
+   added for that ([Team mentions](https://muster-io.github.io/muster/latest/concepts/teams.md#team-mentions)). This was checked on Mattermost 11.2.2 with the
+   Entry licence (F-122); groups synced from LDAP were not checked (F-121).
 3. Copy the bot's access token. Mattermost shows it once.
 4. Add the bot to the team, and to every channel a Destination posts to. A public channel is enough; a private channel
    works the same once the bot is a member.
@@ -388,8 +391,11 @@ characters; a long one drops its description first, then its Alerts, its summary
   mentioned a follower of the Thread. "Quiet" therefore means "without a Mention", not "nobody notified".
 - A Loud Root message carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's
   `@username` through their Account link — as one line at the top of the attachment, directly under its title. There a
-  person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post; whether a group's Mention
-  notifies from an attachment has not been checked. The post's own text is empty: everything is in the attachment, so
+  person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post (F-124), and so does a
+  custom group's `@payments_team`, whose members are mentioned in an attachment and in a Thread reply alike; a custom
+  group's setting to allow references cannot be turned off, so it can always be mentioned (F-123). The Mentions are
+  those of the Destination's [Mention entries](https://muster-io.github.io/muster/latest/concepts/mentions.md); a person whom an entry names without an
+  Account link is left out of the message. The post's own text is empty: everything is in the attachment, so
   the post shows its title once. What a notification shows follows from that: an email notification shows no content;
   a push notification, when the server's **PushNotificationContents** is `full`, and a desktop notification show the
   attachment's summary line — the status, `#N` and the title — which Muster sets as its `fallback` and the channel does
@@ -516,7 +522,8 @@ A Telegram Destination is the channel only: Muster finds its discussion group.
     - once those pass, `getChatMember` in the discussion group for each person of the Teams that name the Destination
       with a Telegram Account link, the item **Members of the discussion group**, which always passes and names the
       people outside the group, whom a Mention in a Thread does not notify
-      ([Unreachable On-calls](https://muster-io.github.io/muster/latest/concepts/schedules.md#unreachable-on-calls)). A new Destination has no Team yet, so
+      ([Unreachable On-calls](https://muster-io.github.io/muster/latest/concepts/schedules.md#unreachable-on-calls)); a person who left the group shows as
+      outside only some time later, about a minute (F-128). A new Destination has no Team yet, so
       its save asks about nobody.
 
     A Destination that fails the check is not saved, and the check says what to fix:
@@ -576,6 +583,14 @@ For the people on call:
   replies under it.
 - Only members of the discussion group are notified about the replies in a Thread — even a reply that mentions them.
   Someone who only subscribed to the channel sees the Root messages, but not what happens to them later.
+- Muting the discussion group does not hide a Mention from an ordinary member: a Mention in a comment rang a member who
+  had muted the group, on the desktop and on the phone (F-129). The creator of the group, who is anonymous in it, was
+  not rung by a Mention in a group they had muted, so a person who created the discussion group or is anonymous in it
+  should not mute it. The Destination check cannot see that.
+
+Telegram mentions only people, by a link to their account; a Destination's
+[Mention entries](https://muster-io.github.io/muster/latest/concepts/mentions.md#telegram) offer a person and "On-call of a Team", and no group, Team or
+everyone in the chat. A person whom an entry names without a Telegram Account link is left out of the message.
 
 ## Known limitation: Quiet Root messages ring the group
 
@@ -1056,7 +1071,9 @@ Muster never joins a channel on its own, so it asks for no `channels:join`: you 
 An app installed from an earlier manifest lacks `usergroups:read`. Add it under **OAuth & Permissions → Scopes → Bot
 Token Scopes**, or add the line to the app's manifest, and reinstall the app when Slack asks for it: a scope added to an
 installed app reaches its bot token only after the reinstall. The reinstall keeps the bot token, so the Connection needs
-no change: select **Check connection** on it again, and the check records the new scope.
+no change: select **Check connection** on it again, and the check records the new scope (F-125). Until then the app
+shows the new scope in its settings but the token still lacks it. A workspace may let only its Admins and Owners create
+user groups, so a Team's user group may have to be created by one of them.
 
 ## Install the app and create the tokens
 
@@ -1196,8 +1213,9 @@ the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Men
   groups and Teams, and people through their Account links. A person whom an entry names is mentioned only through their
   Account link; without one they are left out. The Owner of a Reminder, an auto-unacknowledge or a Takeover is still
   named by their display name as text without a link, which notifies nobody. A Slack Destination takes neither
-  `@everyone` nor `@all`. User groups and Teams are taken once the check found `usergroups:read`, and a user group or a
-  Team mention is written as `<!subteam^…>` of the user group's id, which Slack shows as its handle and which mentions
+  `@everyone` nor `@all`: a bot's `<!everyone>` mentions only in the workspace's general channel and does nothing
+  elsewhere, with no error, while `@channel` reaches the same people (F-127). User groups and Teams are taken once the check found `usergroups:read`, and
+  a user group or a Team mention is written as `<!subteam^…>` of the user group's id, which Slack shows as its handle and which mentions
   its members, in a Root message and in a Thread reply alike. The footer of a Root message — "Acknowledged by", "Snoozed
   by", "Resolved by" — writes a person with an Account link for the Connection as their Mention, which Slack shows as
   their name, in an edit as in a new message; a person without one is their display name as text.
@@ -1562,12 +1580,7 @@ With the API:
 curl -X POST https://muster.example.org/api/v1/destinations \
   -H "Authorization: Bearer $MUSTER_TOKEN" -H 'Content-Type: application/json' \
   -d '{"type":"bridge","name":"alerts","connection_id":"CNK7M3QX9P2RTA","channel_id":"C024BE91L",
-       "mentions":{"new_alert_group":{"everyone":"none","user_ids":[],"groups":[]},
-                   "new_alerts":{"everyone":"none","user_ids":[],"groups":[]},
-                   "reopen":{"everyone":"none","user_ids":[],"groups":[]},
-                   "ack_timeout":{"everyone":"none","user_ids":[],"groups":[]},
-                   "snooze_ended":{"everyone":"none","user_ids":[],"groups":[]},
-                   "rise_to_urgent":{"everyone":"none","user_ids":[],"groups":[]}},
+       "mention_entries":[{"target":{"kind":"everyone","everyone":"here"},"events":["new_alert_group"]}],
        "limiter":{"limit":30,"per_seconds":60}}'
 ```
 
@@ -1607,9 +1620,11 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
     A bridge that declares group mentions or a mention of everyone renders the markers of those entries as its
     messenger's mentions, `@payments_team` or `@here` for example, whether or not it has native mentions. A bridge with
     native mentions renders the markers of people as its mentions of their accounts, and any other bridge shows them by
-    their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's `info`
-    does not declare is left out of the message, and so is a person whom an entry names without an Account link. That
-    copy is at most `bridge.info_max_age` (10 minutes) old: Muster reads `info` again when it is older, and when a
+    their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's
+    `info` does not declare is left out of the message, and so is a person whom an entry names without an Account
+    link; a bridge that nevertheless receives a `group` or an `everyone` entry it does not declare, because its `info`
+    changed since, shows the marker's link text, which notifies nobody, and never refuses the message. See
+    [Whom a message mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md#undelivered-mentions). That copy is at most `bridge.info_max_age` (10 minutes) old: Muster reads `info` again when it is older, and when a
     Connection check runs. A long line of Mentions keeps, in their order, the whole markers that fit half of the
     bridge's longest text, with their entries, and leaves out the others. Only the Owner's Mentions — of a Reminder, an
     auto-unacknowledge or a Takeover — the footer and the Assignees name a person without one, by their display name as
@@ -2491,6 +2506,8 @@ Authorization: Bearer <token>
     "direct_messages": { "bot_can_start": true },
     "private_answers": ["ephemeral"],
     "native_mentions": true,
+    "group_mentions": true,
+    "everyone_mentions": ["channel", "here"],
     "quiet_messages": true,
     "status_color": true
   },
@@ -2738,7 +2755,17 @@ Muster adapts:
     message only the person sees, `popup` a short plain-text pop-up.
 
 `native_mentions`
-:   Without it: a Mention marker is rendered as the person's name in plain text, which notifies nobody.
+:   Without it: a Mention marker of a person is rendered as the person's name in plain text, which notifies nobody.
+
+`group_mentions`
+:   Declares that the bridge renders a mention of a group of its messenger. Without it: Muster offers no group entry or
+    Team mention for the Connection's Destinations and sends no `group` entry; a group an entry still names is left out
+    of the message.
+
+`everyone_mentions`
+:   Lists the mentions of everyone in the chat the messenger has, by the symbolic names `channel`, `here`, `all` and
+    `everyone`. Without a name: Muster offers no such entry for it and sends none; one an entry still names is left
+    out of the message.
 
 `quiet_messages`
 :   Without it: a Quiet message (`notify: false`) is posted as an ordinary message, without Mentions.
@@ -2784,9 +2811,16 @@ escaped for CommonMark, and it cannot mention anyone or form a link.
 
 **Mention markers** are links of the form `[@Display Name](muster-mention:<ref>)`, where `ref` names an entry of
 `mentions`. A bridge with `native_mentions` renders the marker as its messenger's mention of the entry's `external_id`,
-which notifies that person. Any other bridge renders the link text alone, as plain text. The Mentions of a Loud message
-form the first line of its body. The `external_id` is the account's id in the messenger as the bridge reported it when
-the account was linked.
+which notifies that person. Any other bridge renders the link text alone, as plain text. Each entry of `mentions` has a
+`kind`: `user`, the default and what Muster sends when it omits the field, `group`, which a bridge that declares
+`group_mentions` renders as its messenger's group mention, with the group's name as `external_id`, and `everyone`, which
+a bridge renders as the mention of everyone in the chat named by `external_id`, one of `channel`, `here`, `all` and
+`everyone` that it lists in `everyone_mentions`. Muster sends a `group` or an `everyone` only while its copy of `info`
+declares it, but that copy may be up to `bridge.info_max_age` old: a bridge that receives a kind it no longer declares
+never refuses the message, and shows the marker's link text, which notifies nobody. The Mentions of a Loud message form
+the first line of its body, which keeps the whole Mentions that fit half of `limits.max_body_length`; see
+[Whom a message mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md#what-each-messenger-supports). The `external_id` is the account's id
+in the messenger as the bridge reported it when the account was linked.
 
 **Colours and emoji.** `color` is `#rrggbb` in lower case, for messengers that colour messages. `emoji` is the status
 as an emoji, for messengers that do not: 🔴 firing, 🟠 acknowledged, ⚪ snoozed, 🟢 resolved, ⛈ storm.

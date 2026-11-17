@@ -213,7 +213,9 @@ Muster never joins a channel on its own, so it asks for no `channels:join`: you 
 An app installed from an earlier manifest lacks `usergroups:read`. Add it under **OAuth & Permissions → Scopes → Bot
 Token Scopes**, or add the line to the app's manifest, and reinstall the app when Slack asks for it: a scope added to an
 installed app reaches its bot token only after the reinstall. The reinstall keeps the bot token, so the Connection needs
-no change: select **Check connection** on it again, and the check records the new scope.
+no change: select **Check connection** on it again, and the check records the new scope (F-125). Until then the app
+shows the new scope in its settings but the token still lacks it. A workspace may let only its Admins and Owners create
+user groups, so a Team's user group may have to be created by one of them.
 
 ## Install the app and create the tokens
 
@@ -353,8 +355,9 @@ the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Men
   groups and Teams, and people through their Account links. A person whom an entry names is mentioned only through their
   Account link; without one they are left out. The Owner of a Reminder, an auto-unacknowledge or a Takeover is still
   named by their display name as text without a link, which notifies nobody. A Slack Destination takes neither
-  `@everyone` nor `@all`. User groups and Teams are taken once the check found `usergroups:read`, and a user group or a
-  Team mention is written as `<!subteam^…>` of the user group's id, which Slack shows as its handle and which mentions
+  `@everyone` nor `@all`: a bot's `<!everyone>` mentions only in the workspace's general channel and does nothing
+  elsewhere, with no error, while `@channel` reaches the same people (F-127). User groups and Teams are taken once the check found `usergroups:read`, and
+  a user group or a Team mention is written as `<!subteam^…>` of the user group's id, which Slack shows as its handle and which mentions
   its members, in a Root message and in a Thread reply alike. The footer of a Root message — "Acknowledged by", "Snoozed
   by", "Resolved by" — writes a person with an Account link for the Connection as their Mention, which Slack shows as
   their name, in an edit as in a new message; a person without one is their display name as text.

@@ -818,7 +818,7 @@ Mention.
 ## Which changes are Loud
 
 A new Alert Group starts
-:   Loud, as a new Root message · mentions: the Destination's `new_alert_group` setting
+:   Loud, as a new Root message · mentions: the entries for `new_alert_group`
 
 New Alerts join a **firing** Alert Group
 :   Loud, as a Thread reply; batched · mentions: `new_alerts`
@@ -1434,7 +1434,8 @@ starts over each time it becomes Firing again. Acknowledge, Snooze and Resolve s
 
 When nobody acknowledges, Muster sends up to three **notices**, at doubling intervals from the Route's first interval
 (`route.ack_timeout`, 15 minutes on a Paging Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
-Each is a Loud Thread reply that Mentions whom the Destination's `ack_timeout` setting says. After the last notice the
+Each is a Loud Thread reply that Mentions whom the Destination's entries for `ack_timeout`
+say ([Whom a message mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md)). After the last notice the
 Alert Group is **Unclaimed**: its message shows "⚠ Nobody has taken this", and the Alert Group list has an Unclaimed
 filter, column and badge. Unclaimed ends when the Alert Group stops being Firing.
 
@@ -1887,25 +1888,33 @@ mention per Connection, in `team_mentions`, each with its Connection and its gro
 ]
 ```
 
+The Team page edits them in the section **How to mention the Team**, and a Destination's entry "Team" mentions them:
+[Whom a message mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md) says which entries, and what each messenger supports.
+
 What each messenger takes:
 
 Mattermost
-:   The name of a Mattermost group, as `@payments_team` mentions it. A bot with the role Member reads the groups of the
-    server, so **Check connection** reads them in its step **Groups**, and the API lists them for the Team mention
-    (`listConnectionGroups`). A server that does not list them to the bot fails nothing: the step says so, and a Team
-    mention is still saved by the name you type.
+:   The name of a Mattermost group, as `@payments_team` mentions it: its members are mentioned in a Root message and in
+    a Thread reply, and a custom group can always be mentioned. A bot with the role Member and no added permission
+    reads the groups of the server, so **Check connection** reads them in its step **Groups**, and the API lists them
+    for the Team mention (`listConnectionGroups`). A server that does not list them to the bot fails nothing: the step
+    says so, and a Team mention is still saved by the name you type. This was checked on Mattermost 11.2.2 with the
+    Entry licence; groups synced from LDAP were not checked (F-121, F-122, F-123).
 
 Slack
-:   A Slack user group, chosen from those the Connection lists, by its handle and its id. The bot needs the optional
-    scope `usergroups:read`; until the Connection's check has found it, a Team mention for a Slack Connection is
-    refused. See [The scopes](https://muster-io.github.io/muster/latest/messengers/slack.md#the-scopes).
+:   A Slack user group, chosen from those the Connection lists, by its handle and its id. `<!subteam^…>` mentions the
+    group's members in a Root message and in a Thread reply (F-126). The bot needs the optional scope
+    `usergroups:read`; until the Connection's check has found it, a Team mention for a Slack Connection is refused.
+    See [The scopes](https://muster-io.github.io/muster/latest/messengers/slack.md#the-scopes). A workspace may let only its Admins and Owners create user
+    groups (F-125), so ask one of them for the group.
 
 Bridge
 :   A group name of the bridge's messenger, when the bridge declares group mentions in its `info`
     (`group_mentions`). Muster does not list the groups of a bridge: you type the name.
 
 Telegram
-:   Telegram has no group mentions, so a Telegram Connection takes no Team mention.
+:   Telegram has no group mentions, so a Telegram Connection takes no Team mention. The Team's On-call is still
+    mentioned, as a person, by the entry "On-call of a Team".
 
 Saving a Team mention for a Connection that cannot carry one — Telegram, a Slack Connection without `usergroups:read`,
 a bridge that declares no group mentions, or a Notification gateway — is refused with `422` and the code
@@ -1921,6 +1930,9 @@ mentions nobody until the ability is back. A save that sends it again unchanged,
 user group id, keeps it and is not refused; only a new or changed Team mention is checked against what its Connection
 can mention. Deleting a Connection deletes its Team mentions, each recorded in the Audit
 log of its Team; a change of a Team's Team mentions is recorded in its Audit log as every other change of the Team.
+
+Which buttons a Destination's messages show is a separate setting of the Destination:
+[Button sets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#button-sets).
 
 ## Working hours
 
@@ -2818,6 +2830,30 @@ The API saves the entries in order with `If-Match`, and the Audit log shows the 
 ]
 ```
 
+## An example: infra-critical
+
+The operations Destination `infra-critical` should reach the On-call of the Team that owns the Alert Group on every
+Loud event, and everyone on duty in the channel only when it matters. Two entries do that:
+
+| Entry | Loud events |
+|---|---|
+| On-call of the Team from the label | all seven |
+| `@here` | New Alert Group, Rise to critical, Start of a Storm |
+
+So a new Alert Group of the Team payments mentions its On-call and `@here`; New Alerts, a Reopen, the end of a Snooze
+and the ack timeout mention only the On-call; a rise to critical and the start of a Storm mention both again. A Quiet
+message mentions nobody. A new entry is ticked for every Loud event, so untick the events `@here` does not take.
+
+Open **Destinations**, select the Destination and find the section **Mentions**. Each row of the grid is one entry,
+with its Loud events beside it as seven boxes, in this order: New Alert Group, New Alerts, Reopen, Ack timeout, End of
+Snooze, Rise to critical and Start of a Storm. **Add** puts a new entry at the end. Under each target the row reads what it mentions now. In the picture, `@here` is ticked for a new
+Alert Group, a rise to critical and the start of a Storm only.
+
+![The Mentions of a Mattermost Destination: the entry "On-call of the Team from the label" ticked for all seven Loud events and the entry @here ticked for three of them, a warning above them about a person without a linked account, and the table of what each messenger supports under them](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/mentions/01-mentions-grid.png){ .screenshot }
+
+An entry that names a person without a linked account in the Destination's messenger is warned about above the grid
+([Undelivered Mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md#undelivered-mentions)).
+
 ## What each messenger supports
 
 A Destination takes only the targets its Connection can mention. Any other target is refused with `422` and the code
@@ -2831,18 +2867,44 @@ A Destination takes only the targets its Connection can mention. Any other targe
 | Bridge | the words the bridge declares | when the bridge declares group mentions | linked people, by the plain name without `native_mentions` |
 | Outgoing webhook | every target, as data | every target, as data | every target, as data |
 
-Slack has no `everyone`: a bot's `<!everyone>` mentions only in the workspace's general channel, where `<!channel>`
-reaches the same people. A Slack Connection takes user groups and Teams once its check found the optional scope
-`usergroups:read` ([Slack](https://muster-io.github.io/muster/latest/messengers/slack.md)). A bridge declares in its `info` the mentions of everyone it has
-(`everyone_mentions`) and whether it has group mentions (`group_mentions`).
+Mattermost
+:   `@channel`, `@here` and `@all` mention in a Root message's attachment as in a post, and `@payments_team` mentions
+    the members of a custom group in a Root message and in a Thread reply; a custom group can always be mentioned,
+    since its setting to allow references cannot be turned off. The bot reads the groups with the role Member and no
+    added permission. Checked on Mattermost 11.2.2 with the Entry licence (F-122, F-123, F-124); groups synced from
+    LDAP were not checked (F-121). See [Connect Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md#who-gets-notified).
+
+Slack
+:   Slack offers only `<!channel>` and `<!here>`, and no `everyone`: a bot's `<!everyone>` mentions only in the
+    workspace's general channel, where `<!channel>` reaches the same people, and nothing tells the two cases apart
+    (F-127). A user group or a Team mention, `<!subteam^…>`, mentions the group's members in a Root message and in a
+    Thread reply (F-126). A Slack Connection takes user groups and Teams once its check found the optional scope
+    `usergroups:read`, which reaches the bot only after the app is reinstalled; the reinstall keeps the bot token, so
+    check the Connection again, do not edit it (F-125). A workspace may let only its Admins and Owners create user
+    groups. See [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#add-usergroupsread-to-an-installed-app).
+
+Telegram
+:   Telegram mentions only people, by a link to their account, and only in the discussion group. See
+    [Telegram](https://muster-io.github.io/muster/latest/concepts/mentions.md#telegram).
+
+Bridge
+:   A bridge declares in its `info` the mentions of everyone it has (`everyone_mentions`) and whether it has group
+    mentions (`group_mentions`); a bridge that has native mentions renders the markers of people as the messenger's
+    mentions ([Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md)).
+
+Saving an entry whose kind the bridge does not declare is refused. At delivery Muster sends a bridge only the groups and
+mentions of everyone that its copy of `info` declares, and leaves out the others. A bridge never refuses a message for
+the kind of an entry: one that receives a `group` or an `everyone` entry it no longer declares shows the marker's link
+text, which notifies nobody. A person is named by their plain name when the bridge has no native mentions
+([Undelivered Mentions](https://muster-io.github.io/muster/latest/concepts/mentions.md#undelivered-mentions)). Muster reads `info` again when its copy is older than
+`bridge.info_max_age`.
 
 An entry stays when its Connection later loses an ability, such as a Slack app reinstalled without the scope: it reads
 `available: false` with the reason in `unavailable_reason`, and mentions nobody. An entry whose User or Team was deleted
 stays too, shows them as deleted and mentions nobody.
 
-In Slack a user group or a Team mention is written as `<!subteam^…>` of the user group's id, which Slack shows as its
-handle and which mentions its members. A bridge receives a group and a mention of everyone as entries of `mentions`
-of their own kind ([What Muster posts](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts)).
+A bridge receives a group and a mention of everyone as entries of `mentions` of their own kind
+([What Muster posts](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts)).
 
 An outgoing webhook receives the targets as data in `mentions` and `.Mentions`: a Team as `{"type": "team", "slug":
 …, "name": …}`, one per Team of the Alert Group for "Team from the label", and the On-call as a `user`.
@@ -2857,18 +2919,52 @@ The On-call is taken from the Team's main Schedule at the moment of the event, a
 A Team without a main Schedule, or one with a gap at that moment, gives nobody. A Team mention that is set later, or an
 On-call who links an account later, is mentioned from the next Loud event on.
 
+The Team mention is set on the Team page, in the section **How to mention the Team**, one field for each Connection
+that may have a Destination. A Connection that cannot mention a group says why beside its field. See
+[Team mentions](https://muster-io.github.io/muster/latest/concepts/teams.md#team-mentions).
+
+![The section How to mention the Team of the Team payments: the Mattermost Connection oncall-mm with the group payments_team, and the bridge, Slack and Telegram Connections that cannot mention a group, each with its reason](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/mentions/03-team-mentions.png){ .screenshot }
+
 When a Destination becomes a Destination of a Team, Muster adds the entry "Team {Team}" for every Loud event, unless
 the Destination already has an entry naming that Team or has 100 entries, the most a Destination has. A Telegram
 Destination gets none, since Telegram cannot mention Teams. An Admin may remove the entry; naming the Destination
 again later adds it again only when it has none.
 
+## Telegram
+
+A Telegram Destination mentions people only, each by a link to their Telegram account. When you select **Add** in its
+**Mentions** section, everyone in the chat, groups and Teams are greyed with the reason "Telegram cannot mention
+everyone or groups", and it offers a person and the two On-call entries.
+
+![The list that Add opens on a Telegram Destination: Person, On-call of a Team and On-call of the Team from the label can be added, and everyone in the chat, groups and Teams are greyed with the reason "Telegram cannot mention everyone or groups"](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/mentions/02-telegram-mentions.png){ .screenshot }
+
+A Mention in a Thread reaches only the members of the channel's discussion group:
+
+- A subscriber of the channel who is not in the discussion group is not mentioned (F-014). The Destination check names
+  the people of its Teams who are outside the group, in its item **Members of the discussion group**. A person who left
+  the group shows as outside only some time later, about a minute (F-128).
+- Muting the discussion group does not hide a Mention from an ordinary member: a Mention in a comment rang a member who
+  had muted the group, on the desktop and on the phone (F-129).
+- The creator of the discussion group, who is anonymous in it, was not rung by a Mention in a group they had muted
+  (F-129). So a person who created the discussion group, or is anonymous in it, should not mute it. The Destination
+  check sees the creator as a member, so it gives no warning for this.
+
+[Connect Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md#join-the-discussion-group-and-mute-the-channel) tells the people on call to
+join the group.
+
 ## Undelivered Mentions
 
 A person whom an entry names is sometimes not mentioned as their messenger mentions people:
 
-- They have no linked account in the Destination's messenger. The message leaves them out.
+- They have no linked account in the Destination's messenger. The message leaves them out. Only the Owner of a Reminder,
+  an auto-unacknowledge or a Takeover, the footer and the Assignees name a person without a link, by their name as
+  text.
 - The Destination is a bridge whose `info` does not declare `native_mentions`, or Muster has not read its `info` yet.
   The message names them by their plain name, which notifies nobody.
+
+Through a bridge the line of Mentions keeps, in their order, the whole Mentions that fit half of the bridge's body
+limit, and leaves out the rest. A Mention left out for its length is still recorded as delivered today, so it appears
+in no Timeline entry and in no warning.
 
 Nothing is written in the Thread for them: Muster never posts a message about a Mention. Instead, once the Loud
 message is delivered, the Alert Group's Timeline records the delivery event "Mention not delivered in

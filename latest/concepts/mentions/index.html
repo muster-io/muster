@@ -1868,6 +1868,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#an-example-infra-critical" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        An example: infra-critical
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-each-messenger-supports" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1883,6 +1894,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Teams and the On-call
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#telegram" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Telegram
       </span>
     </span>
   </a>
@@ -3128,6 +3150,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#an-example-infra-critical" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        An example: infra-critical
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-each-messenger-supports" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3143,6 +3176,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Teams and the On-call
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#telegram" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Telegram
       </span>
     </span>
   </a>
@@ -3248,6 +3292,37 @@ Owner, a Takeover the previous Owner, and a Reopen into acknowledged only the Ow
 <span class="w">  </span><span class="p">{</span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"everyone"</span><span class="p">,</span><span class="w"> </span><span class="nt">"everyone"</span><span class="p">:</span><span class="w"> </span><span class="s2">"here"</span><span class="p">},</span><span class="w"> </span><span class="nt">"events"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"new_alert_group"</span><span class="p">,</span><span class="w"> </span><span class="s2">"storm_started"</span><span class="p">]}</span>
 <span class="p">]</span>
 </code></pre></div>
+<h2 id="an-example-infra-critical">An example: infra-critical<a class="headerlink" href="#an-example-infra-critical" title="Permanent link">&para;</a></h2>
+<p>The operations Destination <code>infra-critical</code> should reach the On-call of the Team that owns the Alert Group on every
+Loud event, and everyone on duty in the channel only when it matters. Two entries do that:</p>
+<table>
+<thead>
+<tr>
+<th>Entry</th>
+<th>Loud events</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>On-call of the Team from the label</td>
+<td>all seven</td>
+</tr>
+<tr>
+<td><code>@here</code></td>
+<td>New Alert Group, Rise to critical, Start of a Storm</td>
+</tr>
+</tbody>
+</table>
+<p>So a new Alert Group of the Team payments mentions its On-call and <code>@here</code>; New Alerts, a Reopen, the end of a Snooze
+and the ack timeout mention only the On-call; a rise to critical and the start of a Storm mention both again. A Quiet
+message mentions nobody. A new entry is ticked for every Loud event, so untick the events <code>@here</code> does not take.</p>
+<p>Open <strong>Destinations</strong>, select the Destination and find the section <strong>Mentions</strong>. Each row of the grid is one entry,
+with its Loud events beside it as seven boxes, in this order: New Alert Group, New Alerts, Reopen, Ack timeout, End of
+Snooze, Rise to critical and Start of a Storm. <strong>Add</strong> puts a new entry at the end. Under each target the row reads what it mentions now. In the picture, <code>@here</code> is ticked for a new
+Alert Group, a rise to critical and the start of a Storm only.</p>
+<p><img alt="The Mentions of a Mattermost Destination: the entry &quot;On-call of the Team from the label&quot; ticked for all seven Loud events and the entry @here ticked for three of them, a warning above them about a person without a linked account, and the table of what each messenger supports under them" class="screenshot" src="../../assets/screenshots/concepts/mentions/01-mentions-grid.png" /></p>
+<p>An entry that names a person without a linked account in the Destination's messenger is warned about above the grid
+(<a href="#undelivered-mentions">Undelivered Mentions</a>).</p>
 <h2 id="what-each-messenger-supports">What each messenger supports<a class="headerlink" href="#what-each-messenger-supports" title="Permanent link">&para;</a></h2>
 <p>A Destination takes only the targets its Connection can mention. Any other target is refused with <code>422</code> and the code
 <code>mention_unsupported</code> at <code>/mention_entries/{i}/target</code>:</p>
@@ -3293,16 +3368,40 @@ Owner, a Takeover the previous Owner, and a Reopen into acknowledged only the Ow
 </tr>
 </tbody>
 </table>
-<p>Slack has no <code>everyone</code>: a bot's <code>&lt;!everyone&gt;</code> mentions only in the workspace's general channel, where <code>&lt;!channel&gt;</code>
-reaches the same people. A Slack Connection takes user groups and Teams once its check found the optional scope
-<code>usergroups:read</code> (<a href="../../messengers/slack/">Slack</a>). A bridge declares in its <code>info</code> the mentions of everyone it has
-(<code>everyone_mentions</code>) and whether it has group mentions (<code>group_mentions</code>).</p>
+<dl>
+<dt>Mattermost</dt>
+<dd><code>@channel</code>, <code>@here</code> and <code>@all</code> mention in a Root message's attachment as in a post, and <code>@payments_team</code> mentions
+the members of a custom group in a Root message and in a Thread reply; a custom group can always be mentioned,
+since its setting to allow references cannot be turned off. The bot reads the groups with the role Member and no
+added permission. Checked on Mattermost 11.2.2 with the Entry licence (F-122, F-123, F-124); groups synced from
+LDAP were not checked (F-121). See <a href="../../messengers/mattermost/#who-gets-notified">Connect Mattermost</a>.</dd>
+<dt>Slack</dt>
+<dd>Slack offers only <code>&lt;!channel&gt;</code> and <code>&lt;!here&gt;</code>, and no <code>everyone</code>: a bot's <code>&lt;!everyone&gt;</code> mentions only in the
+workspace's general channel, where <code>&lt;!channel&gt;</code> reaches the same people, and nothing tells the two cases apart
+(F-127). A user group or a Team mention, <code>&lt;!subteam^…&gt;</code>, mentions the group's members in a Root message and in a
+Thread reply (F-126). A Slack Connection takes user groups and Teams once its check found the optional scope
+<code>usergroups:read</code>, which reaches the bot only after the app is reinstalled; the reinstall keeps the bot token, so
+check the Connection again, do not edit it (F-125). A workspace may let only its Admins and Owners create user
+groups. See <a href="../../messengers/slack/#add-usergroupsread-to-an-installed-app">Connect Slack</a>.</dd>
+<dt>Telegram</dt>
+<dd>Telegram mentions only people, by a link to their account, and only in the discussion group. See
+<a href="#telegram">Telegram</a>.</dd>
+<dt>Bridge</dt>
+<dd>A bridge declares in its <code>info</code> the mentions of everyone it has (<code>everyone_mentions</code>) and whether it has group
+mentions (<code>group_mentions</code>); a bridge that has native mentions renders the markers of people as the messenger's
+mentions (<a href="../../messengers/write-a-bridge/">Write a bridge</a>).</dd>
+</dl>
+<p>Saving an entry whose kind the bridge does not declare is refused. At delivery Muster sends a bridge only the groups and
+mentions of everyone that its copy of <code>info</code> declares, and leaves out the others. A bridge never refuses a message for
+the kind of an entry: one that receives a <code>group</code> or an <code>everyone</code> entry it no longer declares shows the marker's link
+text, which notifies nobody. A person is named by their plain name when the bridge has no native mentions
+(<a href="#undelivered-mentions">Undelivered Mentions</a>). Muster reads <code>info</code> again when its copy is older than
+<code>bridge.info_max_age</code>.</p>
 <p>An entry stays when its Connection later loses an ability, such as a Slack app reinstalled without the scope: it reads
 <code>available: false</code> with the reason in <code>unavailable_reason</code>, and mentions nobody. An entry whose User or Team was deleted
 stays too, shows them as deleted and mentions nobody.</p>
-<p>In Slack a user group or a Team mention is written as <code>&lt;!subteam^…&gt;</code> of the user group's id, which Slack shows as its
-handle and which mentions its members. A bridge receives a group and a mention of everyone as entries of <code>mentions</code>
-of their own kind (<a href="../../messengers/bridge/#what-muster-posts">What Muster posts</a>).</p>
+<p>A bridge receives a group and a mention of everyone as entries of <code>mentions</code> of their own kind
+(<a href="../../messengers/bridge/#what-muster-posts">What Muster posts</a>).</p>
 <p>An outgoing webhook receives the targets as data in <code>mentions</code> and <code>.Mentions</code>: a Team as <code>{"type": "team", "slug":
 …, "name": …}</code>, one per Team of the Alert Group for "Team from the label", and the On-call as a <code>user</code>.</p>
 <h2 id="teams-and-the-on-call">Teams and the On-call<a class="headerlink" href="#teams-and-the-on-call" title="Permanent link">&para;</a></h2>
@@ -3312,17 +3411,44 @@ On-call instead. To reach the On-call, add "On-call of a Team" or "On-call of th
 <p>The On-call is taken from the Team's main Schedule at the moment of the event, also when the message is sent later.
 A Team without a main Schedule, or one with a gap at that moment, gives nobody. A Team mention that is set later, or an
 On-call who links an account later, is mentioned from the next Loud event on.</p>
+<p>The Team mention is set on the Team page, in the section <strong>How to mention the Team</strong>, one field for each Connection
+that may have a Destination. A Connection that cannot mention a group says why beside its field. See
+<a href="../teams/#team-mentions">Team mentions</a>.</p>
+<p><img alt="The section How to mention the Team of the Team payments: the Mattermost Connection oncall-mm with the group payments_team, and the bridge, Slack and Telegram Connections that cannot mention a group, each with its reason" class="screenshot" src="../../assets/screenshots/concepts/mentions/03-team-mentions.png" /></p>
 <p>When a Destination becomes a Destination of a Team, Muster adds the entry "Team {Team}" for every Loud event, unless
 the Destination already has an entry naming that Team or has 100 entries, the most a Destination has. A Telegram
 Destination gets none, since Telegram cannot mention Teams. An Admin may remove the entry; naming the Destination
 again later adds it again only when it has none.</p>
+<h2 id="telegram">Telegram<a class="headerlink" href="#telegram" title="Permanent link">&para;</a></h2>
+<p>A Telegram Destination mentions people only, each by a link to their Telegram account. When you select <strong>Add</strong> in its
+<strong>Mentions</strong> section, everyone in the chat, groups and Teams are greyed with the reason "Telegram cannot mention
+everyone or groups", and it offers a person and the two On-call entries.</p>
+<p><img alt="The list that Add opens on a Telegram Destination: Person, On-call of a Team and On-call of the Team from the label can be added, and everyone in the chat, groups and Teams are greyed with the reason &quot;Telegram cannot mention everyone or groups&quot;" class="screenshot" src="../../assets/screenshots/concepts/mentions/02-telegram-mentions.png" /></p>
+<p>A Mention in a Thread reaches only the members of the channel's discussion group:</p>
+<ul>
+<li>A subscriber of the channel who is not in the discussion group is not mentioned (F-014). The Destination check names
+  the people of its Teams who are outside the group, in its item <strong>Members of the discussion group</strong>. A person who left
+  the group shows as outside only some time later, about a minute (F-128).</li>
+<li>Muting the discussion group does not hide a Mention from an ordinary member: a Mention in a comment rang a member who
+  had muted the group, on the desktop and on the phone (F-129).</li>
+<li>The creator of the discussion group, who is anonymous in it, was not rung by a Mention in a group they had muted
+  (F-129). So a person who created the discussion group, or is anonymous in it, should not mute it. The Destination
+  check sees the creator as a member, so it gives no warning for this.</li>
+</ul>
+<p><a href="../../messengers/telegram/#join-the-discussion-group-and-mute-the-channel">Connect Telegram</a> tells the people on call to
+join the group.</p>
 <h2 id="undelivered-mentions">Undelivered Mentions<a class="headerlink" href="#undelivered-mentions" title="Permanent link">&para;</a></h2>
 <p>A person whom an entry names is sometimes not mentioned as their messenger mentions people:</p>
 <ul>
-<li>They have no linked account in the Destination's messenger. The message leaves them out.</li>
+<li>They have no linked account in the Destination's messenger. The message leaves them out. Only the Owner of a Reminder,
+  an auto-unacknowledge or a Takeover, the footer and the Assignees name a person without a link, by their name as
+  text.</li>
 <li>The Destination is a bridge whose <code>info</code> does not declare <code>native_mentions</code>, or Muster has not read its <code>info</code> yet.
   The message names them by their plain name, which notifies nobody.</li>
 </ul>
+<p>Through a bridge the line of Mentions keeps, in their order, the whole Mentions that fit half of the bridge's body
+limit, and leaves out the rest. A Mention left out for its length is still recorded as delivered today, so it appears
+in no Timeline entry and in no warning.</p>
 <p>Nothing is written in the Thread for them: Muster never posts a message about a Mention. Instead, once the Loud
 message is delivered, the Alert Group's Timeline records the delivery event "Mention not delivered in
 {Destination}" (<code>mention_not_delivered</code>). Each person, entry and message gets one, with the entry, the Loud event and

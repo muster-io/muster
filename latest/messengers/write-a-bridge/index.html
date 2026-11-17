@@ -4737,6 +4737,8 @@ minutes. A bridge whose features change is therefore picked up without a restart
 <span class="w">    </span><span class="nt">"direct_messages"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"bot_can_start"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">},</span>
 <span class="w">    </span><span class="nt">"private_answers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"ephemeral"</span><span class="p">],</span>
 <span class="w">    </span><span class="nt">"native_mentions"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"group_mentions"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"everyone_mentions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"channel"</span><span class="p">,</span><span class="w"> </span><span class="s2">"here"</span><span class="p">],</span>
 <span class="w">    </span><span class="nt">"quiet_messages"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"status_color"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
 <span class="w">  </span><span class="p">},</span>
@@ -4933,7 +4935,15 @@ link by a code that the bot sends.</dd>
 <dd>Without it: Muster's answer to a press appears in the Thread of the message instead of privately. <code>ephemeral</code> is a
 message only the person sees, <code>popup</code> a short plain-text pop-up.</dd>
 <dt><code>native_mentions</code></dt>
-<dd>Without it: a Mention marker is rendered as the person's name in plain text, which notifies nobody.</dd>
+<dd>Without it: a Mention marker of a person is rendered as the person's name in plain text, which notifies nobody.</dd>
+<dt><code>group_mentions</code></dt>
+<dd>Declares that the bridge renders a mention of a group of its messenger. Without it: Muster offers no group entry or
+Team mention for the Connection's Destinations and sends no <code>group</code> entry; a group an entry still names is left out
+of the message.</dd>
+<dt><code>everyone_mentions</code></dt>
+<dd>Lists the mentions of everyone in the chat the messenger has, by the symbolic names <code>channel</code>, <code>here</code>, <code>all</code> and
+<code>everyone</code>. Without a name: Muster offers no such entry for it and sends none; one an entry still names is left
+out of the message.</dd>
 <dt><code>quiet_messages</code></dt>
 <dd>Without it: a Quiet message (<code>notify: false</code>) is posted as an ordinary message, without Mentions.</dd>
 <dt><code>status_color</code></dt>
@@ -4968,9 +4978,16 @@ escaped for CommonMark, and it cannot mention anyone or form a link.</p>
 <p><strong>Links</strong> are <code>http</code> and <code>https</code> links, plus Mention markers.</p>
 <p><strong>Mention markers</strong> are links of the form <code>[@Display Name](muster-mention:&lt;ref&gt;)</code>, where <code>ref</code> names an entry of
 <code>mentions</code>. A bridge with <code>native_mentions</code> renders the marker as its messenger's mention of the entry's <code>external_id</code>,
-which notifies that person. Any other bridge renders the link text alone, as plain text. The Mentions of a Loud message
-form the first line of its body. The <code>external_id</code> is the account's id in the messenger as the bridge reported it when
-the account was linked.</p>
+which notifies that person. Any other bridge renders the link text alone, as plain text. Each entry of <code>mentions</code> has a
+<code>kind</code>: <code>user</code>, the default and what Muster sends when it omits the field, <code>group</code>, which a bridge that declares
+<code>group_mentions</code> renders as its messenger's group mention, with the group's name as <code>external_id</code>, and <code>everyone</code>, which
+a bridge renders as the mention of everyone in the chat named by <code>external_id</code>, one of <code>channel</code>, <code>here</code>, <code>all</code> and
+<code>everyone</code> that it lists in <code>everyone_mentions</code>. Muster sends a <code>group</code> or an <code>everyone</code> only while its copy of <code>info</code>
+declares it, but that copy may be up to <code>bridge.info_max_age</code> old: a bridge that receives a kind it no longer declares
+never refuses the message, and shows the marker's link text, which notifies nobody. The Mentions of a Loud message form
+the first line of its body, which keeps the whole Mentions that fit half of <code>limits.max_body_length</code>; see
+<a href="../../concepts/mentions/#what-each-messenger-supports">Whom a message mentions</a>. The <code>external_id</code> is the account's id
+in the messenger as the bridge reported it when the account was linked.</p>
 <p><strong>Colours and emoji.</strong> <code>color</code> is <code>#rrggbb</code> in lower case, for messengers that colour messages. <code>emoji</code> is the status
 as an emoji, for messengers that do not: 🔴 firing, 🟠 acknowledged, ⚪ snoozed, 🟢 resolved, ⛈ storm.</p>
 <p><strong>Loud and Quiet.</strong> <code>notify: true</code> is a <strong>Loud</strong> message: it should notify people as the messenger's new messages do,

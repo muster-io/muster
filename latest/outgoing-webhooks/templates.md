@@ -62,7 +62,7 @@ too):
     }
   },
   "proxy": { "enabled": false },
-  "mentions": { "...": "Mention settings, as for any Destination" },
+  "mention_entries": [{ "target": { "kind": "team", "team_id": "TE7D2K9M4QX1PV" } }],
   "limiter": { "limit": 5, "per_seconds": 1 }
 }
 ```
@@ -205,7 +205,9 @@ A template that reads `.AlertGroup` without the branch fails for a summary as a 
 
 ## Mentions
 
-Muster does not know the chat's syntax for a Mention, so a Loud message carries its targets as data in `.Mentions`:
+Muster does not know the chat's syntax for a Mention, so a Loud message carries its targets as data in `.Mentions`,
+those of the Destination's [Mention entries](../concepts/mentions.md#what-each-messenger-supports); a Team is a target
+like any other, once for each Team of the Alert Group when the entry is "Team from the label":
 each has `Type` (`everyone`, `group`, `user` or `team`) and, by type, `Everyone` (`all`, `channel`, `here` or
 `everyone`), `Name`, `ID` and `Login`, or a Team's `Slug` and `Name`. The trusted function `mention` renders a target as
 plain text — `@all` (or `@channel`, `@here`, `@everyone` as the Mention entries chose), the group's name, `@` and the

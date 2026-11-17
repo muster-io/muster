@@ -42,7 +42,7 @@ Through the API, create a Destination of type `webhook` with the mode `events`:
     "headers": [{ "name": "Authorization", "value": "Bearer {{ .Secrets.token }}" }]
   },
   "proxy": { "enabled": false },
-  "mentions": { "...": "Mention settings, as for any Destination" },
+  "mention_entries": [{ "target": { "kind": "team", "team_id": "TE7D2K9M4QX1PV" } }],
   "limiter": { "limit": 5, "per_seconds": 1 }
 }
 ```
@@ -153,7 +153,9 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 :   Who the event mentions under the Destination's Mention entries, as data: `{"type": "everyone"}`,
     `{"type": "group", "name": …}`, `{"type": "user", "id": …, "name": …, "login": …}` — the On-call of a Team too —
     or `{"type": "team", "slug": …, "name": …}`, with one target per Team of the Alert Group for "Team from the label".
-    Always `[]` for a Quiet event.
+    Always `[]` for a Quiet event. A Team is a target of the Destination's
+    [Mention entries](../concepts/mentions.md#what-each-messenger-supports), given by its `team_id`, and the receiver
+    gets its slug and name.
 
 `sequence`
 :   The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,

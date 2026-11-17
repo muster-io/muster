@@ -3325,7 +3325,7 @@ too):</p>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">"proxy"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w"> </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">"mentions"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"Mention settings, as for any Destination"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"mention_entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team"</span><span class="p">,</span><span class="w"> </span><span class="nt">"team_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"TE7D2K9M4QX1PV"</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}],</span>
 <span class="w">  </span><span class="nt">"limiter"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"limit"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nt">"per_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -3432,7 +3432,9 @@ templates that should handle both branch on it:</p>
 </code></pre></div>
 <p>A template that reads <code>.AlertGroup</code> without the branch fails for a summary as a template error.</p>
 <h2 id="mentions">Mentions<a class="headerlink" href="#mentions" title="Permanent link">&para;</a></h2>
-<p>Muster does not know the chat's syntax for a Mention, so a Loud message carries its targets as data in <code>.Mentions</code>:
+<p>Muster does not know the chat's syntax for a Mention, so a Loud message carries its targets as data in <code>.Mentions</code>,
+those of the Destination's <a href="../../concepts/mentions/#what-each-messenger-supports">Mention entries</a>; a Team is a target
+like any other, once for each Team of the Alert Group when the entry is "Team from the label":
 each has <code>Type</code> (<code>everyone</code>, <code>group</code>, <code>user</code> or <code>team</code>) and, by type, <code>Everyone</code> (<code>all</code>, <code>channel</code>, <code>here</code> or
 <code>everyone</code>), <code>Name</code>, <code>ID</code> and <code>Login</code>, or a Team's <code>Slug</code> and <code>Name</code>. The trusted function <code>mention</code> renders a target as
 plain text — <code>@all</code> (or <code>@channel</code>, <code>@here</code>, <code>@everyone</code> as the Mention entries chose), the group's name, <code>@</code> and the

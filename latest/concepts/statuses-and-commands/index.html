@@ -3991,7 +3991,8 @@ the first two on and the Informational profile turns everything off.</p>
 starts over each time it becomes Firing again. Acknowledge, Snooze and Resolve stop it.</p>
 <p>When nobody acknowledges, Muster sends up to three <strong>notices</strong>, at doubling intervals from the Route's first interval
 (<code>route.ack_timeout</code>, 15 minutes on a Paging Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
-Each is a Loud Thread reply that Mentions whom the Destination's <code>ack_timeout</code> setting says. After the last notice the
+Each is a Loud Thread reply that Mentions whom the Destination's entries for <code>ack_timeout</code>
+say (<a href="../mentions/">Whom a message mentions</a>). After the last notice the
 Alert Group is <strong>Unclaimed</strong>: its message shows "⚠ Nobody has taken this", and the Alert Group list has an Unclaimed
 filter, column and badge. Unclaimed ends when the Alert Group stops being Firing.</p>
 <p>An Alert Group that has not been published, as when its Route has no Destination or only Broken ones, has no ack timeout
