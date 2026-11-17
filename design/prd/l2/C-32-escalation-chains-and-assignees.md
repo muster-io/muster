@@ -56,7 +56,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
   A step that Pages or sends may be limited to Working hours — those of the chain's owning Team, else the Organization's
   (C-25.FR-9) — and to a Severity condition. Paging a person normally or importantly runs their Notification rule of
-  that name (C-31.FR-3).
+  that name (C-31.FR-3). A step that Pages several people whose first actions come due together makes one Page naming
+  them all.
   _Revised for L2 (2026-11-16, #578):_ a step "Page a whole Team" that names no Team, and not everyone in the chat,
   Pages the chain's owning Team; a chain without an owning Team must name the Team, and saving one that does not is
   refused with `422` at the step's Team.
@@ -101,14 +102,17 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
 - **C-32.FR-8** A chain Pages only in the Threads of its own Destinations: a Route's chain in those of the Route's
   Destinations that have the Alert Group's Root message; a Team's chain in those of the Team's Destinations that have
-  it, and, where none has, in those of the Route's Destinations. So a step that Pages everyone in the chat never rings
-  another team's chat.
+  it, and, where none has, in those of the Route's Destinations. A source's Destinations that have the Root message are
+  those that an entry of that source reached, at the Alert Group's current or an earlier Severity level, and that the
+  source still names; a Destination reached only through another source's entry is not the source's. So a step that
+  Pages everyone in the chat never rings another team's chat.
 - **C-32.FR-9** A Page by Mention is a Thread reply that delivery sends like any other (ADR-0005): Loud, never combined
   with the Pages of other Alert Groups. It names each person it Pages — as a Mention where they have an Account link in
   the Identity space of that Destination's Connection, and otherwise in a line "Page not delivered: @{login} has no
   linked {messenger} account" — and says which step and chain it comes from: "Step {n}: @ivan, you are needed", then
   "Chain of the Route {Route} · On-call of {Team} {Schedule} · normal", with "important, again in {N} min" when the
-  person's rule repeats. A step for a Team or for everyone in the chat writes that Destination's Team mention or token;
+  person's rule repeats: "again in {N} min" is written only when every person the Page names has a rule whose next
+  Mention comes after the same N, and a later Mention of a rule says "· {importance}, again". A step for a Team or for everyone in the chat writes that Destination's Team mention or token;
   where the Destination's Connection can mention neither, such as Telegram, the step makes no reply there, and when it
   can make a reply in none of the chain's Destinations it records `escalation_step_skipped` with that reason. A call
   through a gateway writes nothing in the Thread.

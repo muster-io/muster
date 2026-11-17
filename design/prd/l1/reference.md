@@ -478,7 +478,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) — every attempt of a call through a Notification gateway that ended, a replayed answer counted as accepted | C-30 |
 | `muster_notification_gateway_broken` | gauge (Leader) | `connection` — 1 while the Notification gateway is Broken, 0 for every other Notification gateway | C-30 |
 | `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |
-| `muster_pages_total` | counter | `chain`, `kind` (`mention`, `call`), `outcome` (`delivered`, `not_delivered`) — one per Page once it ended; a Page by Mention is delivered once a delivered Thread reply mentioned one of its people or, for a Team or everyone in the chat, once one of its replies was delivered; a Page whose chain was deleted before it ended is not counted | C-32 |
+| `muster_pages_total` | counter | `chain`, `kind` (`mention`, `call`), `outcome` (`delivered`, `not_delivered`) — one per Page once it ended; a Page by Mention is delivered once a delivered Thread reply mentioned one of its people or, for a Team or everyone in the chat, once one of its replies was delivered; a Page whose chain was deleted while it ran is not counted | C-32 |
 
 ## Chart rules
 
