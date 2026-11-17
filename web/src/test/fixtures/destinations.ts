@@ -26,6 +26,7 @@ function readFields(): Omit<DestinationReadFields, "id"> {
     owning_team: null,
     mentions: defaultMentions(),
     mention_entries: [],
+    mention_warnings: [],
     health: { state: "healthy" },
     routes: [],
     teams: [],

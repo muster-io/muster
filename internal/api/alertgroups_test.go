@@ -1045,3 +1045,44 @@ func TestAlertGroupTeamsAPI(t *testing.T) {
 		t.Errorf("team=mine by a service account = %d %s", a.status, a.body)
 	}
 }
+
+// TestTimelineMentionNotDeliveredAPI is C-28.FR-3, AC-4 and C-11.FR-21 at the API: a mention_not_delivered delivery
+// entry carries mention — the person, the entry's position and target with its User or Team, the Loud event and the
+// reason — and the other delivery events none.
+func TestTimelineMentionNotDeliveredAPI(t *testing.T) {
+	bob := &groups.ActorRef{Kind: "user", PublicID: "SR0000000000BB", Name: "Bob", Login: "bob"}
+	system := groups.TimelineActor{Kind: "system", Transport: "system"}
+	onCall, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA1", At: t0, Kind: groups.KindDelivery,
+		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
+			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "payments-notice"},
+			Mention: &groups.MentionView{User: bob, Position: 1, Target: groups.MentionTarget{Kind: "on_call_of_team",
+				TeamID: "TM0000000000PA", Team: &groups.TeamRef{PublicID: "TM0000000000PA", Name: "Payments",
+					Slug: "payments"}}, Event: "new_alert_group", Reason: "no_account_link"}}})
+	raw, _ := json.Marshal(onCall)
+	if err != nil || !strings.Contains(string(raw), `"delivery_event":"mention_not_delivered"`) ||
+		!strings.Contains(string(raw), `"mention":{"entry":{"position":1,"target":{"kind":"on_call_of_team",`+
+			`"team":{"deleted":false,"id":"TM0000000000PA","name":"Payments","slug":"payments"},`+
+			`"team_id":"TM0000000000PA"}},"event":"new_alert_group","reason":"no_account_link",`+
+			`"user":{"deactivated":false,"id":"SR0000000000BB","login":"bob","name":"Bob"}}`) {
+		t.Errorf("on-call %s, %v", raw, err)
+	}
+	person, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA2", At: t0, Kind: groups.KindDelivery,
+		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
+			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "bridge"},
+			Mention: &groups.MentionView{User: bob, Target: groups.MentionTarget{Kind: "user", UserID: "SR0000000000BB",
+				User: bob}, Event: "reopen", Reason: "bridge_cannot_mention_people"}}})
+	raw, _ = json.Marshal(person)
+	if err != nil || !strings.Contains(string(raw), `"target":{"kind":"user","user":{"deactivated":false,`+
+		`"id":"SR0000000000BB","login":"bob","name":"Bob"},"user_id":"SR0000000000BB"}}`) ||
+		!strings.Contains(string(raw), `"reason":"bridge_cannot_mention_people"`) {
+		t.Errorf("person %s, %v", raw, err)
+	}
+	publication, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA3", At: t0,
+		Kind: groups.KindDelivery, Loudness: groups.Loud, Mentions: []string{}, Actor: system,
+		Delivery: &groups.DeliveryView{Event: "publication", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA",
+			Name: "ops"}}})
+	raw, _ = json.Marshal(publication)
+	if err != nil || strings.Contains(string(raw), `"mention"`) {
+		t.Errorf("publication %s, %v", raw, err)
+	}
+}

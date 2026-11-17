@@ -866,7 +866,7 @@ RETURNING ds.public_id;
 
 -- RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
 -- buttons (a Reminder's), for the presses on them.
--- name: RecordReplySent :exec
+-- name: RecordReplySent :execrows
 UPDATE thread_replies
 SET state = 'sent', sent_at = @now::timestamptz, message_id = sqlc.narg('message_id')::text,
     button_key_id = sqlc.narg('button_key_id')::text, last_error_class = NULL, last_error = NULL, lease_owner = NULL,
@@ -960,6 +960,21 @@ INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, ale
 VALUES (@org_id, @public_id, @occurred_at, @destination_id, sqlc.narg('alert_group_id')::bigint,
         sqlc.narg('storm_id')::bigint, @kind, @loudness, @mentions::text[], sqlc.narg('error_class')::text,
         sqlc.narg('error')::text, sqlc.narg('detail')::jsonb);
+
+-- ListOpenMentions reads which of the people @user_ids have an open warning about an undelivered Mention on the
+-- Destination (C-28.FR-3): the person and the entry's target of each latest mention_not_delivered or
+-- mention_delivered of the Destination per person and target since @since, the start of retention.alert_details,
+-- whose latest is mention_not_delivered. On delivery_events_mentions_idx.
+-- name: ListOpenMentions :many
+SELECT latest.user_id::bigint AS user_id, latest.target::jsonb AS target
+FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'target')
+             e.detail ->> 'user_id' AS user_id, e.detail -> 'target' AS target, e.kind
+      FROM delivery_events e
+      WHERE e.org_id = @org_id AND e.destination_id = @destination_id
+        AND e.kind IN ('mention_not_delivered', 'mention_delivered') AND e.occurred_at >= @since
+        AND e.detail ->> 'user_id' = ANY(@user_ids::text[])
+      ORDER BY e.detail ->> 'user_id', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
+WHERE latest.kind = 'mention_not_delivered';
 
 -- GetGroupForDeliveries reads the id of an Alert Group by public_id.
 -- name: GetGroupForDeliveries :one

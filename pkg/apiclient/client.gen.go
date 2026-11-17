@@ -762,6 +762,7 @@ const (
 	DeliveryEventKindDestinationRecovered      DeliveryEventKind = "destination_recovered"
 	DeliveryEventKindFinalEdit                 DeliveryEventKind = "final_edit"
 	DeliveryEventKindMarkupRejected            DeliveryEventKind = "markup_rejected"
+	DeliveryEventKindMentionNotDelivered       DeliveryEventKind = "mention_not_delivered"
 	DeliveryEventKindNotDelivered              DeliveryEventKind = "not_delivered"
 	DeliveryEventKindPossibleDuplicate         DeliveryEventKind = "possible_duplicate"
 	DeliveryEventKindPublication               DeliveryEventKind = "publication"
@@ -785,6 +786,8 @@ func (e DeliveryEventKind) Valid() bool {
 	case DeliveryEventKindFinalEdit:
 		return true
 	case DeliveryEventKindMarkupRejected:
+		return true
+	case DeliveryEventKindMentionNotDelivered:
 		return true
 	case DeliveryEventKindNotDelivered:
 		return true
@@ -1903,6 +1906,24 @@ func (e MentionName) Valid() bool {
 	}
 }
 
+// Defines values for MentionNotDeliveredReason.
+const (
+	MentionNotDeliveredReasonBridgeCannotMentionPeople MentionNotDeliveredReason = "bridge_cannot_mention_people"
+	MentionNotDeliveredReasonNoAccountLink             MentionNotDeliveredReason = "no_account_link"
+)
+
+// Valid indicates whether the value is a known member of the MentionNotDeliveredReason enum.
+func (e MentionNotDeliveredReason) Valid() bool {
+	switch e {
+	case MentionNotDeliveredReasonBridgeCannotMentionPeople:
+		return true
+	case MentionNotDeliveredReasonNoAccountLink:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MentionResolvedKind.
 const (
 	MentionResolvedKindEveryone MentionResolvedKind = "everyone"
@@ -2991,22 +3012,22 @@ func (e ProxyType) Valid() bool {
 
 // Defines values for ReachReason.
 const (
-	BridgeNoNativeMentions ReachReason = "bridge_no_native_mentions"
-	NoAccountLink          ReachReason = "no_account_link"
-	NotInDiscussionGroup   ReachReason = "not_in_discussion_group"
-	WebhookNoThreadReply   ReachReason = "webhook_no_thread_reply"
+	ReachReasonBridgeNoNativeMentions ReachReason = "bridge_no_native_mentions"
+	ReachReasonNoAccountLink          ReachReason = "no_account_link"
+	ReachReasonNotInDiscussionGroup   ReachReason = "not_in_discussion_group"
+	ReachReasonWebhookNoThreadReply   ReachReason = "webhook_no_thread_reply"
 )
 
 // Valid indicates whether the value is a known member of the ReachReason enum.
 func (e ReachReason) Valid() bool {
 	switch e {
-	case BridgeNoNativeMentions:
+	case ReachReasonBridgeNoNativeMentions:
 		return true
-	case NoAccountLink:
+	case ReachReasonNoAccountLink:
 		return true
-	case NotInDiscussionGroup:
+	case ReachReasonNotInDiscussionGroup:
 		return true
-	case WebhookNoThreadReply:
+	case ReachReasonWebhookNoThreadReply:
 		return true
 	default:
 		return false
@@ -5299,6 +5320,9 @@ type BridgeDestination struct {
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
 
+	// MentionWarnings The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person's name; always empty on an outgoing webhook, which takes every person as data.
+	MentionWarnings []MentionWarning `json:"mention_warnings"`
+
 	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
@@ -5936,6 +5960,9 @@ type DestinationReadFields struct {
 
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// MentionWarnings The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person's name; always empty on an outgoing webhook, which takes every person as data.
+	MentionWarnings []MentionWarning `json:"mention_warnings"`
 
 	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
@@ -7064,6 +7091,9 @@ type MattermostDestination struct {
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
 
+	// MentionWarnings The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person's name; always empty on an outgoing webhook, which takes every person as data.
+	MentionWarnings []MentionWarning `json:"mention_warnings"`
+
 	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
@@ -7180,11 +7210,22 @@ type MentionEntryInput struct {
 	Target MentionTargetInput `json:"target"`
 }
 
+// MentionEntryRef The Mention entry that named a person, as on the Destination — its position in the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
+type MentionEntryRef struct {
+	Position int `json:"position"`
+
+	// Target The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.
+	Target MentionTarget `json:"target"`
+}
+
 // MentionEvent A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).
 type MentionEvent string
 
 // MentionName A symbolic Mention that each Destination turns into real Mentions.
 type MentionName string
+
+// MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16).
+type MentionNotDeliveredReason string
 
 // MentionResolution What an entry mentions now for one Team, or for no Team.
 type MentionResolution struct {
@@ -7303,6 +7344,22 @@ type MentionTargetKind string
 
 // MentionUnavailableReason Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.
 type MentionUnavailableReason string
+
+// MentionWarning A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.
+type MentionWarning struct {
+	// Entry The entry as it is on the Destination now.
+	Entry     MentionEntryRef `json:"entry"`
+	Messenger ConnectionType  `json:"messenger"`
+
+	// Reason The reason of the latest "Mention not delivered".
+	Reason MentionNotDeliveredReason `json:"reason"`
+
+	// Since When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.
+	Since time.Time `json:"since"`
+
+	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.
+	User UserRef `json:"user"`
+}
 
 // MessageLayout The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.
 type MessageLayout struct {
@@ -9355,6 +9412,9 @@ type SlackDestination struct {
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
 
+	// MentionWarnings The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person's name; always empty on an outgoing webhook, which takes every person as data.
+	MentionWarnings []MentionWarning `json:"mention_warnings"`
+
 	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
@@ -9983,6 +10043,9 @@ type TelegramDestination struct {
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
 
+	// MentionWarnings The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person's name; always empty on an outgoing webhook, which takes every person as data.
+	MentionWarnings []MentionWarning `json:"mention_warnings"`
+
 	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Mentions MentionSettings `json:"mentions"`
@@ -10258,6 +10321,9 @@ type TimelineDeliveryEntry struct {
 	Kind     TimelineDeliveryEntryKind `json:"kind"`
 	Loudness Loudness                  `json:"loudness"`
 
+	// Mention For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); nothing was written in the Thread for it.
+	Mention *UndeliveredMention `json:"mention,omitempty"`
+
 	// Mentions Mentions the delivery event carried (see the Loud and Quiet table of delivery events).
 	Mentions []MentionName `json:"mentions"`
 }
@@ -10509,6 +10575,21 @@ type TotpStatus struct {
 // Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
+// UndeliveredMention A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not mention as their messenger mentions them (C-28.FR-3).
+type UndeliveredMention struct {
+	// Entry The Mention entry that named a person, as on the Destination — its position in the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
+	Entry MentionEntryRef `json:"entry"`
+
+	// Event A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).
+	Event MentionEvent `json:"event"`
+
+	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16).
+	Reason MentionNotDeliveredReason `json:"reason"`
+
+	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.
+	User UserRef `json:"user"`
+}
+
 // User defines model for User.
 type User struct {
 	CreatedAt time.Time                 `json:"created_at"`
@@ -10694,6 +10775,9 @@ type WebhookDestination struct {
 
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
+
+	// MentionWarnings The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person's name; always empty on an outgoing webhook, which takes every person as data.
+	MentionWarnings []MentionWarning `json:"mention_warnings"`
 
 	// Mentions The L1 form of the Mention entries that L1 can express on the Destination's type (C-28.FR-5), removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set

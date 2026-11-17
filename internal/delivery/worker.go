@@ -744,8 +744,9 @@ type attempt struct {
 	late        bool
 	message     Message
 	at          time.Time
-	// targets are the Mentions of a Loud Publication.
-	targets     []mentions.Target
+	// resolved are the Mentions of a Loud Publication: its targets, and the people its Mention entries named, which
+	// its delivery records (C-28.FR-3).
+	resolved    mentions.Result
 	idempotent  bool
 	started     bool
 	republish   bool
@@ -978,7 +979,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 				return err
 			}
 			loud, ms := publicationLoudness(row.PublicationLoud, row.StormID.Valid)
-			if a.targets, err = w.targets(ctx, tx, org, d, row.AlertGroupID, row.StormID.Int64, 0, loud,
+			if a.resolved, err = w.targets(ctx, tx, org, d, row.AlertGroupID, row.StormID.Int64, 0, loud,
 				ms); err != nil {
 				return err
 			}
@@ -1042,7 +1043,7 @@ func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 	kind := a.kind()
 	if a.publication && !a.row.DesiredRetire {
 		c.Loudness, c.Mentions = publicationLoudness(a.row.PublicationLoud, a.row.StormID.Valid)
-		c.Targets = a.targets
+		c.Targets = a.resolved.Targets
 	}
 	if a.republish {
 		r := deliveryEvent(DeliveryPastEditWindow)

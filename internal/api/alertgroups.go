@@ -526,6 +526,25 @@ func (s *Server) CreateAlertGroupNote(ctx context.Context, req gen.CreateAlertGr
 	return gen.CreateAlertGroupNote201JSONResponse(noteOf(n)), nil
 }
 
+// undeliveredMentionOf is the API form of the undelivered Mention of a mention_not_delivered, nil for another delivery
+// event (C-28.FR-3). Its entry's target names a person or a Team, the only targets that name people.
+func undeliveredMentionOf(m *groups.MentionView) *gen.UndeliveredMention {
+	if m == nil {
+		return nil
+	}
+	t := gen.MentionTarget{Kind: gen.MentionTargetKind(m.Target.Kind), TeamId: nonEmptyString(m.Target.TeamID),
+		UserId: nonEmptyString(m.Target.UserID), User: userRefOf(m.Target.User)}
+	if tm := m.Target.Team; tm != nil {
+		t.Team = &gen.TeamRef{Id: tm.PublicID, Name: tm.Name, Slug: tm.Slug, Deleted: tm.Deleted}
+	}
+	out := &gen.UndeliveredMention{Entry: gen.MentionEntryRef{Position: m.Position, Target: t},
+		Event: gen.MentionEvent(m.Event), Reason: gen.MentionNotDeliveredReason(m.Reason)}
+	if u := userRefOf(m.User); u != nil {
+		out.User = *u
+	}
+	return out
+}
+
 // userRefOf is the API form of a User.
 func userRefOf(a *groups.ActorRef) *gen.UserRef {
 	if a == nil {
@@ -724,7 +743,8 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		err = out.FromTimelineDeliveryEntry(gen.TimelineDeliveryEntry{Id: e.PublicID, At: e.At,
 			Kind: gen.TimelineDeliveryEntryKindDelivery, Actor: actor, DeliveryEvent: gen.DeliveryEventKind(d.Event),
 			Destination: gen.EntityRef{Id: d.Destination.PublicID, Name: d.Destination.Name},
-			Error:       nullableString(d.Error), Loudness: loudness, Mentions: mentions})
+			Error:       nullableString(d.Error), Loudness: loudness, Mentions: mentions,
+			Mention: undeliveredMentionOf(d.Mention)})
 	case groups.KindEscalation:
 		v := gen.TimelineEscalationEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineEscalationEntryKindEscalation,
 			Actor: actor, Event: event, Loudness: loudness, Mentions: mentions,

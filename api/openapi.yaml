@@ -15726,6 +15726,7 @@ components:
       - storm_summary
       - final_edit
       - republished_past_edit_window
+      - mention_not_delivered
     TimelineDeliveryEntry:
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'
@@ -15758,6 +15759,11 @@ components:
             description: Mentions the delivery event carried (see the Loud and Quiet table of delivery events).
             items:
               $ref: '#/components/schemas/MentionName'
+          mention:
+            description: For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud
+              message did not mention as their messenger mentions them (C-28.FR-3); nothing was written in the Thread
+              for it.
+            $ref: '#/components/schemas/UndeliveredMention'
     TimelineSystemEntry:
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'
@@ -18128,6 +18134,76 @@ components:
       - snooze_ended
       - rise_to_urgent
       - storm_started
+    MentionNotDeliveredReason:
+      type: string
+      description: 'Why a person whom a Mention entry named was not mentioned as their messenger mentions them
+        (C-28.FR-3): they have no Account link in the Identity space of the Destination''s Connection, so the message
+        left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has
+        read none yet — so the message named them by the plain name, which notifies nobody
+        (`bridge_cannot_mention_people`, C-22.FR-16).'
+      enum:
+      - no_account_link
+      - bridge_cannot_mention_people
+    MentionEntryRef:
+      type: object
+      description: The Mention entry that named a person, as on the Destination — its position in the Destination's
+        `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
+      required:
+      - position
+      - target
+      properties:
+        position:
+          type: integer
+          minimum: 0
+        target:
+          $ref: '#/components/schemas/MentionTarget'
+    UndeliveredMention:
+      type: object
+      description: A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not
+        mention as their messenger mentions them (C-28.FR-3).
+      required:
+      - user
+      - entry
+      - event
+      - reason
+      properties:
+        user:
+          $ref: '#/components/schemas/UserRef'
+        entry:
+          $ref: '#/components/schemas/MentionEntryRef'
+        event:
+          $ref: '#/components/schemas/MentionEvent'
+        reason:
+          $ref: '#/components/schemas/MentionNotDeliveredReason'
+    MentionWarning:
+      type: object
+      description: 'A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not
+        followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events
+        kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person
+        through the entry, or once retention removes the events. An entry removed from the Destination since, or a
+        deleted User, has none.'
+      required:
+      - user
+      - entry
+      - messenger
+      - reason
+      - since
+      properties:
+        user:
+          $ref: '#/components/schemas/UserRef'
+        entry:
+          description: The entry as it is on the Destination now.
+          $ref: '#/components/schemas/MentionEntryRef'
+        messenger:
+          $ref: '#/components/schemas/ConnectionType'
+        reason:
+          description: The reason of the latest "Mention not delivered".
+          $ref: '#/components/schemas/MentionNotDeliveredReason'
+        since:
+          type: string
+          format: date-time
+          description: When the first "Mention not delivered" of the person through the entry since their last
+            delivered Mention through it was recorded.
     MentionTargetKind:
       type: string
       description: 'Whom a Mention entry names (C-28.FR-1): everyone in the chat (`everyone`), a person (`user`), a
@@ -18735,6 +18811,7 @@ components:
       - id
       - mentions
       - mention_entries
+      - mention_warnings
       - health
       - routes
       - teams
@@ -18754,6 +18831,12 @@ components:
           description: The Mention entries in order, each with what it mentions now.
           items:
             $ref: '#/components/schemas/MentionEntry'
+        mention_warnings:
+          type: array
+          description: The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the
+            person's name; always empty on an outgoing webhook, which takes every person as data.
+          items:
+            $ref: '#/components/schemas/MentionWarning'
         teams:
           type: array
           description: The Teams that name the Destination as a Destination of the Team, by name.

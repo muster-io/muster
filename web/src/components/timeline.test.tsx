@@ -340,6 +340,12 @@ describe("entryText", () => {
     );
   });
 
+  test("names a Mention not delivered, in English and Russian", async () => {
+    expect(text(delivery("mention_not_delivered"))).toBe("Mention not delivered in ops");
+    await i18n.changeLanguage("ru");
+    expect(text(delivery("mention_not_delivered"))).toBe("Упоминание не доставлено в ops");
+  });
+
   test("has the Team texts in Russian", async () => {
     await i18n.changeLanguage("ru");
     expect(

@@ -6,10 +6,10 @@
 -- Mention names with the username, the messenger's user id and the display name of their Account link in an identity
 -- space, and the names of the user a footer names.
 
--- ListMentionEntries reads the Mention entries of the Destinations, in their order, each with the User and the Team it
--- names, deleted ones included.
+-- ListMentionEntries reads the Mention entries of the Destinations, in their order, each with its id, the User and the
+-- Team it names, deleted ones included.
 -- name: ListMentionEntries :many
-SELECT e.destination_id, e.position, e.target_kind, coalesce(e.everyone, '')::text AS everyone,
+SELECT e.id, e.destination_id, e.position, e.target_kind, coalesce(e.everyone, '')::text AS everyone,
        coalesce(e.group_name, '')::text AS group_name, coalesce(e.slack_usergroup_id, '')::text AS slack_usergroup_id,
        e.events, e.user_id, coalesce(u.public_id, '')::text AS user_public_id, coalesce(u.name, '')::text AS user_name,
        coalesce(u.login, '')::text AS user_login, coalesce(u.status = 'deleted', false)::boolean AS user_deleted,
@@ -60,10 +60,12 @@ ORDER BY lower(name), id;
 
 -- GetMentionConnection reads what a Connection that is not deleted can mention, by its id or its public_id: its
 -- type, whether the last check of a Slack Connection found usergroups:read, and from a Bridge's stored info whether it
--- declares group mentions, the role messenger and the mentions of everyone it declares.
+-- declares group mentions and native mentions — false while none was read — the role messenger and the mentions of
+-- everyone it declares.
 -- name: GetMentionConnection :one
 SELECT c.id, c.public_id, c.type, coalesce(c.slack_usergroups_read, false)::boolean AS usergroups_read,
        coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       coalesce(c.bridge_info->'capabilities'->'native_mentions' = 'true'::jsonb, false)::boolean AS native_mentions,
        (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger,
        (CASE jsonb_typeof(c.bridge_info->'capabilities'->'everyone_mentions')
             WHEN 'array' THEN ARRAY(SELECT jsonb_array_elements_text(c.bridge_info->'capabilities'->'everyone_mentions'))

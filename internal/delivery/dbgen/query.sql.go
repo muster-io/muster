@@ -3143,6 +3143,59 @@ func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsO
 	return items, nil
 }
 
+const listOpenMentions = `-- name: ListOpenMentions :many
+SELECT latest.user_id::bigint AS user_id, latest.target::jsonb AS target
+FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'target')
+             e.detail ->> 'user_id' AS user_id, e.detail -> 'target' AS target, e.kind
+      FROM delivery_events e
+      WHERE e.org_id = $1 AND e.destination_id = $2
+        AND e.kind IN ('mention_not_delivered', 'mention_delivered') AND e.occurred_at >= $3
+        AND e.detail ->> 'user_id' = ANY($4::text[])
+      ORDER BY e.detail ->> 'user_id', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
+WHERE latest.kind = 'mention_not_delivered'
+`
+
+type ListOpenMentionsParams struct {
+	OrgID         int64
+	DestinationID int64
+	Since         time.Time
+	UserIds       []string
+}
+
+type ListOpenMentionsRow struct {
+	UserID int64
+	Target []byte
+}
+
+// ListOpenMentions reads which of the people @user_ids have an open warning about an undelivered Mention on the
+// Destination (C-28.FR-3): the person and the entry's target of each latest mention_not_delivered or
+// mention_delivered of the Destination per person and target since @since, the start of retention.alert_details,
+// whose latest is mention_not_delivered. On delivery_events_mentions_idx.
+func (q *Queries) ListOpenMentions(ctx context.Context, arg ListOpenMentionsParams) ([]ListOpenMentionsRow, error) {
+	rows, err := q.db.Query(ctx, listOpenMentions,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.Since,
+		arg.UserIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpenMentionsRow{}
+	for rows.Next() {
+		var i ListOpenMentionsRow
+		if err := rows.Scan(&i.UserID, &i.Target); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingGroups = `-- name: ListPendingGroups :many
 SELECT DISTINCT g.public_id
 FROM deliveries d
@@ -4439,7 +4492,7 @@ func (q *Queries) RecordReplyRetry(ctx context.Context, arg RecordReplyRetryPara
 	return i, err
 }
 
-const recordReplySent = `-- name: RecordReplySent :exec
+const recordReplySent = `-- name: RecordReplySent :execrows
 UPDATE thread_replies
 SET state = 'sent', sent_at = $1::timestamptz, message_id = $2::text,
     button_key_id = $3::text, last_error_class = NULL, last_error = NULL, lease_owner = NULL,
@@ -4458,8 +4511,8 @@ type RecordReplySentParams struct {
 
 // RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
 // buttons (a Reminder's), for the presses on them.
-func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams) error {
-	_, err := q.db.Exec(ctx, recordReplySent,
+func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordReplySent,
 		arg.Now,
 		arg.MessageID,
 		arg.ButtonKeyID,
@@ -4467,7 +4520,10 @@ func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams
 		arg.ID,
 		arg.Owner,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recordRepublished = `-- name: RecordRepublished :execrows

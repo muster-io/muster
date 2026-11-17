@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/routing"
 )
@@ -881,7 +882,7 @@ func stormStarted(t *testing.T) *env {
 // produces through the recording adapter the new message, the edit or nothing it names, Loud or Quiet and with its
 // Mentions; the Publication after a recovery is Loud only for an Alert Group firing at that moment.
 func TestDeliveryEventRows(t *testing.T) {
-	if len(delivery.DeliveryEvents) != 12 {
+	if len(delivery.DeliveryEvents) != 13 {
 		t.Fatalf("%d rows", len(delivery.DeliveryEvents))
 	}
 	type scenario struct {
@@ -1000,6 +1001,19 @@ func TestDeliveryEventRows(t *testing.T) {
 			e.changed(t, routeID, nil, []int64{destMM})
 			e.round(t)
 			return e.rec.Calls()
+		}}},
+		// A Mention not delivered: the Publication is the row of its own event; nothing more is sent, and the
+		// delivery event is recorded (C-28.FR-3).
+		delivery.DeliveryMentionNotDelivered: {{true, func(t *testing.T) []deliverytest.Call {
+			e := memberEnv(t)
+			e.w.Mentions = &fakeMentioner{undelivered: []mentions.Undelivered{bobUndelivered}}
+			e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+			e.round(t)
+			if kinds := e.eventKinds(); !slices.Equal(kinds, []string{"publication", "mention_not_delivered"}) ||
+				len(without(e.rec.Calls(), deliverytest.MethodReply)) != 1 {
+				t.Errorf("events %v, calls %+v", kinds, e.rec.Calls())
+			}
+			return without(e.rec.Calls(), deliverytest.MethodPublish)
 		}}},
 		// A change of status past a bridge's edit window: the new Root message, apart from the pointer reply under
 		// the old one.

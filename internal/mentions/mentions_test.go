@@ -6,6 +6,7 @@ package mentions
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -111,8 +112,9 @@ func (f *fakeQueries) ListMentionEntries(_ context.Context, arg dbgen.ListMentio
 	var out []dbgen.ListMentionEntriesRow
 	for _, d := range arg.DestinationIds {
 		for i, e := range f.entries[d] {
-			r := dbgen.ListMentionEntriesRow{DestinationID: d, Position: int32(i), TargetKind: e.Target.Kind,
-				Everyone: e.Target.Everyone, GroupName: e.Target.Group, SlackUsergroupID: e.Target.GroupID,
+			r := dbgen.ListMentionEntriesRow{ID: d*100 + int64(i), DestinationID: d, Position: int32(i),
+				TargetKind: e.Target.Kind,
+				Everyone:   e.Target.Everyone, GroupName: e.Target.Group, SlackUsergroupID: e.Target.GroupID,
 				Events: e.Events}
 			if u := f.userByPublicID(e.Target.UserID); u != nil {
 				r.UserID, r.UserPublicID, r.UserName, r.UserLogin = pgtype.Int8{Int64: u.id, Valid: true},
@@ -820,13 +822,13 @@ func TestResolve(t *testing.T) {
 	} {
 		r := tc.r
 		r.Seq, r.Mentions = tc.seq, tc.mentions
-		got, err := s.Resolve(ctx, nil, orgID, r)
+		got, err := targetsOf(s.Resolve(ctx, nil, orgID, r))
 		if err != nil || describe(got) != tc.want {
 			t.Errorf("%s: %q %v, want %q", tc.name, describe(got), err, tc.want)
 		}
 	}
-	got, _ := s.Resolve(ctx, nil, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
-		ConnectionID: conn(3), Mentions: []string{KindNewAlerts}})
+	got, _ := targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
+		ConnectionID: conn(3), Mentions: []string{KindNewAlerts}}))
 	if len(got) != 2 || got[1].User == nil {
 		t.Fatalf("without an alert group, no teams from the label: %+v", got)
 	}
@@ -834,15 +836,15 @@ func TestResolve(t *testing.T) {
 		t.Errorf("user target %+v", u)
 	}
 	f.reads = nil
-	if _, err := s.Resolve(ctx, nil, orgID, Request{DestinationID: 10, Mentions: []string{Owner}}); err != nil ||
+	if _, err := targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 10, Mentions: []string{Owner}})); err != nil ||
 		slices.Contains(f.reads, "entries") || slices.Contains(f.reads, "owners") {
 		t.Errorf("an Owner without an event reads %v, %v", f.reads, err)
 	}
 
 	// Without the On-call and the Team mentions wired, a Team and an On-call mention nobody.
 	plain := newService(f)
-	if got, err := plain.Resolve(ctx, nil, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
-		ConnectionID: conn(3), AlertGroupID: 5, Mentions: []string{KindNewAlertGroup}}); err != nil ||
+	if got, err := targetsOf(plain.Resolve(ctx, nil, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
+		ConnectionID: conn(3), AlertGroupID: 5, Mentions: []string{KindNewAlertGroup}})); err != nil ||
 		describe(got) != "everyone:here,group:oncall" {
 		t.Errorf("not wired = %q %v", describe(got), err)
 	}
@@ -865,7 +867,7 @@ func TestResolve(t *testing.T) {
 		if name == "ListStormTeams" {
 			r.StormID, r.Mentions = 9, []string{EventStormStarted}
 		}
-		if _, err := s.Resolve(ctx, nil, orgID, r); !errors.Is(err, errBoom) {
+		if _, err := targetsOf(s.Resolve(ctx, nil, orgID, r)); !errors.Is(err, errBoom) {
 			t.Errorf("%s fails = %v", name, err)
 		}
 	}
@@ -887,22 +889,22 @@ func TestResolveTimeAndUsers(t *testing.T) {
 	f.entries[50] = []EntryInput{person(alice)}
 	f.entries[40] = []EntryInput{person(alice), person(bob)}
 	s, o, _ := wired(f)
-	got, err := s.Resolve(ctx, nil, orgID, Request{DestinationID: 20, DestinationType: TypeTelegram,
-		AlertGroupID: 5, Mentions: []string{KindNewAlerts}})
+	got, err := targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 20, DestinationType: TypeTelegram,
+		AlertGroupID: 5, Mentions: []string{KindNewAlerts}}))
 	if err != nil || len(got) != 1 || got[0].User.ExternalID != "4242" || len(o.calls) != 1 ||
 		!o.calls[0].Equal(t0) {
 		t.Fatalf("telegram = %+v, %v, on-call asked at %v", got, err, o.calls)
 	}
 	conn := int64(5)
-	got, err = s.Resolve(ctx, nil, orgID, Request{DestinationID: 50, DestinationType: TypeBridge,
-		ConnectionID: &conn, Mentions: []string{KindNewAlertGroup}})
+	got, err = targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 50, DestinationType: TypeBridge,
+		ConnectionID: &conn, Mentions: []string{KindNewAlertGroup}}))
 	if err != nil || len(got) != 1 || got[0].User.ExternalID != "u-alice" || got[0].User.DisplayName != "Alice S." ||
 		got[0].User.Username != "alice@example.org" {
 		t.Errorf("bridge = %+v, %v", got, err)
 	}
 	conn = 4
-	got, err = s.Resolve(ctx, nil, orgID, Request{DestinationID: 40, DestinationType: TypeSlack,
-		ConnectionID: &conn, Mentions: []string{KindNewAlertGroup}})
+	got, err = targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 40, DestinationType: TypeSlack,
+		ConnectionID: &conn, Mentions: []string{KindNewAlertGroup}}))
 	if err != nil || len(got) != 1 || got[0].User.ExternalID != "U0FAKEALICE" || got[0].User.Username != "alice" {
 		t.Errorf("slack = %+v, %v", got, err)
 	}
@@ -931,14 +933,14 @@ func TestTargetsForTheAdapters(t *testing.T) {
 		everyone(EveryoneHere)}
 	f.entries[61] = []EntryInput{group("ops", ""), teamEntry(TargetTeam, payments), everyone(EveryoneHere),
 		person(alice)}
-	got, err := s.Resolve(ctx, nil, orgID, Request{DestinationID: 60, DestinationType: TypeSlack, ConnectionID: conn(4),
-		AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	got, err := targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 60, DestinationType: TypeSlack, ConnectionID: conn(4),
+		AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}}))
 	if err != nil || len(got) != 2 || got[0].Kind != TargetGroup || got[0].GroupID != "S0FAKEPAYTEAM" ||
 		!SlackUserGroupID(got[0].GroupID) || got[1].Everyone != EveryoneHere {
 		t.Errorf("slack = %+v %v", got, err)
 	}
-	got, err = s.Resolve(ctx, nil, orgID, Request{DestinationID: 61, DestinationType: TypeBridge, ConnectionID: conn(5),
-		AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	got, err = targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 61, DestinationType: TypeBridge, ConnectionID: conn(5),
+		AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}}))
 	if err != nil || describe(got) != "group:ops,group:payments,everyone:here,user:alice@example.org" ||
 		got[3].User.ExternalID != "u-alice" {
 		t.Errorf("bridge = %q %v", describe(got), err)
@@ -980,7 +982,7 @@ func TestResolveEventTime(t *testing.T) {
 		{"no alert group", Request{DestinationID: 10, DestinationType: TypeMattermost, ConnectionID: &conn,
 			Mentions: []string{KindNewAlerts}}, "group:payments_team,user:alice.mm"},
 	} {
-		got, err := s.Resolve(ctx, tx, orgID, tc.r)
+		got, err := targetsOf(s.Resolve(ctx, tx, orgID, tc.r))
 		if err != nil || describe(got) != tc.want {
 			t.Errorf("%s: %q %v, want %q", tc.name, describe(got), err, tc.want)
 		}
@@ -999,7 +1001,7 @@ func TestResolveEventTime(t *testing.T) {
 		case "GetStormStartedAt":
 			r.AlertGroupID, r.Seq, r.StormID = 0, 0, 9
 		}
-		if _, err := s.Resolve(ctx, nil, orgID, r); !errors.Is(err, errBoom) {
+		if _, err := targetsOf(s.Resolve(ctx, nil, orgID, r)); !errors.Is(err, errBoom) {
 			t.Errorf("%s fails = %v", name, err)
 		}
 		delete(f.fail, name)
@@ -1008,13 +1010,114 @@ func TestResolveEventTime(t *testing.T) {
 	// A Slack user group entry and the Team mention of the same user group, named by other handles, mention once.
 	f.entries[42] = []EntryInput{group("other-handle", "S0FAKEPAYTEAM"), teamEntry(TargetTeam, payments)}
 	slack := int64(4)
-	got, err := s.Resolve(ctx, nil, orgID, Request{DestinationID: 42, DestinationType: TypeSlack, ConnectionID: &slack,
-		Mentions: []string{KindNewAlerts}})
+	got, err := targetsOf(s.Resolve(ctx, nil, orgID, Request{DestinationID: 42, DestinationType: TypeSlack, ConnectionID: &slack,
+		Mentions: []string{KindNewAlerts}}))
 	if err != nil || describe(got) != "group:other-handle/S0FAKEPAYTEAM" {
 		t.Errorf("one slack user group = %q, %v", describe(got), err)
 	}
 	if !same(Target{Kind: TargetGroup, Group: "a"}, Target{Kind: TargetGroup, Group: "a"}) ||
 		same(Target{Kind: TargetGroup, Group: "a"}, Target{Kind: TargetGroup, Group: "a", GroupID: "S1"}) {
 		t.Error("same groups")
+	}
+}
+
+// targetsOf are the targets of a resolution.
+func targetsOf(r Result, err error) ([]Target, error) { return r.Targets, err }
+
+// people lists the Undelivered and Mentioned of a resolution as user/entry position/event/reason, in order.
+func people(r Result) string {
+	var out []string
+	for _, u := range r.Undelivered {
+		out = append(out, fmt.Sprintf("undelivered %d/%d/%s/%s", u.UserID, u.Entry.Position, u.Event, u.Reason))
+	}
+	for _, m := range r.Mentioned {
+		out = append(out, fmt.Sprintf("mentioned %d/%d/%s", m.UserID, m.Entry.Position, m.Event))
+	}
+	return strings.Join(out, ",")
+}
+
+// TestResolveUndelivered is C-28.FR-3, AC-3, AC-4, C-12.FR-12 and C-22.FR-16 revised for L2: each person an entry
+// names that is not deleted is, once per entry, Undelivered — left out of the message with no_account_link without an
+// Account link in the Destination's identity space, or sent by the plain name with bridge_cannot_mention_people through
+// a bridge whose info does not declare native_mentions — or Mentioned, each with the entry's id,
+// position and target and the first Loud event of the message the entry applies to; a person named by two entries is
+// recorded for each and mentioned once; the Owner, an outgoing webhook and a message without entries record nothing.
+func TestResolveUndelivered(t *testing.T) {
+	ctx := t.Context()
+	f := resolveFake()
+	f.owners[11] = dbgen.GetEventOwnersRow{OwnerUserID: pgtype.Int8{Int64: 2, Valid: true}}
+	f.users[0].links["bridge:7"], f.users[0].externals["bridge:7"] = "alice@example.org", "u-alice"
+	f.users[0].links["bridge:5"], f.users[0].externals["bridge:5"] = "alice@example.org", "u-alice"
+	native := f.conns[5]
+	native.NativeMentions = true
+	f.conns[5] = native
+	delete(f.users[0].links, "telegram")
+	delete(f.users[0].externals, "telegram")
+	s, _, _ := wired(f)
+	conn := func(id int64) *int64 { return &id }
+	mm := Request{DestinationID: 10, DestinationType: TypeMattermost, ConnectionID: conn(3), AlertGroupID: 5, At: t0}
+	for _, tc := range []struct {
+		name     string
+		r        Request
+		seq      int64
+		mentions []string
+		targets  string
+		people   string
+	}{
+		{"mattermost: an unlinked person and a deleted one", mm, 0, []string{KindNewAlerts},
+			"user:alice.mm,group:payments_team",
+			"undelivered 2/5/new_alerts/no_account_link,mentioned 1/0/new_alerts,mentioned 1/4/new_alerts"},
+		{"the first event the entry applies to", mm, 0, []string{KindReopen, KindNewAlerts},
+			"user:alice.mm,group:payments_team",
+			"undelivered 2/5/new_alerts/no_account_link,mentioned 1/0/reopen,mentioned 1/4/new_alerts"},
+		{"telegram: one person named by two entries, left out", Request{DestinationID: 20,
+			DestinationType: TypeTelegram, AlertGroupID: 5, At: t0}, 0, []string{KindNewAlerts}, "",
+			"undelivered 1/0/new_alerts/no_account_link,undelivered 2/1/new_alerts/no_account_link," +
+				"undelivered 1/2/new_alerts/no_account_link"},
+		// The Connection 7's info declares no native_mentions; GetMentionConnection reads false as well while no info was
+		// read (internal/mentions/query.sql).
+		{"a bridge without native_mentions names by the plain name", Request{DestinationID: 51,
+			DestinationType: TypeBridge, ConnectionID: conn(7), AlertGroupID: 5, At: t0}, 0,
+			[]string{KindNewAlertGroup}, "user:alice@example.org",
+			"undelivered 1/2/new_alert_group/bridge_cannot_mention_people"},
+		{"a deleted connection has no identity space", Request{DestinationID: 51, DestinationType: TypeBridge,
+			ConnectionID: conn(99), AlertGroupID: 5, At: t0}, 0, []string{KindNewAlertGroup}, "",
+			"undelivered 1/2/new_alert_group/no_account_link"},
+		{"a bridge with native_mentions", Request{DestinationID: 50, DestinationType: TypeBridge,
+			ConnectionID: conn(5), AlertGroupID: 5, At: t0}, 0, []string{KindNewAlertGroup},
+			"everyone:channel,group:ops,user:alice@example.org,group:payments", "mentioned 1/2/new_alert_group"},
+		{"an outgoing webhook takes people as data", Request{DestinationID: 30, DestinationType: TypeWebhook,
+			AlertGroupID: 5, At: t0}, 0, []string{KindAckTimeout},
+			"user:Bob Jones,team:payments,team:search,user:Carol,everyone:everyone", ""},
+		{"the owner is no entry", mm, 11, []string{Owner}, "user:Bob Jones", ""},
+		{"no entry applies", Request{DestinationID: 77, DestinationType: TypeMattermost, ConnectionID: conn(3)}, 0,
+			[]string{KindNewAlertGroup}, "", ""},
+	} {
+		r := tc.r
+		r.Seq, r.Mentions = tc.seq, tc.mentions
+		got, err := s.Resolve(ctx, nil, orgID, r)
+		if err != nil || describe(got.Targets) != tc.targets || people(got) != tc.people {
+			t.Errorf("%s: %q %q %v, want %q %q", tc.name, describe(got.Targets), people(got), err, tc.targets,
+				tc.people)
+		}
+	}
+	// One entry whose two Teams have one On-call records them once.
+	f.teams = append(f.teams, team{id: 15, publicID: "TMAAAAAAAAAAB5", name: "Billing", slug: "billing"})
+	f.groupTeams[6] = []int64{11, 15}
+	f.entries[22] = []EntryInput{ent(TargetOnCallOfTeamsFromLabel)}
+	o, m := &fakeOnCalls{onCall: map[int64]int64{11: 2, 15: 2}, until: t0.Add(time.Hour)}, &fakeTeamMentions{}
+	s.Wire(o, m, clock.NewManual(t0))
+	if got, err := s.Resolve(ctx, nil, orgID, Request{DestinationID: 22, DestinationType: TypeTelegram,
+		AlertGroupID: 6, At: t0, Mentions: []string{KindNewAlertGroup}}); err != nil ||
+		people(got) != "undelivered 2/0/new_alert_group/no_account_link" || len(o.calls) != 2 {
+		t.Errorf("one entry, two teams = %q %v, %d on-call lookups", people(got), err, len(o.calls))
+	}
+	got, err := s.Resolve(ctx, nil, orgID, Request{DestinationID: 51, DestinationType: TypeBridge,
+		ConnectionID: conn(7), AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	if err != nil || len(got.Undelivered) != 1 {
+		t.Fatalf("bridge = %+v, %v", got, err)
+	}
+	if e := got.Undelivered[0].Entry; e.ID != 5102 || e.Target != (EntryTarget{Kind: TargetUser, UserID: alice}) {
+		t.Errorf("the entry of the undelivered mention = %+v", e)
 	}
 }

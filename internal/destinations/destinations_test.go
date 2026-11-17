@@ -33,7 +33,10 @@ type fakeStore struct {
 	refs   []dbgen.ListRouteDestinationRefsRow
 	info   []dbgen.ListDestinationInfoRow
 	lists  []dbgen.ListDestinationsParams
-	fail   map[string]error
+	// warnings are the rows of ListMentionWarnings, and warningReads its calls.
+	warnings     []dbgen.ListMentionWarningsRow
+	warningReads []dbgen.ListMentionWarningsParams
+	fail         map[string]error
 }
 
 func (f *fakeStore) ListDestinations(_ context.Context, arg dbgen.ListDestinationsParams) (
@@ -98,6 +101,19 @@ func (f *fakeStore) ListRouteDestinationRefs(_ context.Context, arg dbgen.ListRo
 
 func (f *fakeStore) ListDestinationInfo(context.Context, int64) ([]dbgen.ListDestinationInfoRow, error) {
 	return f.info, f.fail["ListDestinationInfo"]
+}
+
+// ListMentionWarnings answers the rows of warnings of the Destinations asked for, and records the call.
+func (f *fakeStore) ListMentionWarnings(_ context.Context, arg dbgen.ListMentionWarningsParams) (
+	[]dbgen.ListMentionWarningsRow, error) {
+	f.warningReads = append(f.warningReads, arg)
+	var out []dbgen.ListMentionWarningsRow
+	for _, r := range f.warnings {
+		if slices.Contains(arg.DestinationIds, r.DestinationID) {
+			out = append(out, r)
+		}
+	}
+	return out, f.fail["ListMentionWarnings"]
 }
 
 func txt(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }

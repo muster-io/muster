@@ -508,11 +508,41 @@ type NoteView struct {
 	CreatedAt time.Time
 }
 
-// DeliveryView is a delivery event as the Timeline shows it.
+// DeliveryView is a delivery event as the Timeline shows it, with the undelivered Mention of a mention_not_delivered.
 type DeliveryView struct {
 	Event       string
 	Destination Ref
 	Error       *string
+	Mention     *MentionView
+}
+
+// MentionView is an undelivered Mention as the Timeline shows it (C-28.FR-3): the person, the entry that named them —
+// its position and target then — the Loud event and the reason.
+type MentionView struct {
+	User     *ActorRef
+	Position int
+	Target   MentionTarget
+	Event    string
+	Reason   string
+}
+
+// MentionTarget is the target of a Mention entry that names people — a person, or the On-call of a Team or of the
+// Teams from the label — with its User or Team by public_id, and the User or the Team it names.
+type MentionTarget struct {
+	Kind   string    `json:"kind"`
+	UserID string    `json:"user_id,omitempty"`
+	TeamID string    `json:"team_id,omitempty"`
+	User   *ActorRef `json:"-"`
+	Team   *TeamRef  `json:"-"`
+}
+
+// mentionDetail is the detail of a mention_not_delivered delivery event, as delivery writes it.
+type mentionDetail struct {
+	UserID   int64         `json:"user_id"`
+	Position int           `json:"position"`
+	Target   MentionTarget `json:"target"`
+	Event    string        `json:"event"`
+	Reason   string        `json:"reason"`
 }
 
 // TimelineEntry is one entry of the Timeline (TimelineEntry): a lifecycle event or a system entry, a Note or a
@@ -767,14 +797,45 @@ func (s *Service) deliveryEvents(ctx context.Context, gid int64, desc bool, at p
 	}
 	out := make([]TimelineEntry, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, TimelineEntry{PublicID: r.PublicID, At: r.OccurredAt.UTC(), Kind: KindDelivery,
+		e := TimelineEntry{PublicID: r.PublicID, At: r.OccurredAt.UTC(), Kind: KindDelivery,
 			Loudness: Loudness(r.Loudness), Mentions: orEmpty(r.Mentions),
 			Actor: TimelineActor{Kind: "system", Transport: "system"},
 			Delivery: &DeliveryView{Event: r.Kind, Destination: Ref{PublicID: r.DestinationPublicID,
 				Name: r.DestinationName}, Error: textOf(r.Error)},
-			position: TimelinePosition{At: r.OccurredAt.UTC(), Source: sourceDelivery, ID: r.ID}})
+			position: TimelinePosition{At: r.OccurredAt.UTC(), Source: sourceDelivery, ID: r.ID}}
+		if r.Kind == deliveryMentionNotDelivered {
+			m, err := mentionOf(r)
+			if err != nil {
+				return nil, err
+			}
+			e.Delivery.Mention = m
+		}
+		out = append(out, e)
 	}
 	return out, nil
+}
+
+// deliveryMentionNotDelivered is the kind of the delivery event of an undelivered Mention.
+const deliveryMentionNotDelivered = "mention_not_delivered"
+
+// mentionOf is the undelivered Mention of a mention_not_delivered row: its person by id, which actors names, and the
+// Team its entry's target names.
+func mentionOf(r dbgen.ListTimelineDeliveryEventsRow) (*MentionView, error) {
+	var d mentionDetail
+	if err := json.Unmarshal(r.Detail, &d); err != nil {
+		return nil, fmt.Errorf("read the undelivered mention of delivery event %s: %w", r.PublicID, err)
+	}
+	m := &MentionView{User: &ActorRef{Kind: "user", id: d.UserID}, Position: d.Position, Target: d.Target,
+		Event: d.Event, Reason: d.Reason}
+	if d.Target.UserID != "" {
+		// A person entry names the person it did not mention.
+		m.Target.User = m.User
+	}
+	if r.MentionTeamPublicID != "" {
+		m.Target.Team = &TeamRef{PublicID: r.MentionTeamPublicID, Name: r.MentionTeamName, Slug: r.MentionTeamSlug,
+			Deleted: r.MentionTeamDeleted}
+	}
+	return m, nil
 }
 
 // pendingRef is a reference to a User or a Service account by id, which actors replaces with its name.
@@ -805,6 +866,9 @@ func (s *Service) actors(ctx context.Context, entries []TimelineEntry) error {
 				if r != nil {
 					f(r)
 				}
+			}
+			if e.Delivery != nil && e.Delivery.Mention != nil {
+				f(e.Delivery.Mention.User)
 			}
 			if e.Note != nil && e.Note.Author != nil && e.Note.Author != e.Actor.Ref {
 				f(e.Note.Author)

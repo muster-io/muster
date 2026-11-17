@@ -702,8 +702,8 @@ func TestResolveWithoutTime(t *testing.T) {
 	conn := int64(3)
 	// The Alert Group 5 has payments, whose On-call the entry "On-call of the Team from the label" asks for; with no
 	// record of the event and no clock the time is zero.
-	got, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
-		ConnectionID: &conn, AlertGroupID: 5, Mentions: []string{KindReopen}})
+	got, err := targetsOf(s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
+		ConnectionID: &conn, AlertGroupID: 5, Mentions: []string{KindReopen}}))
 	if err != nil || len(got) != 0 || len(o.calls) != 0 || !slices.Contains(f.reads, "publication at") {
 		t.Errorf("without a time = %q %v, %d on-call lookups", describe(got), err, len(o.calls))
 	}

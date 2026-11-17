@@ -6,6 +6,7 @@ import type { DestinationHealth } from './destinationHealth';
 import type { EntityRef } from './entityRef';
 import type { MentionEntry } from './mentionEntry';
 import type { MentionSettings } from './mentionSettings';
+import type { MentionWarning } from './mentionWarning';
 import type { PublicId } from './publicId';
 import type { TeamRef } from './teamRef';
 import type { TemplateErrorState } from './templateErrorState';
@@ -19,6 +20,8 @@ export interface DestinationReadFields {
   mentions: MentionSettings;
   /** The Mention entries in order, each with what it mentions now. */
   mention_entries: MentionEntry[];
+  /** The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person's name; always empty on an outgoing webhook, which takes every person as data. */
+  mention_warnings: MentionWarning[];
   /** The Teams that name the Destination as a Destination of the Team, by name. */
   teams: TeamRef[];
   /** The Team that owns the Destination, null when none does. */
