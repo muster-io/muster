@@ -40,7 +40,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   when the Alert Group is acknowledged, snoozed or resolved, and when its chain starts over or stops; an action that
   comes due after that is not made. A call action for a person without a confirmed contact at that gateway, or whose
   gateway is gone, is skipped and recorded with its reason (C-32.FR-14). Each Mention and call a run makes is a Page of
-  its step.
+  its step. When the next action of a run comes due late, such as after Muster was down, the Mentions overdue by then
+  are made as one Page of its step instead of one each, as overdue notices collapse (C-17.FR-7), and the wait after
+  them counts from that moment. The calls overdue by then are each still made.
 - **C-31.FR-4** Each person changes their own rules in the profile from their web session (C-03.FR-27); an Admin sees
   and changes any User's rules on the User's page — the switch, or sequences, which make the rules custom — and the
   change is recorded in the Audit log with a before/after diff. A call is offered only while a Notification gateway
