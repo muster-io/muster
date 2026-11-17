@@ -183,6 +183,9 @@ Notes on the entries:
   [Telegram in restricted networks](telegram-restricted-networks.md) for networks where it is blocked.
 - [Connect a messenger through a bridge](bridge.md), and [Write a bridge](write-a-bridge.md) for a messenger Muster does not
   support.
+- [Notification gateways](notification-gateways.md): reach people by phone call or SMS, outside messengers, through a
+  bridge in the role `gateway`: connect one, confirm a contact, how calls are made and acknowledged, and
+  [write a gateway](write-a-bridge.md#a-gateway-bridge).
 - [Outgoing webhooks](../outgoing-webhooks/events.md): the [events mode](../outgoing-webhooks/events.md), the [template
   mode](../outgoing-webhooks/templates.md) and some [recipes](../outgoing-webhooks/recipes.md).
 - [Proxies](proxies.md): the proxy of each client, and what the outbound address policy checks.

@@ -73,6 +73,15 @@ The index of the documentation is https://muster-io.github.io/muster/latest/llms
 5. [Unreachable On-calls](https://muster-io.github.io/muster/latest/concepts/schedules.md#unreachable-on-calls) and [the iCal feed](https://muster-io.github.io/muster/latest/concepts/schedules.md#ical-feed).
 6. Finished when [On call now](https://muster-io.github.io/muster/latest/concepts/schedules.md#on-call-now) shows the person you expect for each Team, with no unreachable mark.
 
+### Reach people at night
+
+1. [Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#at-night): Muster ships no gateway and never calls or texts anyone by itself. Until the push of Mentions in Threads is verified, only a Notification gateway is reliable at night.
+2. [A gateway bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#a-gateway-bridge): a gateway is a bridge in the role `gateway`, written for your provider with the Go or the Python library ([The role in `info`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-role-in-info), [`sendNotification`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#sendnotification), [`notification_acknowledged`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#notification_acknowledged)). The answer must come while the person is still on the line, and that needs the **push** mode: see [Answering during a call](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#answering-during-a-call).
+3. [Connect a Notification gateway](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#connect-a-notification-gateway): create the Bridge Connection and check it; the check shows "Notification gateway".
+4. [Contact for calls and SMS](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#contact-for-calls-and-sms): each person adds a contact in their profile and confirms it with a code; only a confirmed contact is called.
+5. [How calls are made](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#how-calls-are-made), [Acknowledging from a call](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#acknowledging-from-a-call) and [Broken gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#broken-gateways), with the [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md).
+6. Finished when [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check) with `--contact` passes against the gateway and the profile of a person shows their contact as confirmed.
+
 ### Automate through the API
 
 1. [API](https://muster-io.github.io/muster/latest/reference/api.md): the conventions of the API and its tokens. Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token. [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md#ways-to-sign-in) describes both.

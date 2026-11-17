@@ -117,7 +117,9 @@ A failed step names its cause with a code:
 A bridge declares its roles in its `info`, and the check shows them. A bridge in the role `messenger`, which is every
 bridge that declares no roles, connects a messenger: its channels are Destinations, and people link their accounts
 through it. A bridge in the role `gateway` is a **Notification gateway**: it reaches people outside messengers, by
-phone call or SMS for example, through a provider of its own. A bridge may have both roles.
+phone call or SMS for example, through a provider of its own. A bridge may have both roles. [Notification gateways](notification-gateways.md) says how
+to connect one and how people confirm a contact; [A gateway bridge](write-a-bridge.md#a-gateway-bridge) is for the
+authors of one.
 
 A Bridge Connection whose only role is `gateway` cannot be a Destination: creating or saving a Destination for it is
 refused with `422` and the code `gateway_only` at `connection_id`. It is not offered for Account links either, since

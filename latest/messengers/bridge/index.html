@@ -3411,7 +3411,9 @@ proxy:</p>
 <p>A bridge declares its roles in its <code>info</code>, and the check shows them. A bridge in the role <code>messenger</code>, which is every
 bridge that declares no roles, connects a messenger: its channels are Destinations, and people link their accounts
 through it. A bridge in the role <code>gateway</code> is a <strong>Notification gateway</strong>: it reaches people outside messengers, by
-phone call or SMS for example, through a provider of its own. A bridge may have both roles.</p>
+phone call or SMS for example, through a provider of its own. A bridge may have both roles. <a href="../notification-gateways/">Notification gateways</a> says how
+to connect one and how people confirm a contact; <a href="../write-a-bridge/#a-gateway-bridge">A gateway bridge</a> is for the
+authors of one.</p>
 <p>A Bridge Connection whose only role is <code>gateway</code> cannot be a Destination: creating or saving a Destination for it is
 refused with <code>422</code> and the code <code>gateway_only</code> at <code>connection_id</code>. It is not offered for Account links either, since
 it looks nobody up in a messenger. Its read in the API has <code>roles</code>, from the <code>info</code> of its last check:</p>

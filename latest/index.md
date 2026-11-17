@@ -46,7 +46,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
 - [Messengers](messengers/index.md): see what each Destination type can do, connect
   [Mattermost](messengers/mattermost.md), [Slack](messengers/slack.md) and [Telegram](messengers/telegram.md), reach any
   other messenger through a [Bridge](messengers/bridge.md) (and [write one](messengers/write-a-bridge.md)),
-  [link your messenger accounts](messengers/account-links.md), and set a [proxy](messengers/proxies.md) for a client.
+  [link your messenger accounts](messengers/account-links.md), reach people by phone through a
+  [Notification gateway](messengers/notification-gateways.md), and set a [proxy](messengers/proxies.md) for a client.
 - [Outgoing webhooks](outgoing-webhooks/events.md): send the lifecycle events of Alert Groups in the
   [events mode](outgoing-webhooks/events.md), or keep a message in any chat in the
   [template mode](outgoing-webhooks/templates.md); [recipes](outgoing-webhooks/recipes.md) for a phone call, a status page,
