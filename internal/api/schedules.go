@@ -235,7 +235,8 @@ func teamOnCallOf(t schedules.TeamOnCall) gen.TeamOnCall {
 		len(t.Unreachable))}
 	for _, u := range t.Unreachable {
 		out.Unreachable = append(out.Unreachable, gen.OnCallReach{Destination: reachDestinationOf(u.Destination),
-			Messenger: gen.DestinationType(u.Messenger), Reason: gen.ReachReason(u.Reason)})
+			Messenger: gen.DestinationType(u.Messenger), Reason: gen.ReachReason(u.Reason),
+			GatewayReaches: &u.GatewayReaches})
 	}
 	out.Schedule.SetNull()
 	out.User.SetNull()
@@ -529,6 +530,7 @@ func warningOf(w schedules.Warning) gen.ScheduleWarning {
 		out.Destination.Set(reachDestinationOf(u.Destination))
 		out.Messenger.Set(gen.DestinationType(u.Messenger))
 		out.Reason.Set(gen.ReachReason(u.Reason))
+		out.GatewayReaches = &u.GatewayReaches
 	}
 	return out
 }

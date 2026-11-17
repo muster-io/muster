@@ -16,10 +16,20 @@ import { type Browser, type Page, expect, test } from "@playwright/test";
 import {
   BRIDGE_SECOND_TOKEN,
   BRIDGE_URL,
+  GATEWAY_NAME,
   adminApi,
+  alertGroupOf,
+  confirmContact,
+  createBridgeConnection,
+  ensureGateway,
+  ensureLocalUser,
   expectNoHorizontalScroll,
+  fakeIntegration,
+  fam,
   fbr,
+  notify,
   removeBridgeConnection,
+  removeIntegration,
   resetFakeBridge,
   shot,
   signIn,
@@ -209,6 +219,170 @@ test("an Admin reading Russian sees the Bridge and its check at phone width", as
       await cleanup.call("DELETE", `/api/v1/users/${userId}`);
     } finally {
       await cleanup.dispose();
+    }
+  }
+});
+
+const GATEWAY_GUIDE =
+  "https://muster-io.github.io/muster/latest/messengers/notification-gateways/#connect-a-notification-gateway";
+
+test("the demo Notification gateway is marked in the list, shows its roles and health, Broken after a refused call and Healthy after a check", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const csp = watchCsp(page);
+  const user = "gwb-petr";
+  const admin = await adminApi();
+  let gatewayId = "";
+  let userId = "";
+  try {
+    gatewayId = await ensureGateway(admin);
+    userId = await ensureLocalUser(admin, user, "responder");
+    await confirmContact(user, gatewayId, "+10000000004");
+    await removeIntegration(admin, "gwb-ui");
+  } finally {
+    await admin.dispose();
+  }
+
+  await signInAdmin(page);
+  await page.goto("/connections");
+  const gatewayRow = page.getByRole("row").filter({ hasText: GATEWAY_NAME });
+  await expect(gatewayRow.getByTestId("connection-gateway-mark")).toHaveText(
+    "Notification gateway",
+  );
+  await expect(
+    page
+      .getByRole("row")
+      .filter({ hasText: "Example Bridge" })
+      .getByTestId("connection-gateway-mark"),
+  ).toHaveCount(0);
+  await shot(page, "connections-gateway-mark");
+
+  await gatewayRow.getByRole("link", { name: GATEWAY_NAME }).click();
+  await expect(page.getByRole("heading", { name: GATEWAY_NAME, level: 1 })).toBeVisible();
+  const health = page.getByTestId("gateway-health");
+  await expect(health.getByRole("heading", { name: "Notification gateway" })).toBeVisible();
+  await expect(health.getByTestId("gateway-roles")).toHaveText("Roles: Notification gateway");
+  await expect(health.getByTestId("destination-health")).toHaveText("Healthy");
+  await expect(page.getByTestId("bridge-info-roles")).toHaveText("Roles: Notification gateway");
+  await expect(page.getByTestId("page-title").getByRole("link")).toHaveAttribute(
+    "href",
+    GATEWAY_GUIDE,
+  );
+  await expect(page.getByTestId("gateway-only-warning")).toHaveCount(0);
+
+  // The check lists the roles.
+  await page.getByRole("button", { name: "Check connection" }).click();
+  await expect(page.getByTestId("connection-check-roles")).toHaveText(
+    "Roles: Notification gateway",
+  );
+
+  // A call the gateway refuses with 401 makes it Broken, with the reason and the time.
+  const integrationId = await fakeIntegration("gwb-ui");
+  await fam("PUT", "/groups/gwb", {
+    receiver: "gwb-ui",
+    route: "{}",
+    labels: { alertname: "Gwb" },
+  });
+  await fam("PUT", "/groups/gwb/alerts/g1", { labels: { cluster: "g1" } });
+  await notify(integrationId, "gwb", { reason: "first notification" });
+  const group = await alertGroupOf(integrationId, "Gwb");
+  try {
+    await fbr("POST", "/faults", { path: "/gateway/v1/notifications", status: 401, times: 1 });
+    const queued = await fetch("http://localhost:8082/_dev/gateway-calls", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, connection_id: gatewayId, alert_group_ids: [group] }),
+    });
+    expect(queued.status, await queued.text()).toBe(204);
+    await expect(async () => {
+      await page.reload();
+      await expect(page.getByTestId("gateway-broken-banner")).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 60_000 });
+    await expect(page.getByTestId("gateway-broken-banner")).toHaveText(
+      /^Broken since \d{2}:\d{2}: .*401.*\. Muster tries again every 5\smin\.$/,
+    );
+    await expect(health.getByTestId("destination-health")).toHaveText("Broken");
+    await shot(page, "gateway-broken");
+
+    // A check that passes ends the state.
+    await fbr("DELETE", "/faults");
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect(page.getByTestId("connection-check-summary")).toBeVisible();
+    await expect(async () => {
+      await page.reload();
+      await expect(health.getByTestId("destination-health")).toHaveText("Healthy", {
+        timeout: 2_000,
+      });
+    }).toPass({ timeout: 30_000 });
+    await expect(page.getByTestId("gateway-broken-banner")).toHaveCount(0);
+  } finally {
+    await fbr("DELETE", "/faults");
+    const admin3 = await adminApi();
+    try {
+      await removeIntegration(admin3, "gwb-ui");
+    } finally {
+      await admin3.dispose();
+    }
+  }
+  expect(csp).toEqual([]);
+});
+
+test("a Connection that declares only the role gateway while it still has a Destination shows the warning about it", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const admin = await adminApi();
+  let connection = "";
+  try {
+    connection = await createBridgeConnection(admin, "br-gw");
+    const nobody = { everyone: "none", user_ids: [], groups: [] };
+    await admin.call("POST", "/api/v1/destinations", {
+      type: "bridge",
+      name: "br-gw-alerts",
+      connection_id: connection,
+      channel_id: "ch-alerts",
+      mentions: Object.fromEntries(
+        [
+          "new_alert_group",
+          "new_alerts",
+          "reopen",
+          "ack_timeout",
+          "snooze_ended",
+          "rise_to_urgent",
+        ].map((k) => [k, nobody]),
+      ),
+      limiter: { limit: 30, per_seconds: 60 },
+    });
+    // The bridge now declares only the role gateway; a check reads that.
+    await fbr("PUT", "/config", { token: BRIDGE_SECOND_TOKEN, roles: ["gateway"] });
+    await admin.call("POST", `/api/v1/connections/${connection}/checks`);
+  } finally {
+    await admin.dispose();
+  }
+  try {
+    await signInAdmin(page);
+    await page.goto(`/connections/${connection}`);
+    await expect(page.getByTestId("gateway-roles")).toHaveText("Roles: Notification gateway");
+    await expect(page.getByTestId("gateway-only-warning")).toHaveText(
+      "This bridge now declares only the role gateway: its 1 Destination no longer receives messages. Remove it or change the bridge.",
+    );
+    await shot(page, "gateway-only-warning");
+    await page.goto("/profile");
+    await page.getByLabel("Language").selectOption("ru");
+    await page.goto(`/connections/${connection}`);
+    await expect(page.getByTestId("gateway-only-warning")).toHaveText(
+      "Мост теперь объявляет только роль gateway: его место доставки (1) больше не получает сообщений. Удалите его или измените мост.",
+    );
+  } finally {
+    // The Admin reads English again, whatever the page showed.
+    await page.goto("/profile");
+    await page.getByLabel(/^(Language|Язык)$/).selectOption("en");
+    await fbr("PUT", "/config", { token: BRIDGE_SECOND_TOKEN, roles: null });
+    const cleaner = await adminApi();
+    try {
+      await removeBridgeConnection(cleaner, "br-gw");
+    } finally {
+      await cleaner.dispose();
     }
   }
 });

@@ -18,6 +18,7 @@ import type { Connection } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
 import { connectionAccount, connectionMessengerName } from "../components/destination-label";
+import { isGateway } from "../components/gateway-health";
 import { PageTitle } from "../components/docs-link";
 import { buttonVariants } from "../components/ui/button";
 
@@ -27,6 +28,7 @@ export const Route = createFileRoute("/connections/")({
 });
 
 function NameCell({ row }: { row: Connection }) {
+  const { t } = useTranslation();
   const account = connectionAccount(row);
   return (
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
@@ -37,6 +39,14 @@ function NameCell({ row }: { row: Connection }) {
       >
         {row.name}
       </Link>
+      {row.type === "bridge" && isGateway(row) && (
+        <span
+          className="rounded-full border px-2 py-px text-xs font-semibold"
+          data-testid="connection-gateway-mark"
+        >
+          {t("connections.roles.gateway")}
+        </span>
+      )}
       {account !== undefined && (
         <span className="text-muted-foreground wrap-anywhere" data-testid="connection-account">
           {account}

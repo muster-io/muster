@@ -30,13 +30,32 @@ func (s *fakeStore) ListAccountLinkSpaces(context.Context, dbgen.ListAccountLink
 	return nil, s.err("ListAccountLinkSpaces")
 }
 
-// reachStore is the fake store with the Destinations of the Teams and the Account links of the people, as the
-// queries read them.
+// ListGatewayReachUsers of the fake store has no contacts at Notification gateways; reachStore gives them.
+func (s *fakeStore) ListGatewayReachUsers(context.Context, dbgen.ListGatewayReachUsersParams) ([]int64, error) {
+	return nil, s.err("ListGatewayReachUsers")
+}
+
+// reachStore is the fake store with the Destinations of the Teams, the Account links of the people and the people with
+// a confirmed contact at a Notification gateway, as the queries read them.
 type reachStore struct {
 	*fakeStore
-	dests []dbgen.ListTeamReachRow
-	links []dbgen.ListAccountLinkSpacesRow
-	asked []dbgen.ListTeamReachParams
+	dests   []dbgen.ListTeamReachRow
+	links   []dbgen.ListAccountLinkSpacesRow
+	gateway []int64
+	asked   []dbgen.ListTeamReachParams
+}
+
+func (s *reachStore) ListGatewayReachUsers(_ context.Context, arg dbgen.ListGatewayReachUsersParams) ([]int64, error) {
+	if err := s.err("ListGatewayReachUsers"); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, u := range s.gateway {
+		if arg.OrgID == orgID && slices.Contains(arg.UserIds, u) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
 }
 
 func (s *reachStore) ListTeamReach(_ context.Context, arg dbgen.ListTeamReachParams) ([]dbgen.ListTeamReachRow,
@@ -175,8 +194,8 @@ func reachDests() []dbgen.ListTeamReachRow {
 
 // reachInput is a Schedule of payments in UTC with day Shifts of petr and olga from 28 October: petr on the 28th, the
 // 30th, …, olga on the 29th, the 31st, ….
-func reachInput(team string) Input {
-	return Input{TeamID: team, Name: "Main", TimeZone: ptr("UTC"), RotationLayers: []RotationLayerInput{{
+func reachInput() Input {
+	return Input{TeamID: teamPay, Name: "Main", TimeZone: ptr("UTC"), RotationLayers: []RotationLayerInput{{
 		Name: "Days", UserIDs: []string{petr.PublicID, olga.PublicID}, ShiftLength: ShiftDay, HandoverTime: "00:00",
 		StartDate: date("2026-10-28")}}}
 }
@@ -215,7 +234,7 @@ func TestOnCallUnreachable(t *testing.T) {
 		{UserID: olga.ID, IdentitySpace: "telegram"}}
 	svc, store, _ := newReachService(t, reachDests(), links)
 	ctx := t.Context()
-	sc, err := svc.Create(ctx, admin, reachInput(teamPay))
+	sc, err := svc.Create(ctx, admin, reachInput())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +295,7 @@ func TestOnCallUnreachable(t *testing.T) {
 		t.Errorf("a Team without Destinations = %+v, %v", unreachableOf(res), err)
 	}
 
-	for _, name := range []string{"ListTeamReach", "ListAccountLinkSpaces"} {
+	for _, name := range []string{"ListTeamReach", "ListAccountLinkSpaces", "ListGatewayReachUsers"} {
 		store.fail[name] = errBoom
 		if _, err := svc.OnCall(ctx, sc.PublicID, nil, nil); !errors.Is(err, errBoom) ||
 			!strings.Contains(err.Error(), "read the") {
@@ -295,5 +314,44 @@ func TestUnreachableWithoutPeople(t *testing.T) {
 	}
 	if got := unreachableWarnings(Result{Segments: []Segment{{Start: t0, End: t0.Add(time.Hour)}}}, 1, r); len(got) != 0 {
 		t.Errorf("warnings of a gap = %+v", got)
+	}
+}
+
+// TestOnCallGatewayReaches is C-27.FR-8: each warning unreachable carries gateway_reaches, true for petr, who has a
+// confirmed contact at a Notification gateway, false for olga, who has none or has one that is not confirmed — the
+// query reads confirmed contacts only —, and the same for every Destination of the segment.
+func TestOnCallGatewayReaches(t *testing.T) {
+	svc, store, _ := newReachService(t, reachDests(), nil)
+	store.gateway = []int64{petr.ID}
+	ctx := t.Context()
+	sc, err := svc.Create(ctx, admin, reachInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	to := utc("2026-10-31T00:00:00Z")
+	res, err := svc.OnCall(ctx, sc.PublicID, nil, &to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string][]bool{}
+	for _, w := range res.Warnings {
+		if w.Kind == WarningUnreachable {
+			seen[w.User.Login] = append(seen[w.User.Login], w.Unreachable.GatewayReaches)
+		}
+	}
+	if len(seen["petr"]) != 4 || slices.Contains(seen["petr"], false) {
+		t.Errorf("petr's warnings = %v, want gateway_reaches on all four", seen["petr"])
+	}
+	// Nobody has a contact now: every warning says false.
+	store.gateway = nil
+	store.links = nil
+	res, err = svc.OnCall(ctx, sc.PublicID, nil, &to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range res.Warnings {
+		if w.Kind == WarningUnreachable && w.Unreachable.GatewayReaches {
+			t.Errorf("%s without a contact: gateway_reaches = true", w.User.Login)
+		}
 	}
 }

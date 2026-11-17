@@ -13787,6 +13787,11 @@ components:
           oneOf:
           - $ref: '#/components/schemas/ReachReason'
           - type: 'null'
+        gateway_reaches:
+          type: boolean
+          description: Set on every `unreachable` warning, true when the person has a confirmed contact at a
+            Notification gateway, so that a call through it reaches them; whether that gateway is Broken is not
+            considered. Left out for another kind.
     ReachReason:
       type: string
       description: 'Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link`
@@ -13815,6 +13820,10 @@ components:
           description: The messenger of the Destination — the type of its Connection, or `webhook`.
         reason:
           $ref: '#/components/schemas/ReachReason'
+        gateway_reaches:
+          type: boolean
+          description: True when the current On-call has a confirmed contact at a Notification gateway, so that a call
+            through it reaches them; whether that gateway is Broken is not considered (C-27.FR-8).
     ScheduleOnCall:
       type: object
       description: The Result of a Schedule over a period, with what it is made of.

@@ -52,6 +52,7 @@ import { checkFixAbout, checkWarningFix, connectionCheckFix } from "../lib/check
 import { draftAddress, draftFieldErrorText, serverErrors } from "./connection-form";
 import { unreachable } from "./destination-test-panel";
 import { DocsLink } from "./docs-link";
+import { rolesText } from "./gateway-health";
 import { RequestLogButton } from "./request-log";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -599,6 +600,11 @@ function Result({
           />
         ))}
       </ul>
+      {type === "bridge" && result.info !== undefined && result.info !== null && (
+        <p className="text-sm" data-testid="connection-check-roles">
+          {t("connections.roles.list", { roles: rolesText(t, result.info.roles) })}
+        </p>
+      )}
       {webhookWarning && (
         <div
           className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm"

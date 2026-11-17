@@ -7740,6 +7740,9 @@ type OnCallNow struct {
 type OnCallReach struct {
 	Destination DestinationRef `json:"destination"`
 
+	// GatewayReaches True when the current On-call has a confirmed contact at a Notification gateway, so that a call through it reaches them; whether that gateway is Broken is not considered (C-27.FR-8).
+	GatewayReaches *bool `json:"gateway_reaches,omitempty"`
+
 	// Messenger The messenger of the Destination — the type of its Connection, or `webhook`.
 	Messenger DestinationType `json:"messenger"`
 
@@ -8944,6 +8947,9 @@ type ScheduleWarning struct {
 
 	// End The end of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
 	End nullable.Nullable[time.Time] `json:"end"`
+
+	// GatewayReaches Set on every `unreachable` warning, true when the person has a confirmed contact at a Notification gateway, so that a call through it reaches them; whether that gateway is Broken is not considered. Left out for another kind.
+	GatewayReaches *bool `json:"gateway_reaches,omitempty"`
 
 	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with the `messenger` and the `reason` (C-27.FR-8).
 	Kind ScheduleWarningKind `json:"kind"`

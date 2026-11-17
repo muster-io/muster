@@ -8,15 +8,23 @@ import { expect, test } from "@playwright/test";
 
 import {
   APP,
+  GATEWAY_NAME,
+  TEAM_SPEC_PASSWORD,
   adminApi,
   disableIdpUser,
+  ensureGateway,
+  ensureLocalUser,
   expectNoHorizontalScroll,
   freshCode,
   nextIdpUser,
   openProfile,
+  removeConnection,
   scalar,
+  sentCode,
   shot,
   shownSecret,
+  signIn,
+  signInAdmin,
   signInLocally,
   sql,
   watchCsp,
@@ -192,4 +200,101 @@ test("refuses a taken login, links OIDC after the warning and ends the session t
   await expect(page).toHaveURL(/\/sign-in\?reason=session_ended/);
   await expect(page.getByText("Your session ended. Sign in again.")).toBeVisible();
   await shot(page, "sign-in-session-ended");
+});
+
+test("the contact for calls and SMS: unavailable without a Notification gateway, then added and confirmed through the fake gateway, in English and Russian", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const login = "gwc-petr";
+  const phone = "+10000000002";
+  const admin = await adminApi();
+  try {
+    await ensureLocalUser(admin, login, "responder");
+    await removeConnection(admin, GATEWAY_NAME);
+
+    // Without a gateway: the hint and the note, no phone field, and no button for a Responder.
+    await signIn(page, login, TEAM_SPEC_PASSWORD);
+    await openProfile(page);
+    const section = page.getByTestId("gateway-contact-section");
+    await expect(section.getByRole("heading", { name: "Contact for calls and SMS" })).toBeVisible();
+    await expect(section).toContainText(
+      "Muster itself does not call, send SMS or check phone numbers: a Notification gateway (a bridge for calls and SMS) does, and it does not depend on a messenger. An Admin sees the contact and can remove it, but not change it.",
+    );
+    await expect(section).toContainText(
+      "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)",
+    );
+    await expect(
+      section.getByRole("link", { name: /^How to connect a Notification gateway/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://muster-io.github.io/muster/latest/messengers/notification-gateways/#connect-a-notification-gateway",
+    );
+    await expect(section.getByRole("link", { name: "Connect a bridge" })).toHaveCount(0);
+    await expect(section.getByLabel("Phone")).toHaveCount(0);
+    await shot(page, "profile-contact-unavailable");
+
+    // The Admin sees "Connect a bridge", which opens the new Connection form with the type Bridge.
+    const adminPage = await browser.newPage();
+    try {
+      await signInAdmin(adminPage);
+      await adminPage.goto("/profile");
+      const connect = adminPage
+        .getByTestId("gateway-contact-section")
+        .getByRole("link", { name: "Connect a bridge" });
+      await expect(connect).toBeVisible();
+      await connect.click();
+      await expect(adminPage).toHaveURL(/\/connections\/new\?type=bridge/);
+      await expect(adminPage.getByRole("radio", { name: "Bridge" })).toBeChecked();
+    } finally {
+      await adminPage.close();
+    }
+
+    // With the gateway back: the phone field, then the code, a wrong code, the right code.
+    await ensureGateway(admin);
+    await page.reload();
+    await expect(section.getByRole("heading", { name: "Example Gateway" })).toBeVisible();
+    await section.getByLabel("Phone").fill(phone);
+    await section.getByRole("button", { name: "Send code" }).click();
+    await expect(section.getByTestId("gateway-code-sent")).toHaveText(
+      `Code sent through the Notification gateway to ${phone}.`,
+    );
+    await expect(section.getByRole("button", { name: "Another number" })).toBeVisible();
+    await section.getByLabel("Code").fill("000000");
+    await section.getByRole("button", { name: "Confirm" }).click();
+    await expect(section).toContainText("The code is wrong or no longer valid. 4 attempts left.");
+    await section.getByLabel("Code").fill(await sentCode(phone));
+    await section.getByRole("button", { name: "Confirm" }).click();
+    await expect(section.getByTestId("gateway-contact-summary")).toHaveText(
+      `${phone} · calls and SMS · confirmed`,
+    );
+    await expect(
+      section.getByRole("button", { name: `Remove the contact ${phone}` }),
+    ).toBeVisible();
+    await expect(section.getByTestId("gateway-contact-note")).toHaveText(
+      "From a call you can acknowledge an Alert Group only while nobody has it; otherwise the call answers “Already taken by {name}”.",
+    );
+    await expect(section.getByLabel("Phone")).toHaveCount(0);
+    await shot(page, "profile-contact-confirmed");
+
+    // Russian, and phone width.
+    await page.getByLabel("Language").selectOption("ru");
+    await expect(section.getByRole("heading", { name: "Контакт для звонков/SMS" })).toBeVisible();
+    await expect(section.getByTestId("gateway-contact-summary")).toHaveText(
+      `${phone} · звонок и SMS · подтверждён`,
+    );
+    await expect(section.getByTestId("gateway-contact-note")).toHaveText(
+      "Из звонка можно подтвердить группу, только если у неё ещё нет владельца; иначе звонок ответит «уже взял(а) {name}».",
+    );
+    await expect(section.getByRole("button", { name: `Удалить контакт ${phone}` })).toBeVisible();
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expectNoHorizontalScroll(page);
+    await shot(page, "profile-contact-confirmed-ru-360");
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByLabel("Язык").selectOption("en");
+  } finally {
+    await ensureGateway(admin);
+    await admin.dispose();
+  }
 });

@@ -59,6 +59,8 @@ export function OnCallMarks({ item }: { item: TeamOnCall }) {
   if (messengers.length === 0 && !gap) {
     return null;
   }
+  // A call through a Notification gateway reaches the On-call, whatever the Destinations cannot mention (C-27.FR-8).
+  const gateway = item.unreachable.some((reach) => reach.gateway_reaches === true);
   return (
     <span className="flex flex-wrap gap-1.5" data-testid="on-call-marks">
       {messengers.map((messenger) => (
@@ -70,6 +72,11 @@ export function OnCallMarks({ item }: { item: TeamOnCall }) {
           {t("onCallNow.unreachable", { messenger: destinationTypeName(t, messenger) })}
         </span>
       ))}
+      {gateway && (
+        <span className="text-xs text-muted-foreground" data-testid="on-call-gateway-reaches">
+          {t("gatewayReaches.note")}
+        </span>
+      )}
       {gap && (
         <span
           className="rounded-full bg-destructive/10 px-2 py-px text-xs font-semibold text-destructive"

@@ -299,6 +299,39 @@ describe("DestinationForm with the Bridge fields", () => {
     });
   });
 
+  test("does not offer a Connection whose only role is gateway, and keeps one with both roles", async () => {
+    const gateway = {
+      ...brConnection("CN00000000GWAY", "gateway-only", null),
+      roles: ["gateway"] as BridgeConnection["roles"],
+    };
+    const both = {
+      ...brConnection("CN00000000BOTH", "gateway-and-chat", INFO),
+      roles: ["messenger", "gateway"] as BridgeConnection["roles"],
+    };
+    vi.spyOn(window, "fetch").mockImplementation(() =>
+      Promise.resolve(json(200, { items: [BR, gateway, both], next_cursor: null })),
+    );
+    await render(
+      providers(
+        <DestinationForm
+          kind={BRIDGE_KIND}
+          submitLabel="Save"
+          save={() => Promise.resolve(undefined)}
+        />,
+      ),
+    );
+    const fields = page.getByTestId("bridge-fields");
+    await expect
+      .element(fields.getByRole("option", { name: "br", exact: true }))
+      .toBeInTheDocument();
+    await expect
+      .element(fields.getByRole("option", { name: "gateway-and-chat" }))
+      .toBeInTheDocument();
+    await expect
+      .element(fields.getByRole("option", { name: "gateway-only" }))
+      .not.toBeInTheDocument();
+  });
+
   test("offers nobody and chosen users only", async () => {
     await renderNew(() => Promise.resolve(undefined));
     const everyone = document.querySelectorAll<HTMLSelectElement>('select[id$="-everyone"]');

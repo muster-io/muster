@@ -28,6 +28,7 @@ import { useGetSignInOptions } from "../api/gen/endpoints/sessions/sessions";
 import type { Me, MeUpdate, User } from "../api/gen/model";
 import { UpdateMeBody } from "../api/gen/zod/profile/profile.zod";
 import { PageTitle } from "../components/docs-link";
+import { GatewayContactSection } from "../components/gateway-contact-section";
 import { ProfileAccountLinks } from "../components/profile-account-links";
 import { ProfileSessions } from "../components/profile-sessions";
 import { ProfileTokens } from "../components/profile-tokens";
@@ -485,6 +486,7 @@ function ProfilePage() {
           <ProfileTotp hasPassword={user.sign_in_method === "local"} />
           <ProfileSessions />
           <ProfileAccountLinks />
+          <GatewayContactSection />
           <ProfileTokens user={user} held={me.data?.permissions ?? []} />
         </div>
       )}

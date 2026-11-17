@@ -143,6 +143,29 @@ describe("On call now on the Home page", () => {
     expect(asked.some((url) => url.includes("teams=all"))).toBe(true);
   });
 
+  test("follows the unreachable mark with the call that works when a gateway reaches the person", async () => {
+    const reaching: TeamOnCall = {
+      ...PAYMENTS_ROW,
+      unreachable: PAYMENTS_ROW.unreachable.map((u) => ({ ...u, gateway_reaches: true })),
+    };
+    vi.spyOn(window, "fetch").mockImplementation(() =>
+      Promise.resolve(reply(200, { items: [DEVOPS_ROW, reaching] })),
+    );
+    await renderWith(<OnCallNowSection />);
+    const payments = page.getByTestId("on-call-row").nth(1);
+    await hasText(payments, "unreachable in Mattermost");
+    await hasText(payments, "A call through the Notification gateway works.");
+    expect(page.getByTestId("on-call-gateway-reaches").elements()).toHaveLength(1);
+    await i18n.changeLanguage("ru");
+    await hasText(payments, "Звонок через шлюз оповещений доходит.");
+  });
+
+  test("shows no such note without gateway_reaches", async () => {
+    await renderWith(<OnCallNowSection />);
+    await hasText(page.getByTestId("on-call-row").nth(1), "unreachable in Mattermost");
+    expect(page.getByTestId("on-call-gateway-reaches").elements()).toHaveLength(0);
+  });
+
   test("My Teams reads only the Teams of the signed-in User", async () => {
     await renderWith(<OnCallNowSection />);
     await expect.element(page.getByText("No Schedule")).toBeVisible();

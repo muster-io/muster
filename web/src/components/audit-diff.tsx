@@ -311,6 +311,20 @@ function scheduleField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
+/** The names of the changed fields of a contact at a Notification gateway (gateway_contact.*). */
+function gatewayContactField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/connection":
+      return t("audit.fields.gateway");
+    case "/contact":
+      return t("audit.fields.contact");
+    case "/confirmed":
+      return t("audit.fields.contactConfirmed");
+    default:
+      return undefined;
+  }
+}
+
 /** The names of the changed fields of the OIDC settings. */
 function oidcField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
@@ -399,6 +413,9 @@ export function fieldLabel(
       break;
     case "schedule":
       label = scheduleField(t, pointer);
+      break;
+    case "gateway_contact":
+      label = gatewayContactField(t, pointer);
       break;
     default:
       break;

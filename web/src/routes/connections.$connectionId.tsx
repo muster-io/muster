@@ -35,6 +35,7 @@ import { BridgeInfoPanel } from "../components/bridge-connection-fields";
 import { CallbackHint } from "../components/callback-hint";
 import { ConnectionCheck } from "../components/connection-check";
 import { PageTitle } from "../components/docs-link";
+import { GatewayHealth, isGatewayOnly } from "../components/gateway-health";
 import {
   ConnectionDeleteDialog,
   ConnectionForm,
@@ -114,6 +115,7 @@ function EditForm({ current }: { current: Connection }) {
           </AlertDescription>
         </Alert>
       )}
+      {current.type === "bridge" && <GatewayHealth connection={current} />}
       <ConnectionForm
         key={formKey}
         connection={base}
@@ -216,7 +218,13 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-1">
             <PageTitle
-              docs={connection === undefined ? "page.connections" : connectionDocs(connection.type)}
+              docs={
+                connection === undefined
+                  ? "page.connections"
+                  : connection.type === "bridge" && isGatewayOnly(connection)
+                    ? "page.notification_gateway"
+                    : connectionDocs(connection.type)
+              }
             >
               {connection?.name ?? t("connections.edit.title")}
             </PageTitle>

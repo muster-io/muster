@@ -11,6 +11,7 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { z } from "zod";
 
 import {
   createConnection,
@@ -29,7 +30,11 @@ import {
 } from "../components/connection-form";
 import { buttonVariants } from "../components/ui/button";
 
+// "Connect a bridge" of the note about a missing Notification gateway opens the form with the type Bridge chosen.
+const searchSchema = z.object({ type: z.enum(["bridge"]).optional().catch(undefined) });
+
 export const Route = createFileRoute("/connections/new")({
+  validateSearch: searchSchema,
   staticData: { shell: true },
   component: NewConnectionPage,
 });
@@ -45,7 +50,8 @@ function NewConnection() {
   ];
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [kind, setKind] = useState<ConnectionType>();
+  const { type } = Route.useSearch();
+  const [kind, setKind] = useState<ConnectionType | undefined>(type);
   // The values in the form as they are typed, which the check sends as a draft.
   const [values, setValues] = useState<ConnectionValues>();
   return (

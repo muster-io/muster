@@ -82,6 +82,7 @@ const GUIDE_ABOUT = {
   "page.connection.telegram": (t) => t("docs.guides.connection.telegram"),
   "page.connection.slack": (t) => t("docs.guides.connection.slack"),
   "page.connection.bridge": (t) => t("docs.guides.connection.bridge"),
+  "page.notification_gateway": (t) => t("docs.guides.notificationGateway"),
   "page.destinations": (t) => t("docs.guides.destinations"),
   "page.destination.mattermost": (t) => t("docs.guides.destination.mattermost"),
   "page.destination.telegram": (t) => t("docs.guides.destination.telegram"),

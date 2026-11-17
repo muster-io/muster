@@ -108,6 +108,24 @@ describe("Warnings", () => {
     expect(list.element().querySelectorAll("li")).toHaveLength(4);
   });
 
+  test("follows an unreachable mark of a person a gateway reaches with the call that works", async () => {
+    await renderWarnings([
+      { ...reach("payments-notice", "mattermost", "no_account_link"), gateway_reaches: true },
+      {
+        ...reach("payments-hook", "webhook", "webhook_no_thread_reply"),
+        user: OLGA,
+        gateway_reaches: false,
+      },
+    ]);
+    const lines = page.getByTestId("schedule-warnings").element().querySelectorAll("li");
+    expect(lines[0]?.textContent).toContain(
+      "Unreachable in Mattermost: no linked account. A call through the Notification gateway works.",
+    );
+    expect(lines[1]?.textContent).not.toContain("A call through the Notification gateway works.");
+    await i18n.changeLanguage("ru");
+    await hasText(page.getByTestId("schedule-warnings"), "Звонок через шлюз оповещений доходит.");
+  });
+
   test("says there are none", async () => {
     await renderWarnings([]);
     await hasText(page.getByTestId("schedule-no-warnings"), "No warnings.");
@@ -174,6 +192,29 @@ describe("On call now", () => {
       "Unreachable in Mattermost: no linked account.",
     );
     await hasText(page.getByTestId("schedule-next"), "Next: @olga from 11:00");
+  });
+
+  test("follows the unreachable mark with the call that works when a gateway reaches the On-call", async () => {
+    await renderNow({
+      segments: [segment(FROM, "2026-11-16T18:00:00Z", PETR)],
+      warnings: [{ ...MATTERMOST, gateway_reaches: true }],
+    });
+    const marks = page.getByTestId("schedule-unreachable");
+    await hasText(
+      marks,
+      "Unreachable in Mattermost: no linked account. A call through the Notification gateway works.",
+    );
+    await i18n.changeLanguage("ru");
+    await hasText(marks, "Звонок через шлюз оповещений доходит.");
+  });
+
+  test("adds nothing to the unreachable mark without gateway_reaches", async () => {
+    await renderNow({
+      segments: [segment(FROM, "2026-11-16T18:00:00Z", PETR)],
+      warnings: [{ ...MATTERMOST, gateway_reaches: false }],
+    });
+    await hasText(page.getByTestId("schedule-unreachable"), "no linked account.");
+    expect(page.getByTestId("schedule-gateway-reaches").elements()).toHaveLength(0);
   });
 
   test("shows no mark for an On-call a Destination reaches, and names a gap that follows", async () => {

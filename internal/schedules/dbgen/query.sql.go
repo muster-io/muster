@@ -782,6 +782,43 @@ func (q *Queries) ListGapScanSchedules(ctx context.Context, orgID int64) ([]List
 	return items, nil
 }
 
+const listGatewayReachUsers = `-- name: ListGatewayReachUsers :many
+SELECT DISTINCT g.user_id
+FROM gateway_contacts g
+JOIN connections c ON c.org_id = g.org_id AND c.id = g.connection_id
+WHERE g.org_id = $1 AND g.user_id = ANY($2::bigint[]) AND g.confirmed_at IS NOT NULL
+  AND c.type = 'bridge' AND c.deleted_at IS NULL AND c.bridge_info->'roles' @> '["gateway"]'::jsonb
+ORDER BY g.user_id
+`
+
+type ListGatewayReachUsersParams struct {
+	OrgID   int64
+	UserIds []int64
+}
+
+// ListGatewayReachUsers reads which of the Users @user_ids have a confirmed contact at a Notification gateway, a Bridge
+// Connection that is not deleted and whose stored info has the role gateway; whether the gateway is Broken is not
+// considered (C-27.FR-8). schedules imports no package of Paging, so it reads gateway_contacts itself.
+func (q *Queries) ListGatewayReachUsers(ctx context.Context, arg ListGatewayReachUsersParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listGatewayReachUsers, arg.OrgID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOnCallTeams = `-- name: ListOnCallTeams :many
 SELECT t.id, t.public_id, t.name, t.slug, s.id AS schedule_id, s.public_id AS schedule_public_id,
        s.name AS schedule_name, s.time_zone AS schedule_time_zone

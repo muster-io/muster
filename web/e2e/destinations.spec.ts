@@ -183,6 +183,20 @@ test.afterAll(async () => {
   }
 });
 
+test("the Bridge Destination form offers the messenger bridge and not the Notification gateway, which declares only the role gateway", async ({
+  page,
+}) => {
+  await signInAdmin(page);
+  await page.goto("/destinations/new");
+  await page.getByRole("radio", { name: "Bridge", exact: true }).check();
+  const connection = page.getByLabel("Connection", { exact: true });
+  await expect(connection.getByRole("option", { name: "Example Bridge", exact: true })).toHaveCount(
+    1,
+  );
+  await expect(connection.getByRole("option", { name: "Example Gateway" })).toHaveCount(0);
+  await shot(page, "destination-new-bridge-connections");
+});
+
 test("creates a Mattermost Destination, refusing a channel without the bot next to the channel", async ({
   page,
 }) => {

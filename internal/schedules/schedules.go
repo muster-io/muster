@@ -303,6 +303,7 @@ type Queries interface {
 	ListTeamReach(ctx context.Context, arg dbgen.ListTeamReachParams) ([]dbgen.ListTeamReachRow, error)
 	ListAccountLinkSpaces(ctx context.Context, arg dbgen.ListAccountLinkSpacesParams) (
 		[]dbgen.ListAccountLinkSpacesRow, error)
+	ListGatewayReachUsers(ctx context.Context, arg dbgen.ListGatewayReachUsersParams) ([]int64, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }

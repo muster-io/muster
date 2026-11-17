@@ -74,6 +74,14 @@ export function ScheduleOnCallNow({ data, zone }: { data: ScheduleOnCall; zone: 
                 data-reason={w.reason ?? undefined}
               >
                 {unreachableText(t, w)}
+                {w.gateway_reaches === true && (
+                  <>
+                    {" "}
+                    <span className="text-foreground" data-testid="schedule-gateway-reaches">
+                      {t("gatewayReaches.note")}
+                    </span>
+                  </>
+                )}
               </li>
             ))}
           </ul>
