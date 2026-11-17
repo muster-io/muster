@@ -228,7 +228,7 @@ describe("with a Notification gateway", () => {
     await expect
       .element(page.getByTestId("gateway-contact-note"))
       .toHaveTextContent(
-        "From a call you can acknowledge an Alert Group only while nobody has it; otherwise the call answers “Already taken by {name}”.",
+        "From a call you can acknowledge an Alert Group only while nobody has it; otherwise the call answers “Already taken by petr”.",
       );
     expect(page.getByLabelText("Phone").elements()).toHaveLength(0);
   });
@@ -368,7 +368,7 @@ describe("with a Notification gateway", () => {
     await expect
       .element(page.getByTestId("gateway-contact-note"))
       .toHaveTextContent(
-        "Из звонка можно подтвердить группу, только если у неё ещё нет владельца; иначе звонок ответит «уже взял(а) {name}».",
+        "Из звонка можно подтвердить группу, только если у неё ещё нет владельца; иначе звонок ответит «уже взял(а) petr».",
       );
     await expect.element(page.getByRole("button", { name: /^Удалить/ })).toBeVisible();
   });

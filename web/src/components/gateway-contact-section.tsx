@@ -24,7 +24,7 @@ import {
   useListMyGatewayContacts,
 } from "../api/gen/endpoints/notification-gateways/notification-gateways";
 import type { EntityRef, GatewayContact } from "../api/gen/model";
-import { fieldErrorText, isApiError, problemText } from "../lib/api";
+import { fieldErrorText, isApiError, problemText, useSession } from "../lib/api";
 import { useCan } from "./app-shell";
 import { DocsLink } from "./docs-link";
 import { GatewayUnavailable } from "./gateway-unavailable";
@@ -451,6 +451,7 @@ function GatewayBlock({
 export function GatewayContactSection() {
   const { t } = useTranslation();
   const canRead = useCan("connections:read");
+  const session = useSession();
   const contacts = useListMyGatewayContacts();
   const gateways = useListConnections(
     { role: "gateway", limit: 500 },
@@ -507,7 +508,7 @@ export function GatewayContactSection() {
             ))}
             {items.some((c) => c.confirmed) && (
               <p className="text-sm text-muted-foreground" data-testid="gateway-contact-note">
-                {t("gatewayContact.note", { name: "{name}" })}
+                {t("gatewayContact.note", { name: session?.user.name ?? "" })}
               </p>
             )}
           </>

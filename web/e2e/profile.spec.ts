@@ -272,9 +272,12 @@ test("the contact for calls and SMS: unavailable without a Notification gateway,
     await expect(
       section.getByRole("button", { name: `Remove the contact ${phone}` }),
     ).toBeVisible();
+    const who = (await page.getByTestId("user-menu-name").textContent())?.trim() ?? "";
+    expect(who).not.toBe("");
     await expect(section.getByTestId("gateway-contact-note")).toHaveText(
-      "From a call you can acknowledge an Alert Group only while nobody has it; otherwise the call answers “Already taken by {name}”.",
+      `From a call you can acknowledge an Alert Group only while nobody has it; otherwise the call answers “Already taken by ${who}”.`,
     );
+    await expect(section.getByTestId("gateway-contact-note")).not.toContainText("{name}");
     await expect(section.getByLabel("Phone")).toHaveCount(0);
     await shot(page, "profile-contact-confirmed");
 
@@ -285,8 +288,9 @@ test("the contact for calls and SMS: unavailable without a Notification gateway,
       `${phone} · звонок и SMS · подтверждён`,
     );
     await expect(section.getByTestId("gateway-contact-note")).toHaveText(
-      "Из звонка можно подтвердить группу, только если у неё ещё нет владельца; иначе звонок ответит «уже взял(а) {name}».",
+      `Из звонка можно подтвердить группу, только если у неё ещё нет владельца; иначе звонок ответит «уже взял(а) ${who}».`,
     );
+    await expect(section.getByTestId("gateway-contact-note")).not.toContainText("{name}");
     await expect(section.getByRole("button", { name: `Удалить контакт ${phone}` })).toBeVisible();
     await page.setViewportSize({ width: 360, height: 740 });
     await expectNoHorizontalScroll(page);

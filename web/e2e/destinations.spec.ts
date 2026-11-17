@@ -11,7 +11,7 @@
 // the fake server shows exactly, in English and in Russian. No page scrolls sideways at 360 px; no Content Security
 // Policy violation.
 
-import { type Browser, expect, test, type Page } from "@playwright/test";
+import { type Browser, expect, type Locator, test, type Page } from "@playwright/test";
 
 import {
   type Api,
@@ -637,6 +637,12 @@ const MENTION_EVENTS = [
   "storm_started",
 ] as const;
 
+/** The horizontal centre of the element, in page pixels. */
+async function centreOf(target: Locator): Promise<number> {
+  const box = await target.boundingBox();
+  return (box?.x ?? Number.NaN) + (box?.width ?? Number.NaN) / 2;
+}
+
 /** The row of the Mentions grid whose target reads exactly text. */
 function mentionRow(page: Page, text: string) {
   return page
@@ -700,6 +706,32 @@ test("the Mentions grid shows what each entry resolves to now, warns about an un
   await expect(support.getByTestId("mention-support-slack")).toContainText("<!channel>, <!here>");
   await expect(support.getByTestId("mention-support-telegram")).toContainText("Linked people");
   await shot(page, "destination-mentions");
+
+  // The header shares the template of the rows: each event header is centred over its checkbox column, and the
+  // placeholder of the Remove column lies over the Remove buttons, at 1280 px and at the md breakpoint (768 px).
+  const original = page.viewportSize() ?? { width: 1280, height: 800 };
+  for (const width of [1280, 768]) {
+    await page.setViewportSize({ width, height: original.height });
+    const header = section.getByTestId("mention-header");
+    await expect(header).toBeVisible();
+    const cells = header.locator(":scope > span");
+    await expect(cells).toHaveCount(MENTION_EVENTS.length + 2);
+    await expectNoHorizontalScroll(page);
+    for (const row of await section.getByTestId("mention-entry").all()) {
+      for (const [i, event] of MENTION_EVENTS.entries()) {
+        const cell = await centreOf(cells.nth(i + 1));
+        const box = await centreOf(row.getByTestId(`mention-event-${event}`));
+        expect(Math.abs(cell - box), `${event} at ${width} px`).toBeLessThan(1);
+      }
+      const last = await cells.last().boundingBox();
+      const remove = await row.getByRole("button").boundingBox();
+      expect(remove?.x ?? 0).toBeGreaterThanOrEqual((last?.x ?? 0) - 1);
+      expect((remove?.x ?? 0) + (remove?.width ?? 0)).toBeLessThanOrEqual(
+        (last?.x ?? 0) + (last?.width ?? 0) + 1,
+      );
+    }
+  }
+  await page.setViewportSize(original);
 
   // 2. "Add" → @here → a new row ticked for every event; untick all but "New Alert Group" → "Save".
   await page.getByRole("button", { name: "Add", exact: true }).click();
