@@ -192,6 +192,16 @@ describe("fieldLabel", () => {
     expect(fieldLabel(i18n.t, "route", "/minimum_severity")).toBe("Минимальная важность маршрута");
   });
 
+  test("names the changed fields of a Schedule", async () => {
+    expect(fieldLabel(i18n.t, "schedule", "/rotation_layers")).toBe("Rotation layers");
+    expect(fieldLabel(i18n.t, "schedule", "/main")).toBe("Main Schedule");
+    expect(fieldLabel(i18n.t, "schedule", "/gap_alert")).toBe("Gap alert");
+    expect(fieldLabel(i18n.t, "schedule", "/time_zone")).toBe("Time zone");
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "schedule", "/rotation_layers")).toBe("Слои ротации");
+    expect(fieldLabel(i18n.t, "schedule", "/gap_alert")).toBe("Оповещение о дыре");
+  });
+
   test("names the Destinations and the delivery fields of a Route", async () => {
     expect(fieldLabel(i18n.t, "route", "/destination_ids")).toBe("Destinations");
     expect(fieldLabel(i18n.t, "route", "/destination_entries")).toBe("Destinations");

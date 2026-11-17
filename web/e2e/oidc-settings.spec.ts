@@ -222,7 +222,7 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
   // Step 8: the IdP maps ada, now the only active Admin, to Responder.
   await nextIdpUser("u-web-ada", "ada", ["oncall"]);
   await page.goto("/api/v1/sessions/oidc/start");
-  await expect(page).toHaveURL(`${APP}/alert-groups`);
+  await expect(page).toHaveURL(`${APP}/`);
   await openAccess(page, "OIDC");
   const kept =
     "ada stays Admin: they are the last active Admin, and the identity provider maps them to Responder. Make another user Admin first.";
@@ -242,7 +242,7 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
 
   // ada signs in again with the same groups: Role sync now applies.
   await page.goto("/api/v1/sessions/oidc/start");
-  await expect(page).toHaveURL(`${APP}/alert-groups`);
+  await expect(page).toHaveURL(`${APP}/`);
 
   // Step 10: as a Responder, ada sees none of the admin pages; Organization stays for Lookup tables and Link rules.
   for (const entry of ["Access", "Users", "OIDC", "Audit log"]) {
