@@ -69,7 +69,8 @@ func (h *harness) member(group int64, state string, ended time.Time, movedTo int
 }
 
 // TestPurge is the retention of C-09.FR-16 (C-09.AC-18): Alerts inside Alert Groups that ended
-// retention.alert_details ago go in batches, then summary rows resolved retention.alert_group_summaries ago, the
+// retention.alert_details ago go in batches, with the steps of the runs of the chains of Alert Groups resolved then
+// (C-32.FR-18), then summary rows resolved retention.alert_group_summaries ago, the
 // summary of a person-resolved Alert Group that a later one fires again after included; a summary that an Alert of
 // another Alert Group still names as where it moved waits; running it twice deletes nothing more.
 func TestPurge(t *testing.T) {
@@ -92,9 +93,13 @@ func TestPurge(t *testing.T) {
 	open := h.summary(5, 2, ancient, time.Time{}, "Open", nil)
 	holder := h.summary(6, 2, now, time.Time{}, "Holder", nil)
 	h.member(holder.ID, "moved", now.Add(-time.Hour), target.ID)
+	// The steps of the runs of an Alert Group resolved before the details' cutoff go; those of one resolved since and of
+	// an open one stay.
+	h.db.runSteps = map[int64]int{target.ID: 7, kept.ID: 3, open.ID: 2}
 
 	got, err := Purge(ctx, h.db, orgID, now)
-	if err != nil || got != (Purged{Details: RetentionBatch + 10, Summaries: 2}) {
+	if err != nil || got != (Purged{Details: RetentionBatch + 10 + 7, Summaries: 2}) ||
+		h.db.runSteps[target.ID] != 0 || h.db.runSteps[kept.ID] != 3 || h.db.runSteps[open.ID] != 2 {
 		t.Fatalf("purged %+v, %v", got, err)
 	}
 	if h.db.groups[manual.ID] != nil || h.db.groups[later.ID] != nil || h.db.groups[target.ID] == nil ||
@@ -118,7 +123,8 @@ func TestPurge(t *testing.T) {
 	if d, n, err := RetentionTask(h.db)(ctx, orgID, now); err != nil || d != 0 || n != 1 {
 		t.Errorf("the task = %d, %d, %v", d, n, err)
 	}
-	for _, q := range []string{"GetRetentionPeriods", "DeleteExpiredMemberships", "DeleteExpiredGroups"} {
+	for _, q := range []string{"GetRetentionPeriods", "DeleteExpiredMemberships", "DeleteExpiredRunSteps",
+		"DeleteExpiredGroups"} {
 		h.db.fail[q] = errBoom
 		if _, err := Purge(ctx, h.db, orgID, now); !errors.Is(err, errBoom) {
 			t.Errorf("%s: %v", q, err)

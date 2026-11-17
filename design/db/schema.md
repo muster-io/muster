@@ -114,7 +114,13 @@
   `destinations.telegram_absent_user_ids` and `destinations.telegram_members_checked_at`, C-27.FR-8, S-164) and
   [`0045_first_acknowledged_by`](../../internal/db/migrations/0045_first_acknowledged_by.up.sql)
   (`alert_groups.first_acknowledged_by_user_id`, who made the first acknowledgement, filled from the Timeline where it
-  is whole, C-09.FR-27, S-174), in
+  is whole, C-09.FR-27, S-174) and
+  [`0046_escalation_chains`](../../internal/db/migrations/0046_escalation_chains.up.sql)
+  (the Escalation chains with their steps, and the chains of Routes and Teams, C-32.FR-1 to FR-3, S-154) and
+  [`0047_escalation_runs`](../../internal/db/migrations/0047_escalation_runs.up.sql)
+  (the runs of the chains on Alert Groups, `escalation_runs` and `escalation_run_steps`, the timer kind
+  `escalation_step` whose subject is the run, `timers.escalation_run_id`, the columns of the escalation entries of the
+  Timeline and `alert_groups.chain_generation`, C-32.FR-4 to FR-7, FR-14 to FR-18, S-169), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -220,7 +226,8 @@ them, `gateway_calls` and `gateway_call_items` (0034), the Notification rules of
 (0037), the Team mentions, `team_mentions` (0042), and the Mention entries of the Destinations, `mention_entries`,
 and the Alert Groups each Storm counts, `storm_alert_groups` (0043), and the Escalation chains, `escalation_chains`,
 `escalation_steps` and `escalation_step_users`, with the chains of Routes and Teams, `route_escalation_chains` and
-`team_escalation_chains` (0046), which makes 85 tables.
+`team_escalation_chains` (0046), and the runs of the chains, `escalation_runs` and `escalation_run_steps` (0047), which
+makes 87 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -236,10 +243,10 @@ and the Alert Groups each Storm counts, `storm_alert_groups` (0043), and the Esc
 | Open Alert Group updates | `open_group_updates` | routing, organization, destinations, teams, links, users, account links and tokens insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries`, `team_mentions`, `team_escalation_chains` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams; connections deletes the `team_mentions` of a Connection it deletes and gives each Team they belonged to a new `version` | deleted Teams kept, marked deleted; `team_mentions` with their Team or Connection |
 | Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
-| Paging | `notification_rules`, `escalation_chains`, `escalation_steps`, `escalation_step_users` | notificationrules; users deletes a deleted user's row through the Notification rules; escalation | `notification_rules` with "Reset to the Organization's rules" or the User's deletion; steps with their chain |
+| Paging | `notification_rules`, `escalation_chains`, `escalation_steps`, `escalation_step_users`, `escalation_runs`, `escalation_run_steps` | notificationrules; users deletes a deleted user's row through the Notification rules; escalation, the runs in the dispatcher's transaction; `groups` deletes `escalation_run_steps` in the retention of the details | `notification_rules` with "Reset to the Organization's rules" or the User's deletion; steps with their chain; run steps with the details (`retention.alert_details`, by the Leader task `alert_group_retention`); runs with their Alert Group |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
-| Timers and Storms | `timers`, `storms`, `storm_alert_groups` | `groups`, timers, delivery; `storm_alert_groups` delivery, as a Storm starts and joins | queue rows deleted when done; `storm_alert_groups` with its Storm or its Alert Group |
+| Timers and Storms | `timers`, `storms`, `storm_alert_groups` | `groups`, timers, delivery, escalation (the timers of runs); `storm_alert_groups` delivery, as a Storm starts and joins | queue rows deleted when done; `storm_alert_groups` with its Storm or its Alert Group; the timer of a run with its run |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
 | Request log | `request_log` | requestlog | newest `request_log.max_records` per owner and `request_log.max_age`; batched `DELETE` every minute |
 | Links | `lookup_tables`, `lookup_table_entries`, `link_rules`, `link_rule_matchers` | messages | — |
@@ -1279,7 +1286,7 @@ Columns by concern:
 | Reopen window | `reopen_deadline`, `prior_status`, `prior_owner_user_id`, `prior_snooze_until`, `prior_snooze_no_end`, `prior_snoozed_while_urgent`, `prior_snoozed_by_user_id`, `prior_snoozed_by_service_account_id` |
 | Grace period | `grace_deadline`, `firing_again_after_id` ("firing again after a manual resolve of #N"; `ON DELETE SET NULL` since migration 0003, so that summary retention can delete the earlier Alert Group) |
 | Counters | `firing_alert_count`, `resolved_alert_count`, `reopen_count`, `event_seq` |
-| Timers | `first_published_at` (filled by migration 0007 for Alert Groups published before it was set: the earliest `deliveries.published_at` or delivered `webhook_events.delivered_at`; their ack timeout starts at their next transition into firing), `ack_timeout_started_at`, `ack_timeout_notices_sent`, `unclaimed`, `reminders_sent`, `reminders_unanswered`, `last_reminder_at`, `owner_answered_at` |
+| Timers | `first_published_at` (filled by migration 0007 for Alert Groups published before it was set: the earliest `deliveries.published_at` or delivered `webhook_events.delivered_at`; their ack timeout starts at their next transition into firing), `ack_timeout_started_at`, `ack_timeout_notices_sent`, `unclaimed`, `reminders_sent`, `reminders_unanswered`, `last_reminder_at`, `owner_answered_at`, `chain_generation` (migration 0047: the current start of its Escalation chains, raised by each start and start-over, 0 before the first; [4.18](#418-paging)) |
 | Time | `created_at` (start), `last_changed_at` |
 
 Invariants, enforced by `CHECK`:
@@ -1389,6 +1396,10 @@ C-32 record their events without a new version; and `timeline_entries_transport_
 three transactions. It added `paged_user_ids` (`users.id` of the people a Page names) and `gateway_connection_id`
 (`connections.id` of the Notification gateway of a call), without foreign keys; the reason of `page_not_delivered` is
 `reason`. The dispatcher records `page_not_delivered` for a call that ended Not delivered ([4.17](#417-notification-gateways)).
+Migration 0047 added `escalation_run_id`, `escalation_chain_id` and `step_number`, the run, the chain and the number of
+the step of an event of an Escalation chain such as `escalation_step_skipped`, whose reason is `reason` and whose
+person, for a skip of a person, is `paged_user_ids` ([4.18](#418-paging)); without foreign keys, as the chain may be
+deleted since and the entries outlive the runs.
 Delivery events are not stored
 here; the Timeline endpoint merges `delivery_events` by time as the kind `delivery`
 ([ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md)), and Notes as the kind `notes`. One index,
@@ -1422,7 +1433,19 @@ Serves C-09.FR-12, C-11.FR-6, C-17; [ADR-0006](../adr/0006-postgresql-only-stora
   `reopen_window_end`, `grace_period_end` per Alert Group, and `storm_calm_check` per Storm. One row per subject and kind
   (partial unique indexes), so rescheduling is an `UPDATE` of `deadline`, and stopping a timer is a `DELETE`. After
   downtime, overdue rows are claimed like any others and fire once, collapsed (`notices_missed`). The next scheduled
-  notice or Reminder of an Alert Group (C-17.FR-9) is read from here.
+  notice or Reminder of an Alert Group (C-17.FR-9) is read from here. Migration 0047 adds the kind `escalation_step`,
+  the next step of a run of an Escalation chain, whose subject is its run, `escalation_run_id` (`ON DELETE CASCADE`),
+  with `alert_group_id` and `storm_id` null (`timers_subject_v2_check`, replacing `timers_subject_check`, and
+  `timers_kind_v2_check`, replacing the inline kind CHECK of 0001, each added `NOT VALID`, validated in a second
+  transaction and the old one dropped in a third); `timers_escalation_run_key` on `(escalation_run_id) WHERE
+  escalation_run_id IS NOT NULL` keeps one timer per run and serves the cascade of a run's deletion; only the timers of
+  runs name a run. A timer of a run names the run rather than its Alert Group because
+  several chains run on one Alert Group at once (C-32.FR-4), each with its own timer beside the Alert Group's ack
+  timeout, Reminder or Snooze timer, while `timers_alert_group_key` allows one timer per Alert Group and kind: narrowing
+  that index would break the `ON CONFLICT` inference of `UpsertTimer` in `internal/groups` and of the replicas of an
+  earlier version during a rolling update. The runs' own upsert in `internal/escalation` conflicts on
+  `timers_escalation_run_key`. A run cascades from its Alert Group and its timer from the run, so deleting an Alert
+  Group still deletes every timer about it.
 - **`storms`** — a Storm per Route (`started_at`, `calm_since`, `ended_at`, counts); at most one active per Route. Storm
   summaries and the Alert Groups they stand for are delivery rows (4.11).
 - **`storm_alert_groups`** (migration 0043, C-28.FR-7) — the Alert Groups a Storm counts, primary key
@@ -1506,7 +1529,10 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
     raised Minimum severity, the re-render after a key rotation): set by a change of the Desired state of a delivered
     row with a Root message and no final edit due, kept by one on a pending row that has it, and cleared by every
     other change of the Desired state, a final edit, a republication and a rejoin, so that a Publication, a final edit
-    and a change of Alerts or a Command keep their place.
+    and a change of Alerts or a Command keep their place; `published_by_configuration` (migration 0047, default false)
+    — a change of configuration released the delivery from its Storm (`ReleaseHeld` of a raised Minimum severity), so
+    its Publication, when it is the Alert Group's first, starts no Escalation chain (C-32.FR-5, ADR-0018); every other
+    first Publication, after a Storm, a restart or a join, starts them.
   The claim index `deliveries_due_v2_idx` `(org_id, urgent DESC, configuration_only, next_attempt_at) WHERE state =
   'pending'` (migration 0038, which replaced `deliveries_due_idx` without `configuration_only`) serves the four
   claims of due deliveries, one per urgency and mark, each a range read in `next_attempt_at` order; the per-
@@ -1945,6 +1971,33 @@ Serves C-31 (from 0.2.0, migration 0037) and C-32 (migration 0046); [ADR-0018](.
   Organization's row of the Teams, the Teams, the Routes, the Escalation chains, the Schedules. A save of a chain reads
   its new owning Team `FOR SHARE`, locks the chain's row `FOR NO KEY UPDATE`, then reads the Schedules of its steps `FOR
   KEY SHARE` in id order; no transaction of a chain locks a Route or a Team for a change.
+- **`escalation_runs`** (migration 0047, C-32.FR-4 to FR-7, FR-16, FR-18) — one run of a chain on an Alert Group from a
+  start of its chains, with its `ER` `public_id`: `alert_group_id` (`ON DELETE CASCADE`), `chain_id` (`ON DELETE SET
+  NULL`, the run keeping `chain_name`), `owning_team_id`, the owning Team the chain had when the run started, whose
+  Working hours its steps use (P-73; Teams are only soft-deleted, so its `ON DELETE SET NULL` never acts), `sources`, the Route and the Teams that named the chain as a JSON array of
+  `{kind, team_id}` — one run however many name it (P-70, `escalation_runs_chain_key` on `(alert_group_id, generation,
+  chain_id)`) —, `steps`, the steps the chain had when the run started, kept until it stops or starts over (P-73),
+  `step_index`, the next step from 0, `repeats`, the passes of each `repeat` step by its number, `state` `running`,
+  `ran_out` once it passed its last step or `stopped` (`escalation_runs_ended_check`: `ended_at` exactly when it no
+  longer runs), `stop_command` `acknowledge`, `snooze`, `resolve` or `started_over` exactly when stopped
+  (`escalation_runs_stop_check`), `stop_event_seq`, the lifecycle event of the change that stopped it, whose Timeline
+  entry names the actor, and `generation`, the value of `alert_groups.chain_generation` it started in: the read of an
+  Alert Group gives the runs of its current start (`escalation_runs_group_idx` on `(alert_group_id, generation)`,
+  which also serves the cascade of the deletion of an Alert Group), and "How it went" the recent runs of a chain
+  (`escalation_runs_chain_idx` on `(chain_id, started_at DESC, id DESC)`, which also serves the `SET NULL` of the
+  deletion of a chain). Every write of a run is in the dispatcher's transaction, after the lock of its Alert Group: a
+  start reads the chains it runs `FOR KEY SHARE` in id order before it writes a run — the deletion of a chain locks it
+  `FOR UPDATE` and then sets `chain_id` of its runs to null —, then the runs, then their timers; a step locks its Alert
+  Group, then its run `FOR NO KEY UPDATE`, then writes its timer.
+- **`escalation_run_steps`** (migration 0047, C-32.FR-14, FR-18) — the steps a run made or skipped, primary key
+  `(run_id, seq)`, each with its `number`, `kind`, `at`, `outcome` `made` or `skipped` and the `reason` of a skip
+  (`escalation_run_steps_reason_check`), what "How it went" lists: whole steps, while the people a made step
+  skipped are in the Timeline. They are details of their Alert Group: the retention of the details deletes them once
+  the Alert Group was resolved `retention.alert_details` ago (`DeleteExpiredRunSteps` in `internal/groups`, in
+  batches), and they also go with their run, which goes with its Alert Group. `escalation_run_steps_at_idx` on
+  `(org_id, at)` lets the retention start from the steps made before the cutoff — a step is made while its Alert Group
+  fires, so before it resolves — rather than from every Alert Group resolved long ago, whose steps are mostly gone:
+  once none is due, its plan reads that index and nothing else.
 
 The Permissions `escalation-chains:read`, for every Role, and `escalation-chains:write`, for Admins, and their
 allocation are reference data of migration 0046, as in 0025.
@@ -2065,6 +2118,10 @@ SELECT e.id FROM webhook_events e
 
 **Timers**:
 `SELECT id FROM timers WHERE org_id = $1 AND deadline <= $business_now AND (lease_until IS NULL OR lease_until <= $real_now) ORDER BY deadline LIMIT $n FOR UPDATE SKIP LOCKED`.
+The timers of the runs of Escalation chains (`escalation_step`, migration 0047) are claimed like any timer by any
+replica; the handler reads the run by `escalation_run_id`, locks its Alert Group through the dispatcher and then the
+run, and does nothing when the run no longer runs or its timer was moved since the claim, so that two replicas make
+each step once.
 **Broken probes**: the same claim over `destinations WHERE org_id = $1 AND health = 'broken' AND next_probe_at <= $business_now`,
 bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **Probes of Broken Notification gateways**
 (C-30.FR-8): the gateway sender of every replica claims `connections WHERE org_id = $1 AND gateway_broken_since IS NOT
@@ -2266,6 +2323,7 @@ since the foreign-key check of a new item takes `FOR KEY SHARE` on its call. The
 | Delivery events | `delivery_events` | monthly | `retention.alert_details`, 90 days | dropping the month |
 | Audit log | `audit_log` | monthly | `retention.audit_log`, 1 year | dropping the month |
 | Alerts inside Alert Groups | `alert_group_alerts` | — | 90 days after the firing ended | batched `DELETE` |
+| Steps of the runs of Escalation chains | `escalation_run_steps` | — | `retention.alert_details`, 90 days after their Alert Group resolved; hidden from "How it went" from then on | batched `DELETE` in the Leader task `alert_group_retention`, after the Alerts inside Alert Groups; the cascade from the run and its summary row too |
 | Alerts view (resolved fingerprints) | `alerts`, `alert_presences` | — | 90 days after resolution | batched `DELETE` (cascades) |
 | Alert Group summary rows | `alert_groups` | — | `retention.alert_group_summaries`, 2 years after resolution | batched `DELETE` (cascades Notes, deliveries, timers, queues) |
 | Notes | `notes` | — | as long as their summary row | the cascade from the summary row; never the details purge |

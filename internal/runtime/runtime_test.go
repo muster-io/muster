@@ -39,6 +39,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	destdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/escalation"
 	"github.com/muster-io/muster/internal/gateways"
 	"github.com/muster-io/muster/internal/groups"
 	groupsdb "github.com/muster-io/muster/internal/groups/dbgen"
@@ -1837,6 +1838,8 @@ func TestConfigureWorker(t *testing.T) {
 		groups:        groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
 		delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
 			Business: business})}
+	p.chainRuns = escalation.New(escalation.Config{OrgID: 1, Store: escalation.NewStore(noDB{}),
+		Business: business}).Runs(escalation.RunsConfig{DB: noDB{}, Groups: p.groups})
 	p.configureWorker()
 	// The sender keeps the Broken state of the gateways, whose probes this replica leases (C-30.FR-8).
 	if b := p.gatewaySender.Broken; b != p.gatewayBroken || b.Lease.Owner != "r-1" {
@@ -1864,13 +1867,14 @@ func TestConfigureWorker(t *testing.T) {
 	id := int64(9)
 	for name, h := range p.timers.Handlers {
 		for _, org := range []int64{2, 1} {
-			after, err := h(t.Context(), noDB{}, org, timers.Timer{AlertGroupID: &id, StormID: &id})
+			after, err := h(t.Context(), noDB{}, org, timers.Timer{AlertGroupID: &id, StormID: &id,
+				EscalationRunID: &id})
 			if after != nil || (org == 1) != errors.Is(err, errNoDB) {
 				t.Errorf("%s in organization %d = %v", name, org, err)
 			}
 		}
 	}
-	if len(p.timers.Handlers) != 6 || p.deliverer.Published == nil {
+	if len(p.timers.Handlers) != 7 || p.deliverer.Published == nil {
 		t.Errorf("handlers %v", slices.Collect(maps.Keys(p.timers.Handlers)))
 	}
 }

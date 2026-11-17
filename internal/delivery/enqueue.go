@@ -52,12 +52,13 @@ type Row struct {
 	EventMentions bool
 }
 
-// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11, C-25, C-26 and C-30 that
-// delivery turns into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row
+// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11, C-25, C-26, C-30 and C-32
+// that delivery turns into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row
 // per variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those
 // it leaves, a Quiet Publication in those it joins, an update in those of both. destination_joined is a new Root message
-// in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update. page_not_delivered shows
-// nothing in a messenger (C-30.FR-7): the gateway called, and outgoing webhooks in events mode receive it.
+// in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update. page_not_delivered and
+// escalation_step_skipped show nothing in a messenger (C-30.FR-7, C-32.FR-14): outgoing webhooks in events mode receive
+// them.
 var Table = []Row{
 	{groups.EventCreated, groups.VariantAny, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup},
 		false},
@@ -84,6 +85,7 @@ var Table = []Row{
 	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventPageNotDelivered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
+	{groups.EventEscalationStepSkipped, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventDestinationJoined, groups.VariantFiring, FormPublication, groups.Loud,
 		[]groups.Mention{groups.MentionNewAlertGroup}, false},
 	{groups.EventDestinationJoined, groups.VariantAcknowledged, FormPublication, groups.Quiet, nil, false},
@@ -311,6 +313,9 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 	// own entries, destination_joined its Destination and a change of a Team's entries the Destination it touched.
 	adds := growth{joined: r.Joined(), teams: joinedTeams(r), grows: r.Grows}
 	targets := withAdded(withReached(reached, had, created || moved || len(had) == 0 || grows(r)), reached, adds)
+	if created && r.Unreached != nil && !reachable(targets) {
+		r.Unreached()
+	}
 	if len(targets) == 0 && !created {
 		return s.wake(ctx, q, left > 0)
 	}
@@ -387,6 +392,17 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		}
 	}
 	return s.wake(ctx, q, true)
+}
+
+// reachable reports whether a Destination that is not Broken reaches the Alert Group among the targets of its creation:
+// one without, or with only Broken ones, starts its Escalation chains at once (C-32.FR-5).
+func reachable(targets []target) bool {
+	for _, t := range targets {
+		if len(t.entries) > 0 && t.dest.Health != healthBroken {
+			return true
+		}
+	}
+	return false
 }
 
 // reachQueries are the queries of the reach of an Alert Group (C-26.FR-2 to FR-4).

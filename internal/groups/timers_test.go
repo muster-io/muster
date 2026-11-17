@@ -29,7 +29,7 @@ func (h *harness) paging() {
 // publish marks the first Publication of g at at, as delivery does once its outcome committed.
 func (h *harness) publish(t *testing.T, g *dbgen.LockGroupsRow, at time.Time) {
 	t.Helper()
-	if err := h.svc.MarkPublished(t.Context(), g.ID, at); err != nil {
+	if err := h.svc.MarkPublished(t.Context(), g.ID, at, true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -480,7 +480,7 @@ func TestMarkPublished(t *testing.T) {
 	if d, _ := h.ackTimer(g); d == nil || !d.Equal(t0.Add(75*time.Minute)) {
 		t.Errorf("unacknowledged after the publication: timer %v", d)
 	}
-	if err := h.svc.MarkPublished(t.Context(), 9999, t0); err != nil {
+	if err := h.svc.MarkPublished(t.Context(), 9999, t0, true); err != nil {
 		t.Errorf("an alert group that is gone = %v", err)
 	}
 
@@ -495,7 +495,7 @@ func TestMarkPublished(t *testing.T) {
 		h.db.routes[2].timers.AckTimeoutEnabled = true
 		g := h.firing(t, "z"+q)
 		h.db.fail[q] = errBoom
-		if err := h.svc.MarkPublished(t.Context(), g.ID, t0); !errors.Is(err, errBoom) {
+		if err := h.svc.MarkPublished(t.Context(), g.ID, t0, true); !errors.Is(err, errBoom) {
 			t.Errorf("%s failing = %v", q, err)
 		}
 		delete(h.db.fail, q)
@@ -1132,4 +1132,100 @@ func TestStatusReasonCode(t *testing.T) {
 			t.Errorf("StatusReasonCode(%q) = %q, want %q", reason, got, want)
 		}
 	}
+}
+
+// TestChainsAndTheAckTimeout is C-32.FR-6, C-32.AC-4 and C-17.FR-1: when the first chain of an Alert Group starts,
+// its ack timeout timer is removed, or never set, and no notice follows; when it becomes firing again the ack timeout
+// starts over only if no chain starts; one on which no chain applies gets the notices of C-17.AC-1.
+func TestChainsAndTheAckTimeout(t *testing.T) {
+	t.Run("a chain at the first publication", func(t *testing.T) {
+		h := newHarness(t)
+		h.paging()
+		h.withChains()
+		g := h.firing(t, "x")
+		h.publish(t, g, t0)
+		if at, _ := h.ackTimer(g); at != nil || g.AckTimeoutStartedAt.Valid {
+			t.Errorf("ack timeout %v %+v", at, g.AckTimeoutStartedAt)
+		}
+		h.runUntil(t, g, t0.Add(8*time.Hour))
+		if events := h.events(g); slices.Contains(events, "ack_timeout") || slices.Contains(events, "unclaimed") {
+			t.Errorf("events %v", events)
+		}
+	})
+	t.Run("no chain applies", func(t *testing.T) {
+		h := newHarness(t)
+		h.paging()
+		f := h.withChains()
+		f.n = 0
+		g := h.firing(t, "x")
+		h.publish(t, g, t0)
+		if at, n := h.ackTimer(g); at == nil || !at.Equal(t0.Add(15*time.Minute)) || n != 1 || g.ChainGeneration != 1 {
+			t.Errorf("ack timeout %v notice %d, generation %d", at, n, g.ChainGeneration)
+		}
+		h.runUntil(t, g, t0.Add(2*time.Hour))
+		if got := h.timerEntries(g); len(got) != 4 {
+			t.Errorf("notices %v", got)
+		}
+	})
+	t.Run("a chain starting while the ack timeout runs stops it", func(t *testing.T) {
+		h := newHarness(t)
+		h.paging()
+		f := h.withChains()
+		f.n = 0
+		g := h.rise(t, func(g *dbgen.LockGroupsRow) {
+			h.publish(t, g, t0)
+			if at, _ := h.ackTimer(g); at == nil {
+				t.Fatal("no ack timeout before the rise")
+			}
+			f.n = 1
+		})
+		if at, _ := h.ackTimer(g); at != nil || g.AckTimeoutStartedAt.Valid {
+			t.Errorf("after a chain started: ack timeout %v", at)
+		}
+	})
+	t.Run("firing again with no chain that starts", func(t *testing.T) {
+		h := newHarness(t)
+		h.paging()
+		h.people()
+		f := h.withChains()
+		g := h.firing(t, "x")
+		h.publish(t, g, t0)
+		if _, err := h.do(alice, CommandAcknowledge, g); err != nil {
+			t.Fatal(err)
+		}
+		f.n = 0
+		h.clock.Advance(time.Minute)
+		if _, err := h.do(alice, CommandUnacknowledge, g); err != nil {
+			t.Fatal(err)
+		}
+		if at, _ := h.ackTimer(g); at == nil || !at.Equal(h.clock.Now().Add(15*time.Minute)) {
+			t.Errorf("ack timeout %v", at)
+		}
+		f.n = 1
+		if _, err := h.do(alice, CommandAcknowledge, g); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.do(alice, CommandUnacknowledge, g); err != nil {
+			t.Fatal(err)
+		}
+		if at, _ := h.ackTimer(g); at != nil {
+			t.Errorf("with a chain that starts: ack timeout %v", at)
+		}
+	})
+	t.Run("chains started at the creation keep the ack timeout off at the publication", func(t *testing.T) {
+		h := newHarness(t)
+		h.paging()
+		h.withChains()
+		h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+			if r.Unreached != nil {
+				r.Unreached()
+			}
+			return nil
+		})
+		g := h.firing(t, "x")
+		h.publish(t, g, t0.Add(time.Minute))
+		if at, _ := h.ackTimer(g); at != nil || g.ChainGeneration != 1 {
+			t.Errorf("ack timeout %v, generation %d", at, g.ChainGeneration)
+		}
+	})
 }

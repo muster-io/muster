@@ -463,7 +463,8 @@ var ReminderSkipped = newEvent("reminder_skipped", LevelInfo, "C-17",
 // AlertGroupsPurged is logged when the Alert Group retention of the Leader deleted details or summary rows.
 var AlertGroupsPurged = newEvent("alert_groups_purged", LevelInfo, "C-09",
 	"The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended "+
-		"retention.alert_details ago (details, the rows deleted) and the summary rows of Alert Groups resolved "+
+		"retention.alert_details ago and the steps of the runs of the Escalation chains of Alert Groups resolved "+
+		"then (details, the rows deleted) and the summary rows of Alert Groups resolved "+
 		"retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).",
 	"details", "summaries")
 
@@ -1236,3 +1237,33 @@ var ScheduleGapCleared = newEvent("schedule_gap_cleared", LevelInfo, "C-27",
 		"its gap alert is no longer active, or it was deleted. schedule is the public_id of the Schedule and team that "+
 		"of its Team. Logged once per resolve.",
 	"schedule", "team")
+
+// EscalationRunStarted is logged for each run of an Escalation chain that starts on an Alert Group (C-32.FR-5).
+var EscalationRunStarted = newEvent("escalation_run_started", LevelInfo, "C-32",
+	"A run of an Escalation chain started on an Alert Group at its first step, at its first Publication, at its "+
+		"creation without a Destination that reaches it, when it became firing again, or for a rise or a Team that "+
+		"joined: group is the public_id of the Alert Group, chain that of the chain and run that of the run.",
+	"group", "chain", "run")
+
+// EscalationRunStopped is logged for each running run of an Escalation chain that a change of its Alert Group stopped
+// (C-32.FR-5).
+var EscalationRunStopped = newEvent("escalation_run_stopped", LevelInfo, "C-32",
+	"A run of an Escalation chain stopped before its last step: group is the public_id of the Alert Group, chain "+
+		"that of the chain, empty once it was deleted, run that of the run and command acknowledge, snooze, resolve "+
+		"or started_over.",
+	"group", "chain", "run", "command")
+
+// EscalationRunStepLimit is logged for a run of an Escalation chain that reached the most steps a run makes, as
+// repeats nested without a wait can, and ran out there (C-32.FR-15).
+var EscalationRunStepLimit = newEvent("escalation_run_step_limit", LevelWarn, "C-32",
+	"A run of an Escalation chain made the most steps a run makes, escalation.MaxStepsPerRun, as repeats nested "+
+		"without a wait between them can, and ran out there as after its last step, so that its Alert Group becomes "+
+		"Unclaimed: group is the public_id of the Alert Group, chain that of the chain, empty once it was deleted, run "+
+		"that of the run and steps how many steps it made and skipped. Review the repeats of the chain.",
+	"group", "chain", "run", "steps")
+
+// EscalationRunRanOut is logged for each run of an Escalation chain that passed its last step (C-32.FR-7).
+var EscalationRunRanOut = newEvent("escalation_run_ran_out", LevelInfo, "C-32",
+	"A run of an Escalation chain passed its last step without an acknowledgement: group is the public_id of the "+
+		"Alert Group, chain that of the chain, empty once it was deleted, and run that of the run.",
+	"group", "chain", "run")

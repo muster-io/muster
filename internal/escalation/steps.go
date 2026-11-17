@@ -774,7 +774,18 @@ func stepOf(r dbgen.ListStepsRow) Step {
 // of its owning Team — its own, else the Organization's, as teams.Effective says — and the Organization's for a chain
 // without one.
 func (s *Service) WorkingHoursOf(ctx context.Context, c Chain) (teams.WorkingHours, error) {
-	o, err := s.store.GetOrganizationWorkingHours(ctx, s.orgID)
+	return s.workingHoursOn(ctx, s.store, c)
+}
+
+// workingHoursQueries are the reads of the Working hours.
+type workingHoursQueries interface {
+	GetOrganizationWorkingHours(ctx context.Context, orgID int64) (dbgen.GetOrganizationWorkingHoursRow, error)
+	GetTeamWorkingHours(ctx context.Context, arg dbgen.GetTeamWorkingHoursParams) (dbgen.GetTeamWorkingHoursRow, error)
+}
+
+// workingHoursOn is WorkingHoursOf read through q, such as the transaction of a step of a run.
+func (s *Service) workingHoursOn(ctx context.Context, q workingHoursQueries, c Chain) (teams.WorkingHours, error) {
+	o, err := q.GetOrganizationWorkingHours(ctx, s.orgID)
 	if err != nil {
 		return teams.WorkingHours{}, fmt.Errorf("read the working hours of the organization: %w", err)
 	}
@@ -782,7 +793,7 @@ func (s *Service) WorkingHoursOf(ctx context.Context, c Chain) (teams.WorkingHou
 	if c.OwningTeam == nil {
 		return org, nil
 	}
-	t, err := s.store.GetTeamWorkingHours(ctx, dbgen.GetTeamWorkingHoursParams{OrgID: s.orgID, ID: c.OwningTeam.ID})
+	t, err := q.GetTeamWorkingHours(ctx, dbgen.GetTeamWorkingHoursParams{OrgID: s.orgID, ID: c.OwningTeam.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return org, nil
 	}

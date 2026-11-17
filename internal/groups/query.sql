@@ -99,7 +99,7 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
        last_changed_at, first_acknowledged_at, first_published_at, ack_timeout_started_at, ack_timeout_notices_sent,
        unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at,
-       first_acknowledged_by_user_id
+       first_acknowledged_by_user_id, chain_generation
 FROM alert_groups
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[])
 ORDER BY id
@@ -194,7 +194,7 @@ SET route_id = @route_id, moved_from_route_id = sqlc.narg('moved_from_route_id')
     first_published_at = sqlc.narg('first_published_at'), ack_timeout_started_at = sqlc.narg('ack_timeout_started_at'),
     ack_timeout_notices_sent = @ack_timeout_notices_sent, unclaimed = @unclaimed, reminders_sent = @reminders_sent,
     reminders_unanswered = @reminders_unanswered, last_reminder_at = sqlc.narg('last_reminder_at'),
-    owner_answered_at = sqlc.narg('owner_answered_at')
+    owner_answered_at = sqlc.narg('owner_answered_at'), chain_generation = @chain_generation
 WHERE org_id = @org_id AND id = @id;
 
 -- IsActiveUser reports whether a User can still own an Alert Group: a disabled or deleted Owner has no
@@ -279,7 +279,7 @@ INSERT INTO timeline_entries (
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
     period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
-    paged_user_ids, gateway_connection_id
+    paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
 )
 VALUES (
     @org_id, @public_id, @alert_group_id, @at, @kind, sqlc.narg('event'), sqlc.narg('event_seq'),
@@ -290,7 +290,8 @@ VALUES (
     sqlc.narg('replaced_label'), sqlc.narg('label_conflicts')::text[], sqlc.narg('period_from'),
     sqlc.narg('period_to'), sqlc.narg('detail'), sqlc.narg('notice_number'), sqlc.narg('missed_count'),
     sqlc.narg('team_id'), sqlc.narg('team_rule'), sqlc.narg('team_matcher'), sqlc.narg('team_value'),
-    sqlc.narg('destination_id'), sqlc.narg('paged_user_ids')::bigint[], sqlc.narg('gateway_connection_id')
+    sqlc.narg('destination_id'), sqlc.narg('paged_user_ids')::bigint[], sqlc.narg('gateway_connection_id'),
+    sqlc.narg('escalation_run_id'), sqlc.narg('escalation_chain_id'), sqlc.narg('step_number')
 );
 
 -- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
@@ -523,7 +524,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -538,7 +539,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -1185,6 +1186,23 @@ SELECT retention_alert_details_days, retention_alert_group_summaries_days
 FROM organizations
 WHERE id = @org_id;
 
+-- DeleteExpiredRunSteps deletes at most @batch_size steps of the runs of Escalation chains on Alert Groups resolved
+-- before @cutoff, the details of those Alert Groups ("How it went"); the runs stay with their summary rows. It starts
+-- from the steps still present that were made before the cutoff (escalation_run_steps_at_idx) — a step is made while
+-- its Alert Group fires, so before it resolves — and not from every Alert Group resolved long ago, whose steps are
+-- mostly gone. Rows another transaction holds wait for the next run.
+-- name: DeleteExpiredRunSteps :execrows
+DELETE FROM escalation_run_steps s
+WHERE s.org_id = @org_id AND (s.run_id, s.seq) IN (
+    SELECT x.run_id, x.seq
+    FROM escalation_run_steps x
+    JOIN escalation_runs r ON r.org_id = x.org_id AND r.id = x.run_id
+    JOIN alert_groups g ON g.org_id = r.org_id AND g.id = r.alert_group_id
+    WHERE x.org_id = @org_id AND x.at < @cutoff::timestamptz AND g.status = 'resolved'
+      AND g.resolved_at < @cutoff::timestamptz
+    LIMIT @batch_size
+    FOR UPDATE OF x SKIP LOCKED);
+
 -- DeleteExpiredMemberships deletes at most @batch_size Alerts inside Alert Groups that ended before @cutoff; rows
 -- another transaction holds wait for the next run.
 -- name: DeleteExpiredMemberships :execrows
@@ -1569,6 +1587,24 @@ ORDER BY e.destination_id, e.kind, e.team_id;
 SELECT id, public_id, name, type, health, broken_since, broken_reason
 FROM destinations
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+
+-- ListTimelineChains names the chains of the escalation entries by their runs: the chain with its owning Team, null
+-- once deleted, and the name of the chain when the run started.
+-- name: ListTimelineChains :many
+SELECT r.id AS run_id, r.chain_name, c.public_id AS chain_public_id, c.name AS chain_name_now,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted
+FROM escalation_runs r
+LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = c.owning_team_id
+WHERE r.org_id = @org_id AND r.id = ANY(@ids::bigint[]);
+
+-- SetChainGeneration writes the start of the chains of an Alert Group that the re-render step found no Destination
+-- for, after the dispatcher saved it.
+-- name: SetChainGeneration :exec
+UPDATE alert_groups
+SET chain_generation = @chain_generation
+WHERE org_id = @org_id AND id = @id;
 
 -- ListTimelineGateways names the Notification gateways of the escalation entries of calls, deleted ones included.
 -- name: ListTimelineGateways :many

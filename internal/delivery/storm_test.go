@@ -152,6 +152,7 @@ func (f *fakeDB) ReleaseHeld(_ context.Context, arg dbgen.ReleaseHeldParams) err
 	if d := f.delivery(arg.ID); d.heldBy != 0 {
 		d.heldBy, d.next, d.updated = 0, arg.Now, arg.Now
 		d.loud = pgtype.Bool{Bool: d.loud.Bool && arg.Loud, Valid: d.loud.Valid}
+		d.byConfiguration = !arg.Loud
 	}
 	return nil
 }
@@ -239,6 +240,7 @@ func (f *fakeDB) ReleaseHeldOpen(_ context.Context, arg dbgen.ReleaseHeldOpenPar
 	f.held(arg.StormID, func(d *fakeDelivery, resolved bool) {
 		if !resolved {
 			d.heldBy, d.loud, d.next, d.updated = 0, pgtype.Bool{Bool: arg.Loud, Valid: true}, arg.Now, arg.Now
+			d.byConfiguration = false
 		}
 	})
 	return nil
@@ -508,7 +510,13 @@ func TestStorm(t *testing.T) {
 		t.Fatalf("not ended %+v, log %s", st, e.log)
 	}
 	e.rec.Reset()
+	marked := e.recordPublished()
 	e.round(t)
+	// The end of the Storm publishes the Alert Groups it held, which an Alert started: each first Publication starts
+	// the Escalation chains (C-32.FR-5).
+	if len(*marked) != 5 || slices.ContainsFunc(*marked, func(c publishedCall) bool { return !c.loud }) {
+		t.Errorf("first publications after the storm %+v", *marked)
+	}
 	var quiet []deliverytest.Call
 	var final []deliverytest.Call
 	for _, c := range e.rec.Calls() {
@@ -751,6 +759,7 @@ func TestStormQuietRelease(t *testing.T) {
 		e.onlyStorm(t)
 		e.round(t)
 		e.rec.Reset()
+		marked := e.recordPublished()
 		g := e.view(id, groups.StatusFiring)
 		g.Urgent = true
 		e.db.groups[id].urgent = true
@@ -760,6 +769,10 @@ func TestStormQuietRelease(t *testing.T) {
 		if p := e.publications(); len(p) != 1 || p[0].Loudness != c.want ||
 			!strings.HasPrefix(textOf(p[0]), fmt.Sprintf("#%d ", id)) {
 			t.Errorf("%s: released %+v", c.name, p)
+		}
+		// Only the release by a change of configuration starts no Escalation chain (ADR-0018).
+		if m := *marked; len(m) != 1 || m[0].group != id || m[0].loud != (c.reason == "") {
+			t.Errorf("%s: marked %+v", c.name, m)
 		}
 	}
 }

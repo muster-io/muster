@@ -605,6 +605,27 @@ func (f *fakeDB) DeleteExpiredMemberships(_ context.Context, arg dbgen.DeleteExp
 	return n, nil
 }
 
+// DeleteExpiredRunSteps deletes the steps of the runs of the resolved Alert Groups that ended before the cutoff, as
+// runSteps counts them by Alert Group.
+func (f *fakeDB) DeleteExpiredRunSteps(_ context.Context, arg dbgen.DeleteExpiredRunStepsParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("DeleteExpiredRunSteps"); err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, id := range slices.Sorted(maps.Keys(f.runSteps)) {
+		g := f.groups[id]
+		if g == nil || g.Status != string(StatusResolved) || !g.ResolvedAt.Time.Before(arg.Cutoff) {
+			continue
+		}
+		take := min(int64(f.runSteps[id]), int64(arg.BatchSize)-n)
+		f.runSteps[id] -= int(take)
+		n += take
+	}
+	return n, nil
+}
+
 func (f *fakeDB) DeleteExpiredGroups(_ context.Context, arg dbgen.DeleteExpiredGroupsParams) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

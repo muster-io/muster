@@ -17,7 +17,7 @@ export interface WebhookActor {
   token_name?: string | null;
   transport?: Transport;
   /**
-     * Reason of a `system` transition, for example `timer`, or `owner_disabled` and `owner_deleted` when disabling or deleting a user released their acknowledgement.
+     * Reason of a `system` transition, for example `timer`, or `owner_disabled` and `owner_deleted` when disabling or deleting a user released their acknowledgement. On `page_not_delivered` and `escalation_step_skipped` it repeats the reason of the event, also given in `page.reason` and `escalation_step.reason`.
      * @nullable
      */
   reason?: string | null;

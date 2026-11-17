@@ -546,8 +546,9 @@ type process struct {
 	teams *teams.Service
 	// schedules holds the Schedules of the Teams, and icalFeeds the personal iCal feeds of their On-call times.
 	schedules *schedules.Service
-	// chains holds the Escalation chains (C-32), kept in the main pool.
+	// chains holds the Escalation chains (C-32), kept in the main pool, and chainRuns their runs on Alert Groups.
 	chains    *escalation.Service
+	chainRuns *escalation.Runs
 	icalFeeds *schedules.Feeds
 	snapshots *ingest.Service
 	signals   *heartbeat.Service
@@ -1016,6 +1017,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
 			return routing.RestampAlerts(ctx, tx, orgID, alertIDs, routeID)
 		}})
+	// The dispatcher starts and stops the runs of the Escalation chains in its transaction, and each step of a run is a
+	// system transition of the dispatcher (C-32.FR-5, ADR-0016); no step Pages anyone until S-155.
+	p.chainRuns = p.chains.Runs(escalation.RunsConfig{DB: p.db.AccountLinksDB(), Groups: p.groups,
+		OnCalls: p.schedules, Log: p.log})
+	p.groups.SetChainRuns(p.chainRuns)
 	// Lookup tables and Link rules give every Alert Group its links (C-12.FR-9); Mention entries name users by their
 	// Account links (C-12.FR-8, FR-12), Teams by their Team mentions and the On-call by the Teams' main Schedules on the
 	// business clock (C-28.FR-3), which mentions imports neither for (ADR-0016).
@@ -1252,8 +1258,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Teams:      p.teams,
 		Schedules:  p.schedules,
 		IcalFeeds:  p.icalFeeds,
-		// The Escalation chains are kept in the main pool (C-32).
+		// The Escalation chains are kept in the main pool (C-32), with their runs.
 		EscalationChains: p.chains,
+		ChainRuns:        p.chainRuns,
 		TrustedProxies:   p.cfg.TrustedProxies,
 		Log:              p.log,
 		Real:             p.clocks.Real,
@@ -1678,6 +1685,14 @@ func (p *process) configureWorker() {
 				return nil, nil
 			}
 			return p.groups.FireReminder(ctx, tx, *t.AlertGroupID, t.Deadline)
+		},
+		// The timer of a run names the run, not its Alert Group (schema.md §4.10).
+		escalation.TimerKind: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
+			func(context.Context), error) {
+			if org != p.orgID || t.EscalationRunID == nil {
+				return nil, nil
+			}
+			return p.chainRuns.FireStep(ctx, tx, *t.EscalationRunID, t.Deadline)
 		},
 	}
 }

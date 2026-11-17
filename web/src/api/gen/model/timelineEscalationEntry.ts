@@ -3,6 +3,8 @@
  * Do not edit manually.
  */
 import type { EntityRef } from './entityRef';
+import type { EscalationChainRef } from './escalationChainRef';
+import type { EscalationSkipReason } from './escalationSkipReason';
 import type { PageNotDeliveredReason } from './pageNotDeliveredReason';
 import type { TimelineEntryBase } from './timelineEntryBase';
 import type { TimelineEscalationEntryKind } from './timelineEscalationEntryKind';
@@ -10,7 +12,7 @@ import type { TimelineLifecycleFields } from './timelineLifecycleFields';
 import type { UserRef } from './userRef';
 
 /**
- * An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered.
+ * An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered, or `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person.
  */
 export type TimelineEscalationEntry = TimelineEntryBase & TimelineLifecycleFields & ({
   kind: TimelineEscalationEntryKind;
@@ -19,4 +21,18 @@ export type TimelineEscalationEntry = TimelineEntryBase & TimelineLifecycleField
   /** The Notification gateway of a call; null for a Page by Mention. */
   gateway?: EntityRef | null;
   reason?: PageNotDeliveredReason | null;
+  /** The Escalation chain of the event, null once it was deleted or for an event of no chain. */
+  chain?: EscalationChainRef | null;
+  /**
+     * The name of the chain when its run started; null for an event of no chain.
+     * @nullable
+     */
+  chain_name?: string | null;
+  /**
+     * The number of the step of the chain; null for an event of no chain.
+     * @minimum 1
+     * @nullable
+     */
+  step?: number | null;
+  skip_reason?: EscalationSkipReason | null;
 });

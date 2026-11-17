@@ -1161,7 +1161,8 @@ func TestWebhookEventsProbeKeepsRetryAfter(t *testing.T) {
 // Root message, the delivered created event is the first Publication, marked at its delivered_at once its outcome
 // committed; a later event delivered while the Alert Group is still unmarked marks it when its created event was
 // delivered, or at its own delivered_at when no created event was (one not delivered, or a webhook added to a Route
-// with an open Alert Group, whose first event is not created); a marked one marks nothing.
+// with an open Alert Group, whose first event is not created); a marked one marks nothing. Each starts the Escalation
+// chains, as an Alert made the Alert Group (C-32.FR-5): a delivered created event is that point of the table.
 func TestWebhookEventsMarkPublished(t *testing.T) {
 	e := newEventsEnv(t, nil)
 	calls := e.recordPublished(errBoom)
@@ -1169,14 +1170,14 @@ func TestWebhookEventsMarkPublished(t *testing.T) {
 	e.enqueue(t, g, groups.System, created())
 	e.drain(t)
 	createdAt := e.business.Now()
-	if len(*calls) != 1 || (*calls)[0] != (publishedCall{groupID, createdAt, false}) ||
+	if len(*calls) != 1 || (*calls)[0] != (publishedCall{groupID, createdAt, false, true}) ||
 		!strings.Contains(e.log.String(), `"work":"mark_published"`) {
 		t.Fatalf("created: calls %+v, log %s", *calls, e.log)
 	}
 	e.business.Advance(time.Minute)
 	e.enqueue(t, g, webUser, event(2, groups.EventAcknowledged, groups.VariantAny))
 	e.drain(t)
-	if len(*calls) != 2 || (*calls)[1] != (publishedCall{groupID, createdAt, false}) {
+	if len(*calls) != 2 || (*calls)[1] != (publishedCall{groupID, createdAt, false, true}) {
 		t.Fatalf("a later event while unmarked: calls %+v", *calls)
 	}
 	e.enqueue(t, g, webUser, event(3, groups.EventResolved, groups.VariantAny))
@@ -1193,7 +1194,7 @@ func TestWebhookEventsMarkPublished(t *testing.T) {
 	e.sender.answers = []delivery.Outcome{{Kind: delivery.OutcomeUnknown, Status: 400, Error: "answered 400"}}
 	e.drain(t)
 	if got := e.sender.sent(t); len(got) != 2 || len(*calls) != 1 ||
-		(*calls)[0] != (publishedCall{groupID, e.business.Now(), false}) {
+		(*calls)[0] != (publishedCall{groupID, e.business.Now(), false, true}) {
 		t.Errorf("created not delivered: sent %v, calls %+v", got, *calls)
 	}
 
@@ -1206,7 +1207,7 @@ func TestWebhookEventsMarkPublished(t *testing.T) {
 	e.enqueue(t, g, webUser, event(5, groups.EventResolved, groups.VariantAny))
 	e.drain(t)
 	if got := e.sender.sent(t); len(got) != 2 || len(*calls) != 1 ||
-		(*calls)[0] != (publishedCall{groupID, e.business.Now(), false}) {
+		(*calls)[0] != (publishedCall{groupID, e.business.Now(), false, true}) {
 		t.Errorf("webhook added to a route with an open alert group: sent %v, calls %+v", got, *calls)
 	}
 

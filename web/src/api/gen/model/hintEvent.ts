@@ -10,7 +10,7 @@ import type { NullablePublicId } from './nullablePublicId';
  *
  * | `type` | `id` | Meaning |
  * |---|---|---|
- * | `alert-group` | the Alert Group `public_id` | It changed (status, Alerts, Timeline, delivery state): refresh its page and any list row. |
+ * | `alert-group` | the Alert Group `public_id` | It changed (status, Alerts, Timeline, delivery state, the runs of its Escalation chains): refresh its page and any list row. |
  * | `alert-groups` | null | New Alert Groups may match the current list filters or counts: the UI announces "N new". |
  * | `integration`, `route`, `connection`, `destination`, `team`, `schedule`, `escalation-chain` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
  * | `organization` | null | Organization settings changed. |

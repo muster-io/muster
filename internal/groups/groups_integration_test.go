@@ -1590,7 +1590,7 @@ func TestIntegrationAckTimeout(t *testing.T) {
 		}
 		published := e.clock.Now()
 		for _, at := range []time.Time{published, published.Add(time.Minute)} {
-			if err := e.groups.MarkPublished(ctx, id, at); err != nil {
+			if err := e.groups.MarkPublished(ctx, id, at, true); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1715,7 +1715,7 @@ func TestIntegrationReminders(t *testing.T) {
 		e.process(t, gk, alert("firing", "2026-10-07T11:00:00Z", "alertname", "DiskFull", "team", "db", "pod", "a"))
 		ga := e.groupOf(t, "a")
 		id := e.groupID(t, ga)
-		if err := e.groups.MarkPublished(ctx, id, e.clock.Now()); err != nil {
+		if err := e.groups.MarkPublished(ctx, id, e.clock.Now(), true); err != nil {
 			t.Fatal(err)
 		}
 		acked := e.clock.Now()

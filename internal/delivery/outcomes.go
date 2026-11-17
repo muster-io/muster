@@ -347,7 +347,7 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 		if r.PublishedAt.Valid {
 			at = r.PublishedAt.Time
 		}
-		logs.add(w.markPublished(a.row.AlertGroupID, at))
+		logs.add(w.markPublished(a.row.AlertGroupID, at, !a.row.PublishedByConfiguration))
 	}
 	if a.row.DestinationHealth == healthBroken {
 		return true, markHealthy(ctx, q, w.raiser(org), org, a.destination.ID, now, logs)
@@ -382,15 +382,18 @@ func released(ctx context.Context, q queries, org int64, old, key string) error 
 }
 
 // markPublished marks, once the transaction that recorded a Publication of the Alert Group groupID at at committed,
-// its first Publication (C-17.FR-1, D298): through the dispatcher in a transaction of its own, never inside the
+// its first Publication, with whether it starts the Escalation chains — every Publication but one that a change of
+// configuration released (published_by_configuration) — (C-17.FR-1, C-32.FR-5, D298): through the dispatcher in a
+// transaction of its own, never inside the
 // outcome's, which locks deliveries before alert_groups while the dispatcher locks them the other way round. A
 // failure is logged; the next delivered call or event of the Alert Group marks it again while it is unmarked.
-func (w *Worker) markPublished(groupID int64, at time.Time) func(ctx context.Context, log *logging.Logger) {
+func (w *Worker) markPublished(groupID int64, at time.Time, startsChains bool) func(ctx context.Context,
+	log *logging.Logger) {
 	return func(ctx context.Context, log *logging.Logger) {
 		if w.Published == nil {
 			return
 		}
-		if err := w.Published(ctx, groupID, at); err != nil && ctx.Err() == nil {
+		if err := w.Published(ctx, groupID, at, startsChains); err != nil && ctx.Err() == nil {
 			log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", "mark_published"),
 				logging.F("error", err.Error()))
 		}

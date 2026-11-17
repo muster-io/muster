@@ -19,18 +19,20 @@ const RetentionBatch = 5000
 type retentionQueries interface {
 	GetRetentionPeriods(ctx context.Context, orgID int64) (dbgen.GetRetentionPeriodsRow, error)
 	DeleteExpiredMemberships(ctx context.Context, arg dbgen.DeleteExpiredMembershipsParams) (int64, error)
+	DeleteExpiredRunSteps(ctx context.Context, arg dbgen.DeleteExpiredRunStepsParams) (int64, error)
 	DeleteExpiredGroups(ctx context.Context, arg dbgen.DeleteExpiredGroupsParams) (int64, error)
 }
 
-// Purged is what one run of the retention deleted: Details, the Alerts inside Alert Groups, and Summaries, the
-// summary rows.
+// Purged is what one run of the retention deleted: Details, the Alerts inside Alert Groups and the steps of the runs
+// of their Escalation chains, and Summaries, the summary rows.
 type Purged struct {
 	Details   int64
 	Summaries int64
 }
 
 // Purge runs the Alert Group retention of the Organization orgID at now (C-09.FR-16): first the Alerts inside Alert
-// Groups that ended retention.alert_details ago, then the summary rows resolved retention.alert_group_summaries ago
+// Groups that ended retention.alert_details ago and the steps of the runs of the chains of Alert Groups resolved then,
+// then the summary rows resolved retention.alert_group_summaries ago
 // with their Notes, timers, deliveries and queue rows by cascade, each in batches of at most RetentionBatch until a
 // batch comes back short. Timeline and delivery event months are dropped by partition maintenance; the reads hide the
 // details of an Alert Group from the end of retention.alert_details, whether or not they are deleted yet. Running it
@@ -49,6 +51,17 @@ func Purge(ctx context.Context, q Queries, orgID int64, now time.Time) (Purged, 
 		out.Details += n
 		if err != nil {
 			return out, fmt.Errorf("delete the expired alerts inside alert groups: %w", err)
+		}
+		if n < RetentionBatch {
+			break
+		}
+	}
+	for {
+		n, err := q.DeleteExpiredRunSteps(ctx, dbgen.DeleteExpiredRunStepsParams{OrgID: orgID, Cutoff: details,
+			BatchSize: RetentionBatch})
+		out.Details += n
+		if err != nil {
+			return out, fmt.Errorf("delete the expired steps of escalation runs: %w", err)
 		}
 		if n < RetentionBatch {
 			break

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
@@ -215,6 +217,15 @@ func TestLifecycleEventTable(t *testing.T) {
 				h.pageNotDelivered(t, []int64{g.ID}, PageCallRefused)
 				return g
 			}},
+		{"escalation step skipped", want{EventEscalationStepSkipped, KindEscalation, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				return h.chainStep(t, ChainProgress{Skips: []StepSkip{{ChainEntry: ChainEntry{Run: runID, Step: 3},
+					Reason: SkipSeverity}}})
+			}},
+		{"unclaimed when every chain ran out", want{EventUnclaimed, KindTimers, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				return h.chainStep(t, ChainProgress{RanOut: true})
+			}},
 	}
 	produced := map[Event]bool{}
 	for _, c := range cases {
@@ -258,6 +269,26 @@ func TestLifecycleEventTable(t *testing.T) {
 			t.Errorf("no case covers %s", r.Event)
 		}
 	}
+}
+
+// chainStep starts a published Alert Group with a chain and makes one step of it that did p, every run having run out.
+func (h *harness) chainStep(t *testing.T, p ChainProgress) *dbgen.LockGroupsRow {
+	t.Helper()
+	f := h.withChains()
+	f.ranOut = true
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	h.publish(t, g, t0)
+	h.clock.Advance(time.Minute)
+	after, err := h.svc.ChainStep(t.Context(), nil, g.ID, func(context.Context, *Group) (ChainProgress, error) {
+		return p, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after(t.Context())
+	return g
 }
 
 // TestCommandEventTable is C-10.AC-16, C-10.FR-15 and C-09.FR-11: every row of the lifecycle event table of the
@@ -790,6 +821,38 @@ func (f *fakeDB) ListTimelineGateways(_ context.Context, arg dbgen.ListTimelineG
 	}
 	return out, nil
 }
+
+// ListTimelineChains names the run runID of the escalation_step_skipped tests: its chain chainID, and no other.
+func (f *fakeDB) ListTimelineChains(_ context.Context, arg dbgen.ListTimelineChainsParams) (
+	[]dbgen.ListTimelineChainsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListTimelineChains"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListTimelineChainsRow
+	for _, id := range arg.Ids {
+		switch id {
+		case runID:
+			out = append(out, dbgen.ListTimelineChainsRow{RunID: id, ChainName: "payments",
+				ChainPublicID: pgtype.Text{String: "EC0000000000PA", Valid: true},
+				ChainNameNow:  pgtype.Text{String: "payments", Valid: true},
+				TeamPublicID:  pgtype.Text{String: "TM0000000000PA", Valid: true},
+				TeamName:      pgtype.Text{String: "Payments", Valid: true},
+				TeamSlug:      pgtype.Text{String: "payments", Valid: true}})
+		case deletedRunID:
+			out = append(out, dbgen.ListTimelineChainsRow{RunID: id, ChainName: "gone"})
+		}
+	}
+	return out, nil
+}
+
+// runID and deletedRunID are the runs of the escalation_step_skipped tests: of the chain payments, and of a chain
+// deleted since.
+const (
+	runID        = 88
+	deletedRunID = 89
+)
 
 // gatewayID is the Notification gateway of the page_not_delivered tests.
 const gatewayID = 77

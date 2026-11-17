@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/timers"
 )
 
@@ -50,16 +51,20 @@ func (d *dispatcher) timerPolicy(ctx context.Context, q Queries, id int64) (time
 		reminderCap: time.Duration(r.RemindersCapSeconds) * time.Second, autoUnack: r.AutoUnacknowledge}, nil
 }
 
-// timerState is what the timer sync of the dispatcher compares before and after a change.
+// timerState is what the timer sync of the dispatcher compares before and after a change: with the Severity level
+// and the start of the Escalation chains, which the sync of the chains compares (escalation.go).
 type timerState struct {
-	status    Status
-	published bool
-	unclaimed bool
-	owner     int64
+	status     Status
+	published  bool
+	unclaimed  bool
+	owner      int64
+	severity   organization.SeverityLevel
+	generation int64
 }
 
 func timerStateOf(g *Group) timerState {
-	b := timerState{status: g.Status, published: g.FirstPublishedAt != nil, unclaimed: g.Unclaimed}
+	b := timerState{status: g.Status, published: g.FirstPublishedAt != nil, unclaimed: g.Unclaimed,
+		severity: g.Severity, generation: g.ChainGeneration}
 	if g.OwnerUserID != nil {
 		b.owner = *g.OwnerUserID
 	}
@@ -70,10 +75,21 @@ func timerStateOf(g *Group) timerState {
 // firing, once it has been published.
 func (s timerState) ackTimeoutRuns() bool { return s.status == StatusFiring && s.published }
 
-// syncTimers keeps the ack timeout and the Reminders of g with its status after a change (ADR-0016); b is the state
-// before the change.
-func (d *dispatcher) syncTimers(ctx context.Context, q Queries, g *Group, b timerState, now time.Time) error {
-	if err := d.syncAckTimeout(ctx, q, g, b, now); err != nil {
+// syncTimers keeps the Escalation chains, the ack timeout and the Reminders of g with its status after the change c
+// (ADR-0016); b is the state before the change. The chains come first: the ack timeout starts only where none runs
+// (C-32.FR-6).
+func (d *dispatcher) syncTimers(ctx context.Context, q Queries, g *Group, b timerState, c *change, now time.Time,
+	after *committed) error {
+	chains, err := d.syncChains(ctx, q, g, b, c, now, after)
+	if err != nil {
+		return err
+	}
+	// Unclaimed ends whenever the Alert Group stops being firing (C-17.FR-3), published or not: chains that ran out
+	// make an Alert Group without a Publication Unclaimed too.
+	if g.Status != StatusFiring {
+		g.Unclaimed = false
+	}
+	if err := d.syncAckTimeout(ctx, q, g, b, chains, now); err != nil {
 		return err
 	}
 	return d.syncReminders(ctx, q, g, b, now)
@@ -82,12 +98,21 @@ func (d *dispatcher) syncTimers(ctx context.Context, q Queries, g *Group, b time
 // syncAckTimeout keeps the ack timeout of g with its status (C-17.FR-1, FR-3): every change that makes a published
 // Alert Group firing — Reopen into firing, Unacknowledge, Unsnooze, Unresolve, a Snooze ending, a rise to Urgent,
 // auto-unacknowledge, the release of a disabled or deleted Owner — or that publishes a firing one starts it over at its
-// time, at the first Publication for the latter; every change that stops it being firing — Acknowledge, Snooze, Resolve
-// by a person or the system — stops it and ends Unclaimed.
-func (d *dispatcher) syncAckTimeout(ctx context.Context, q Queries, g *Group, b timerState, now time.Time) error {
+// time, at the first Publication for the latter, unless Escalation chains run in the current start of g; every change
+// that stops it being firing — Acknowledge, Snooze, Resolve by a person or the system — stops it and ends Unclaimed. A
+// chain that starts while it runs stops it: no notice follows (C-32.FR-6).
+func (d *dispatcher) syncAckTimeout(ctx context.Context, q Queries, g *Group, b timerState, chains chainSync,
+	now time.Time) error {
 	before, after := b.ackTimeoutRuns(), timerStateOf(g).ackTimeoutRuns()
 	switch {
 	case after && !before:
+		running, err := d.chainsRunning(ctx, q, g, chains)
+		if err != nil {
+			return err
+		}
+		if running {
+			return d.stopAckTimeout(ctx, q, g)
+		}
 		start := now
 		if !b.published {
 			start = *g.FirstPublishedAt
@@ -96,8 +121,17 @@ func (d *dispatcher) syncAckTimeout(ctx context.Context, q Queries, g *Group, b 
 	case before && !after:
 		g.AckTimeoutStartedAt, g.AckTimeoutNoticesSent, g.Unclaimed = nil, 0, false
 		return stopTimer(ctx, q, d.orgID, g.ID, TimerAckTimeout)
+	case after && chains.started && g.AckTimeoutStartedAt != nil:
+		return d.stopAckTimeout(ctx, q, g)
 	}
 	return nil
+}
+
+// stopAckTimeout stops the ack timeout of g that chains replace (C-32.FR-6): no notice is due any more and the timer
+// is removed; Unclaimed is the chains' to decide.
+func (d *dispatcher) stopAckTimeout(ctx context.Context, q Queries, g *Group) error {
+	g.AckTimeoutStartedAt, g.AckTimeoutNoticesSent = nil, 0
+	return stopTimer(ctx, q, d.orgID, g.ID, TimerAckTimeout)
 }
 
 // startAckTimeout starts the ack timeout of g at start where its Route has one: no notice sent, not Unclaimed, and
@@ -167,9 +201,13 @@ func (d *dispatcher) hintUnclaimed(ctx context.Context, q Queries, g *Group, b t
 }
 
 // markPublished records the first Publication of an Alert Group at at; the dispatcher's timer sync then starts its
-// ack timeout there when it is firing. An Alert Group published before changes nothing.
+// Escalation chains, or its ack timeout where none starts, there when it is firing. A Publication that a change of
+// configuration released (not startsChains), such as a raised Minimum severity that made a held Alert Group Urgent,
+// starts the ack timeout but no chain, as only Alerts and Commands start chains (ADR-0018). An Alert Group published
+// before changes nothing.
 type markPublished struct {
-	at time.Time
+	at           time.Time
+	startsChains bool
 }
 
 func (t markPublished) precondition(g *Group) error {
@@ -181,17 +219,19 @@ func (t markPublished) precondition(g *Group) error {
 
 func (t markPublished) apply(_ context.Context, _ Queries, g *Group, c *change) error {
 	g.FirstPublishedAt = &t.at
-	c.written = true
+	c.written, c.noChains = true, !t.startsChains
 	return nil
 }
 
 // MarkPublished records the first Publication of the Alert Group groupID at at, the published_at of that delivery or
-// the delivered_at of its created event (C-17.FR-1, D277, D298): a system transition of the dispatcher in a
+// the delivered_at of its created event, with whether it starts the Escalation chains, false only for a Publication
+// that a change of configuration released (C-17.FR-1, C-32.FR-5, D277, D298): a system transition of the dispatcher in
+// a
 // transaction of its own, which delivery calls after the transaction that recorded the Publication committed, as that
 // one locks deliveries before alert_groups and the dispatcher the other way round. It changes nothing for an Alert
 // Group published before, so that a republication after the Root message was deleted never starts the ack timeout
 // over and a repeated call is safe.
-func (s *Service) MarkPublished(ctx context.Context, groupID int64, at time.Time) error {
+func (s *Service) MarkPublished(ctx context.Context, groupID int64, at time.Time, startsChains bool) error {
 	at = at.UTC().Truncate(time.Microsecond)
 	var after committed
 	err := s.store.InTx(ctx, func(q Queries) error {
@@ -204,7 +244,7 @@ func (s *Service) MarkPublished(ctx context.Context, groupID int64, at time.Time
 		if g == nil {
 			return nil
 		}
-		err = s.d.dispatch(ctx, q, g, System, markPublished{at: at}, &after)
+		err = s.d.dispatch(ctx, q, g, System, markPublished{at: at, startsChains: startsChains}, &after)
 		if errors.Is(err, errNotDue) {
 			return nil
 		}

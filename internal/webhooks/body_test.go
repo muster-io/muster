@@ -303,6 +303,58 @@ func TestBodyDestinationJoined(t *testing.T) {
 	}
 }
 
+// TestBodyEscalationStepSkipped is C-15.FR-2 revised by C-32.FR-14: escalation_step_skipped carries the chain, the
+// step and the reason in its escalation_step {chain, step, reason, users}, valid against OutgoingWebhookEvent, Quiet
+// without Mentions, with the person of a skip of a person and a null chain once the chain was deleted; no other event
+// carries it.
+func TestBodyEscalationStepSkipped(t *testing.T) {
+	schema := eventSchema(t)
+	s, f := newService(t)
+	render, err := s.eventBodies(t.Context(), f, bodyFixture(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := &groups.ChainEntry{Run: 3, Chain: 5, ChainPublicID: "ECAAAAAAAAAAP5", ChainName: "payments", Step: 3}
+	viewer := &groups.Page{Users: []groups.PagedUser{{ID: 4, PublicID: "SRAAAAAAAAAAP4", Name: "Vic", Login: "vic"}},
+		Reason: groups.SkipViewer}
+	for _, c := range []struct {
+		event  groups.Event
+		chain  *groups.ChainEntry
+		reason string
+		page   *groups.Page
+		want   string
+	}{
+		{groups.EventEscalationStepSkipped, chain, groups.SkipSeverity, nil,
+			`{"chain":{"id":"ECAAAAAAAAAAP5","name":"payments"},"step":3,"reason":"severity","users":[]}`},
+		{groups.EventEscalationStepSkipped, &groups.ChainEntry{Run: 3, Step: 2}, groups.SkipViewer, viewer,
+			`{"chain":null,"step":2,"reason":"viewer","users":[{"id":"SRAAAAAAAAAAP4","name":"Vic","login":"vic"}]}`},
+		{groups.EventAlertsAdded, chain, "", nil, ``},
+	} {
+		raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: 6, Event: c.event, Loudness: groups.Quiet,
+			Chain: c.chain, Reason: c.reason, Page: c.page}, OccurredAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		_ = json.Unmarshal(raw, &v)
+		if err := schema.VisitJSON(v); err != nil {
+			t.Fatalf("%s: %v\n%s", c.event, err, raw)
+		}
+		var b struct {
+			Event      string          `json:"event"`
+			Notify     bool            `json:"notify"`
+			Mentions   []any           `json:"mentions"`
+			Escalation json.RawMessage `json:"escalation_step"`
+			Page       json.RawMessage `json:"page"`
+		}
+		_ = json.Unmarshal(raw, &b)
+		if b.Event != string(c.event) || b.Notify || len(b.Mentions) != 0 || string(b.Escalation) != c.want ||
+			len(b.Page) != 0 {
+			t.Errorf("%s: %s", c.event, raw)
+		}
+	}
+}
+
 // TestBodyPageNotDelivered is C-15.FR-2 revised by C-30.FR-7: page_not_delivered carries the Page in its page {users,
 // gateway, reason}, valid against OutgoingWebhookEvent, Quiet without Mentions; no other event carries a page, even
 // one recorded with a Page by mistake, and a Page by Mention has a null gateway.
