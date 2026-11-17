@@ -29,6 +29,7 @@ acceptance:
   - "[C-32.AC-17] The end-to-end checks of S-155 read the Pages of the runs of the devops chain and the `team`, `everyone` and `importance` of the escalation entries (e2e `TestPages`)."
 verify: "make ci e2e-go"
 operator_attention: false
+issue: 607
 ---
 
 # S-178. The Pages of the runs of Escalation chains and of the Timeline in the API, and paged in the Timeline of the SPA (BE)

@@ -34,6 +34,7 @@ acceptance:
   - "[C-32.FR-11] Concepts → Escalation chains has the rows of Telegram, Bridge and outgoing webhooks of the table of C-32.FR-11, and Outgoing webhooks → Events describes `paged` with its `mentions`; `make docs-check` passes."
 verify: "make ci e2e-go docs-check"
 operator_attention: false
+issue: 606
 ---
 
 # S-177. Pages by Mention in Telegram, through Bridges and to outgoing webhooks (BE)
