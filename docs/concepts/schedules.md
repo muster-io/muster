@@ -44,21 +44,51 @@ A Rotation layer may be **limited** to some days of the week and, optionally, a 
 11:00–19:00. Outside the limits it has no Shift. A time of day whose end is earlier than its start crosses midnight,
 and each window belongs to the day it starts on: Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00.
 
-A higher Rotation layer wins wherever it has a Shift. A common Schedule has two:
-
-Around the clock, below
-:   Weekly Shifts handed over on Monday at 10:00 among Petr, Sergey and Olga.
-
-Working hours 11–19, above
-:   Weekly Shifts on weekdays from 11:00 to 19:00 among Olga and Petr.
-
-On a Wednesday at 15:00 the On-call is the person of the upper Rotation layer; at 21:00 and at the weekend, the person
-of the lower one.
+A higher Rotation layer wins wherever it has a Shift. [A worked example](#a-worked-example) follows.
 
 A Rotation layer may only add people who can be Paged: Users in the Team who are neither Viewers nor disabled. Adding
 anyone else is refused with `422` `not_pageable` at the person, with the reason `viewer`, `disabled` or `not_in_team`.
 Someone who becomes one of these later stays in the Rotation layer: their Shifts are skipped — the Rotation layer
 below, or a gap, takes the time — and the Result lists a warning about them until an Admin removes them.
+
+## A worked example
+
+The Schedule "Main" of the Team "payments", in the time zone `Europe/Berlin`, has two Rotation layers. Both hand over
+on Monday at 10:00, and week 1 below is a week in which both lists are at their first person:
+
+Around the clock, below
+:   Weekly Shifts handed over on Monday at 10:00 among Petr, Sergey and Olga.
+
+Working hours 11–19, above
+:   Weekly Shifts handed over on Monday at 10:00, limited to weekdays from 11:00 to 19:00, among Olga and Petr.
+
+Each week the next person of each list is on Shift:
+
+| | Week 1 | Week 2 | Week 3 |
+|---|---|---|---|
+| Around the clock, below | Petr | Sergey | Olga |
+| Working hours 11–19, above | Olga | Petr | Olga |
+
+Who is On-call on a Wednesday of week 1:
+
+- **At 15:00** both Rotation layers have a Shift, and the upper one wins: **Olga** is On-call.
+- **At 21:00** the upper Rotation layer has no Shift, as its Shifts end at 19:00, so the lower one has it: **Petr**
+  is On-call. He is also On-call on the Saturday at 15:00, as the upper Rotation layer has no Shifts at the weekend.
+
+In week 2 the same Wednesday gives Petr at 15:00 and Sergey at 21:00. The handover of each Rotation layer is at 10:00
+on the Monday, so on the Monday of week 2 Petr is still On-call until 10:00, then Sergey until 11:00, and from 11:00
+Petr, who is on Shift in the upper Rotation layer.
+
+The page of the Schedule shows the two weeks, with a row for each Rotation layer, the row "Overrides" and, below them,
+the row "Result — who is On-call", which is what Muster uses. In the picture, Sergey has been disabled: his Shifts in
+the lower Rotation layer are hatched, and the evenings, nights and the weekend of week 2, when only he is on Shift
+there, are gaps in red, as is the hour from 10:00 to 11:00 of its Monday, after his handover and before the upper
+Rotation layer begins. The section "Warnings" lists them. [Gaps](#gaps-and-the-internal-alert) says what happens
+then.
+
+![The page of the Schedule Main of the Team payments: who is On-call now, and the Warnings with the disabled Sergey and the gaps](../assets/screenshots/concepts/schedules/01-schedule-page.png){ .screenshot }
+
+![The two-week view of the Schedule Main: the rows of the Rotation layers Working hours 11–19 and Around the clock, the Overrides and the row Result, with the gaps of week 2 in red](../assets/screenshots/concepts/schedules/02-schedule-view.png){ .screenshot }
 
 ## Several Schedules
 
@@ -66,6 +96,16 @@ A Team may have several Schedules, such as a first and a second line. One of the
 On-call is the Team's On-call: the first Schedule of a Team is its main one, and an Admin makes another one main with
 `main` set to true, which takes the mark off the previous one. The main Schedule cannot be unmarked on its own; deleting
 it leaves the Team without one until an Admin marks another.
+
+For example, "payments" has its "Main" Schedule, whose On-call is the Team's, and a Schedule "Second line" with one
+Rotation layer, "Second line, working hours", of the people who back the first line up. A Mention of the Team's On-call
+([Mentions](mentions.md)) names the person of "Main"; an [Escalation chain](escalation-chains.md) whose step Pages the
+On-call of a Schedule names the Schedule itself, so a step can Page "Second line" while the Team's On-call stays that of
+"Main".
+
+Each Schedule has its own Rotation layers, Overrides and gap alert: a Schedule that is not main reports its gaps only
+when an Admin turns its gap alert on (see [Gaps and the Internal alert](#gaps-and-the-internal-alert)). "On call now"
+([below](#on-call-now)) shows the main Schedule of each Team only.
 
 A Team that has Schedules cannot be deleted: `deleteTeam` answers `409` `team_in_use` and names them.
 
@@ -94,6 +134,14 @@ Changing and deleting
 No messages
 :   Overrides need no approval and send no message, and neither do Shifts: who is On-call is shown by Muster and its
     API, and every Override is recorded in the Audit log with its people and span.
+
+Olga, who is On-call on Wednesday from 11:00 to 19:00 in the example above, gives that Shift to Petr. On the page of
+the Schedule she selects "Add Override", chooses "I give my Shift to…", selects her segment in the row "Result" and
+Petr as the person who takes it. The Override is exactly that segment: the Result shows Petr On-call on Wednesday from
+11:00 to 19:00, and nothing else changes. "I take the Shift of…" is the form the other way round: the person who makes
+the Override takes the Shift, and chooses whose Shift it is.
+
+![The Override form of olga: the mode I give my Shift to..., the segment of Wednesday 11:00 to 19:00 chosen in the row Result, and petr as the person who takes it](../assets/screenshots/concepts/schedules/03-override-form.png){ .screenshot }
 
 ## iCal feed
 
@@ -165,6 +213,11 @@ off or the Schedule is deleted. Renaming the Schedule or its Team updates the op
 `muster_schedule_gap` is 1 for each Schedule with such a gap and 0 for the others, and the chart rule of the same name
 is the backup for the Internal alert; its [runbook](../operations/runbooks/MusterScheduleGap.md) says how to fill a gap.
 
+In the worked example, with Sergey disabled, nobody is On-call in the evenings, nights and weekend of week 2, nor in the hour after his Monday handover: the upper
+Rotation layer has no Shift then and the lower one belongs to Sergey, whose Shifts are skipped. A Responder of the Team
+fills the gaps with Overrides, or an Admin replaces Sergey in the Rotation layer; once no gap is left within the next
+7 days, the alert resolves at the next scan.
+
 A Schedule that covers only part of the day on purpose, such as a second line in working hours, has gaps every evening:
 keep its gap alert off. With `by_default` it already is, as long as it is not its Team's main Schedule.
 
@@ -172,7 +225,13 @@ keep its gap alert off. With `by_default` it already is, as long as it is not it
 
 `getOnCallNow` lists every Team by name — or with `teams=mine` the Teams of the caller — with the On-call of its main
 Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
-within the next 14 days. A Team without a main Schedule has `no_schedule` true.
+within the next 14 days. A Team without a main Schedule has `no_schedule` true. The Home page shows it as "On call
+now", and the Team page shows the same for its Team.
+
+![On call now on the Home page: devops with @ivan, payments with @olga until Tuesday 19:00 marked unreachable in Mattermost, and search with No Schedule](../assets/screenshots/concepts/schedules/04-on-call-now.png){ .screenshot }
+
+In the picture the On-call of "payments" is Olga, whose account is not linked in Mattermost, so the row says
+"unreachable in Mattermost" ([Unreachable On-calls](#unreachable-on-calls)); "search" has no Schedule.
 
 ## Unreachable On-calls
 
@@ -214,12 +273,17 @@ it sends nothing to the chat; on save and on **Check** it stops after 10 seconds
 (`destination.telegram.group_people_budget`), and `muster doctor` paces its requests at the Connection's limiter and
 stops after as long. A Team with hundreds of linked people may so leave some unasked.
 
-The warning is as old as the last check. A leave reaches Telegram's answer only some time later, about a minute, so a
-check right after someone left the group may still see them in it; check again later. A person the check could not
+The warning is as old as the last check. A leave reaches Telegram's answer only some time later, about a minute
+(F-128), so a check right after someone left the group may still see them in it, and a person who left may show as
+unreachable only later; check again later. A person the check could not
 tell — Telegram answered with an error, did not answer in time, or was not asked before the check stopped — keeps what
 the check before saw: the warning of someone who was outside the group stays until a check sees them in it, and
 someone never seen outside it gets no warning.
 
+For an ordinary member, muting the discussion group did not hide a Mention: a Mention in a comment, written as a
+`tg://user?id=` link, notified a member who had muted it, on the desktop and on the phone (F-129 of the verified facts in
+`design/facts.md` of the repository), so such an On-call may mute the discussion group.
+
 One case the warning cannot see: the creator of the discussion group, who is anonymous there, was not notified of a
-Mention in a group they had muted, while an ordinary member who muted it was. The check sees the creator in the group,
-so they get no warning; a creator who is On-call should keep the discussion group unmuted.
+Mention in a group they had muted (F-129). The check sees the creator in the group, so they get no warning; an On-call
+who created the discussion group, or is anonymous in it, should not mute it. That one a Destination check cannot see.
