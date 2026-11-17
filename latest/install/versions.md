@@ -246,6 +246,13 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       starts no
       chain on the Alert Groups it changes, and a chain whose Alert Group it acknowledges, snoozes or resolves stops at
       its next step, without making it; let the rollout finish before relying on chains.
+    - Migration 0048 adds the delivery events of [undelivered Mentions](../concepts/mentions.md#undelivered-mentions),
+      `mention_not_delivered` and `mention_delivered`, and an index on them, none after the upgrade: the warnings of
+      the Destinations start with the next Loud message that leaves someone out. It is expand only: a replica without
+      it records neither, so the Loud messages it delivers during the rollout warn of nothing and clear no warning,
+      its Destination reads have no `mention_warnings`, and its Timeline lists both kinds, `mention_delivered`
+      included, as delivery events of a kind it does not know, which its web UI shows as "Delivery event in
+      {Destination}".
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -856,6 +863,47 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Going back below 0047 deletes the timers of runs and loses every run with its steps, and the escalation entries of
     the Timeline lose the chain and the step they named; the Alert Groups keep the ack timeout as the chains left it,
     stopped where a chain had started, until they next become firing.
+
+    Migration 0048 runs in four transactions: the first adds the new kind CHECK of `delivery_events`, `NOT VALID`, and
+    the index on the partitioned table alone, invalid; the second validates the CHECK; the third drops the CHECK it
+    replaces; the fourth builds the index on each partition, oldest first, and attaches it, skipping a partition whose
+    detach by retention was left unfinished, which a later run of retention finalizes. Each gives up after 5
+    seconds of waiting for a lock (`lock_timeout`); the fourth holds back the delivery events of the current month
+    while it scans that partition, so run the upgrade at a quiet time. Any such failure leaves the schema recorded as
+    dirty at version 48, and the 0.2.0 replica refuses to start with `schema_dirty`. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_class WHERE relname = 'delivery_events_mentions_idx';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 47, dirty = false;`.
+    3. If it returns 1, drop what the attempt added and clear it, so that the next start runs 0048 again:
+
+        ```sql
+        DROP INDEX delivery_events_mentions_idx;
+        ALTER TABLE delivery_events
+            ADD CONSTRAINT delivery_events_kind_v2_check CHECK (kind IN (
+                'publication', 'possible_duplicate', 'not_delivered', 'delivered_late', 'deleted_in_messenger',
+                'republished', 'thread_not_attached', 'markup_rejected', 'destination_broken',
+                'destination_recovered', 'storm_summary', 'final_edit', 'republished_past_edit_window'))
+            NOT VALID;
+        ALTER TABLE delivery_events VALIDATE CONSTRAINT delivery_events_kind_v2_check;
+        ALTER TABLE delivery_events DROP CONSTRAINT delivery_events_kind_v3_check;
+        UPDATE schema_migrations SET version = 47, dirty = false;
+        ```
+
+        Skip the `ADD CONSTRAINT` and its `VALIDATE` when `delivery_events_kind_v2_check` still exists, as a failure
+        in the second or the third transaction leaves it. No row of the new kinds exists yet: only a replica with
+        0048 writes them, and it refuses to start on a dirty schema.
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0048 deletes every `mention_not_delivered` and `mention_delivered`: the Timelines no longer say
+    that a Mention was not delivered, and the Destinations warn of nothing until a replica with 0048 records the next
+    undelivered Mention.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

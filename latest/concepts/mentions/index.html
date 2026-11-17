@@ -1890,6 +1890,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#undelivered-mentions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Undelivered Mentions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#start-of-a-storm" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3139,6 +3150,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#undelivered-mentions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Undelivered Mentions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#start-of-a-storm" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3261,7 +3283,7 @@ Owner, a Takeover the previous Owner, and a Reopen into acknowledged only the Ow
 <td>Bridge</td>
 <td>the words the bridge declares</td>
 <td>when the bridge declares group mentions</td>
-<td>linked people</td>
+<td>linked people, by the plain name without <code>native_mentions</code></td>
 </tr>
 <tr>
 <td>Outgoing webhook</td>
@@ -3294,6 +3316,30 @@ On-call who links an account later, is mentioned from the next Loud event on.</p
 the Destination already has an entry naming that Team or has 100 entries, the most a Destination has. A Telegram
 Destination gets none, since Telegram cannot mention Teams. An Admin may remove the entry; naming the Destination
 again later adds it again only when it has none.</p>
+<h2 id="undelivered-mentions">Undelivered Mentions<a class="headerlink" href="#undelivered-mentions" title="Permanent link">&para;</a></h2>
+<p>A person whom an entry names is sometimes not mentioned as their messenger mentions people:</p>
+<ul>
+<li>They have no linked account in the Destination's messenger. The message leaves them out.</li>
+<li>The Destination is a bridge whose <code>info</code> does not declare <code>native_mentions</code>, or Muster has not read its <code>info</code> yet.
+  The message names them by their plain name, which notifies nobody.</li>
+</ul>
+<p>Nothing is written in the Thread for them: Muster never posts a message about a Mention. Instead, once the Loud
+message is delivered, the Alert Group's Timeline records the delivery event "Mention not delivered in
+{Destination}" (<code>mention_not_delivered</code>). Each person, entry and message gets one, with the entry, the Loud event and
+the reason: <code>no_account_link</code> or <code>bridge_cannot_mention_people</code>. A message that ends Not delivered records none, nor
+does a Quiet message or an edit, since neither mentions anyone. The first publication of a Storm summary belongs to no
+Alert Group, so its undelivered Mentions appear in no Timeline. They still warn on the Destination.</p>
+<p>The Destination page warns about each person and entry whose latest "Mention not delivered" is not followed by a
+delivered Mention of that person through that entry. The API reads the warnings in <code>mention_warnings</code> of every
+Destination, each with the person, the entry, the messenger, the reason and since when. For example: "Mention not
+delivered: @petr, On-call of payments, has no linked Mattermost account."</p>
+<p>The warning clears by itself, because Muster computes it from the delivery events and never stores it:</p>
+<ul>
+<li>When the person links an account (or the bridge declares <code>native_mentions</code>), the next Loud message that mentions
+  them through that entry clears it.</li>
+<li>When the events behind it are older than <code>retention.alert_details</code>, which removes them, the warning goes too.</li>
+</ul>
+<p>A warning whose entry was removed from the Destination since goes at once. So does the warning of a deleted User.</p>
 <h2 id="start-of-a-storm">Start of a Storm<a class="headerlink" href="#start-of-a-storm" title="Permanent link">&para;</a></h2>
 <p>The first publication of a Storm summary mentions the Destination's entries for <code>storm_started</code>. "Team from the label"
 and "On-call of the Team from the label" take the Teams of the Alert Groups the Storm counts. The summary's later edits

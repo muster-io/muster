@@ -3442,6 +3442,13 @@ critical, and a Route raises the level of its Alert Groups with its
   starts no
   chain on the Alert Groups it changes, and a chain whose Alert Group it acknowledges, snoozes or resolves stops at
   its next step, without making it; let the rollout finish before relying on chains.</li>
+<li>Migration 0048 adds the delivery events of <a href="../../concepts/mentions/#undelivered-mentions">undelivered Mentions</a>,
+  <code>mention_not_delivered</code> and <code>mention_delivered</code>, and an index on them, none after the upgrade: the warnings of
+  the Destinations start with the next Loud message that leaves someone out. It is expand only: a replica without
+  it records neither, so the Loud messages it delivers during the rollout warn of nothing and clear no warning,
+  its Destination reads have no <code>mention_warnings</code>, and its Timeline lists both kinds, <code>mention_delivered</code>
+  included, as delivery events of a kind it does not know, which its web UI shows as "Delivery event in
+  {Destination}".</li>
 </ul>
 <p><strong>Slack apps get an optional scope.</strong> Team mentions in Slack need the bot scope <code>usergroups:read</code>, which the
 <a href="../../messengers/slack/#create-the-app-from-a-manifest">manifest</a> now has. A Slack app installed before 0.2.0 keeps
@@ -4054,6 +4061,47 @@ refuses to start with <code>schema_dirty</code>. To recover, with the same datab
 <p>Going back below 0047 deletes the timers of runs and loses every run with its steps, and the escalation entries of
 the Timeline lose the chain and the step they named; the Alert Groups keep the ack timeout as the chains left it,
 stopped where a chain had started, until they next become firing.</p>
+<p>Migration 0048 runs in four transactions: the first adds the new kind CHECK of <code>delivery_events</code>, <code>NOT VALID</code>, and
+the index on the partitioned table alone, invalid; the second validates the CHECK; the third drops the CHECK it
+replaces; the fourth builds the index on each partition, oldest first, and attaches it, skipping a partition whose
+detach by retention was left unfinished, which a later run of retention finalizes. Each gives up after 5
+seconds of waiting for a lock (<code>lock_timeout</code>); the fourth holds back the delivery events of the current month
+while it scans that partition, so run the upgrade at a quiet time. Any such failure leaves the schema recorded as
+dirty at version 48, and the 0.2.0 replica refuses to start with <code>schema_dirty</code>. To recover, with the same
+database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">pg_class</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">relname</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'delivery_events_mentions_idx'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 47, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, drop what the attempt added and clear it, so that the next start runs 0048 again:</p>
+<div class="highlight"><pre><span></span><code><span class="k">DROP</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">delivery_events_mentions_idx</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">delivery_events</span>
+<span class="w">    </span><span class="k">ADD</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">delivery_events_kind_v2_check</span><span class="w"> </span><span class="k">CHECK</span><span class="w"> </span><span class="p">(</span><span class="n">kind</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span>
+<span class="w">        </span><span class="s1">'publication'</span><span class="p">,</span><span class="w"> </span><span class="s1">'possible_duplicate'</span><span class="p">,</span><span class="w"> </span><span class="s1">'not_delivered'</span><span class="p">,</span><span class="w"> </span><span class="s1">'delivered_late'</span><span class="p">,</span><span class="w"> </span><span class="s1">'deleted_in_messenger'</span><span class="p">,</span>
+<span class="w">        </span><span class="s1">'republished'</span><span class="p">,</span><span class="w"> </span><span class="s1">'thread_not_attached'</span><span class="p">,</span><span class="w"> </span><span class="s1">'markup_rejected'</span><span class="p">,</span><span class="w"> </span><span class="s1">'destination_broken'</span><span class="p">,</span>
+<span class="w">        </span><span class="s1">'destination_recovered'</span><span class="p">,</span><span class="w"> </span><span class="s1">'storm_summary'</span><span class="p">,</span><span class="w"> </span><span class="s1">'final_edit'</span><span class="p">,</span><span class="w"> </span><span class="s1">'republished_past_edit_window'</span><span class="p">))</span>
+<span class="w">    </span><span class="k">NOT</span><span class="w"> </span><span class="k">VALID</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">delivery_events</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">delivery_events_kind_v2_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">delivery_events</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">delivery_events_kind_v3_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">47</span><span class="p">,</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+<p>Skip the <code>ADD CONSTRAINT</code> and its <code>VALIDATE</code> when <code>delivery_events_kind_v2_check</code> still exists, as a failure
+in the second or the third transaction leaves it. No row of the new kinds exists yet: only a replica with
+0048 writes them, and it refuses to start on a dirty schema.</p>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
+<p>Going back below 0048 deletes every <code>mention_not_delivered</code> and <code>mention_delivered</code>: the Timelines no longer say
+that a Mention was not delivered, and the Destinations warn of nothing until a replica with 0048 records the next
+undelivered Mention.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that

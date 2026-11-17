@@ -70,7 +70,7 @@ A Destination takes only the targets its Connection can mention. Any other targe
 | Mattermost | `channel`, `here`, `all` | Mattermost groups | linked people |
 | Slack | `channel`, `here` | user groups, with the scope `usergroups:read` | linked people |
 | Telegram | none | none | linked people |
-| Bridge | the words the bridge declares | when the bridge declares group mentions | linked people |
+| Bridge | the words the bridge declares | when the bridge declares group mentions | linked people, by the plain name without `native_mentions` |
 | Outgoing webhook | every target, as data | every target, as data | every target, as data |
 
 Slack has no `everyone`: a bot's `<!everyone>` mentions only in the workspace's general channel, where `<!channel>`
@@ -103,6 +103,34 @@ When a Destination becomes a Destination of a Team, Muster adds the entry "Team 
 the Destination already has an entry naming that Team or has 100 entries, the most a Destination has. A Telegram
 Destination gets none, since Telegram cannot mention Teams. An Admin may remove the entry; naming the Destination
 again later adds it again only when it has none.
+
+## Undelivered Mentions
+
+A person whom an entry names is sometimes not mentioned as their messenger mentions people:
+
+- They have no linked account in the Destination's messenger. The message leaves them out.
+- The Destination is a bridge whose `info` does not declare `native_mentions`, or Muster has not read its `info` yet.
+  The message names them by their plain name, which notifies nobody.
+
+Nothing is written in the Thread for them: Muster never posts a message about a Mention. Instead, once the Loud
+message is delivered, the Alert Group's Timeline records the delivery event "Mention not delivered in
+{Destination}" (`mention_not_delivered`). Each person, entry and message gets one, with the entry, the Loud event and
+the reason: `no_account_link` or `bridge_cannot_mention_people`. A message that ends Not delivered records none, nor
+does a Quiet message or an edit, since neither mentions anyone. The first publication of a Storm summary belongs to no
+Alert Group, so its undelivered Mentions appear in no Timeline. They still warn on the Destination.
+
+The Destination page warns about each person and entry whose latest "Mention not delivered" is not followed by a
+delivered Mention of that person through that entry. The API reads the warnings in `mention_warnings` of every
+Destination, each with the person, the entry, the messenger, the reason and since when. For example: "Mention not
+delivered: @petr, On-call of payments, has no linked Mattermost account."
+
+The warning clears by itself, because Muster computes it from the delivery events and never stores it:
+
+- When the person links an account (or the bridge declares `native_mentions`), the next Loud message that mentions
+  them through that entry clears it.
+- When the events behind it are older than `retention.alert_details`, which removes them, the warning goes too.
+
+A warning whose entry was removed from the Destination since goes at once. So does the warning of a deleted User.
 
 ## Start of a Storm
 
