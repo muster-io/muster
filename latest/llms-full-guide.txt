@@ -64,6 +64,15 @@ The index of the documentation is https://muster-io.github.io/muster/latest/llms
 4. [What critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md): Nothing else makes an Alert Group Urgent; read it before setting a Minimum severity.
 5. Finished when the [preview](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#preview-where-alerts-go) of the Route lists the Teams and Destinations you expect.
 
+### Set up who is On-call
+
+1. [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#schedules): a Team's On-call is the On-call of its main Schedule; the Team must exist first, with its people ([People](https://muster-io.github.io/muster/latest/concepts/teams.md#people)).
+2. [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md#rotation-layers): Rotation layers, whose people must be able to be Paged, and [a worked example](https://muster-io.github.io/muster/latest/concepts/schedules.md#a-worked-example): A higher Rotation layer wins wherever it has a Shift.
+3. [Several Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md#several-schedules): the first is the main one, whose On-call is the Team's; an Escalation chain step may Page another.
+4. [Overrides](https://muster-io.github.io/muster/latest/concepts/schedules.md#overrides), which send no message, and [gaps](https://muster-io.github.io/muster/latest/concepts/schedules.md#gaps-and-the-internal-alert): the Internal alert `MusterScheduleGap` and its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md); keep the gap alert off for a Schedule that covers only part of the day.
+5. [Unreachable On-calls](https://muster-io.github.io/muster/latest/concepts/schedules.md#unreachable-on-calls) and [the iCal feed](https://muster-io.github.io/muster/latest/concepts/schedules.md#ical-feed).
+6. Finished when [On call now](https://muster-io.github.io/muster/latest/concepts/schedules.md#on-call-now) shows the person you expect for each Team, with no unreachable mark.
+
 ### Automate through the API
 
 1. [API](https://muster-io.github.io/muster/latest/reference/api.md): the conventions of the API and its tokens. Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token. [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md#ways-to-sign-in) describes both.

@@ -1750,6 +1750,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#schedules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Schedules
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#membership-from-the-identity-provider" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3194,6 +3205,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#schedules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Schedules
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#membership-from-the-identity-provider" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3259,7 +3281,8 @@ filters them, and you add people, Destinations and Routes when you want them.</p
 Team (<a href="#values-without-a-team">Values without a Team</a>). <strong>New Team</strong> makes a Team; a value without a Team has its own
 <strong>Create Team</strong>.</p>
 <p><img alt="The Teams list with the Teams payments and search, and the values checkout and Payments of the Team label that name no Team" class="screenshot" src="../../assets/screenshots/concepts/teams/01-teams-list.png" /></p>
-<p>A Team's page has its people, its identity provider groups, its Working hours, its Destinations, and <strong>Which Alerts
+<p>A Team's page has its people, its identity provider groups, its Working hours, its Destinations, its
+<a href="../schedules/">Schedules</a> with who is On-call now, and <strong>Which Alerts
 belong to this Team</strong>: the Team label with its slug and the Team matchers, with an example of what an Alert gets.</p>
 <p><img alt="The people of the Team payments: alice and bob added by hand, petr through the identity provider group" class="screenshot" src="../../assets/screenshots/concepts/teams/02-team-people.png" /></p>
 <p>The Destinations of a Team are the Destinations of the team, each with a
@@ -3394,6 +3417,11 @@ person an Admin added, <code>idp</code> for a person the identity provider put i
 <li>Disabling a User keeps them in their Teams.</li>
 <li>Deleting a User takes them out of every Team.</li>
 </ul>
+<h2 id="schedules">Schedules<a class="headerlink" href="#schedules" title="Permanent link">&para;</a></h2>
+<p>A Team may have Schedules that say who in it is On-call. The Team's On-call is the On-call of its main Schedule, which
+Mentions of the Team's On-call use, and a Team that has Schedules cannot be deleted. The Team page lists its Schedules
+and shows who is On-call now. See <a href="../schedules/">Schedules</a>: Rotation layers, several Schedules, Overrides, gaps and the
+iCal feed.</p>
 <h2 id="membership-from-the-identity-provider">Membership from the identity provider<a class="headerlink" href="#membership-from-the-identity-provider" title="Permanent link">&para;</a></h2>
 <p>A Team may name groups of the identity provider in <code>idp_entries</code>; the people in those groups who sign in through
 OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:</p>

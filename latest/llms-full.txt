@@ -2,14 +2,14 @@
 
 The full text of the documentation is split into one file per section of the navigation, each smaller than 1 MiB; this file lists them. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt.
 
-- [Rules and scenarios for AI agents](https://muster-io.github.io/muster/latest/llms-full-guide.txt): 14471 bytes, about 3617 tokens.
-- [Home, Quick start, First alert in a messenger](https://muster-io.github.io/muster/latest/llms-full-home.txt): 3 pages, 28950 bytes, about 7237 tokens.
+- [Rules and scenarios for AI agents](https://muster-io.github.io/muster/latest/llms-full-guide.txt): 16096 bytes, about 4024 tokens.
+- [Home, Quick start, First alert in a messenger](https://muster-io.github.io/muster/latest/llms-full-home.txt): 3 pages, 29030 bytes, about 7257 tokens.
 - [Install](https://muster-io.github.io/muster/latest/llms-full-install.txt): 3 pages, 94454 bytes, about 23613 tokens.
 - [Configure](https://muster-io.github.io/muster/latest/llms-full-configure.txt): 3 pages, 50902 bytes, about 12725 tokens.
 - [Integrations](https://muster-io.github.io/muster/latest/llms-full-integrations.txt): 3 pages, 45452 bytes, about 11363 tokens.
 - [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, 241793 bytes, about 60448 tokens.
 - [Outgoing webhooks](https://muster-io.github.io/muster/latest/llms-full-outgoing-webhooks.txt): 3 pages, 51281 bytes, about 12820 tokens.
 - [Sign-in](https://muster-io.github.io/muster/latest/llms-full-sign-in.txt): 5 pages, 44939 bytes, about 11234 tokens.
-- [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 13 pages, 193217 bytes, about 48304 tokens.
-- [Operations](https://muster-io.github.io/muster/latest/llms-full-operations.txt): 26 pages, 125820 bytes, about 31455 tokens.
+- [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 13 pages, 199380 bytes, about 49845 tokens.
+- [Operations](https://muster-io.github.io/muster/latest/llms-full-operations.txt): 26 pages, 125928 bytes, about 31482 tokens.
 - [Reference](https://muster-io.github.io/muster/latest/llms-full-reference.txt): 8 pages, 129480 bytes, about 32370 tokens.
