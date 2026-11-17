@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import type { Organization } from "../api/gen/model";
 import { UpdateOrganizationBody } from "../api/gen/zod/organization/organization.zod";
+import { DefaultNotificationRules } from "../components/default-notification-rules";
 import { ButtonSetEditor } from "../components/button-set-editor";
 import { LABEL_NAME } from "../components/labels-editor";
 import { NetworkListEditor } from "../components/network-list-editor";
@@ -123,6 +124,7 @@ function AlertHandlingForm({ organization }: { organization: Organization }) {
           />
         </CardContent>
       </Card>
+      <DefaultNotificationRules organization={organization} />
       <p className="text-sm text-muted-foreground">{t("organization.evaluationNote")}</p>
       <SaveBar state={state} testId="alert-handling-status" />
     </form>

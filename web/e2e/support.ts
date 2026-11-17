@@ -540,6 +540,23 @@ export class Api {
 
   /** Sets the Organization's "TOTP required" policy. */
   async setTotpPolicy(policy: "nobody" | "local_users" | "everyone"): Promise<void> {
+    await this.patchOrganization({ totp_required: policy });
+  }
+
+  /** Sets the Organization's default Notification rules through the API, as the web UI has no editor for them. */
+  async setNotificationRules(rules: { normal: unknown[]; important: unknown[] }): Promise<void> {
+    await this.patchOrganization({ notification_rules: rules });
+  }
+
+  /** Sets a User's Notification rules through the API, at the version read; `{ state: "organization" }` resets them. */
+  async setUserNotificationRules(userId: string, change: unknown): Promise<void> {
+    const path = `/api/v1/users/${userId}/notification-rules`;
+    const res = await this.context.get(path);
+    await this.call("PUT", path, change, { "If-Match": res.headers().etag ?? "" });
+  }
+
+  /** Changes fields of the Organization: reads it, and writes it back with the fields, at the version read. */
+  private async patchOrganization(patch: Record<string, unknown>): Promise<void> {
     const res = await this.context.get("/api/v1/organization");
     const org = parse<
       Record<string, unknown> & { outgoing_heartbeat: { proxy: Record<string, unknown> } }
@@ -549,7 +566,7 @@ export class Api {
     await this.call(
       "PUT",
       "/api/v1/organization",
-      { ...rest, totp_required: policy, outgoing_heartbeat: { proxy } },
+      { ...rest, ...patch, outgoing_heartbeat: { proxy } },
       { "If-Match": res.headers().etag ?? "" },
     );
   }

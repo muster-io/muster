@@ -298,3 +298,141 @@ test("the contact for calls and SMS: unavailable without a Notification gateway,
     await admin.dispose();
   }
 });
+
+test("Personal notification rules: the rules in words, the switch unavailable without a gateway, then a confirmed contact makes it available, Call and the Organization's rules, custom rules and Reset, in English and Russian", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const login = "nr-petr";
+  const phone = "+10000000005";
+  const normal = "Normal: a Mention in the Thread of the Root message.";
+  const important =
+    "Important: a Mention in the Thread and again after 5 minutes if you did not answer.";
+  const withCall = `Important: a Mention in the Thread and a call to ${phone} at the same time, again after 5 minutes.`;
+  const admin = await adminApi();
+  try {
+    const userId = await ensureLocalUser(admin, login, "responder");
+    await admin.setUserNotificationRules(userId, { state: "organization" });
+    await removeConnection(admin, GATEWAY_NAME);
+
+    // Without a gateway: "Linked accounts" first, the rules in words, and the switch unavailable.
+    await signIn(page, login, TEAM_SPEC_PASSWORD);
+    await openProfile(page);
+    const section = page.getByTestId("notification-rules-section");
+    await expect(
+      section.getByRole("heading", { name: "Personal notification rules" }),
+    ).toBeVisible();
+    const headings = await page.getByRole("heading", { level: 2 }).allTextContents();
+    expect(headings.indexOf("Linked accounts")).toBeGreaterThan(-1);
+    expect(headings.indexOf("Linked accounts")).toBeLessThan(
+      headings.indexOf("Personal notification rules"),
+    );
+    expect(headings.indexOf("Personal notification rules")).toBeLessThan(
+      headings.indexOf("Contact for calls and SMS"),
+    );
+    await expect(
+      page.getByText("A Page is a Mention in the Thread; it reaches only a linked account."),
+    ).toBeVisible();
+    await expect(section).toContainText(
+      "What happens when an Escalation step calls you 'normally' or 'importantly'. Muster sends no direct messages.",
+    );
+    await expect(section.getByTestId("rule-normal")).toHaveText(normal);
+    await expect(section.getByTestId("rule-important")).toHaveText(important);
+    await expect(
+      section.getByRole("link", { name: /^Learn more: Notification rules/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://muster-io.github.io/muster/latest/concepts/notification-rules/",
+    );
+    await expect(section.getByTestId("rules-switch")).toContainText(
+      "Also call through the Notification gateway",
+    );
+    await expect(section.getByRole("radio", { name: "As in the Organization" })).toBeDisabled();
+    await expect(section.getByRole("radio", { name: "Call", exact: true })).toBeDisabled();
+    await expect(section.getByRole("radio", { name: "Don't call" })).toBeDisabled();
+    await expect(section.getByTestId("gateway-unavailable")).toContainText(
+      "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)",
+    );
+    await shot(page, "profile-rules-unavailable");
+
+    // With the gateway back and no confirmed contact: the switch asks for the contact first.
+    await ensureGateway(admin);
+    await page.reload();
+    await expect(section.getByTestId("rules-no-contact")).toHaveText(
+      "Confirm your contact for calls and SMS below first.",
+    );
+    await expect(section.getByRole("radio", { name: "Call", exact: true })).toBeDisabled();
+
+    // The contact is confirmed in the block below, without a reload: the switch is available. Call, then the
+    // Organization's rules again.
+    const contact = page.getByTestId("gateway-contact-section");
+    await contact.getByLabel("Phone").fill(phone);
+    await contact.getByRole("button", { name: "Send code" }).click();
+    await contact.getByLabel("Code").fill(await sentCode(phone));
+    await contact.getByRole("button", { name: "Confirm" }).click();
+    await expect(contact.getByTestId("gateway-contact-summary")).toHaveText(
+      `${phone} · calls and SMS · confirmed`,
+    );
+    await expect(section.getByRole("radio", { name: "Call", exact: true })).toBeEnabled();
+    await expect(section.getByTestId("rules-no-contact")).toHaveCount(0);
+    await section.getByRole("radio", { name: "Call", exact: true }).click();
+    await expect(section.getByTestId("rule-important")).toHaveText(withCall);
+    await expect(section.getByTestId("rule-normal")).toHaveText(normal);
+    await expect(section.getByTestId("rules-call-to")).toHaveText(`to ${phone}`);
+    await shot(page, "profile-rules-call");
+    await page.reload();
+    await expect(section.getByRole("radio", { name: "Call", exact: true })).toBeChecked();
+    await expect(section.getByTestId("rule-important")).toHaveText(withCall);
+    await section.getByRole("radio", { name: "As in the Organization" }).click();
+    await expect(section.getByTestId("rule-important")).toHaveText(important);
+    await section.getByRole("radio", { name: "Don't call" }).click();
+    await expect(section.getByRole("radio", { name: "Don't call" })).toBeChecked();
+    await expect(section.getByTestId("rule-important")).toHaveText(important);
+    await section.getByRole("radio", { name: "As in the Organization" }).click();
+    await expect(section.getByRole("radio", { name: "As in the Organization" })).toBeChecked();
+
+    // Russian, and phone width.
+    await page.getByLabel("Language").selectOption("ru");
+    const ru = page.getByTestId("notification-rules-section");
+    await expect(ru.getByRole("heading", { name: "Личные правила уведомлений" })).toBeVisible();
+    await expect(ru.getByTestId("rule-normal")).toHaveText(
+      "Обычное: упоминание в треде корневого сообщения.",
+    );
+    await expect(ru.getByTestId("rule-important")).toHaveText(
+      "Важное: упоминание в треде и ещё раз через 5 минут, если вы не ответили.",
+    );
+    await ru.getByRole("radio", { name: "Звонить", exact: true }).click();
+    await expect(ru.getByTestId("rule-important")).toHaveText(
+      `Важное: упоминание в треде и звонок на ${phone} одновременно, ещё раз через 5 минут.`,
+    );
+    await expect(ru.getByRole("radio", { name: "Не звонить" })).toBeEnabled();
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expectNoHorizontalScroll(page);
+    await shot(page, "profile-rules-call-ru-360");
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await ru.getByRole("radio", { name: "Как в организации" }).click();
+    await expect(ru.getByRole("radio", { name: "Как в организации" })).toBeChecked();
+    await page.getByLabel("Язык").selectOption("en");
+
+    // An Admin sets three Mentions through the API: the rule in words, no switch, and Reset brings the switch back.
+    await admin.setUserNotificationRules(userId, {
+      state: "custom",
+      normal: [{ kind: "mention" }, { kind: "mention" }, { kind: "mention" }],
+      important: [{ kind: "mention" }, { kind: "wait", wait_seconds: 300 }, { kind: "mention" }],
+    });
+    await page.reload();
+    await expect(section.getByTestId("rule-normal")).toHaveText(
+      "Normal: 3 Mentions in the Thread at the same time.",
+    );
+    await expect(section.getByTestId("rules-custom")).toContainText("These rules are custom");
+    await expect(section.getByRole("radio")).toHaveCount(0);
+    await shot(page, "profile-rules-custom");
+    await section.getByRole("button", { name: "Reset to the Organization's rules" }).click();
+    await expect(section.getByRole("radio", { name: "As in the Organization" })).toBeChecked();
+    await expect(section.getByTestId("rule-normal")).toHaveText(normal);
+    await expect(section.getByTestId("rules-custom")).toHaveCount(0);
+  } finally {
+    await ensureGateway(admin);
+    await admin.dispose();
+  }
+});

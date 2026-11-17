@@ -238,6 +238,10 @@ function organizationField(t: TFunction, pointer: string): string | undefined {
       return t("audit.fields.buttons");
     case "/team_label":
       return t("organization.general.teamLabel");
+    case "/notification_rules/normal":
+      return t("audit.fields.defaultRuleNormal");
+    case "/notification_rules/important":
+      return t("audit.fields.defaultRuleImportant");
     default:
       return undefined;
   }
@@ -320,6 +324,22 @@ function gatewayContactField(t: TFunction, pointer: string): string | undefined 
       return t("audit.fields.contact");
     case "/confirmed":
       return t("audit.fields.contactConfirmed");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of a User's Notification rules (notification_rules.updated). */
+function notificationRulesField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/state":
+      return t("audit.fields.rulesState");
+    case "/gateway_id":
+      return t("audit.fields.rulesGateway");
+    case "/normal":
+      return t("notificationRules.normal");
+    case "/important":
+      return t("notificationRules.important");
     default:
       return undefined;
   }
@@ -416,6 +436,9 @@ export function fieldLabel(
       break;
     case "gateway_contact":
       label = gatewayContactField(t, pointer);
+      break;
+    case "notification_rules":
+      label = notificationRulesField(t, pointer);
       break;
     default:
       break;

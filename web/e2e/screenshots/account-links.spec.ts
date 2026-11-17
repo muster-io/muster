@@ -115,7 +115,7 @@ function behind(page: Page): Locator {
 }
 
 function accounts(page: Page): Locator {
-  return cardOf(page.getByRole("heading", { name: "Messenger accounts", exact: true }));
+  return cardOf(page.getByRole("heading", { name: "Linked accounts", exact: true }));
 }
 
 test.beforeAll(async () => {

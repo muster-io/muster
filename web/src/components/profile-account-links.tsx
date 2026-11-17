@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Messenger accounts" of the profile (C-18.FR-2, FR-3, FR-6, FR-10, C-03.FR-12): the signed-in user's Account links
+// "Linked accounts" of the profile (C-18.FR-2, FR-3, FR-6, FR-10, C-03.FR-12): the signed-in user's Account links
 // with "Unlink", "Link Telegram", "Link Mattermost" and "Link Slack" (C-24.FR-12) for the Connections of each messenger,
 // and "Link through {Connection}" for each Bridge Connection (C-22.FR-15). The Connections come from listLinkableConnections, which needs
 // no Permission and gives their id, name and messenger, and for a Bridge how it links; the profile reads the
