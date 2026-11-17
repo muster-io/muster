@@ -55,6 +55,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   table](reference.md#lifecycle-events-added-in-l2), except `escalation_webhook`, which goes only to the outgoing
   webhook Destination its Escalation step names (C-32.FR-13); `alert_group` also carries its Teams and its Assignees,
   and its `urgent` is true exactly when its Severity level is critical (C-26.FR-8).
+  _Revised for L2 (2026-11-17, #589):_ `escalation_webhook` does not make its step's Destination one of the Alert
+  Group's Destinations: that Destination receives no other event of the Alert Group unless the Alert Group reaches it.
 - **C-15.FR-3** Template mode defines a "create" request (method, URL, headers, body) with extraction rules that pick
   values from the response (for example `$.data.id`); the values are stored per Alert Group and Destination. "Update"
   requests use them and run through reconciliation, so only the latest state is sent. Optional "open thread" runs once,

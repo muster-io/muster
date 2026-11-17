@@ -68,6 +68,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Destination page warns about each person and entry whose latest such delivery event is not followed by a delivered
   Mention of that person through that entry — computed from the delivery events, not stored: "Mention not delivered:
   @{login}, {entry}, has no linked {messenger} account" or "… the bridge cannot mention people".
+  _Revised for L2 (2026-11-17, #590):_ a warning's `since` is the first "Mention not delivered" after the person's last
+  delivered Mention through that entry, among the delivery events kept for `retention.alert_details`, and its `reason`
+  is the latest one. The entry is matched by its target, so that a save of the Destination keeps its warnings. A warning
+  is dropped when its entry is removed from the Destination or its User is deleted; a disabled User keeps it. The first
+  publication of a Storm summary records its undelivered Mentions without an Alert Group: they warn on the Destination
+  only and appear in no Timeline (C-11.FR-21).
 - **C-28.FR-4** The rules of L1 stay: Reminders and auto-unacknowledge mention the Owner and a Takeover the previous
   Owner, whatever the entries; a Reopen into acknowledged mentions only the Owner; Mentions are never added by an edit
   (ADR-0005); a Quiet new message carries none.

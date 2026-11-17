@@ -292,9 +292,9 @@ change of the chain while a run goes on, the rows of C-32.AC-18, and `E2E_REPLIC
   false) starts its ack timeout, as C-17.FR-1 says, but no Escalation chain: only Alerts and Commands start chains
   (ADR-0018 amendment). The implementation tells that release apart from one an Alert or a Command made.
 - Suggested commit: `feat(escalation): run escalation chains on alert groups with the ack timeout and unclaimed`.
-- The maintainer confirms provisional values with this story (operator attention): P-70, a chain named by a Route and
-  Teams more than once runs once, in the Threads of each; P-73, a change of a chain applies to runs that start
-  afterwards.
+- P-70 and P-73 are decided (the maintainer confirmed them with this story; C-32.FR-4 and FR-16 lost their provisional
+  markers): a chain named by a Route and Teams more than once runs once, in the Threads of each; a change of a chain
+  applies to runs that start afterwards.
 - P-71 and P-72 are decided (L2.md §5.3): a running chain goes on when the Severity level falls, and a chain that starts
   later ends Unclaimed while it runs.
 - New Alerts that remove an acknowledgement and Maintenance windows, which C-32.FR-5 mentions, are specified later in
@@ -314,8 +314,9 @@ change of the chain while a run goes on, the rows of C-32.AC-18, and `E2E_REPLIC
   repeats nested without a wait that need more go on at the next firing, due at once. Nested repeats multiply, so a run
   makes at most `escalation.MaxStepsPerRun` steps, `MaxSteps*(1+MaxSteps*MaxRepeatTimes)` (4,020), counted from the
   steps it recorded; one that reaches it runs out there as after its last step — its Alert Group then becomes
-  Unclaimed — and logs `escalation_run_step_limit` at warn. Refusing such a chain when it is saved, or forbidding
-  nested repeats, would change S-154's contract and is left to the maintainer.
+  Unclaimed — and logs `escalation_run_step_limit` at warn. This is decided (C-32.FR-15, revised in #588): nested
+  repeats restart their inner counts on each outer pass and the run is capped at 4,020 steps; such a chain is neither
+  refused when it is saved nor are nested repeats forbidden, so S-154's contract stays.
 - For S-155, downtime: a firing that comes late makes every step whose wait is over in one go, each recorded at the
   time it was due. Once steps Page, the Pages of the steps missed during downtime should collapse, as C-17's
   `notices_missed` collapses overdue notices, rather than ring once per missed step; this story implements no
@@ -326,8 +327,9 @@ change of the chain while a run goes on, the rows of C-32.AC-18, and `E2E_REPLIC
   "How it went" gives a run whose Alert Group resolved `retention.alert_details` ago without its steps, whether or not
   they were deleted yet, as the other reads hide the details.
 - "How it went" lists whole steps: a step made for some of its people, the others skipped as Viewers or disabled,
-  shows as made, and the people skipped are in the Timeline as `escalation_step_skipped`; S-155 adds the Pages. The
-  maintainer may want the skipped people there too (review).
+  shows as made, and the people skipped are in the Timeline as `escalation_step_skipped`; S-155 adds the Pages. This is
+  decided (C-32.FR-18, revised in #588): "How it went" lists whole steps made and skipped, and the people skipped within
+  a step that was made appear in the Timeline only.
 - A run keeps the owning Team its chain had when it started (`escalation_runs.owning_team_id`), whose Working hours
   its steps use, as it keeps the steps (P-73).
 - An Alert Group published Quietly by a change of configuration starts no chain at that Publication, so its chains
