@@ -5,7 +5,7 @@ capability: C-28
 kind: be
 layer: L2
 depends_on: [S-140]
-covers: [C-28.FR-2, C-25.FR-8, C-22.FR-16, C-24.FR-6]
+covers: [C-28.FR-2, C-25.FR-8, C-22.FR-16, C-24.FR-6, C-12.FR-11]
 files_touched:
   - api/bridge.yaml
   - internal/mentions/mentions.go
@@ -120,8 +120,8 @@ workspace's general channel (F-127), is not offered in Slack (C-28.FR-2, the mai
 - A new rule of this story: the Mention line of a Bridge message keeps, in their order, the whole Mentions that fit
   half of `limits.max_body_length`, leaving out each one that does not fit, with its entry, so that a long line can
   neither cut a marker nor crowd out the text: the same budget as Slack's Thread-reply Mentions, half of its length
-  limit; unlike Slack's `fitMentions`, it skips a Mention that does not fit. Neither C-12.FR-11 nor `defaults.md` has
-  it yet; the maintainer decides in the pull request.
+  limit; unlike Slack's `fitMentions`, it skips a Mention that does not fit. The rule is now in C-12.FR-11 (revised
+  for L2), a fixed rule with no setting.
 - Suggested commit: `feat(mentions): write group mentions in slack, and group and everyone mentions through bridges`.
 - Split from S-140 by the review, at the boundary between deciding whom a message mentions and writing it in the
   messengers that L1 could not write it for; it takes the next free ID, S-171, follows S-140, and the bridge libraries
@@ -135,3 +135,4 @@ workspace's general channel (F-127), is not offered in Slack (C-28.FR-2, the mai
 | C-25.FR-8 | partial | Team mentions in Slack and through bridges; the rest is S-139 and S-140 |
 | C-22.FR-16 | partial | revised for L2: group and everyone entries in `mentions`; the record of the plain name is S-165 |
 | C-24.FR-6 | full | revised for L2: `<!subteam^ID>`; no `<!everyone>` |
+| C-12.FR-11 | partial | revised for L2: the Mention line of a Bridge message within half of the body limit; the shortening of the layout is S-125 |

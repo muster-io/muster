@@ -297,6 +297,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   the details never removes Notes, and Notes are deleted together with the summary row. The list and search cover the
   summary rows; an Alert Group whose details were removed opens as its summary and its Notes with the notice "Alerts
   and Timeline of this Alert Group were removed after {period}".
+  _Revised for L2 (2026-11-17, #585):_ the steps of the runs of Escalation chains ("How it went", C-32.FR-18) are kept
+  with the details, for `retention.alert_details`: they are removed with them, and "How it went" gives a run whose
+  details were removed without its steps.
 - **C-09.FR-21** The Integration delete dialog (C-05) shows how many open Alert Groups will be resolved.
 
 ## UI

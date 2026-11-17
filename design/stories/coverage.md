@@ -1213,7 +1213,7 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-09.FR-13 | S-118 (part), S-120 (part), S-168 (part), S-159 | complete | the Assignee filter: the API (S-168) and the list (S-159) |
 | C-09.FR-14 | S-120 (part), S-123 (part), S-159 | complete | the Teams in the header (S-120), the entries of each Destination (S-123), the running chains, Assignees and escalation entries (S-159) |
 | C-09.FR-15 | S-174 (part), S-175 (part) | complete | By Team and the filters of every view: the API (S-174) and the page (S-175) |
-| C-09.FR-16 | S-169 (part) | complete | the steps of the runs of Escalation chains are details, pruned with them and hidden from "How it went" once removed (S-169) |
+| C-09.FR-16 | S-169 (part) | complete | the steps of the runs of Escalation chains are details, kept for `retention.alert_details`, pruned with them and hidden from "How it went" once removed (S-169) |
 | C-09.FR-22 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-168 (part), S-156 (part) | complete | the events of C-25 and C-26 (S-118, S-121) and of C-30 and C-32 (S-148, S-169, S-155, S-168, S-156) |
 | C-09.FR-27 | S-174 | complete | added for L2: who made the first acknowledgement, with the backfill from the Timeline |
 | C-09.FR-28 | S-174 (part), S-175 (part) | complete | added for L2: By people in the API (S-174) and on the page (S-175) |
@@ -1243,7 +1243,7 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-12.FR-2 | S-125 | complete |  |
 | C-12.FR-3 | S-125 (part), S-143 (part), S-148 (part), S-173 (part), S-155 (part), S-168 (part) | complete | the layout (S-125), undelivered Mentions (S-143), calls (S-148), their answers (S-173), Pages (S-155), Assignees (S-168) |
 | C-12.FR-8 | S-140 (part), S-143 (part) | complete | the Mention entries in delivery and on the form |
-| C-12.FR-11 | S-125 | complete |  |
+| C-12.FR-11 | S-125, S-171 (part) | complete | the shortening of the compact layout (S-125); the Mention line of a Bridge message within half of the body limit (S-171) |
 | C-12.FR-12 | S-140 (part), S-165 (part), S-168 (part) | complete | an unlinked person left out and recorded (S-140, S-165); the Assignees named like the footer's people (S-168) |
 | C-12 UI | S-129 | complete | "Labels in the message" and the preview of the layout |
 | C-13.FR-3 | S-125 | complete |  |

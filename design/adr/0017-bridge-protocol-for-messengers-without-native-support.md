@@ -38,6 +38,9 @@
   (journal D569) the signed action data of a call through a Notification gateway names the call, which Muster keeps with
   its person and Alert Groups, so that one call about several Alert Groups fits the size of a button's data; all
   additive in version 1
+- Amended: 2026-11-17 — group mentions through bridges: a Team mention and a group entry of a Destination are `mentions`
+  entries of the kind `group`, placed by a marker, and a bridge never refuses a Mention entry for its kind, since
+  Muster decides from a copy of `info` that may be older than the bridge's own
 
 ## Context
 
@@ -118,10 +121,13 @@ Muster verifies it and checks that it belongs to the pressed message, as for Mat
 
 **Mentions** name linked people, as `{external_id, display_name}` in the envelope, each placed in the body by a marker
 that reads as the plain name where the bridge cannot mention natively. From L2 a bridge may also declare in `info` the
-group mentions its messenger has; Muster then sends a Team mention (ADR-0018) as a group token that the bridge renders
-itself (journal D516). It may also declare which mentions of everyone in the chat its messenger has, by the symbolic
-names `channel`, `here`, `all` and `everyone`; Muster sends each as a `mentions` entry of its own kind, which the bridge
-renders as its messenger's mention (journal D540, D567). Mentions never appear in an edit (ADR-0005).
+group mentions its messenger has; Muster then sends a Team mention (ADR-0018), and a group entry of a Destination, as a
+`mentions` entry of the kind `group` with the group's name, placed in the body by a marker, which the bridge renders as
+its messenger's group mention. A bridge never refuses a Mention entry for its kind: an entry of a kind that it did not
+declare is shown as the marker's link text. It may also declare which mentions of everyone in the chat its messenger
+has, by the symbolic names `channel`, `here`, `all` and `everyone`; Muster sends each as a `mentions` entry of its own
+kind, which the bridge renders as its messenger's mention (journal D540, D567). Mentions never appear in an edit
+(ADR-0005).
 
 **Idempotency.** Every request that creates a message carries an `Idempotency-Key`; the bridge stores the key with its
 successful result and answers a repeated key with that result, marked as replayed, without posting again — whatever

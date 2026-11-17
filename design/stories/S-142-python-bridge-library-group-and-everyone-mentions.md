@@ -21,7 +21,7 @@ files_touched:
 acceptance:
   - "[C-28.FR-2] `api/bridge.yaml` is Muster's copy from `master` byte for byte, `make spec-check` passes, and `make generate-check` finds `src/muster_bridge/models.py` current with `Capabilities.group_mentions`, `Capabilities.everyone_mentions` and `Mention.kind`; a `Mention` without `kind` reads as `user`."
   - "[C-28.FR-2, C-25.FR-8] The configuration takes `group_mentions` and `everyone_mentions`, which `info` declares; a name outside `channel`, `here`, `all` and `everyone`, or a repeated one, raises `ConfigError` naming the reason (`test_config.py`)."
-  - "[C-28.FR-2] `replace_mentions` hands the render function each entry with its kind, and a body whose `group` or `everyone` entry arrives at a bridge that declared none is refused as `invalid` before the messenger is called (`test_mentions.py`, `test_app.py`)."
+  - "[C-28.FR-2] `replace_mentions` hands the render function each entry with its kind, a `group` entry carries the group's name in `external_id` and `display_name`, an `everyone` entry the symbolic name, and a body whose `group` or `everyone` entry arrives at a bridge that did not declare it is never refused for its kind: the entry is shown as its marker's link text (`test_mentions.py`, `test_app.py`)."
   - "[C-28.FR-2] README.md shows a bridge that declares group mentions and `here` and renders a user, a group and `here`, and `tests/test_mentions.py` runs that example."
   - "[C-28.FR-2] `make ci conformance` passes, the conformance check from `ghcr.io/muster-io/muster:edge` included."
 verify: "make ci conformance"
@@ -51,7 +51,10 @@ issue: 431
   `layout` that S-128 took; `src/muster_bridge/models.py` is regenerated (never listed).
 - **Package**: `Config.group_mentions` and `Config.everyone_mentions` go into `info.capabilities` and are validated as
   the specification does (`config.py`); `replace_mentions(body, mentions, render)` passes the entry with its `kind`
-  (`mentions.py`); the application refuses an undeclared `group` or `everyone` entry as `invalid` (`app.py`);
+  (`mentions.py`; an entry without `kind` is a `user`); a `group` entry carries the group's name in both fields and an
+  `everyone` entry the symbolic name; the application never refuses an entry for its kind, since Muster decides from a
+  copy of `info` that may be older than the bridge's own, and shows an undeclared `group` or `everyone` entry as the
+  marker's link text (`app.py`);
   `muster_bridge` re-exports the new names (`__init__.py`).
 - **Tests**: `test_spec.py` validates a request with each kind and an `info` with both fields against the copy with
   openapi-core; `test_config.py`, `test_mentions.py`, `test_app.py`.
@@ -59,7 +62,8 @@ issue: 431
 ## Steps
 
 1. Take the copy and regenerate. Check: `make spec-check generate-check`.
-2. Add the configuration, the kinds and the refusal, with their tests; update README.md. Check: `make ci`.
+2. Add the configuration and the kinds, and show an undeclared kind as the marker's link text, with their tests;
+   update README.md. Check: `make ci`.
 3. Run the conformance check. Check: `make conformance`.
 
 ## Verification

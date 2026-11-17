@@ -21,7 +21,7 @@ files_touched:
 acceptance:
   - "[C-28.FR-2] `api/bridge.yaml` is Muster's copy from `master` byte for byte, `make spec-check` passes, and `make generate-check` finds `models.gen.go` current with `Capabilities.GroupMentions`, `Capabilities.EveryoneMentions` and `Mention.Kind`; a `Mention` without `kind` reads as `user`."
   - "[C-28.FR-2, C-25.FR-8] `bridge.Config` takes `GroupMentions` and `EveryoneMentions`, which `info` declares; `bridge.New` refuses a name of `EveryoneMentions` outside `channel`, `here`, `all` and `everyone`, or a repeated one, naming the reason (`bridge_test.go`)."
-  - "[C-28.FR-2] `ReplaceMentions` hands the render function each entry with its kind, so that a bridge renders a group as its messenger's group mention and `channel` as its mention of everyone, and a user as before; a body whose `group` or `everyone` entry arrives at a bridge that declared none is refused as `invalid` before the messenger is called (`mention_test.go`, `server_test.go`)."
+  - "[C-28.FR-2] `ReplaceMentions` hands the render function each entry with its kind, so that a bridge renders a group as its messenger's group mention and `channel` as its mention of everyone, and a user as before; a `group` entry carries the group's name in `external_id` and `display_name`, an `everyone` entry the symbolic name; a body whose `group` or `everyone` entry arrives at a bridge that did not declare it is never refused for its kind, and the entry is shown as its marker's link text (`mention_test.go`, `server_test.go`)."
   - "[C-28.FR-2] `Example_groupMentions` in `example_test.go` declares group mentions and `here`, and renders a body with a user, a group and `here`; its output is checked; README.md and `doc.go` describe the declaration and the kinds."
   - "[C-28.FR-2] `make ci conformance` passes, the conformance check from `ghcr.io/muster-io/muster:edge` included, and the release pull request that release-please opens names the change in its changelog."
 verify: "make ci conformance"
@@ -53,15 +53,19 @@ issue: 430
   `layout` that S-127 took; `models.gen.go` is regenerated (never listed).
 - **Package**: `Config.GroupMentions bool` and `Config.EveryoneMentions []string` go into `info.capabilities`;
   `bridge.New` validates them as the specification does; `ReplaceMentions(body, mentions, render)` passes the entry with
-  its `Kind` to `render` (a `user` by default); the handler refuses a `group` or `everyone` entry that the bridge did
-  not declare as `invalid`.
+  its `Kind` to `render` (a `user` by default, as for an entry without `kind`);
+  a `group` entry carries the group's name in both fields and an `everyone` entry the symbolic name;
+  the handler never refuses an entry for its kind, since Muster
+  decides from a copy of `info` that may be older than the bridge's own, and shows a `group` or `everyone` entry that
+  the bridge did not declare as the marker's link text.
 - **Tests**: `spec_test.go` validates a request with each kind and an `info` with both fields against the copy;
   `bridge_test.go`, `mention_test.go`, `server_test.go`; `example_test.go` is the runnable example.
 
 ## Steps
 
 1. Take the copy and regenerate. Check: `make spec-check generate-check`.
-2. Add the configuration, the kinds and the refusal, with their tests and the example; update README.md and `doc.go`.
+2. Add the configuration and the kinds, and show an undeclared kind as the marker's link text, with their tests and
+   the example; update README.md and `doc.go`.
    Check: `make ci`.
 3. Run the conformance check. Check: `make conformance`.
 
