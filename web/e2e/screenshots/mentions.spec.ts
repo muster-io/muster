@@ -120,13 +120,8 @@ test("shows the Mentions of a Destination, the targets of Telegram and the Team 
   await expect(section.getByTestId("mention-warning")).toHaveText(
     "Mention not delivered: @petr, On-call of the Team from the label, has no linked Mattermost account",
   );
-  // The header of the columns is hidden for the shot: it sits a few pixels off the boxes of the rows, and a reader would
-  // read the boxes under the wrong events. The page names the events in the order of the boxes.
-  await capture(page, MENTIONS, "01-mentions-grid", {
-    locator: section,
-    padding: 16,
-    hide: section.getByTestId("mention-header"),
-  });
+  await expect(section.getByTestId("mention-header")).toBeVisible();
+  await capture(page, MENTIONS, "01-mentions-grid", { locator: section, padding: 16 });
 
   // The Telegram Destination: the list that "Add" opens, with what Telegram cannot mention greyed and its reason.
   await page.goto(`/destinations/${telegramDestination}`);

@@ -25,8 +25,10 @@ import {
 import { MentionTargetPicker } from "./mention-target-picker";
 import { Button } from "./ui/button";
 
+// The header and the rows share this template, so every header cell sits over its checkbox column; the last column has a
+// fixed width because the header and each row are separate grids and an `auto` track would size to its own content.
 const GRID =
-  "md:grid md:grid-cols-[minmax(11rem,1fr)_repeat(7,minmax(4.5rem,6rem))_auto] md:items-center md:gap-x-2";
+  "md:grid md:grid-cols-[minmax(11rem,1fr)_repeat(7,minmax(4.5rem,6rem))_6rem] md:items-center md:gap-x-2";
 
 export interface MentionEntriesEditorProps {
   /** The base of the ids, unique on the page. */
@@ -84,7 +86,7 @@ export function MentionEntriesEditor({
       ) : (
         <div className="flex min-w-0 flex-col gap-2">
           <div
-            className={`hidden text-xs text-muted-foreground ${GRID}`}
+            className={`hidden border border-transparent px-3 text-xs text-muted-foreground ${GRID}`}
             aria-hidden="true"
             data-testid="mention-header"
           >
@@ -160,7 +162,7 @@ export function MentionEntriesEditor({
                       </label>
                     ))}
                   </div>
-                  <div className="flex">
+                  <div className="flex md:justify-end">
                     <Button
                       type="button"
                       variant="ghost"
