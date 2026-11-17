@@ -8083,14 +8083,16 @@ type OutgoingWebhookEvent struct {
 	EscalationStep *WebhookEscalationStep `json:"escalation_step,omitempty"`
 
 	// Event One of the lifecycle event names (see `LifecycleEvent`) or `test`, which only a Destination test sends. New names are added within `version` 1; receivers ignore names they do not know.
-	Event    WebhookEventName       `json:"event"`
+	Event WebhookEventName `json:"event"`
+
+	// Mentions The Mentions of a Loud event as data (C-15.FR-11), empty on a Quiet one. On `paged` they are the people of the Page as `user` targets, or for a step "Page the whole Team" its Team as a `team` target or everyone in the chat as an `everyone` target, never the Destination's Mention entries.
 	Mentions []WebhookMentionTarget `json:"mentions"`
 
 	// Notify True exactly when the event is Loud.
 	Notify     bool      `json:"notify"`
 	OccurredAt time.Time `json:"occurred_at"`
 
-	// Page The Page, only on `page_not_delivered`.
+	// Page The Page, only on `paged` and `page_not_delivered`.
 	Page *WebhookPage `json:"page,omitempty"`
 
 	// Sequence The lifecycle event number of the Alert Group, kept across retries. It grows with every lifecycle event of the Alert Group but may have gaps, and for a Destination added to the Route later it does not start at 1; receivers rely only on "greater means newer". 0 on the `test` event.
@@ -10932,7 +10934,7 @@ type WebhookEventsConfig struct {
 	Url string `json:"url"`
 }
 
-// WebhookMentionTarget A resolved Mention as data (C-15.FR-11). `everyone` has no other fields, `group` has `name`, `user` has `id`, `name` and `login` — the On-call of a Team is a `user` — and `team` has `slug` and `name`, one per Team of the Alert Group for "Team from the label".
+// WebhookMentionTarget A resolved Mention as data (C-15.FR-11). `everyone` has no other fields, `group` has `name`, `user` has `id`, `name` and `login` — the On-call of a Team and the people that `paged` Pages are `user` targets — and `team` has `slug` and `name`, one per Team of the Alert Group for "Team from the label", or the Team of a step "Page the whole Team" on `paged`.
 type WebhookMentionTarget struct {
 	// Id A `public_id` in the format of `PublicId`, or null.
 	Id    nullable.Nullable[NullablePublicId] `json:"id,omitempty"`
@@ -10945,15 +10947,24 @@ type WebhookMentionTarget struct {
 // WebhookMentionTargetType defines model for WebhookMentionTarget.Type.
 type WebhookMentionTargetType string
 
-// WebhookPage A Page as an outgoing webhook event names it, on `page_not_delivered`.
+// WebhookPage A Page as an outgoing webhook event names it, on `paged` and `page_not_delivered`.
 type WebhookPage struct {
+	// Chain The Escalation chain whose step made the Page; null for a Page that no step of a chain made, and once the chain was deleted.
+	Chain nullable.Nullable[WebhookChainRef] `json:"chain"`
+
 	// Gateway The Notification gateway of a call; null for a Page by Mention.
 	Gateway nullable.Nullable[EntityRef] `json:"gateway"`
 
-	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered or was withheld while its Destination was Broken (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+	// Importance How the step Paged its people; null for a step "Page the whole Team" and a call through a Notification gateway.
+	Importance nullable.Nullable[PageImportance] `json:"importance"`
+
+	// Reason Why the Page was not delivered, on `page_not_delivered`; null on `paged`.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason"`
 
-	// Users The people the Page names.
+	// Step The number of that step in its chain; null when no step of a chain made the Page, and kept when the chain was deleted.
+	Step nullable.Nullable[int] `json:"step"`
+
+	// Users The people the Page names; empty for a step "Page the whole Team".
 	Users []WebhookUser `json:"users"`
 }
 

@@ -5356,6 +5356,7 @@ func (q *Queries) LockOpenGroupUpdate(ctx context.Context, arg LockOpenGroupUpda
 
 const lockPage = `-- name: LockPage :one
 SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
+       coalesce(p.importance, '')::text AS importance,
        p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
        coalesce(r.chain_name, '')::text AS chain_name
 FROM pages p
@@ -5377,6 +5378,7 @@ type LockPageRow struct {
 	State           string
 	StepNumber      int32
 	Team            bool
+	Importance      string
 	EscalationRunID pgtype.Int8
 	ChainID         pgtype.Int8
 	ChainPublicID   string
@@ -5384,7 +5386,7 @@ type LockPageRow struct {
 }
 
 // LockPage locks a Page whose outcome its Thread replies settle, after its Alert Group, with the run, the chain and the
-// step that made it.
+// step that made it, and the importance of a Page of people, empty for none.
 func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow, error) {
 	row := q.db.QueryRow(ctx, lockPage, arg.OrgID, arg.ID, arg.AlertGroupID)
 	var i LockPageRow
@@ -5394,6 +5396,7 @@ func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow
 		&i.State,
 		&i.StepNumber,
 		&i.Team,
+		&i.Importance,
 		&i.EscalationRunID,
 		&i.ChainID,
 		&i.ChainPublicID,

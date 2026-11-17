@@ -1413,7 +1413,8 @@ Migration 0047 added `escalation_run_id`, `escalation_chain_id` and `step_number
 the step of an event of an Escalation chain such as `escalation_step_skipped`, whose reason is `reason` and whose
 person, for a skip of a person, is `paged_user_ids` ([4.18](#418-paging)); without foreign keys, as the chain may be
 deleted since and the entries outlive the runs. Migration 0049 added `page_everyone`, the token of a step "Page the
-whole Team" for everyone in the chat, and `page_importance`, `normal` or `important`, of a Page by Mention, `paged`;
+whole Team" for everyone in the chat, and `page_importance`, `normal` or `important`, of a Page by Mention of people,
+on its `paged` and its `page_not_delivered` (S-177);
 the Team of such a step is `team_id` (S-118), and the people of a Page of people `paged_user_ids`. Neither has a
 CHECK or a foreign key: the Timeline keeps what the Page was.
 Delivery events are not stored

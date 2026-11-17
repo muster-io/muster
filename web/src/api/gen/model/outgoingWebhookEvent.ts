@@ -20,6 +20,7 @@ export interface OutgoingWebhookEvent {
   event: WebhookEventName;
   /** True exactly when the event is Loud. */
   notify: boolean;
+  /** The Mentions of a Loud event as data (C-15.FR-11), empty on a Quiet one. On `paged` they are the people of the Page as `user` targets, or for a step "Page the whole Team" its Team as a `team` target or everyone in the chat as an `everyone` target, never the Destination's Mention entries. */
   mentions: WebhookMentionTarget[];
   /**
      * The lifecycle event number of the Alert Group, kept across retries. It grows with every lifecycle event of the Alert Group but may have gaps, and for a Destination added to the Route later it does not start at 1; receivers rely only on "greater means newer". 0 on the `test` event.
@@ -33,7 +34,7 @@ export interface OutgoingWebhookEvent {
   alerts: WebhookAlert[];
   /** The Destination the Alert Group joined, only on `destination_joined`; the outgoing webhook Destination the step sent to, only on `escalation_webhook`. */
   destination?: WebhookDestinationRef;
-  /** The Page, only on `page_not_delivered`. */
+  /** The Page, only on `paged` and `page_not_delivered`. */
   page?: WebhookPage;
   /** The chain, the step and the reason, only on `escalation_step_skipped` and `escalation_webhook`, whose reason is null. */
   escalation_step?: WebhookEscalationStep;

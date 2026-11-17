@@ -6,7 +6,7 @@ import type { NullablePublicId } from './nullablePublicId';
 import type { WebhookMentionTargetType } from './webhookMentionTargetType';
 
 /**
- * A resolved Mention as data (C-15.FR-11). `everyone` has no other fields, `group` has `name`, `user` has `id`, `name` and `login` — the On-call of a Team is a `user` — and `team` has `slug` and `name`, one per Team of the Alert Group for "Team from the label".
+ * A resolved Mention as data (C-15.FR-11). `everyone` has no other fields, `group` has `name`, `user` has `id`, `name` and `login` — the On-call of a Team and the people that `paged` Pages are `user` targets — and `team` has `slug` and `name`, one per Team of the Alert Group for "Team from the label", or the Team of a step "Page the whole Team" on `paged`.
  */
 export interface WebhookMentionTarget {
   type: WebhookMentionTargetType;

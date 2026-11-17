@@ -435,9 +435,10 @@ func TestBodyPageNotDelivered(t *testing.T) {
 		want  string
 	}{
 		{groups.EventPageNotDelivered, call, `{"users":[{"id":"SRAAAAAAAAAAP4","name":"Petr","login":"petr"}],` +
-			`"gateway":{"id":"CNAAAAAAAAAAG7","name":"Example Gateway"},"reason":"call_refused"}`},
+			`"gateway":{"id":"CNAAAAAAAAAAG7","name":"Example Gateway"},"reason":"call_refused","chain":null,` +
+			`"step":null,"importance":null}`},
 		{groups.EventPageNotDelivered, mention, `{"users":[{"id":"SRAAAAAAAAAAP4","name":"Petr","login":"petr"}],` +
-			`"gateway":null,"reason":"call_unknown"}`},
+			`"gateway":null,"reason":"call_unknown","chain":null,"step":null,"importance":null}`},
 		{groups.EventAlertsAdded, call, ``},
 	} {
 		raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: 6, Event: c.event, Loudness: groups.Quiet,
@@ -459,6 +460,80 @@ func TestBodyPageNotDelivered(t *testing.T) {
 		_ = json.Unmarshal(raw, &b)
 		if b.Event != string(c.event) || b.Notify || len(b.Mentions) != 0 || string(b.Page) != c.want {
 			t.Errorf("%s: %s", c.event, raw)
+		}
+	}
+}
+
+// TestBodyPaged is C-15.FR-2 and C-15.FR-11 revised for L2 with C-32.FR-11: paged in events mode is Loud, carries its
+// people as user targets of mentions — or the Team of a page_team step as a team target, or everyone — and its Page
+// with the chain, the step and the importance, valid against OutgoingWebhookEvent; a chain deleted since is null and
+// a page_team step has no importance; a page_not_delivered of a step carries its chain, step and importance too.
+func TestBodyPaged(t *testing.T) {
+	schema := eventSchema(t)
+	s, f := newService(t)
+	render, err := s.eventBodies(t.Context(), f, bodyFixture(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ivan := groups.PagedUser{ID: 4, PublicID: "SRAAAAAAAAAAIV", Name: "Ivan", Login: "ivan"}
+	chain := &groups.ChainEntry{Run: 3, Chain: 2, ChainPublicID: "ECAAAAAAAAAADV", ChainName: "devops", Step: 1}
+	ivanTarget := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{PublicID: ivan.PublicID,
+		Name: ivan.Name, Login: ivan.Login}}
+	for _, c := range []struct {
+		name         string
+		event        groups.Event
+		loud         bool
+		chain        *groups.ChainEntry
+		page         *groups.Page
+		targets      []mentions.Target
+		wantMentions string
+		wantPage     string
+	}{
+		{"people", groups.EventPaged, true, chain, &groups.Page{ID: 9, Users: []groups.PagedUser{ivan},
+			Importance: "important"}, []mentions.Target{ivanTarget},
+			`[{"type":"user","id":"SRAAAAAAAAAAIV","name":"Ivan","login":"ivan"}]`,
+			`{"users":[{"id":"SRAAAAAAAAAAIV","name":"Ivan","login":"ivan"}],"gateway":null,"reason":null,` +
+				`"chain":{"id":"ECAAAAAAAAAADV","name":"devops"},"step":1,"importance":"important"}`},
+		{"the whole Team", groups.EventPaged, true, &groups.ChainEntry{Run: 3, Step: 2},
+			&groups.Page{ID: 10, Team: &groups.PageTeam{ID: 5}},
+			[]mentions.Target{{Kind: mentions.TargetTeam, Team: &mentions.TeamTarget{Slug: "payments",
+				Name: "Payments"}}},
+			`[{"type":"team","name":"Payments","slug":"payments"}]`,
+			`{"users":[],"gateway":null,"reason":null,"chain":null,"step":2,"importance":null}`},
+		{"everyone", groups.EventPaged, true, chain, &groups.Page{ID: 11, Everyone: "here"},
+			[]mentions.Target{{Kind: mentions.TargetEveryone, Everyone: "here"}}, `[{"type":"everyone"}]`,
+			`{"users":[],"gateway":null,"reason":null,"chain":{"id":"ECAAAAAAAAAADV","name":"devops"},"step":1,` +
+				`"importance":null}`},
+		{"not delivered", groups.EventPageNotDelivered, false, chain, &groups.Page{ID: 9,
+			Users: []groups.PagedUser{ivan}, Reason: groups.PageRepliesFailed, Importance: "normal"}, nil, `[]`,
+			`{"users":[{"id":"SRAAAAAAAAAAIV","name":"Ivan","login":"ivan"}],"gateway":null,` +
+				`"reason":"not_delivered","chain":{"id":"ECAAAAAAAAAADV","name":"devops"},"step":1,` +
+				`"importance":"normal"}`},
+	} {
+		loudness := groups.Quiet
+		if c.loud {
+			loudness = groups.Loud
+		}
+		raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: 8, Event: c.event, Loudness: loudness,
+			Chain: c.chain, Page: c.page}, Notify: c.loud, Mentions: c.targets, OccurredAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		_ = json.Unmarshal(raw, &v)
+		if err := schema.VisitJSON(v); err != nil {
+			t.Fatalf("%s: %v\n%s", c.name, err, raw)
+		}
+		var b struct {
+			Event    string          `json:"event"`
+			Notify   bool            `json:"notify"`
+			Mentions json.RawMessage `json:"mentions"`
+			Page     json.RawMessage `json:"page"`
+		}
+		_ = json.Unmarshal(raw, &b)
+		if b.Event != string(c.event) || b.Notify != c.loud || string(b.Mentions) != c.wantMentions ||
+			string(b.Page) != c.wantPage {
+			t.Errorf("%s: %s", c.name, raw)
 		}
 	}
 }

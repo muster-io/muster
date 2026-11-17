@@ -14,6 +14,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/templates"
@@ -76,6 +77,40 @@ func TestFitKeepsWhatCannotGo(t *testing.T) {
 	}
 	if length("a🔥") != 3 {
 		t.Fatal("length counts UTF-16 code units")
+	}
+}
+
+// TestPageLead is C-32.FR-9 and FR-11 in Telegram: the reply of a Page writes its Mentions — a `tg://user` link for a
+// person with a Telegram Account link — inside its Lead, "Step 1: <a href=\"tg://user?id=…\">Ivan</a>, you are needed",
+// in HTML and as plain text; without Mentions it has no Lead, and a message without a Lead keeps its Mentions alone.
+func TestPageLead(t *testing.T) {
+	page := messages.PageMessage("en", "Infrastructure", "UTC", messages.ColourFiring, messages.PageInput{Step: 1,
+		Mentioned: true, Messenger: "telegram", Source: messages.PageSourceRoute, OnCallTeam: "devops",
+		Schedule: "Main", Importance: "normal", Unlinked: []string{"petr"}})
+	ivan := []mentions.Target{{Kind: mentions.TargetUser, User: &mentions.User{Name: "Ivan <I>",
+		ExternalID: "123456"}}}
+	w := writer{}
+	got := fit(page, w, mentionText(ivan, w), LengthLimit)
+	want := `Step 1: <a href="tg://user?id=123456">Ivan &lt;I&gt;</a>, you are needed` + "\n" +
+		"Page not delivered: @" + zeroWidthSpace + "petr has no linked Telegram account\n" +
+		"Chain of the Route Infrastructure · On-call of devops Main · normal"
+	if got != want {
+		t.Errorf("page = %q", got)
+	}
+	plain := writer{plain: true}
+	if got := fit(page, plain, mentionText(ivan, plain), LengthLimit); !strings.HasPrefix(got,
+		"Step 1: Ivan <I>, you are needed\n") {
+		t.Errorf("plain page = %q", got)
+	}
+	page.Lead = nil
+	if got := fit(page, w, "", LengthLimit); strings.Contains(got, "you are needed") ||
+		!strings.HasPrefix(got, "Page not delivered") {
+		t.Errorf("page without mentions = %q", got)
+	}
+	reply := messages.Message{Kind: messages.KindReply, Language: "en", Lines: []string{"New alerts (1)"}}
+	if got := fit(reply, w, mentionText(ivan, w), LengthLimit); got != `<a href="tg://user?id=123456">Ivan &lt;I&gt;</a>`+
+		"\nNew alerts (1)" {
+		t.Errorf("reply = %q", got)
 	}
 }
 
