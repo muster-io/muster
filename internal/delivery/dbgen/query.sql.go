@@ -1528,7 +1528,7 @@ SELECT r.id, r.delivery_id, r.alert_group_id, r.event, r.event_seqs, r.loudness,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.telegram_channel_chat_id, ds.telegram_discussion_chat_id,
        g.public_id AS alert_group_public_id, g.number, g.title, g.status, g.urgent,
-       rt.language
+       rt.language, r.page_id, r.paged_user_ids, r.page_source
 FROM thread_replies r
 JOIN deliveries d ON d.org_id = r.org_id AND d.id = r.delivery_id
 JOIN destinations ds ON ds.org_id = r.org_id AND ds.id = r.destination_id
@@ -1578,6 +1578,9 @@ type GetLeasedReplyRow struct {
 	Status                   string
 	Urgent                   bool
 	Language                 string
+	PageID                   pgtype.Int8
+	PagedUserIds             []int64
+	PageSource               pgtype.Text
 }
 
 // GetLeasedReply reads, and locks, a Thread reply whose lease this replica still holds at the real time now, with its
@@ -1625,6 +1628,9 @@ func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) 
 		&i.Status,
 		&i.Urgent,
 		&i.Language,
+		&i.PageID,
+		&i.PagedUserIds,
+		&i.PageSource,
 	)
 	return i, err
 }
@@ -1696,6 +1702,60 @@ func (q *Queries) GetLeasedWebhookEvent(ctx context.Context, arg GetLeasedWebhoo
 		&i.AlertGroupPublicID,
 		&i.Number,
 		&i.GroupUnpublished,
+	)
+	return i, err
+}
+
+const getPageReply = `-- name: GetPageReply :one
+SELECT p.step_number, coalesce(p.importance, '')::text AS importance, coalesce(p.again_seconds, 0)::integer AS again_seconds,
+       p.again, coalesce(p.everyone, '')::text AS everyone, p.team_id, coalesce(t.name, '')::text AS team_name,
+       coalesce(s.name, '')::text AS schedule_name, coalesce(st.name, '')::text AS schedule_team_name,
+       coalesce(ct.name, '')::text AS chain_team_name, (p.schedule_id IS NOT NULL)::boolean AS on_call
+FROM pages p
+LEFT JOIN teams t ON t.org_id = p.org_id AND t.id = p.team_id
+LEFT JOIN schedules s ON s.org_id = p.org_id AND s.id = p.schedule_id
+LEFT JOIN teams st ON st.org_id = s.org_id AND st.id = s.team_id
+LEFT JOIN teams ct ON ct.org_id = p.org_id AND ct.id = p.chain_team_id
+WHERE p.org_id = $1 AND p.id = $2
+`
+
+type GetPageReplyParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetPageReplyRow struct {
+	StepNumber       int32
+	Importance       string
+	AgainSeconds     int32
+	Again            bool
+	Everyone         string
+	TeamID           pgtype.Int8
+	TeamName         string
+	ScheduleName     string
+	ScheduleTeamName string
+	ChainTeamName    string
+	OnCall           bool
+}
+
+// GetPageReply reads what the Thread reply of a Page says (C-32.FR-9): the step, the importance and the next Mention of
+// the rule, a later Mention, the Team or the token of a page_team step, the Schedule of a page_on_call step with its
+// Team, and the Team of "Chain of the Team".
+func (q *Queries) GetPageReply(ctx context.Context, arg GetPageReplyParams) (GetPageReplyRow, error) {
+	row := q.db.QueryRow(ctx, getPageReply, arg.OrgID, arg.ID)
+	var i GetPageReplyRow
+	err := row.Scan(
+		&i.StepNumber,
+		&i.Importance,
+		&i.AgainSeconds,
+		&i.Again,
+		&i.Everyone,
+		&i.TeamID,
+		&i.TeamName,
+		&i.ScheduleName,
+		&i.ScheduleTeamName,
+		&i.ChainTeamName,
+		&i.OnCall,
 	)
 	return i, err
 }
@@ -2353,9 +2413,11 @@ func (q *Queries) InsertPostCopy(ctx context.Context, arg InsertPostCopyParams) 
 
 const insertThreadReply = `-- name: InsertThreadReply :exec
 INSERT INTO thread_replies (org_id, delivery_id, alert_group_id, destination_id, event, event_seqs, loudness,
-                            mentions, fingerprints, state, next_attempt_at, created_at)
+                            mentions, fingerprints, state, next_attempt_at, created_at, page_id, paged_user_ids,
+                            page_source)
 VALUES ($1, $2, $3, $4, $5, $6::bigint[], $7,
-        $8::text[], $9::text[], $10::text, $11, $12)
+        $8::text[], $9::text[], $10::text, $11, $12, $13,
+        $14::bigint[], $15)
 `
 
 type InsertThreadReplyParams struct {
@@ -2371,6 +2433,9 @@ type InsertThreadReplyParams struct {
 	State         string
 	Due           time.Time
 	Now           time.Time
+	PageID        pgtype.Int8
+	PagedUserIds  []int64
+	PageSource    pgtype.Text
 }
 
 // InsertThreadReply queues a Thread reply, due at @due: pending, or dropped while its Destination is Broken.
@@ -2388,6 +2453,9 @@ func (q *Queries) InsertThreadReply(ctx context.Context, arg InsertThreadReplyPa
 		arg.State,
 		arg.Due,
 		arg.Now,
+		arg.PageID,
+		arg.PagedUserIds,
+		arg.PageSource,
 	)
 	return err
 }
@@ -2779,6 +2847,51 @@ func (q *Queries) ListDestinationsByID(ctx context.Context, arg ListDestinations
 			&i.Buttons,
 			&i.OrganizationButtons,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEndedPages = `-- name: ListEndedPages :many
+SELECT p.id, p.alert_group_id
+FROM pages p
+WHERE p.org_id = $1 AND p.state = 'pending' AND p.id > $2::bigint
+  AND NOT EXISTS (SELECT 1
+                  FROM thread_replies r
+                  WHERE r.org_id = p.org_id AND r.page_id = p.id AND r.state IN ('collecting', 'pending'))
+ORDER BY p.id
+LIMIT $3
+`
+
+type ListEndedPagesParams struct {
+	OrgID int64
+	After int64
+	Lim   int32
+}
+
+type ListEndedPagesRow struct {
+	ID           int64
+	AlertGroupID int64
+}
+
+// ListEndedPages lists, in id order after @after, the Pages still pending none of whose Thread replies is still to be
+// sent, which the delivery worker settles: their replies were sent, ended Not delivered or were withheld, as when their
+// Destination is Broken (C-32.FR-10).
+func (q *Queries) ListEndedPages(ctx context.Context, arg ListEndedPagesParams) ([]ListEndedPagesRow, error) {
+	rows, err := q.db.Query(ctx, listEndedPages, arg.OrgID, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEndedPagesRow{}
+	for rows.Next() {
+		var i ListEndedPagesRow
+		if err := rows.Scan(&i.ID, &i.AlertGroupID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -3186,6 +3299,193 @@ func (q *Queries) ListOpenMentions(ctx context.Context, arg ListOpenMentionsPara
 	for rows.Next() {
 		var i ListOpenMentionsRow
 		if err := rows.Scan(&i.UserID, &i.Target); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPageLinks = `-- name: ListPageLinks :many
+SELECT user_id, identity_space
+FROM account_links
+WHERE org_id = $1 AND user_id = ANY($2::bigint[]) AND identity_space = ANY($3::text[])
+`
+
+type ListPageLinksParams struct {
+	OrgID   int64
+	UserIds []int64
+	Spaces  []string
+}
+
+type ListPageLinksRow struct {
+	UserID        int64
+	IdentitySpace string
+}
+
+// ListPageLinks lists which of the people have an Account link in which of the Identity spaces.
+func (q *Queries) ListPageLinks(ctx context.Context, arg ListPageLinksParams) ([]ListPageLinksRow, error) {
+	rows, err := q.db.Query(ctx, listPageLinks, arg.OrgID, arg.UserIds, arg.Spaces)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPageLinksRow{}
+	for rows.Next() {
+		var i ListPageLinksRow
+		if err := rows.Scan(&i.UserID, &i.IdentitySpace); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPageReplies = `-- name: ListPageReplies :many
+SELECT state, coalesce(paged_user_ids, '{}')::bigint[] AS paged_user_ids
+FROM thread_replies
+WHERE org_id = $1 AND page_id = $2::bigint
+`
+
+type ListPageRepliesParams struct {
+	OrgID  int64
+	PageID int64
+}
+
+type ListPageRepliesRow struct {
+	State        string
+	PagedUserIds []int64
+}
+
+// ListPageReplies lists the Thread replies of a Page with their state and the people each mentions.
+func (q *Queries) ListPageReplies(ctx context.Context, arg ListPageRepliesParams) ([]ListPageRepliesRow, error) {
+	rows, err := q.db.Query(ctx, listPageReplies, arg.OrgID, arg.PageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPageRepliesRow{}
+	for rows.Next() {
+		var i ListPageRepliesRow
+		if err := rows.Scan(&i.State, &i.PagedUserIds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPageReplyUsers = `-- name: ListPageReplyUsers :many
+SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username,
+       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name
+FROM page_users pu
+JOIN users u ON u.org_id = pu.org_id AND u.id = pu.user_id
+LEFT JOIN account_links al ON al.org_id = pu.org_id AND al.user_id = pu.user_id
+                          AND al.identity_space = $1::text
+WHERE pu.org_id = $2 AND pu.page_id = $3
+ORDER BY u.id
+`
+
+type ListPageReplyUsersParams struct {
+	IdentitySpace string
+	OrgID         int64
+	PageID        int64
+}
+
+type ListPageReplyUsersRow struct {
+	ID          int64
+	PublicID    string
+	Name        string
+	Login       string
+	Username    string
+	ExternalID  string
+	DisplayName string
+}
+
+// ListPageReplyUsers lists the people of a Page by id, with the username, the messenger's user
+// id and the display name of their Account link in the Identity space, empty without one.
+func (q *Queries) ListPageReplyUsers(ctx context.Context, arg ListPageReplyUsersParams) ([]ListPageReplyUsersRow, error) {
+	rows, err := q.db.Query(ctx, listPageReplyUsers, arg.IdentitySpace, arg.OrgID, arg.PageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPageReplyUsersRow{}
+	for rows.Next() {
+		var i ListPageReplyUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Login,
+			&i.Username,
+			&i.ExternalID,
+			&i.DisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPageRoots = `-- name: ListPageRoots :many
+SELECT d.id, d.type, d.connection_id, d.health, x.entries
+FROM deliveries x
+JOIN destinations d ON d.org_id = x.org_id AND d.id = x.destination_id
+WHERE x.org_id = $1 AND x.alert_group_id = $2::bigint AND x.held_by_storm_id IS NULL
+  AND (x.message_id IS NOT NULL OR (x.state = 'pending' AND x.published_at IS NULL))
+  AND x.state NOT IN ('withheld', 'deleted_in_messenger', 'retired') AND NOT x.desired_retire
+  AND d.deleted_at IS NULL
+ORDER BY d.id
+`
+
+type ListPageRootsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type ListPageRootsRow struct {
+	ID           int64
+	Type         string
+	ConnectionID pgtype.Int8
+	Health       string
+	Entries      []byte
+}
+
+// ListPageRoots lists the Destinations that are not deleted where an Alert Group has its Root message, which a Page of
+// its chains may reply under (C-32.FR-8): a delivery with a message that has not ended, or whose first Publication is
+// on its way — the chains start with the first Publication in one Destination, often before the others — and that no
+// Storm holds, with the type, the Connection and the health of its Destination, and the entries that reached the
+// delivery, which tell the sources that own it (where.go).
+func (q *Queries) ListPageRoots(ctx context.Context, arg ListPageRootsParams) ([]ListPageRootsRow, error) {
+	rows, err := q.db.Query(ctx, listPageRoots, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPageRootsRow{}
+	for rows.Next() {
+		var i ListPageRootsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.ConnectionID,
+			&i.Health,
+			&i.Entries,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

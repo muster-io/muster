@@ -185,9 +185,11 @@ WHERE org_id = @org_id AND id = @id;
 -- InsertThreadReply queues a Thread reply, due at @due: pending, or dropped while its Destination is Broken.
 -- name: InsertThreadReply :exec
 INSERT INTO thread_replies (org_id, delivery_id, alert_group_id, destination_id, event, event_seqs, loudness,
-                            mentions, fingerprints, state, next_attempt_at, created_at)
+                            mentions, fingerprints, state, next_attempt_at, created_at, page_id, paged_user_ids,
+                            page_source)
 VALUES (@org_id, @delivery_id, @alert_group_id, @destination_id, @event, @event_seqs::bigint[], @loudness,
-        @mentions::text[], @fingerprints::text[], @state::text, @due, @now);
+        @mentions::text[], @fingerprints::text[], @state::text, @due, @now, sqlc.narg('page_id'),
+        sqlc.narg('paged_user_ids')::bigint[], sqlc.narg('page_source'));
 
 -- CollectAlerts adds new Alerts to the open batch of a delivery, due when its Thread batching window closes, creating
 -- the batch when there is none; inserted tells a new batch. A batch takes the loudness and Mentions of the loudest
@@ -807,7 +809,7 @@ SELECT r.id, r.delivery_id, r.alert_group_id, r.event, r.event_seqs, r.loudness,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.telegram_channel_chat_id, ds.telegram_discussion_chat_id,
        g.public_id AS alert_group_public_id, g.number, g.title, g.status, g.urgent,
-       rt.language
+       rt.language, r.page_id, r.paged_user_ids, r.page_source
 FROM thread_replies r
 JOIN deliveries d ON d.org_id = r.org_id AND d.id = r.delivery_id
 JOIN destinations ds ON ds.org_id = r.org_id AND ds.id = r.destination_id
@@ -2247,3 +2249,70 @@ SELECT EXISTS (SELECT 1
 SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM teams
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+
+-- ListPageRoots lists the Destinations that are not deleted where an Alert Group has its Root message, which a Page of
+-- its chains may reply under (C-32.FR-8): a delivery with a message that has not ended, or whose first Publication is
+-- on its way — the chains start with the first Publication in one Destination, often before the others — and that no
+-- Storm holds, with the type, the Connection and the health of its Destination, and the entries that reached the
+-- delivery, which tell the sources that own it (where.go).
+-- name: ListPageRoots :many
+SELECT d.id, d.type, d.connection_id, d.health, x.entries
+FROM deliveries x
+JOIN destinations d ON d.org_id = x.org_id AND d.id = x.destination_id
+WHERE x.org_id = @org_id AND x.alert_group_id = @alert_group_id::bigint AND x.held_by_storm_id IS NULL
+  AND (x.message_id IS NOT NULL OR (x.state = 'pending' AND x.published_at IS NULL))
+  AND x.state NOT IN ('withheld', 'deleted_in_messenger', 'retired') AND NOT x.desired_retire
+  AND d.deleted_at IS NULL
+ORDER BY d.id;
+
+-- ListPageLinks lists which of the people have an Account link in which of the Identity spaces.
+-- name: ListPageLinks :many
+SELECT user_id, identity_space
+FROM account_links
+WHERE org_id = @org_id AND user_id = ANY(@user_ids::bigint[]) AND identity_space = ANY(@spaces::text[]);
+
+-- GetPageReply reads what the Thread reply of a Page says (C-32.FR-9): the step, the importance and the next Mention of
+-- the rule, a later Mention, the Team or the token of a page_team step, the Schedule of a page_on_call step with its
+-- Team, and the Team of "Chain of the Team".
+-- name: GetPageReply :one
+SELECT p.step_number, coalesce(p.importance, '')::text AS importance, coalesce(p.again_seconds, 0)::integer AS again_seconds,
+       p.again, coalesce(p.everyone, '')::text AS everyone, p.team_id, coalesce(t.name, '')::text AS team_name,
+       coalesce(s.name, '')::text AS schedule_name, coalesce(st.name, '')::text AS schedule_team_name,
+       coalesce(ct.name, '')::text AS chain_team_name, (p.schedule_id IS NOT NULL)::boolean AS on_call
+FROM pages p
+LEFT JOIN teams t ON t.org_id = p.org_id AND t.id = p.team_id
+LEFT JOIN schedules s ON s.org_id = p.org_id AND s.id = p.schedule_id
+LEFT JOIN teams st ON st.org_id = s.org_id AND st.id = s.team_id
+LEFT JOIN teams ct ON ct.org_id = p.org_id AND ct.id = p.chain_team_id
+WHERE p.org_id = @org_id AND p.id = @id;
+
+-- ListPageReplyUsers lists the people of a Page by id, with the username, the messenger's user
+-- id and the display name of their Account link in the Identity space, empty without one.
+-- name: ListPageReplyUsers :many
+SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username,
+       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name
+FROM page_users pu
+JOIN users u ON u.org_id = pu.org_id AND u.id = pu.user_id
+LEFT JOIN account_links al ON al.org_id = pu.org_id AND al.user_id = pu.user_id
+                          AND al.identity_space = @identity_space::text
+WHERE pu.org_id = @org_id AND pu.page_id = @page_id
+ORDER BY u.id;
+
+-- ListPageReplies lists the Thread replies of a Page with their state and the people each mentions.
+-- name: ListPageReplies :many
+SELECT state, coalesce(paged_user_ids, '{}')::bigint[] AS paged_user_ids
+FROM thread_replies
+WHERE org_id = @org_id AND page_id = @page_id::bigint;
+
+-- ListEndedPages lists, in id order after @after, the Pages still pending none of whose Thread replies is still to be
+-- sent, which the delivery worker settles: their replies were sent, ended Not delivered or were withheld, as when their
+-- Destination is Broken (C-32.FR-10).
+-- name: ListEndedPages :many
+SELECT p.id, p.alert_group_id
+FROM pages p
+WHERE p.org_id = @org_id AND p.state = 'pending' AND p.id > @after::bigint
+  AND NOT EXISTS (SELECT 1
+                  FROM thread_replies r
+                  WHERE r.org_id = p.org_id AND r.page_id = p.id AND r.state IN ('collecting', 'pending'))
+ORDER BY p.id
+LIMIT @lim;

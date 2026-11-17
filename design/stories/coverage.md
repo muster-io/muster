@@ -59,7 +59,7 @@ for L2](#l1-requirements-revised-for-l2)
 | C-29 Compact message layout | L2 Teams | 16 | S-125, S-126, S-127, S-128, S-129, S-130, S-168 | yes | 16 of 16 |
 | C-30 Notification gateways | L2 Paging | 18 | S-145, S-167, S-146, S-147, S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158 | yes | 18 of 18 |
 | C-31 Notification rules | L2 Paging | 12 | S-152, S-153, S-155, S-157, S-161 | yes | 12 of 12 |
-| C-32 Escalation chains and Assignees | L2 Paging | 38 | S-148, S-154, S-169, S-155, S-168, S-156, S-157, S-158, S-159, S-160, S-161 | yes | 38 of 38 |
+| C-32 Escalation chains and Assignees | L2 Paging | 38 | S-148, S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-161 | yes | 38 of 38 |
 
 ## C-01
 
@@ -1141,7 +1141,7 @@ S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158
 ## C-32
 
 [Escalation chains and Assignees](../prd/l2/C-32-escalation-chains-and-assignees.md) · L2 Paging · stories: S-148,
-S-154, S-169, S-155, S-168, S-156, S-157, S-158, S-159, S-160, S-161
+S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-161
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -1152,18 +1152,18 @@ S-154, S-169, S-155, S-168, S-156, S-157, S-158, S-159, S-160, S-161
 | C-32.FR-5 | S-169 | complete | new Alerts that remove an acknowledgement and Maintenance windows are specified later in L2 |
 | C-32.FR-6 | S-169 | complete |  |
 | C-32.FR-7 | S-169 | complete |  |
-| C-32.FR-8 | S-155 | complete |  |
-| C-32.FR-9 | S-155 | complete |  |
+| C-32.FR-8 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram, Bridges and outgoing webhooks (S-177) |
+| C-32.FR-9 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram and Bridges (S-177) |
 | C-32.FR-10 | S-155 (part), S-157 (part) | complete |  |
-| C-32.FR-11 | S-155 (part), S-157 (part), S-160 (part), S-161 (part) | complete | the push of Mentions in Thread replies checked by the spike S-160 |
+| C-32.FR-11 | S-155 (part), S-177 (part), S-157 (part), S-160 (part), S-161 (part) | complete | the push of Mentions in Thread replies checked by the spike S-160 |
 | C-32.FR-12 | S-168 (part), S-157 (part) | complete | P-89 confirmed with S-168; Assignees by calls S-157 |
 | C-32.FR-13 | S-156 | complete |  |
 | C-32.FR-14 | S-169 (part), S-156 (part), S-157 (part) | complete |  |
 | C-32.FR-15 | S-169 | complete |  |
 | C-32.FR-16 | S-169 | complete | P-73 confirmed with S-169 |
 | C-32.FR-17 | S-154 (part), S-158 (part) | complete |  |
-| C-32.FR-18 | S-169 (part), S-168 (part), S-159 (part) | complete |  |
-| C-32.FR-19 | S-148 (part), S-154 (part), S-155 (part) | complete |  |
+| C-32.FR-18 | S-169 (part), S-168 (part), S-178 (part), S-159 (part) | complete |  |
+| C-32.FR-19 | S-148 (part), S-154 (part), S-155 (part), S-178 (part) | complete |  |
 | C-32.FR-20 | S-161 | complete | cites the facts of S-160 |
 | C-32.AC-1 | S-155 | complete |  |
 | C-32.AC-2 | S-168 | complete |  |
@@ -1181,7 +1181,7 @@ S-154, S-169, S-155, S-168, S-156, S-157, S-158, S-159, S-160, S-161
 | C-32.AC-14 | S-158 (part), S-159 (part) | complete | the chain page (S-158), the Alert Group page at 360 pixels (S-159) |
 | C-32.AC-15 | S-154 (part), S-169 (part) | complete |  |
 | C-32.AC-16 | S-169 (part), S-155 (part) | complete |  |
-| C-32.AC-17 | S-169 (part), S-155 (part), S-158 (part) | complete |  |
+| C-32.AC-17 | S-169 (part), S-178 (part), S-158 (part) | complete | the Pages of the runs (S-178) |
 | C-32.AC-18 | S-169 | complete |  |
 
 ## L1 requirements revised for L2
@@ -1250,14 +1250,14 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-13.FR-8 | S-140 | complete | Mattermost groups for group entries and Team mentions |
 | C-13.FR-9 | S-114 (part), S-143 (part) | complete | the button set (S-114) and the Mention entries (S-143); the Route and Team forms with Severity conditions are S-123's, under C-26.FR-1 |
 | C-14.FR-16 | S-125 | complete |  |
-| C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-168 (part), S-156 (part) | complete | the L2 events in events mode (S-118, S-121, S-148, S-169, S-155), the `webhook_events` CHECK extended by S-118, S-121 and S-148; the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156) |
-| C-15.FR-11 | S-140 (part), S-155 | complete | Teams and the On-call as targets (S-140); the people that `paged` names (S-155) |
+| C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-177 (part), S-168 (part), S-156 (part) | complete | the L2 events in events mode (S-118, S-121, S-148, S-169, S-155), the people of `paged` (S-177), the `webhook_events` CHECK extended by S-118, S-121 and S-148; the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156) |
+| C-15.FR-11 | S-140 (part), S-177 | complete | Teams and the On-call as targets (S-140); the people that `paged` names (S-177) |
 | C-16.FR-4 | S-113 (part), S-125 (part) | complete |  |
 | C-17.FR-1 | S-169 | complete | the first chain stops the ack timeout |
 | C-17.FR-2 | S-140 | complete | the Mentions of the entries for `ack_timeout` |
 | C-17.FR-3 | S-169 | complete | Unclaimed once every chain ran out |
 | C-17.FR-11 | S-169 | complete | `unclaimed` when the last chain runs out |
-| C-18.FR-4 | S-155 | complete | a Page by Mention reaches a person only through an Account link |
+| C-18.FR-4 | S-155 (part), S-177 (part) | complete | a Page by Mention reaches a person only through an Account link: in Mattermost and Slack (S-155), in Telegram and through Bridges (S-177) |
 | C-18.FR-6 | S-167 (part), S-150 (part) | complete | gateway contacts set only by their person, seen and removed by Admins (S-167, S-150) |
 | C-18.FR-10 | S-145 | complete | gateway-only Connections not offered to link an account through |
 | C-20.FR-1 | S-111 (part), S-112 (part), S-113 (part), S-114 (part), S-115 (part), S-118 (part), S-119 (part), S-120 (part), S-152 (part), S-153 (part) | complete | the default Notification rules (S-152, S-153) |

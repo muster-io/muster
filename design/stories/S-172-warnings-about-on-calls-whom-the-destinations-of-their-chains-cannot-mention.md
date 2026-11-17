@@ -4,7 +4,7 @@ title: Warnings about On-calls whom the Destinations of their chains cannot ment
 capability: C-27
 kind: be
 layer: L2
-depends_on: [S-155]
+depends_on: [S-155, S-177]
 covers: [C-27.FR-8]
 files_touched:
   - internal/schedules/reach.go
@@ -39,7 +39,8 @@ issue: 461
 **OUT**
 
 - The warnings for the Destinations of the Team and the check for the people of its Teams: S-164. Whether a call
-  through a Notification gateway still reaches the person: S-150. Where chains Page: S-155. The pages that show the
+  through a Notification gateway still reaches the person: S-150. Where chains Page: S-155, and in Telegram and
+  Bridge Destinations S-177. The pages that show the
   warnings: S-135, S-136, S-150.
 
 ## Contracts
@@ -48,8 +49,8 @@ issue: 461
 - **Schema**: none new; `destinations.telegram_absent_user_ids` (S-164) holds the result.
 - **Schedules** (`internal/schedules/reach.go`, `query.sql`): the Destinations of the reach of a Schedule add, through a
   query of its own — `schedules` imports no package of Paging (S-169) — the Destinations of the Routes and Teams that
-  name a chain with a `page_on_call` or `call` step on the Schedule, as `delivery.PageTargets` of S-155 finds them for a
-  run; each warning keeps its reason (C-27.FR-8). This SQL computes a part of the reach rule of S-121, so
+  name a chain with a `page_on_call` or `call` step on the Schedule, as `delivery.PageTargets` of S-155 and S-177 finds
+  them for a run; each warning keeps its reason (C-27.FR-8). This SQL computes a part of the reach rule of S-121, so
   `reach_test.go` also loads the vectors of `internal/routing/testdata/reach/` (S-121), the one
   set of cases of who an Alert Group reaches, and checks for the vectors with chains of a Route or a Team that the
   Destinations its query finds are those the vectors expect for those sources (plan review, M4).

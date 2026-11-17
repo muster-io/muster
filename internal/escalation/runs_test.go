@@ -201,7 +201,7 @@ func (f *fakeRuns) LockRun(_ context.Context, arg dbgen.LockRunParams) (dbgen.Lo
 	}
 	out := dbgen.LockRunRow{ID: r.id, PublicID: r.PublicID, AlertGroupID: r.AlertGroupID, ChainID: r.ChainID,
 		ChainName: r.ChainName, Steps: r.Steps, StepIndex: r.stepIndex, Repeats: r.repeats, State: r.state,
-		Generation: r.Generation, Deadline: time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)}
+		Generation: r.Generation, Deadline: time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC), Sources: r.Sources}
 	if c, ok := f.chains[r.ChainID.Int64]; ok && r.ChainID.Valid {
 		out.ChainPublicID = pgtype.Text{String: c.PublicID, Valid: true}
 	}

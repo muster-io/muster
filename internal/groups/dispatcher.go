@@ -128,6 +128,7 @@ type Queries interface {
 	ListGroupsTeamIDs(ctx context.Context, arg dbgen.ListGroupsTeamIDsParams) ([]dbgen.ListGroupsTeamIDsRow, error)
 	ListReachEntries(ctx context.Context, arg dbgen.ListReachEntriesParams) ([]dbgen.ListReachEntriesRow, error)
 	SetChainGeneration(ctx context.Context, arg dbgen.SetChainGenerationParams) error
+	pageQueries
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the connection or transaction the queries run on, which the re-render step writes through.
@@ -620,6 +621,8 @@ type dispatcher struct {
 	reached ReminderCheck
 	// chains are the runs of the Escalation chains; nil runs none, and every Alert Group keeps its ack timeout.
 	chains ChainRuns
+	// pages finds the Destinations a Page by Mention goes to; nil Pages nobody by Mention.
+	pages PageTargets
 }
 
 // dispatch runs t on the locked Alert Group g as actor and records what it did; after are the counters and log lines
@@ -780,6 +783,7 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 		if e.Page != nil {
 			p.PagedUserIds, p.GatewayConnectionID, p.Reason = e.Page.userIDs(), e.Page.gatewayID(),
 				nonEmpty(e.Page.Reason)
+			p.PageEveryone, p.PageImportance = nonEmpty(e.Page.Everyone), nonEmpty(e.Page.Importance)
 		}
 		if e.Chain != nil {
 			p.EscalationRunID = pgtype.Int8{Int64: e.Chain.Run, Valid: true}

@@ -4,7 +4,7 @@ title: The Escalation chain page with its steps and "How it went", and the chain
 capability: C-32
 kind: fe
 layer: L2
-depends_on: [S-123, S-150, S-157]
+depends_on: [S-123, S-150, S-157, S-178]
 covers: [C-32.FR-1, C-32.FR-2, C-32.FR-3, C-32.FR-17, C-32.AC-14, C-32.AC-17, C-30.FR-9, C-25.FR-2, C-08.FR-1]
 files_touched:
   - web/src/routes/escalation-chains.index.tsx
@@ -62,7 +62,7 @@ issue: 447
 
 **OUT**
 
-- The API: S-154, S-169, S-155, S-157. Running chains and Assignees on the Alert Group page, the list and Home: S-159.
+- The API: S-154, S-169, S-155, S-178 (the Pages of "How it went"), S-157. Running chains and Assignees on the Alert Group page, the list and Home: S-159.
 - The step-by-step test of a Destination with an accelerated run of chains: specified later in L2 (L2.md §1.5).
 
 ## Contracts

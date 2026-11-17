@@ -217,6 +217,13 @@ func TestLifecycleEventTable(t *testing.T) {
 				h.pageNotDelivered(t, []int64{g.ID}, PageCallRefused)
 				return g
 			}},
+		{"paged", want{EventPaged, KindEscalation, Loud, []string{"paged"}},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				h.people()
+				h.svc.SetPageTargets(&fakeTargets{targets: []PageTarget{{DestinationID: 11, Linked: []int64{owner}}}})
+				return h.chainStep(t, ChainProgress{Pages: []StepPage{{ChainEntry: ChainEntry{Run: runID, Step: 1},
+					People: []int64{owner}, Importance: "normal"}}})
+			}},
 		{"escalation step skipped", want{EventEscalationStepSkipped, KindEscalation, Quiet, nil},
 			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
 				return h.chainStep(t, ChainProgress{Skips: []StepSkip{{ChainEntry: ChainEntry{Run: runID, Step: 3},

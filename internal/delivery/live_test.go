@@ -807,6 +807,17 @@ func TestLive(t *testing.T) {
 					// destination_joined publishes in the Destination it names.
 					ev.Destination = &groups.JoinedDestination{ID: l.dests[0], PublicID: "DSAAAAAAAAAAA1"}
 				}
+				if row.Event == groups.EventPaged {
+					// paged replies in the Destinations of its Page (C-32.FR-8).
+					var page int64
+					if err := l.d.Pool.QueryRow(t.Context(), `INSERT INTO pages (org_id, alert_group_id, step_number,
+						kind, everyone, state, created_at) VALUES ($1, $2, 1, 'mention', 'here', 'pending', now())
+						RETURNING id`, l.orgID, id).Scan(&page); err != nil {
+						t.Fatal(err)
+					}
+					ev.Page = &groups.Page{ID: page, Everyone: "here",
+						Targets: []groups.PageTarget{{DestinationID: l.dests[0], Source: groups.PageSourceRoute}}}
+				}
 				render := func(g *groups.Group, evs ...groups.Recorded) {
 					err := pgxTx(t, l, func(tx groups.DBTX) error {
 						return l.svc.Enqueue(t.Context(), tx, groups.Rendering{Group: g, Actor: actor, Events: evs})

@@ -4,7 +4,7 @@
  */
 
 /**
- * Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+ * Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
  * @nullable
  */
 export type EscalationSkipReason = typeof EscalationSkipReason[keyof typeof EscalationSkipReason] | null;
@@ -18,4 +18,5 @@ export const EscalationSkipReason = {
   disabled: 'disabled',
   destination_deleted: 'destination_deleted',
   webhook_events_required: 'webhook_events_required',
+  no_mention_possible: 'no_mention_possible',
 } as const;

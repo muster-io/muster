@@ -106,6 +106,9 @@ func (s stubRenderer) Reply(_ context.Context, _ messages.DBTX, r delivery.Reply
 	if s.err != nil {
 		return delivery.Message{}, s.err
 	}
+	if r.Page != nil {
+		return messages.PageMessage("en", "payments", "UTC", string(g.Status), *r.Page), nil
+	}
 	m := messages.Message{Kind: messages.KindReply, Language: "en", Colour: string(g.Status),
 		Lines: []string{fmt.Sprintf("#%d %s", g.Number, r.Event)}, Buttons: []messages.Button{}}
 	listed := r.Fingerprints

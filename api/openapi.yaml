@@ -15143,8 +15143,9 @@ components:
         Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled
         (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted
         (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both
-        (`webhook_events_required`). Null when the step was made. Later versions add reasons; clients show an unknown
-        one as it is.'
+        (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain''s Destinations can
+        mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add
+        reasons; clients show an unknown one as it is.'
       enum:
       - outside_working_hours
       - severity
@@ -15153,6 +15154,7 @@ components:
       - disabled
       - destination_deleted
       - webhook_events_required
+      - no_mention_possible
       - null
     AlertGroupList:
       type: object
@@ -15448,6 +15450,7 @@ components:
       - team_joined
       - unknown_team_value
       - destination_joined
+      - paged
       - page_not_delivered
       - escalation_step_skipped
       - escalation_webhook
@@ -15486,6 +15489,7 @@ components:
         - unknown_team_value
         - destination_joined
         escalation:
+        - paged
         - page_not_delivered
         - escalation_step_skipped
         - escalation_webhook
@@ -15496,7 +15500,8 @@ components:
       - quiet
     MentionName:
       type: string
-      description: A symbolic Mention that each Destination turns into real Mentions.
+      description: A symbolic Mention that each Destination turns into real Mentions; `paged` is the people of a Page by
+        their Account links, or the Team mention or token of a step "Page the whole Team" (C-32.FR-9).
       enum:
       - owner
       - previous_owner
@@ -15507,6 +15512,7 @@ components:
       - snooze_ended
       - rise_to_urgent
       - storm_started
+      - paged
     TimelineKind:
       type: string
       enum:
@@ -15834,8 +15840,11 @@ components:
         budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt
         (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call
         was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent
-        (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown
-        one as it is.'
+        (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain''s Destinations has the Alert Group''s
+        Root message (`no_root_message`), the person has no Account link in the Identity space of any of them
+        (`no_account_link`), or every Thread reply that would mention them ended Not delivered or was withheld while
+        its Destination was Broken (`not_delivered`). Null for the other events of the kind. Later versions add
+        reasons; clients show an unknown one as it is.'
       enum:
       - call_refused
       - call_unknown
@@ -15843,6 +15852,9 @@ components:
       - no_confirmed_contact
       - gateway_deleted
       - gateway_broken
+      - no_root_message
+      - no_account_link
+      - not_delivered
       - null
     TimelineEscalationEntry:
       description: An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a
@@ -20583,6 +20595,7 @@ components:
       - team_joined
       - unknown_team_value
       - destination_joined
+      - paged
       - page_not_delivered
       - escalation_step_skipped
       - escalation_webhook

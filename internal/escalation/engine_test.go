@@ -431,16 +431,84 @@ func TestStepPages(t *testing.T) {
 }
 
 type recordingPages struct {
-	runs   []RunRef
-	steps  []StepRef
-	people [][]int64
-	err    error
+	runs    []RunRef
+	steps   []StepRef
+	people  [][]int64
+	made    func(step StepRef) StepMade
+	stopped []int64
+	err     error
+	stopErr error
 }
 
 func (p *recordingPages) MakeStep(_ context.Context, _ groups.DBTX, _ *groups.Group, run RunRef, step StepRef,
-	people []int64) error {
+	people []int64) (StepMade, error) {
 	p.runs, p.steps, p.people = append(p.runs, run), append(p.steps, step), append(p.people, people)
-	return p.err
+	if p.made != nil {
+		return p.made(step), p.err
+	}
+	return StepMade{}, p.err
+}
+
+func (p *recordingPages) StopRules(_ context.Context, _ groups.DBTX, groupID int64, _ time.Time) error {
+	p.stopped = append(p.stopped, groupID)
+	return p.stopErr
+}
+
+// TestStepPagesInProgress is C-32.FR-9 and FR-14 for the steps that Page: the Pages that StepPages makes join the
+// progress of the firing after the skips of their step, a page_team step that StepPages skips is recorded skipped
+// with its reason, and the stop of the runs stops the runs of their Notification rules (C-31.FR-3).
+func TestStepPagesInProgress(t *testing.T) {
+	e := newRunsEnv(t)
+	pages := &recordingPages{made: func(st StepRef) StepMade {
+		if st.Kind == KindPageTeam {
+			return StepMade{Skip: groups.SkipNoMentionPossible}
+		}
+		return StepMade{Pages: []groups.StepPage{{ChainEntry: groups.ChainEntry{Step: st.Number}, People: []int64{21}}}}
+	}}
+	e.runs.pages = pages
+	e.chain(1, "devops", false, people(23, 21), team(), page(schedMain), wait(600), page(schedMain))
+	e.source(1, 0, ConditionAny)
+	e.start(t, groups.ChainStart{All: true})
+	e.fire(t, e.q.runs[0].id)
+	p := e.groups.progress[len(e.groups.progress)-1]
+	var skips []string
+	for _, s := range p.Skips {
+		skips = append(skips, strconv.Itoa(s.Step)+"/"+s.Reason)
+	}
+	var made []string
+	for _, pg := range p.Pages {
+		made = append(made, strconv.Itoa(pg.Step)+"@"+strconv.Itoa(pg.After)+"#"+strconv.Itoa(pg.Seq))
+	}
+	if !slices.Equal(skips, []string{"1/viewer", "2/no_mention_possible"}) || !slices.Equal(made, []string{"1@1#0",
+		"3@2#1"}) {
+		t.Errorf("skips %v pages %v", skips, made)
+	}
+	if got := e.made(); !slices.Equal(got[:3], []string{"1 made", "2 skipped no_mention_possible", "3 made"}) {
+		t.Errorf("steps %v", got)
+	}
+	if r := pages.runs[0]; r.ChainPublicID == "" || r.ChainName != "devops" || len(r.Sources) != 1 {
+		t.Errorf("run %+v", r)
+	}
+	// The start stopped the rules of the Alert Group's earlier start; the stop of its runs stops them again, and so
+	// does a stop after the runs ended: a rule may still repeat after its chain's run ran out.
+	if err := e.runs.Stop(t.Context(), nil, e.g, groups.ChainStop{Command: groups.StopAcknowledge,
+		At: e.clock.Now()}); err != nil || !slices.Equal(pages.stopped, []int64{e.g.ID, e.g.ID}) {
+		t.Errorf("the rules of the stopped run: %v %v", err, pages.stopped)
+	}
+	if err := e.runs.Stop(t.Context(), nil, e.g, groups.ChainStop{Command: groups.StopResolve,
+		At: e.clock.Now()}); err != nil || len(pages.stopped) != 3 {
+		t.Errorf("the rules after the runs stopped: %v %v", err, pages.stopped)
+	}
+	e2 := newRunsEnv(t)
+	failing := &recordingPages{}
+	e2.runs.pages = failing
+	e2.chain(1, "devops", false, wait(600))
+	e2.source(1, 0, ConditionAny)
+	e2.start(t, groups.ChainStart{All: true})
+	failing.stopErr = errors.New("boom")
+	if err := e2.runs.Stop(t.Context(), nil, e2.g, groups.ChainStop{Command: groups.StopResolve}); err == nil {
+		t.Error("a failing stop of the rules: no error")
+	}
 }
 
 // TestPosition: the step a running run is at is the wait it waits out, else its next step; none once it no longer

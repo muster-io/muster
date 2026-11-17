@@ -162,6 +162,10 @@ type (
 		created                   time.Time
 		attempts                  int64
 		firstFailed               *time.Time
+		// page is the Page of the reply of a paged, pagedUsers the people it mentions and pageSource its source.
+		page       int64
+		pagedUsers []int64
+		pageSource string
 	}
 	fakeBucket struct {
 		tokens   float64
@@ -225,6 +229,8 @@ type fakeDB struct {
 	conditions map[int64]map[int64]string
 	teamDests  map[int64][]routing.Entry
 	teamRefs   map[int64]dbgen.ListEntryTeamsRow
+	// pageDB are the Pages by Mention (pages_test.go).
+	pageDB fakePageDB
 }
 
 // sqlBool is a boolean of SQL — true, false or NULL — with its three-valued logic, so that the fake meets a NULL where
@@ -546,7 +552,8 @@ func (f *fakeDB) InsertThreadReply(_ context.Context, arg dbgen.InsertThreadRepl
 	}
 	f.replies = append(f.replies, &fakeReply{id: f.id(), delivery: arg.DeliveryID, group: arg.AlertGroupID,
 		dest: arg.DestinationID, event: arg.Event, seqs: arg.EventSeqs, loudness: arg.Loudness, mentions: arg.Mentions,
-		fingerprints: arg.Fingerprints, state: arg.State, next: arg.Due, created: arg.Now})
+		fingerprints: arg.Fingerprints, state: arg.State, next: arg.Due, created: arg.Now, page: arg.PageID.Int64,
+		pagedUsers: arg.PagedUserIds, pageSource: arg.PageSource.String})
 	return nil
 }
 
@@ -1141,7 +1148,9 @@ func (f *fakeDB) GetLeasedReply(_ context.Context, arg dbgen.GetLeasedReplyParam
 		TelegramDiscussionChatID: nullInt(ds.tgGroup), AlertGroupPublicID: g.publicID, Number: g.number, Title: g.title,
 		Status: g.status, Urgent: g.urgent, Language: f.routes[g.route].language, DesiredPayload: d.payload,
 		PublishedAt:    tz(d.publishedAt),
-		ResponseValues: valuesOf(d.responseValues), ThreadOpened: d.threadOpened}, nil
+		ResponseValues: valuesOf(d.responseValues), ThreadOpened: d.threadOpened,
+		PageID: pgtype.Int8{Int64: r.page, Valid: r.page != 0}, PagedUserIds: r.pagedUsers,
+		PageSource: pgtype.Text{String: r.pageSource, Valid: r.pageSource != ""}}, nil
 }
 
 // valuesOf is the JSON object of extracted values as a column holds it.

@@ -16,6 +16,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -85,13 +86,19 @@ type replyAttempt struct {
 }
 
 // reply sends one claimed Thread reply; a failure is logged and the reply is attempted again once its lease runs out.
+// A reply that ended, sent or Not delivered, settles its Page; one attempted again does not, and a Page whose replies
+// end otherwise, dropped or withheld, is settled by the round (settlePages).
 func (w *Worker) reply(ctx context.Context, org, id int64) {
 	a, ok, err := w.prepareReply(ctx, org, id)
 	if err == nil && ok {
 		for _, f := range a.after {
 			f(ctx)
 		}
-		err = w.sendReply(ctx, org, a)
+		var ended bool
+		ended, err = w.sendReply(ctx, org, a)
+		if err == nil && ended {
+			w.settleReply(ctx, org, a.row)
+		}
 	}
 	if err != nil && ctx.Err() == nil {
 		w.Log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", "thread_reply"), logging.F("error", err.Error()))
@@ -162,6 +169,13 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		var webhook *WebhookCall
 		var pending []func(context.Context)
 		var fallbacks []string
+		var page *messages.PageInput
+		var pageTargets []mentions.Target
+		if row.PageID.Valid {
+			if page, pageTargets, err = w.pageReply(ctx, tx, q, org, row, d); err != nil {
+				return err
+			}
+		}
 		if sendsRequests(d.Type) {
 			// The request templates render the Alert Group's latest Desired state and the event the reply carries.
 			webhook = &WebhookCall{State: row.DesiredPayload, Response: responseValues(row.ResponseValues),
@@ -169,7 +183,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		} else if msg, err = w.Renderer.Reply(ctx, tx, ReplyView{Event: groups.Event(row.Event), Seq: seq,
 			Fingerprints: row.Fingerprints, Language: row.Language, Listed: ThreadAlertsListed,
 			Markup: markupOf(d.Type), After: func(f func(context.Context)) { pending = append(pending, f) },
-			Fallback: func(detail string) { fallbacks = append(fallbacks, detail) }}, g); err != nil {
+			Fallback: func(detail string) { fallbacks = append(fallbacks, detail) }, Page: page}, g); err != nil {
 			return fmt.Errorf("render the thread reply: %w", err)
 		}
 		// A Route template that failed for the reply is recorded in the Timeline as for the Root message (C-12.FR-6).
@@ -179,8 +193,12 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 				return err
 			}
 		}
-		resolved, err := w.targets(ctx, tx, org, d, row.AlertGroupID, 0, seq, groups.Loudness(row.Loudness), ms)
-		if err != nil {
+		var resolved mentions.Result
+		if page != nil {
+			// A Page mentions its people by their Account links, not by the Destination's Mention entries.
+			resolved.Targets = pageTargets
+		} else if resolved, err = w.targets(ctx, tx, org, d, row.AlertGroupID, 0, seq, groups.Loudness(row.Loudness),
+			ms); err != nil {
 			return err
 		}
 		a = replyAttempt{row: row, destination: d,
@@ -198,8 +216,9 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 
 // sendReply sends a prepared Thread reply outside any transaction and records its outcome by its rule (outcomes.go);
 // a markup the messenger rejects is sent again without markup, and a reply whose Thread is lost again without its reply
-// link, in the same attempt.
-func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) error {
+// link, in the same attempt. ended says whether the reply ended, sent or Not delivered, rather than waiting for
+// another attempt.
+func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) (ended bool, err error) {
 	ctx = outbound.WithLinks(ctx, linksOf(a.destination, &a.row.AlertGroupID))
 	start := w.Lease.Clocks.Real.Now()
 	c := a.call
@@ -228,15 +247,18 @@ func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) error
 	}
 	took := w.Lease.Clocks.Real.Now().Sub(start)
 	var logs after
-	err := w.Store.inTx(ctx, func(q queries) error {
+	err = w.Store.inTx(ctx, func(q queries) error {
 		logs = nil
-		return w.recordReply(ctx, q, org, a, out, rejected, lost, &logs)
+		var recErr error
+		ended, recErr = w.recordReply(ctx, q, org, a, out, rejected, lost, &logs)
+		return recErr
 	})
 	w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1, took)
-	if err == nil {
-		logs.run(ctx, w.Log)
+	if err != nil {
+		return false, err
 	}
-	return err
+	logs.run(ctx, w.Log)
+	return ended, nil
 }
 
 // sendReplyCall is one adapter call of a prepared Thread reply; a type no adapter serves is an unknown response.

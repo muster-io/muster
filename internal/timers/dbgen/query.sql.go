@@ -28,7 +28,8 @@ UPDATE timers t
 SET lease_owner = $1::text, lease_until = $2::timestamptz, attempts = t.attempts + 1
 FROM due
 WHERE t.org_id = $3 AND t.id = due.id
-RETURNING t.id, t.alert_group_id, t.storm_id, t.escalation_run_id, t.kind, t.deadline, t.attempts
+RETURNING t.id, t.alert_group_id, t.storm_id, t.escalation_run_id, t.notification_rule_run_id, t.kind, t.deadline,
+          t.attempts
 `
 
 type ClaimDueTimersParams struct {
@@ -42,13 +43,14 @@ type ClaimDueTimersParams struct {
 }
 
 type ClaimDueTimersRow struct {
-	ID              int64
-	AlertGroupID    pgtype.Int8
-	StormID         pgtype.Int8
-	EscalationRunID pgtype.Int8
-	Kind            string
-	Deadline        time.Time
-	Attempts        int64
+	ID                    int64
+	AlertGroupID          pgtype.Int8
+	StormID               pgtype.Int8
+	EscalationRunID       pgtype.Int8
+	NotificationRuleRunID pgtype.Int8
+	Kind                  string
+	Deadline              time.Time
+	Attempts              int64
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -79,6 +81,7 @@ func (q *Queries) ClaimDueTimers(ctx context.Context, arg ClaimDueTimersParams) 
 			&i.AlertGroupID,
 			&i.StormID,
 			&i.EscalationRunID,
+			&i.NotificationRuleRunID,
 			&i.Kind,
 			&i.Deadline,
 			&i.Attempts,

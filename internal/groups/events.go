@@ -63,9 +63,16 @@ const EventDestinationJoined Event = "destination_joined"
 // EventPageNotDelivered is the lifecycle event of C-30.FR-7 and C-32.FR-10 (revised C-09.FR-22): a Page that reached
 // its person nowhere, here a call through a Notification gateway that ended Not delivered — Quiet, without Mentions,
 // of the Timeline kind escalation, nothing in a messenger. Its entry names the people in paged_user_ids, the gateway
-// and the reason. escalation_step_skipped and escalation_webhook are in escalation.go; the other events of the kind
-// escalation (paged, assignees_changed) join the table with the stories that record them.
+// and the reason. escalation_step_skipped and escalation_webhook are in escalation.go; assignees_changed joins the
+// table with the story that records it.
 const EventPageNotDelivered Event = "page_not_delivered"
+
+// EventPaged is the lifecycle event of C-32.FR-9 and FR-19 (revised C-09.FR-22): an Escalation step, or an action of a
+// Notification rule, Pages people, a Team or everyone in the chat by Mention — Loud with the Mention paged, of the
+// Timeline kind escalation, a Thread reply in the Threads of its chain's Destinations (C-32.FR-8). Its entry names
+// the people in paged_user_ids, or the Team of a page_team step in team_id and its token in page_everyone, and the
+// importance of a Page of people in page_importance. A Page through a Notification gateway comes with S-157.
+const EventPaged Event = "paged"
 
 // ReachEvents are the lifecycle events by which the Destinations an Alert Group reaches can grow (C-26.FR-4, FR-5): a
 // Team that joins it, which adds the Team's Destinations, and a rise of its Severity level, which adds the Destinations
@@ -112,6 +119,9 @@ const (
 	MentionAckTimeout    Mention = "ack_timeout"
 	MentionSnoozeEnded   Mention = "snooze_ended"
 	MentionRiseToUrgent  Mention = "rise_to_urgent"
+	// MentionPaged is the Mention of paged: the people of the Page by their Account links, or the Team mention or the
+	// token of a page_team step, in the Destinations of the chain (C-32.FR-9).
+	MentionPaged Mention = "paged"
 )
 
 // Variant tells apart the rows of one event: the status an Alert Group had or returns to, or whether a rise to
@@ -182,6 +192,7 @@ var Table = []Row{
 	{EventReminderAnswered, VariantAny, KindTimers, Quiet, nil},
 	{EventAutoUnacknowledged, VariantAny, KindStatus, Loud, []Mention{MentionOwner}},
 	{EventNoticesMissed, VariantAny, KindTimers, Loud, nil},
+	{EventPaged, VariantAny, KindEscalation, Loud, []Mention{MentionPaged}},
 	{EventPageNotDelivered, VariantAny, KindEscalation, Quiet, nil},
 	{EventEscalationStepSkipped, VariantAny, KindEscalation, Quiet, nil},
 	{EventEscalationWebhook, VariantAny, KindEscalation, Quiet, nil},

@@ -4,7 +4,7 @@ title: Running chains and Assignees on the Alert Group page at phone width, the 
 capability: C-32
 kind: fe
 layer: L2
-depends_on: [S-158, S-168]
+depends_on: [S-158, S-168, S-178]
 covers: [C-32.FR-18, C-32.AC-10, C-32.AC-14, C-09.FR-11, C-09.FR-13, C-09.FR-14]
 files_touched:
   - web/src/routes/alert-groups.$alertGroupId.tsx

@@ -29,7 +29,7 @@ import (
 // version leaves it, which stops no run, is stopped then. Otherwise it makes the steps from the current one on: a step
 // that Pages or sends is skipped, recording escalation_step_skipped, outside the Working hours of its chain when it is
 // limited to them, for a Severity level its condition does not meet, in a gap of the Schedule it Pages, or for a
-// person it names who became a Viewer or was disabled since; it is made otherwise, by StepPages, none until S-155. A
+// person it names who became a Viewer or was disabled since; it is made otherwise, by StepPages (pages.go). A
 // step "Send to an outgoing webhook" is also skipped when its Destination was deleted or takes no events any more, and
 // is made by recording escalation_webhook (webhook.go).
 // Skips and Pages go on at once; a wait sets the timer at the end of the wait, from the deadline the step was due, on
@@ -60,7 +60,7 @@ func (r *Runs) FireStep(ctx context.Context, tx DBTX, runID int64, deadline time
 		}
 		if g.Status != groups.StatusFiring {
 			// A replica of an earlier version stopped being firing without stopping the runs: they stop now.
-			return groups.ChainProgress{Changed: true}, r.stop(ctx, q, g, groups.ChainStop{Command: stopOf(g.Status),
+			return groups.ChainProgress{Changed: true}, r.stop(ctx, tx, q, g, groups.ChainStop{Command: stopOf(g.Status),
 				At: r.s.clock.Now().UTC()}, func(f func(context.Context)) { logs = append(logs, f) })
 		}
 		w := &walk{r: r, tx: tx, q: q, g: g, run: run, now: r.s.clock.Now().UTC(), at: deadline.UTC(),
@@ -126,6 +126,8 @@ type walk struct {
 	// MaxStepsPerRun.
 	made   int64
 	capped bool
+	// seq numbers the webhooks and the Pages of the firing, which keep the order of their steps.
+	seq int
 }
 
 // MaxStepsPerFiring bounds the steps one firing makes. Repeats nested without a wait between them make many passes
@@ -190,16 +192,15 @@ func (w *walk) walk(ctx context.Context) (groups.ChainProgress, error) {
 				p.Skips = append(p.Skips, *skip)
 			}
 			if hook != nil {
-				hook.After = len(p.Skips)
+				hook.After, hook.Seq = len(p.Skips), w.seq
+				w.seq++
 				p.Webhooks = append(p.Webhooks, *hook)
 			}
 			idx++
 		default:
-			skips, err := w.page(ctx, st)
-			if err != nil {
+			if err := w.page(ctx, st, &p); err != nil {
 				return p, err
 			}
-			p.Skips = append(p.Skips, skips...)
 			idx++
 		}
 	}
@@ -223,33 +224,59 @@ func (w *walk) entry(st runStep) groups.ChainEntry {
 		ChainName: w.run.ChainName, Step: st.Number}
 }
 
-// page makes or skips a step that Pages or sends (C-32.FR-14): skipped for a Severity level its condition does not
-// meet, outside the Working hours of its chain when limited to them, in a gap of the Schedule it Pages; for the people
-// it names, each who became a Viewer or was disabled since is skipped, and the step with them when none is left.
-func (w *walk) page(ctx context.Context, st runStep) ([]groups.StepSkip, error) {
+// page makes or skips a step that Pages or sends (C-32.FR-14), adding its skips and Pages to p: skipped for a
+// Severity level its condition does not meet, outside the Working hours of its chain when limited to them, in a gap of
+// the Schedule it Pages; for the people it names, each who became a Viewer or was disabled since is skipped, and the
+// step with them when none is left. StepPages makes the step, its Pages after the skips of its people, or skips a
+// page_team step that none of its chain's Destinations can carry (no_mention_possible, C-32.FR-9).
+func (w *walk) page(ctx context.Context, st runStep, p *groups.ChainProgress) error {
 	reason, err := w.skipReason(ctx, st)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if reason != "" {
-		return []groups.StepSkip{{ChainEntry: w.entry(st), Reason: reason}}, w.record(ctx, st, OutcomeSkipped, reason)
+		p.Skips = append(p.Skips, groups.StepSkip{ChainEntry: w.entry(st), Reason: reason})
+		return w.record(ctx, st, OutcomeSkipped, reason)
 	}
 	people, skips, err := w.people(ctx, st)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	p.Skips = append(p.Skips, skips...)
 	if len(st.UserIDs) > 0 && len(people) == 0 {
-		return skips, w.record(ctx, st, OutcomeSkipped, skips[0].Reason)
+		return w.record(ctx, st, OutcomeSkipped, skips[0].Reason)
 	}
 	if w.r.pages != nil {
-		ref := RunRef{ID: w.run.ID, PublicID: w.run.PublicID, ChainID: w.run.ChainID.Int64}
-		step := StepRef{Number: st.Number, Kind: st.Kind, Importance: st.Importance, ScheduleID: st.ScheduleID,
-			TeamID: st.TeamID, Everyone: st.Everyone, GatewayID: st.GatewayID}
-		if err := w.r.pages.MakeStep(ctx, w.tx, w.g, ref, step, people); err != nil {
-			return nil, err
+		made, err := w.r.pages.MakeStep(ctx, w.tx, w.g, w.ref(), StepRef{Number: st.Number, Kind: st.Kind,
+			Importance: st.Importance, ScheduleID: st.ScheduleID, Schedule: st.Schedule, TeamID: st.TeamID,
+			Everyone: st.Everyone, GatewayID: st.GatewayID}, people)
+		if err != nil {
+			return err
+		}
+		if made.Skip != "" {
+			p.Skips = append(p.Skips, groups.StepSkip{ChainEntry: w.entry(st), Reason: made.Skip})
+			return w.record(ctx, st, OutcomeSkipped, made.Skip)
+		}
+		for _, pg := range made.Pages {
+			pg.After, pg.Seq = len(p.Skips), w.seq
+			w.seq++
+			p.Pages = append(p.Pages, pg)
 		}
 	}
-	return skips, w.record(ctx, st, OutcomeMade, "")
+	return w.record(ctx, st, OutcomeMade, "")
+}
+
+// ref names the run for StepPages: its chain, its owning Team when it started and its sources.
+func (w *walk) ref() RunRef {
+	ref := RunRef{ID: w.run.ID, PublicID: w.run.PublicID, ChainID: w.run.ChainID.Int64,
+		ChainPublicID: w.run.ChainPublicID.String, ChainName: w.run.ChainName, OwningTeamID: w.run.OwningTeamID.Int64}
+	var sources []source
+	if json.Unmarshal(w.run.Sources, &sources) == nil {
+		for _, s := range sources {
+			ref.Sources = append(ref.Sources, RunSource(s))
+		}
+	}
+	return ref
 }
 
 // skipReason is why a step that Pages or sends is skipped as a whole, empty when it is not.

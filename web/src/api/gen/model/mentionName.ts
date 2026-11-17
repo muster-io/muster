@@ -4,7 +4,7 @@
  */
 
 /**
- * A symbolic Mention that each Destination turns into real Mentions.
+ * A symbolic Mention that each Destination turns into real Mentions; `paged` is the people of a Page by their Account links, or the Team mention or token of a step "Page the whole Team" (C-32.FR-9).
  */
 export type MentionName = typeof MentionName[keyof typeof MentionName];
 
@@ -19,4 +19,5 @@ export const MentionName = {
   snooze_ended: 'snooze_ended',
   rise_to_urgent: 'rise_to_urgent',
   storm_started: 'storm_started',
+  paged: 'paged',
 } as const;

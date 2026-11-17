@@ -38,16 +38,17 @@ const (
 	FailureBackoff = time.Second
 )
 
-// Timer is a claimed timer row with its subject: an Alert Group, a Storm, or the run of an Escalation chain, whose
-// timer names the run rather than its Alert Group (schema.md §4.10).
+// Timer is a claimed timer row with its subject: an Alert Group, a Storm, the run of an Escalation chain or the run of
+// a Notification rule, whose timers name the run rather than its Alert Group (schema.md §4.10).
 type Timer struct {
-	ID              int64
-	AlertGroupID    *int64
-	StormID         *int64
-	EscalationRunID *int64
-	Kind            string
-	Deadline        time.Time
-	Attempts        int64
+	ID                    int64
+	AlertGroupID          *int64
+	StormID               *int64
+	EscalationRunID       *int64
+	NotificationRuleRunID *int64
+	Kind                  string
+	Deadline              time.Time
+	Attempts              int64
 }
 
 // Handler fires one timer of its kind in the transaction tx of the timer, for the Organization orgID, and returns
@@ -97,7 +98,8 @@ func (s pgStore) Claim(ctx context.Context, l db.Lease, orgID int64, kinds []str
 		out := make([]Timer, len(rows))
 		for i, r := range rows {
 			out[i] = Timer{ID: r.ID, AlertGroupID: int8Of(r.AlertGroupID), StormID: int8Of(r.StormID),
-				EscalationRunID: int8Of(r.EscalationRunID), Kind: r.Kind, Deadline: r.Deadline.UTC(), Attempts: r.Attempts}
+				EscalationRunID: int8Of(r.EscalationRunID), NotificationRuleRunID: int8Of(r.NotificationRuleRunID),
+				Kind: r.Kind, Deadline: r.Deadline.UTC(), Attempts: r.Attempts}
 		}
 		return out, nil
 	})

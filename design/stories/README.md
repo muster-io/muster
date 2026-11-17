@@ -270,9 +270,9 @@ deployment, `docs` documentation. A story for another repository names it after 
 |---|---|---|---|
 | L2 Teams | C-25, C-26, the buttons of C-28, C-29 | S-111 – S-130, S-162, S-163, S-166, S-170 | 24 |
 | L2 On call | C-27, the Team mentions of C-25, the Mention entries of C-28 | S-131 – S-144, S-164, S-165, S-171 | 17 |
-| L2 Paging | C-30 – C-32, the chains' part of C-27.FR-8 | S-145 – S-161, S-167 – S-169, S-172, S-173 | 22 |
+| L2 Paging | C-30 – C-32, the chains' part of C-27.FR-8 | S-145 – S-161, S-167 – S-169, S-172, S-173, S-177, S-178 | 24 |
 | L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
-| **L2 core** | 8 | | **66** |
+| **L2 core** | 8 | | **68** |
 
 ### Foundation
 
@@ -623,14 +623,16 @@ show the links.
 | [S-154](S-154-escalation-chains-and-steps-and-naming-them-on-routes-and-teams.md) | C-32 | Escalation chains and their steps, naming them on Routes and Teams with Severity conditions, and the refusals that protect them (BE) | be | S-140, S-148, S-152 |
 | [S-169](S-169-the-lifecycle-of-escalation-chains-with-the-ack-timeout-unclaimed-and-skipped-steps.md) | C-32 | The lifecycle of Escalation chains on Alert Groups, with the ack timeout, Unclaimed, waits, repeats and skipped steps (BE) | be | S-154 |
 | [S-155](S-155-pages-by-mention-in-the-threads-of-their-chains-notification-rule-runs-and-undelivered-pages.md) | C-32 | Pages by Mention in the Threads of their own chains, the runs of Notification rules, and undelivered Pages (BE) | be | S-152, S-164, S-165, S-169, S-171 |
-| [S-172](S-172-warnings-about-on-calls-whom-the-destinations-of-their-chains-cannot-mention.md) | C-27 | Warnings about On-calls whom the Destinations of their chains cannot mention, with the Telegram discussion group check for them (BE) | be | S-155 |
+| [S-177](S-177-pages-in-telegram-through-bridges-and-to-outgoing-webhooks.md) | C-32 | Pages by Mention in Telegram, through Bridges and to outgoing webhooks (BE) | be | S-155 |
+| [S-178](S-178-the-pages-of-chain-runs-and-of-the-timeline-in-the-api.md) | C-32 | The Pages of the runs of Escalation chains and of the Timeline in the API, and paged in the Timeline of the SPA (BE) | be | S-155 |
+| [S-172](S-172-warnings-about-on-calls-whom-the-destinations-of-their-chains-cannot-mention.md) | C-27 | Warnings about On-calls whom the Destinations of their chains cannot mention, with the Telegram discussion group check for them (BE) | be | S-155, S-177 |
 | [S-168](S-168-assignees-in-the-root-message-and-the-layout-the-owners-team-and-the-assignee-filter.md) | C-32 | Assignees — the people the chains Paged last — in the Root message and the layout, the Owner's Team, and the Assignee filter (BE) | be | S-126, S-155 |
 | [S-156](S-156-the-step-send-to-an-outgoing-webhook-and-escalation-webhook.md) | C-32 | The step "Send to an outgoing webhook" and the event escalation_webhook (BE) | be | S-169 |
-| [S-157](S-157-pages-through-a-notification-gateway-from-escalation-steps-and-notification-rules.md) | C-32 | Pages through a Notification gateway from Escalation steps and Notification rules, queued as calls (BE) | be | S-149, S-156, S-168, S-173 |
-| [S-158](S-158-the-chain-page-with-how-it-went-and-the-chains-on-the-route-form-and-the-team-page.md) | C-32 | The Escalation chain page with its steps and "How it went", and the chains on the Route form and the Team page (FE) | fe | S-123, S-150, S-157 |
-| [S-159](S-159-running-chains-and-assignees-on-the-alert-group-page-the-assignee-filter-and-i-am-an-assignee.md) | C-32 | Running chains and Assignees on the Alert Group page at phone width, the Assignee filter, and "I am an Assignee" on the Home page (FE) | fe | S-158, S-168 |
+| [S-157](S-157-pages-through-a-notification-gateway-from-escalation-steps-and-notification-rules.md) | C-32 | Pages through a Notification gateway from Escalation steps and Notification rules, queued as calls (BE) | be | S-149, S-156, S-168, S-173, S-178 |
+| [S-158](S-158-the-chain-page-with-how-it-went-and-the-chains-on-the-route-form-and-the-team-page.md) | C-32 | The Escalation chain page with its steps and "How it went", and the chains on the Route form and the Team page (FE) | fe | S-123, S-150, S-157, S-178 |
+| [S-159](S-159-running-chains-and-assignees-on-the-alert-group-page-the-assignee-filter-and-i-am-an-assignee.md) | C-32 | Running chains and Assignees on the Alert Group page at phone width, the Assignee filter, and "I am an Assignee" on the Home page (FE) | fe | S-158, S-168, S-178 |
 | [S-160](S-160-spike-push-of-mentions-in-thread-replies.md) | C-32 | Spike: push of Mentions in Thread replies to a phone in Mattermost, Slack and Telegram | docs | — |
-| [S-161](S-161-documentation-escalation-chains-notification-rules-and-how-an-alert-reaches-people.md) | C-32 | Documentation: Escalation chains, Notification rules and How an alert reaches people | docs | S-124, S-137, S-151, S-153, S-157, S-159, S-160 |
+| [S-161](S-161-documentation-escalation-chains-notification-rules-and-how-an-alert-reaches-people.md) | C-32 | Documentation: Escalation chains, Notification rules and How an alert reaches people | docs | S-124, S-137, S-151, S-153, S-157, S-159, S-160, S-177 |
 
 S-162, S-163, S-166 and S-170 were split or added when the contracts of the stage "L2 Teams" were written and reviewed.
 S-162, the Route profile Paging, was split from S-111, because the profile's id appears in thirteen web end-to-end specs
@@ -670,7 +672,13 @@ people that chains Page and the Timeline read path joined S-155, which would the
 keeps the Pages, and S-172 takes the chains' Destinations in the warnings about unreachable On-calls and that check; it
 follows S-155. S-173 was split from S-148 in the same review, when the Timeline read path and the exhaustive switches of
 the SPA joined S-148, which would then have touched about 47 files: S-148 keeps the queue of calls, and S-173 takes the
-Acknowledge of the Transport `gateway` with its answers; it follows S-148, and S-151 and S-157 depend on it. The spike
+Acknowledge of the Transport `gateway` with its answers; it follows S-148, and S-151 and S-157 depend on it. S-177 and
+S-178 were split from S-155 before it was implemented, when its Pages in every kind of Destination and their reads
+would have touched about 80 files: S-155 keeps the Pages in Mattermost and Slack, the runs of Notification rules,
+undelivered Pages and the metric; S-177 takes the Pages in Telegram, through Bridges and to outgoing webhooks, and
+S-178 the Pages of the runs of chains and the fields of a Page in the Timeline of the API. Both follow S-155; S-172
+follows S-177, whose Telegram Destinations it checks, S-161 follows it for the table of C-32.FR-11, and S-157, S-158 and
+S-159 follow S-178, whose reads they extend or show. The spike
 on the push of Mentions, S-160, depends on nothing and may run at any time; only the documentation of S-161 waits for
 it.
 

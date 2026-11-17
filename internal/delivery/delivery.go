@@ -68,16 +68,19 @@ const TelegramPressEditDelay = 500 * time.Millisecond
 // claim takes, few, so that Urgent work that comes due meanwhile waits behind few calls; the margin after the time its
 // tokens are due that a delivery without a token, or after a RetryAfter, waits, so that the interactive path takes the
 // next token first; the longest wait between rounds, which bounds what a missed notification costs; the
-// shortest one; the first wait after a failed round; and the most Thread replies one delete of their retention
-// removes.
+// shortest one; the first wait after a failed round; the most Thread replies one delete of their retention
+// removes; and the most batches of Pages whose replies all ended that one round settles, so that a backlog of them,
+// such as the replies a Broken Destination dropped at its recovery, does not hold back the deliveries and replies of
+// the next round.
 const (
-	Lease          = time.Minute
-	Batch          = 10
-	TokenMargin    = 200 * time.Millisecond
-	MaxWait        = 30 * time.Second
-	MinWait        = 100 * time.Millisecond
-	FailureBackoff = time.Second
-	RetentionBatch = 5000
+	Lease             = time.Minute
+	Batch             = 10
+	TokenMargin       = 200 * time.Millisecond
+	MaxWait           = 30 * time.Second
+	MinWait           = 100 * time.Millisecond
+	FailureBackoff    = time.Second
+	RetentionBatch    = 5000
+	PageSettleBatches = 4
 )
 
 // The Destination types.
@@ -451,6 +454,7 @@ type queries interface {
 	bridgePressQueries
 	slackPressQueries
 	reachQueries
+	pageQueries
 	RecordThreadOpened(ctx context.Context, arg dbgen.RecordThreadOpenedParams) error
 	SetDestinationTemplateError(ctx context.Context, arg dbgen.SetDestinationTemplateErrorParams) (
 		[]dbgen.SetDestinationTemplateErrorRow, error)
@@ -529,6 +533,9 @@ type Config struct {
 	Mentions Mentioner
 	// Requests renders the Desired state of outgoing webhooks in the template mode.
 	Requests Requests
+	// TeamMentions are the Team mentions of the Teams, which tell where a page_team step can Page (C-28.FR-2); nil
+	// mentions no Team.
+	TeamMentions mentions.TeamMentions
 }
 
 // Service is the delivery of an Organization: Enqueue for the dispatcher, the delivery state of Alert Groups, the
@@ -545,6 +552,8 @@ type Service struct {
 	bodies   EventBodies
 	mentions Mentioner
 	requests Requests
+	// teamMentions are the Team mentions a page_team step Pages by.
+	teamMentions mentions.TeamMentions
 }
 
 // New returns the Service of the Organization in cfg.
@@ -555,7 +564,7 @@ func New(cfg Config) *Service {
 	}
 	return &Service{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, renderer: cfg.Renderer, log: cfg.Log,
 		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase), real: realClock, bodies: cfg.Bodies,
-		mentions: cfg.Mentions, requests: cfg.Requests}
+		mentions: cfg.Mentions, requests: cfg.Requests, teamMentions: cfg.TeamMentions}
 }
 
 // ErrNotFound is an Alert Group that does not exist in the Organization.
