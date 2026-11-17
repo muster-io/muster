@@ -12,10 +12,12 @@
 // Owner, named as L1 named them. A User is named by the username of their Account link in the Destination's identity
 // space — through a Bridge by the link's messenger user id and display name (C-22.FR-16), and in Slack by the link's
 // user id as <@id>, which its adapter renders (C-24.FR-6) — otherwise by the Muster display name, which mentions
-// nobody; the footer of a message names its user the same way (C-12.FR-12). It imports neither internal/schedules nor
-// internal/teams: the On-call and the Team mentions come through the interfaces it declares, which internal/runtime
-// wires (ADR-0016). Storing a Destination is internal/destinations', and rendering a target in a messenger's syntax is
-// its adapter's.
+// nobody; the footer of a message names its user the same way (C-12.FR-12). A group — a group entry or a Team
+// mention — is named by its name and, in Slack, the user group's id, which the Slack adapter writes as <!subteam^id>
+// (C-24.FR-6); everyone in the chat by its symbolic name; a Bridge receives both as entries of their own kind
+// (C-22.FR-16). It imports neither internal/schedules nor internal/teams: the On-call and the Team mentions come
+// through the interfaces it declares, which internal/runtime wires (ADR-0016). Storing a Destination is
+// internal/destinations', and rendering a target in a messenger's syntax is its adapter's.
 package mentions
 
 import (
@@ -332,8 +334,10 @@ type Request struct {
 	Mentions        []string
 }
 
-// Target is one Mention for an adapter to render: everyone in the chat with the word, a messenger group — a Team
-// mention among them — with a Slack user group's id, a User, or for an outgoing webhook a Team as data (C-15.FR-11).
+// Target is one Mention for an adapter to render: everyone in the chat with the word — the symbolic name a Bridge
+// receives — a messenger group — a Team mention among them — by its name with a Slack user group's id, which the Slack
+// adapter writes as <!subteam^id> and a Bridge names by the group's name, a User, or for an outgoing webhook a Team as
+// data (C-15.FR-11, C-22.FR-16, C-24.FR-6).
 type Target struct {
 	Kind     string      `json:"kind"`
 	Everyone string      `json:"everyone,omitempty"`
@@ -369,6 +373,12 @@ func (u User) Display() string {
 		return u.Username
 	}
 	return u.Name
+}
+
+// SlackUserGroupID reports whether id has the form of a Slack user group's id (F-125), the only group a Slack message
+// can mention (C-24.FR-6).
+func SlackUserGroupID(id string) bool {
+	return slackUserGroupID.MatchString(id)
 }
 
 // IdentitySpace is the identity space of a Destination's messenger: every Telegram link, or the Mattermost, Bridge or

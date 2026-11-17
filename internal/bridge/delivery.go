@@ -220,7 +220,7 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 	if m.Kind == messages.KindStorm {
 		kind = gen.StormSummary
 	}
-	head, list := mentionsOf(c)
+	head, list := mentionsOf(c, i)
 	m, list, ref := withFooterMention(m, t.Conn.ID, i, list)
 	in := postInput(kind, t.ChannelID, content(m, i, head), c.Loudness == groups.Loud)
 	in.Mentions = marked(list, in.Body)
@@ -261,8 +261,9 @@ func (a *Adapter) Reply(ctx context.Context, c delivery.Call, root delivery.Root
 	if fail != nil {
 		return *fail
 	}
-	head, list := mentionsOf(c)
+	head, list := mentionsOf(c, i)
 	in := replyInput(root.ThreadAnchorID, withFooterIn(m, t.Conn.ID), i, head, list, c.Loudness == groups.Loud)
+	in.Mentions = marked(in.Mentions, in.Body)
 	out, r := t.Conn.Client.ReplyInThread(ctx, c.Class, root.MessageID, c.Key, in)
 	o := r.Outcome()
 	if r.OK() {

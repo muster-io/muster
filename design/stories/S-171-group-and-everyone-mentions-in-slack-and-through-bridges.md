@@ -14,11 +14,14 @@ files_touched:
   - internal/slack/layout_test.go
   - internal/bridge/envelope.go
   - internal/bridge/envelope_test.go
+  - internal/bridge/delivery.go
   - internal/fakes/fakebridge/messages.go
   - internal/fakes/fakebridge/fakebridge_test.go
   - test/e2e/mention_kinds_test.go
   - AGENTS.md
   - docs/messengers/bridge.md
+  - docs/messengers/slack.md
+  - docs/concepts/mentions.md
 acceptance:
   - "[C-24.FR-6, C-25.FR-8, C-28.FR-2] In Slack a user group entry and a Team mention are written as `<!subteam^ID>`, in the first line of a Loud message, Root message or Thread reply alike; the fake Slack server records them (`layout_test.go`, `mention_kinds_test.go`)."
   - "[C-22.FR-16, C-25.FR-8, C-28.FR-2] Through a bridge that declares group mentions and `here`, a group entry, a Team mention and `here` are entries of the envelope's `mentions` with the `kind` `group` or `everyone` — `external_id` and `display_name` carrying the group's name or the symbolic name — placed in the body by the Mention marker; a person stays of the kind `user`, the default; a bridge that declares none receives no such entry (`envelope_test.go`, `mention_kinds_test.go`)."
@@ -111,6 +114,14 @@ workspace's general channel (F-127), is not offered in Slack (C-28.FR-2, the mai
 
 ## Notes
 
+- `files_touched` gained `internal/bridge/delivery.go`, whose Publish and Reply hand the info of the Connection to the
+  envelope's Mentions, and `docs/messengers/slack.md` and `docs/concepts/mentions.md`, which said that Muster does not
+  write user groups, group mentions and mentions of everyone yet; S-144 still rewrites both pages.
+- A new rule of this story: the Mention line of a Bridge message keeps, in their order, the whole Mentions that fit
+  half of `limits.max_body_length`, leaving out each one that does not fit, with its entry, so that a long line can
+  neither cut a marker nor crowd out the text: the same budget as Slack's Thread-reply Mentions, half of its length
+  limit; unlike Slack's `fitMentions`, it skips a Mention that does not fit. Neither C-12.FR-11 nor `defaults.md` has
+  it yet; the maintainer decides in the pull request.
 - Suggested commit: `feat(mentions): write group mentions in slack, and group and everyone mentions through bridges`.
 - Split from S-140 by the review, at the boundary between deciding whom a message mentions and writing it in the
   messengers that L1 could not write it for; it takes the next free ID, S-171, follows S-140, and the bridge libraries

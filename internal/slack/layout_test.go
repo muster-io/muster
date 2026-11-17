@@ -856,6 +856,81 @@ func TestMentions(t *testing.T) {
 	}
 }
 
+// TestUserGroupMentions is C-24.FR-6 revised, C-25.FR-8 and C-28.FR-2: a user group entry and a Team mention are
+// <!subteam^S…> of the user group's id, once whatever handle names it, in `text` and in the top section of a Loud Root
+// message and first in the section of a Loud Thread reply, with the other Mentions in the order of the targets and
+// never in the attachment; a group without a user group's id and everyone are written nowhere — <!everyone> never —
+// a Quiet call, every edit, mentions nobody; and a label value or template output that writes <!subteam^…> or
+// <!everyone> reaches Slack neutralized, so that only the adapter's own Mention notifies.
+func TestUserGroupMentions(t *testing.T) {
+	e := newLayoutEnv(t)
+	group := mentions.Target{Kind: mentions.TargetGroup, Group: "payments-team", GroupID: "S0FAKEPAYTEAM"}
+	team := mentions.Target{Kind: mentions.TargetGroup, Group: "payments", GroupID: "S0FAKEPAYTEAM"}
+	linked := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "US0000000000U1",
+		Name: "Alice A.", Login: "alice", ExternalID: "U0FAKEALICE"}}
+	targets := []mentions.Target{group, hereTarget, linked, team,
+		{Kind: mentions.TargetGroup, Group: "oncall"}, {Kind: mentions.TargetGroup, Group: "x", GroupID: "S0>X"},
+		{Kind: mentions.TargetGroup, Group: "y", GroupID: "s0lower"},
+		{Kind: mentions.TargetGroup, Group: "infra", GroupID: "S0FAKEINFRA"},
+		{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneEveryone}}
+	want := []string{"<!subteam^S0FAKEPAYTEAM>", "<!here>", "<@U0FAKEALICE>", "<!subteam^S0FAKEINFRA>"}
+	if got := mentionText(targets, nil); !slices.Equal(got, want) {
+		t.Errorf("mentions = %q, want %q", got, want)
+	}
+	for _, id := range []string{"S0FAKEPAYTEAM", "S1"} {
+		if !mentions.SlackUserGroupID(id) {
+			t.Errorf("%q is not a user group's id", id)
+		}
+	}
+
+	conn := int64(3)
+	loud := delivery.Call{Destination: delivery.Destination{ID: 1, PublicID: "DS0000000000D1", Type: mentions.TypeSlack,
+		Connection: &conn}, Loudness: groups.Loud, Targets: targets}
+	quiet := loud
+	quiet.Loudness = groups.Quiet
+	line := strings.Join(want, " ")
+	m := e.root(t, layoutSource(messages.ColourFiring))
+	m.Body = &messages.Body{Text: "Paging <!subteam^S0FAKEOTHER> <!everyone>", Markup: messages.MarkupMrkdwn}
+	o := layout(m, testLook(), callMentions(loud, m))
+	if o.Text != "🔴 #12 DiskFull "+line || o.Blocks[0].Text.Text != "🔴 #12 DiskFull\n"+line {
+		t.Errorf("loud root = %q, %q", o.Text, o.Blocks[0].Text.Text)
+	}
+	if att := requestJSON(t, outgoing{Attachments: o.Attachments}); strings.Contains(att, "<!") {
+		t.Errorf("a Mention in the attachment: %s", att)
+	}
+	if b := sections(o)[blockBody]; !strings.Contains(b, "Paging &lt;!subteam^S0FAKEOTHER> &lt;!everyone>") {
+		t.Errorf("template output = %q", b)
+	}
+	if all := requestJSON(t, o); strings.Count(all, "<!subteam^") != 4 || strings.Contains(all, "<!everyone") {
+		t.Errorf("the request mentions more than the targets: %s", all)
+	}
+	r := newAlertsReply()
+	o = layout(r, testLook(), callMentions(loud, r))
+	if o.Text != "New alerts (1): "+line || !strings.HasPrefix(o.Blocks[0].Text.Text, line+"\nNew alerts (1):\n") {
+		t.Errorf("loud reply = %q, %q", o.Text, o.Blocks[0].Text.Text)
+	}
+	if p := layout(r, plainLook(), callMentions(loud, r)); !strings.HasPrefix(p.Text, line) {
+		t.Errorf("plain reply = %q", p.Text)
+	}
+	if callMentions(quiet, m) != nil {
+		t.Error("a Quiet call mentions a user group")
+	}
+	if o := layout(m, testLook(), callMentions(quiet, m)); strings.Contains(requestJSON(t, o), "<!subteam") {
+		t.Errorf("quiet = %q", o.Text)
+	}
+
+	// A label value that writes a user group's or everyone's Mention is text.
+	src := layoutSource(messages.ColourFiring)
+	src.CommonLabels["note"] = "<!subteam^S0FAKEPAYTEAM> <!everyone>"
+	for i := range src.Alerts {
+		src.Alerts[i].Labels["note"] = src.CommonLabels["note"]
+	}
+	if all := requestJSON(t, layout(e.root(t, src), testLook(), nil)); strings.Contains(all, "<!") ||
+		!strings.Contains(all, "&lt;!subteam^S0FAKEPAYTEAM&gt; &lt;!everyone&gt;") {
+		t.Errorf("a label mentions: %s", all)
+	}
+}
+
 // TestLinkedMentions is C-24.FR-6, C-24.AC-15 and C-12.FR-12: a User with an Account link for the Destination's
 // Connection is mentioned as <@U…> of the link's user id in `text` and the top section of a Loud Root message and of
 // a Reminder, never in the attachment; a User without a link there, and a link whose id has not the shape of a Slack

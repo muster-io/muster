@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -157,7 +158,7 @@ func bridgeSchema(t *testing.T, name string) *openapi3.Schema {
 func TestEnvelopeMatchesTheProtocol(t *testing.T) {
 	i := infoOf(t)
 	head, list := mentionsOf(delivery.Call{Loudness: groups.Loud, Targets: []mentions.Target{
-		linked("Alice Smith", "u-alice", "Alice Smith"), linked("Bob Brown", "", "")}})
+		linked("Alice Smith", "u-alice", "Alice Smith"), linked("Bob Brown", "", "")}}, i)
 	firing := content(rootMessage(t, messages.ColourFiring), i, head)
 	root := postInput(gen.Root, "ch-alerts", firing, true)
 	root.Mentions = list
@@ -516,7 +517,7 @@ func TestMentions(t *testing.T) {
 		{Kind: mentions.TargetUser}, linked("", "", ""), linked("@bob *b*", "", ""),
 		linked("Dave Doe", "u-dave", "  "), linked("Erin", "u-erin", long),
 		linked("Frank", strings.Repeat("f", 513), "Frank F."), linked("", "u-nobody", "")}}
-	head, list := mentionsOf(c)
+	head, list := mentionsOf(c, infoOf(t))
 	want := "[@Alice Smith](muster-mention:m1) @\u200bbob \\*b\\* " +
 		"[@Carol \\]evil\\[ (x) @\u200ball](muster-mention:m2) [@Dave Doe](muster-mention:m3) " +
 		"[@" + strings.Repeat("ж", 199) + "…](muster-mention:m4) Frank"
@@ -537,11 +538,193 @@ func TestMentions(t *testing.T) {
 		}
 	}
 	c.Loudness = groups.Quiet
-	if head, list := mentionsOf(c); head != nil || list == nil || len(list) != 0 {
+	if head, list := mentionsOf(c, infoOf(t)); head != nil || list == nil || len(list) != 0 {
 		t.Fatalf("quiet = %q %v", head, list)
 	}
-	if head, list := mentionsOf(delivery.Call{Loudness: groups.Loud}); head != nil || list == nil || len(list) != 0 {
+	if head, list := mentionsOf(delivery.Call{Loudness: groups.Loud}, infoOf(t)); head != nil || list == nil ||
+		len(list) != 0 {
 		t.Fatalf("nobody = %q %v", head, list)
+	}
+}
+
+// declaring is a bridge that declares group mentions and the mentions of everyone named.
+func declaring(words ...string) func(map[string]any) {
+	return func(m map[string]any) {
+		at(m, "capabilities")["group_mentions"] = true
+		at(m, "capabilities")["everyone_mentions"] = words
+	}
+}
+
+// TestGroupAndEveryoneEntries covers C-22.FR-16 revised, C-25.FR-8 and C-28.FR-2: through a bridge that declares
+// group mentions and here, a group entry, a Team mention and here are entries of mentions with the kind group or
+// everyone — the group's name or the symbolic name as external id and display name — each placed by its marker in the
+// Mention line, in the order of the targets and each once, beside a linked person, whose entry has no kind and so
+// stays a user; the entries pass the schema of api/bridge.yaml. A mention of everyone the bridge does not list, a
+// group with an empty or a too long name, and every group and everyone through a bridge that declares neither are
+// left out, and a Quiet call has none.
+func TestGroupAndEveryoneEntries(t *testing.T) {
+	c := delivery.Call{Loudness: groups.Loud, Targets: []mentions.Target{
+		{Kind: mentions.TargetGroup, Group: "payments_team"}, linked("Alice Smith", "u-alice", "Alice Smith"),
+		{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere},
+		{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneChannel},
+		{Kind: mentions.TargetGroup, Group: "db *ops*"}, {Kind: mentions.TargetGroup, Group: " \n "},
+		{Kind: mentions.TargetGroup, Group: strings.Repeat("g", 201)},
+		{Kind: mentions.TargetGroup, Group: "payments_team"}, linked("Here", "here", "Here"),
+		{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere}}}
+	head, list := mentionsOf(c, infoOf(t, declaring("here")))
+	want := "[@payments\\_team](muster-mention:m1) [@Alice Smith](muster-mention:m2) [@here](muster-mention:m3) " +
+		"[@db \\*ops\\*](muster-mention:m4) [@Here](muster-mention:m5)"
+	if len(head) != 1 || head[0] != want {
+		t.Fatalf("line\n%q\nwant\n%q", head, want)
+	}
+	got, _ := json.Marshal(list)
+	wantList := `[{"display_name":"payments_team","external_id":"payments_team","kind":"group","ref":"m1"},` +
+		`{"display_name":"Alice Smith","external_id":"u-alice","ref":"m2"},` +
+		`{"display_name":"here","external_id":"here","kind":"everyone","ref":"m3"},` +
+		`{"display_name":"db *ops*","external_id":"db *ops*","kind":"group","ref":"m4"},` +
+		`{"display_name":"Here","external_id":"here","ref":"m5"}]`
+	if string(got) != wantList {
+		t.Fatalf("mentions\n%s\nwant\n%s", got, wantList)
+	}
+	for _, m := range list {
+		if b, _ := json.Marshal(m); visit(t, bridgeSchema(t, "Mention"), b) != nil {
+			t.Errorf("%s does not match Mention", b)
+		}
+	}
+
+	// A Root message and a Thread reply carry the entries with their markers in the body, and match the protocol.
+	i := infoOf(t, declaring("here"))
+	m := rootMessage(t, messages.ColourFiring)
+	in := postInput(gen.Root, "ch-alerts", content(m, i, head), true)
+	in.Mentions = marked(list, in.Body)
+	reply := replyInput("t-m1", replyMessage("New Alert: pod i3"), i, head, list, true)
+	for name, v := range map[string]any{"MessageInput": in, "ThreadReplyInput": reply} {
+		b, _ := json.Marshal(v)
+		if err := visit(t, bridgeSchema(t, name), b); err != nil {
+			t.Errorf("%s does not match %s: %v", b, name, err)
+		}
+		if !strings.Contains(string(b), `"body":"[@payments\\_team](muster-mention:m1) [@Alice Smith]`) ||
+			!strings.Contains(string(b), `{"display_name":"here","external_id":"here","kind":"everyone","ref":"m3"}`) {
+			t.Errorf("%s = %s", name, b)
+		}
+	}
+	if len(in.Mentions) != 5 {
+		t.Errorf("the root message's mentions %+v", in.Mentions)
+	}
+
+	// Without the declarations, groups and everyone are left out and the people stay.
+	for name, info := range map[string]Info{"none": infoOf(t), "everyone only": infoOf(t, func(m map[string]any) {
+		at(m, "capabilities")["everyone_mentions"] = []string{"channel"}
+	}), "groups only": infoOf(t, func(m map[string]any) { at(m, "capabilities")["group_mentions"] = true })} {
+		head, list := mentionsOf(c, info)
+		var kinds []string
+		for _, e := range list {
+			kinds = append(kinds, string(kindOf(e))+":"+e.ExternalId)
+		}
+		want := map[string]string{"none": "[user:u-alice user:here]",
+			"everyone only": "[user:u-alice everyone:channel user:here]",
+			"groups only":   "[group:payments_team user:u-alice group:db *ops* user:here]"}[name]
+		if fmt.Sprint(kinds) != want || len(head) != 1 {
+			t.Errorf("%s: %v %q, want %s", name, kinds, head, want)
+		}
+		b, _ := json.Marshal(list)
+		if name == "none" && strings.Contains(string(b), `"kind"`) {
+			t.Errorf("a bridge that declares nothing sees kind: %s", b)
+		}
+	}
+	c.Loudness = groups.Quiet
+	if head, list := mentionsOf(c, i); head != nil || len(list) != 0 {
+		t.Fatalf("quiet = %q %v", head, list)
+	}
+}
+
+// TestLongMentionLine covers C-22.FR-16 and C-12.FR-11 for a Mention line longer than the body allows: through a
+// bridge with max_body_length 500 that declares group mentions, eight groups with names of 61 characters keep only the
+// whole markers that fit half of the body, in a Root message and in a Thread reply alike; no part of a marker is left,
+// the text of the message stays, and every entry sent has its marker in the body, and only those. A Mention that
+// does not fit is skipped and later ones that fit stay, and the footer's entry takes a ref of its own.
+func TestLongMentionLine(t *testing.T) {
+	e := newAdapterEnv(t, set("limits", "max_body_length", 500), declaring("here"))
+	c := call(groups.Loud, "pub-"+destPublicID+"-1-1")
+	for n := range 8 {
+		c.Targets = append(c.Targets, mentions.Target{Kind: mentions.TargetGroup,
+			Group: fmt.Sprintf("g%d%s", n, strings.Repeat("x", 59))})
+	}
+	e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m1","truncated":false,"replayed":false}`))
+	if o := e.adapter.Publish(t.Context(), c, rootMessage(t, messages.ColourFiring)); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish %+v", o)
+	}
+	c.Key = "reply-" + destPublicID + "-1"
+	if o := e.adapter.Reply(t.Context(), c, delivery.Root{MessageID: "m1"},
+		replyMessage("New Alert: pod i3")); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("reply %+v", o)
+	}
+	for name, s := range map[string]seen{"root": e.bridge.requests("post")[0], "reply": e.bridge.requests("reply")[0]} {
+		env := decode(t, s)
+		body := env["body"].(string)
+		line, rest, _ := strings.Cut(body, "\n\n")
+		list, _ := env["mentions"].([]any)
+		if utf8.RuneCountInString(body) > 500 || utf8.RuneCountInString(line) > 250 || len(list) != 2 ||
+			strings.Count(body, "muster-mention:") != 2 || strings.Count(body, "[@") != 2 ||
+			strings.Contains(body, "g2x") {
+			t.Errorf("%s: %d entries, body %q", name, len(list), body)
+		}
+		for _, m := range list {
+			ref := m.(map[string]any)["ref"].(string)
+			if !strings.Contains(line, "](muster-mention:"+ref+")") {
+				t.Errorf("%s: the entry %s has no marker in %q", name, ref, line)
+			}
+		}
+		if want := map[string]string{"root": "prod · started", "reply": "New Alert: pod i3"}[name]; !strings.HasPrefix(
+			rest, want) {
+			t.Errorf("%s: the text after the Mentions = %q", name, rest)
+		}
+	}
+	if got := fitLine([]string{strings.Repeat("a", 11)}, 10); got != "" {
+		t.Errorf("a first name longer than the line = %q", got)
+	}
+
+	// A Mention that does not fit is left out and those after it that fit stay: a first one longer than the line,
+	// a person whose marker no longer fits after the first group, here and a second group; the footer's user, whom
+	// no target names, gets an entry after the highest ref, so that no ref repeats and every entry has its marker.
+	token := templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+	m := rootMessage(t, messages.ColourAcknowledged)
+	m.Footers["bridge:1"] = "Acknowledged by " + token
+	m.FooterUsers = map[string]messages.FooterUser{"bridge:1": {Name: "Bob Smith", ExternalID: "u-bob",
+		DisplayName: "Bob"}}
+	c = call(groups.Loud, "pub-"+destPublicID+"-2-1")
+	c.Targets = []mentions.Target{{Kind: mentions.TargetUser, User: &mentions.User{Name: strings.Repeat("n", 300)}},
+		{Kind: mentions.TargetGroup, Group: "g0" + strings.Repeat("x", 59)},
+		linked("Carol", "u-carol", strings.Repeat("c", 200)),
+		{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere},
+		{Kind: mentions.TargetGroup, Group: "g1" + strings.Repeat("x", 59)}}
+	e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m2","truncated":false,"replayed":false}`))
+	if o := e.adapter.Publish(t.Context(), c, m); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish %+v", o)
+	}
+	env := decode(t, e.bridge.requests("post")[1])
+	body := env["body"].(string)
+	line, _, _ := strings.Cut(body, "\n\n")
+	var refs, kinds []string
+	for _, x := range env["mentions"].([]any) {
+		entry := x.(map[string]any)
+		ref := entry["ref"].(string)
+		if slices.Contains(refs, ref) || !strings.Contains(body, "](muster-mention:"+ref+")") {
+			t.Errorf("the entry %s is repeated or has no marker in %q", ref, body)
+		}
+		refs = append(refs, ref)
+		kinds = append(kinds, fmt.Sprint(entry["kind"], ":", entry["external_id"]))
+	}
+	if want := "[group:g0" + strings.Repeat("x", 59) + " everyone:here group:g1" + strings.Repeat("x", 59) +
+		" <nil>:u-bob]"; fmt.Sprint(kinds) != want || fmt.Sprint(refs) != "[m1 m3 m4 m5]" ||
+		strings.Contains(line, "nnn") || strings.Contains(line, "ccc") || utf8.RuneCountInString(line) > 250 ||
+		!strings.HasSuffix(body, "Acknowledged by [@Bob](muster-mention:m5)") {
+		t.Errorf("mentions %v refs %v, body %q", kinds, refs, body)
+	}
+	if got := nextRef([]gen.Mention{{Ref: "m2"}, {Ref: "x9"}, {Ref: "m10"}}); got != "m11" {
+		t.Errorf("nextRef = %q", got)
 	}
 }
 
