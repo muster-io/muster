@@ -556,24 +556,42 @@ func mentionEntriesOf(in *[]gen.MentionEntryInput) *[]mentions.EntryInput {
 	return &out
 }
 
+// mentionTargetRead is the target of the entry e as read, with the User or the Team it names.
+func mentionTargetRead(e mentions.Entry) gen.MentionTarget {
+	t := gen.MentionTarget{Kind: gen.MentionTargetKind(e.Target.Kind), Group: nonEmptyString(e.Target.Group),
+		GroupId: nonEmptyString(e.Target.GroupID), TeamId: nonEmptyString(e.Target.TeamID),
+		UserId: nonEmptyString(e.Target.UserID)}
+	if e.Target.Everyone != "" {
+		w := gen.MentionTargetEveryone(e.Target.Everyone)
+		t.Everyone = &w
+	}
+	if u := e.User; u != nil {
+		login := u.Login
+		t.User = &gen.UserRef{Id: u.PublicID, Name: u.Name, Login: &login, Deactivated: u.Deleted}
+	}
+	if tm := e.Team; tm != nil {
+		t.Team = &gen.TeamRef{Id: tm.PublicID, Name: tm.Name, Slug: tm.Slug, Deleted: tm.Deleted}
+	}
+	return t
+}
+
+// mentionWarningsRead are the warnings of a Destination about undelivered Mentions (C-28.FR-3), never nil.
+func mentionWarningsRead(list []destinations.MentionWarning) []gen.MentionWarning {
+	out := make([]gen.MentionWarning, len(list))
+	for i, w := range list {
+		login := w.User.Login
+		out[i] = gen.MentionWarning{User: gen.UserRef{Id: w.User.PublicID, Name: w.User.Name, Login: &login},
+			Entry:     gen.MentionEntryRef{Position: w.Entry.Position, Target: mentionTargetRead(w.Entry)},
+			Messenger: gen.ConnectionType(w.Messenger), Reason: gen.MentionNotDeliveredReason(w.Reason), Since: w.Since}
+	}
+	return out
+}
+
 // mentionEntriesRead is the API form of the Mention entries of a read, with what each mentions now.
 func mentionEntriesRead(list []mentions.Entry) []gen.MentionEntry {
 	out := make([]gen.MentionEntry, len(list))
 	for i, e := range list {
-		t := gen.MentionTarget{Kind: gen.MentionTargetKind(e.Target.Kind), Group: nonEmptyString(e.Target.Group),
-			GroupId: nonEmptyString(e.Target.GroupID), TeamId: nonEmptyString(e.Target.TeamID),
-			UserId: nonEmptyString(e.Target.UserID)}
-		if e.Target.Everyone != "" {
-			w := gen.MentionTargetEveryone(e.Target.Everyone)
-			t.Everyone = &w
-		}
-		if u := e.User; u != nil {
-			login := u.Login
-			t.User = &gen.UserRef{Id: u.PublicID, Name: u.Name, Login: &login, Deactivated: u.Deleted}
-		}
-		if tm := e.Team; tm != nil {
-			t.Team = &gen.TeamRef{Id: tm.PublicID, Name: tm.Name, Slug: tm.Slug, Deleted: tm.Deleted}
-		}
+		t := mentionTargetRead(e)
 		events := make([]gen.MentionEvent, len(e.Events))
 		for j, ev := range e.Events {
 			events[j] = gen.MentionEvent(ev)
@@ -680,6 +698,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 		return gen.Destination{}, fmt.Errorf("read the mention settings of %s: %w", d.PublicID, err)
 	}
 	entries := mentionEntriesRead(d.MentionEntries)
+	warnings := mentionWarningsRead(d.MentionWarnings)
 	limiter := gen.Limiter{Limit: int(d.LimiterLimit), PerSeconds: int(d.LimiterPerSeconds)}
 	buttonSet := destinationButtonsOf(d.Buttons)
 	routes := make([]gen.EntityRef, 0, len(d.Routes))
@@ -706,7 +725,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			Type: gen.MattermostDestinationTypeMattermost, ConnectionId: deref(d.Connection),
 			TeamId: deref(d.MattermostTeamID), ChannelId: deref(d.MattermostChannelID),
 			TeamName: nullableString(d.MattermostTeamName), ChannelName: nullableString(d.MattermostChannelName),
-			Mentions: l1, MentionEntries: entries, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions: l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeTelegram:
@@ -716,28 +735,28 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			ChannelChatId:        nullableString(d.TelegramChannelChatID),
 			DiscussionGroupId:    nullableString(d.TelegramDiscussionGroupID),
 			DiscussionGroupTitle: nullableString(d.TelegramDiscussionGroupTitle),
-			Mentions:             l1, MentionEntries: entries, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions:             l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeBridge:
 		err = out.FromBridgeDestination(gen.BridgeDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.BridgeDestinationTypeBridge, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.BridgeChannelID), ChannelName: nullableString(d.BridgeChannelName),
-			Mentions: l1, MentionEntries: entries, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions: l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeSlack:
 		err = out.FromSlackDestination(gen.SlackDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.SlackDestinationTypeSlack, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.SlackChannelID), ChannelName: nullableString(d.SlackChannelName),
-			Mentions: l1, MentionEntries: entries, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions: l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeWebhook:
 		var w gen.WebhookDestination
 		if w, err = webhookOf(d); err == nil {
 			w.Id, w.Name, w.Type = d.PublicID, d.Name, gen.WebhookDestinationTypeWebhook
-			w.Mentions, w.MentionEntries = l1, entries
+			w.Mentions, w.MentionEntries, w.MentionWarnings = l1, entries, warnings
 			w.Limiter, w.Health, w.Routes = limiter, healthOf(d.Health), routes
 			w.Teams = teamRefs
 			w.TemplateError, w.CreatedAt, w.Etag = templateError, d.CreatedAt, &tag

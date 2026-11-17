@@ -116,7 +116,9 @@ type Destination struct {
 	// SigningSecretOnce is the first Signing secret of an outgoing webhook, set only by Create, which returns it once.
 	SigningSecretOnce logging.Secret
 
-	MentionEntries      []mentions.Entry
+	MentionEntries []mentions.Entry
+	// MentionWarnings are the warnings about undelivered Mentions (C-28.FR-3), computed on every read.
+	MentionWarnings     []MentionWarning
 	Buttons             buttons.Own
 	OrganizationButtons buttons.Set
 	LimiterLimit        int64
@@ -171,6 +173,8 @@ type Store interface {
 	ListRouteDestinationRefs(ctx context.Context, arg dbgen.ListRouteDestinationRefsParams) (
 		[]dbgen.ListRouteDestinationRefsRow, error)
 	ListDestinationInfo(ctx context.Context, orgID int64) ([]dbgen.ListDestinationInfoRow, error)
+	ListMentionWarnings(ctx context.Context, arg dbgen.ListMentionWarningsParams) ([]dbgen.ListMentionWarningsRow,
+		error)
 }
 
 // NewStore is the Store over the main pool.
@@ -254,8 +258,8 @@ func (s *Service) Get(ctx context.Context, publicID string) (Destination, error)
 	return list[0], nil
 }
 
-// withEntries sets the Mention entries of each Destination with what each mentions now; without a MentionValidator,
-// as a reader without the changes has, none.
+// withEntries sets the Mention entries of each Destination with what each mentions now, and the warnings about
+// undelivered Mentions through them; without a MentionValidator, as a reader without the changes has, none.
 func (s *Service) withEntries(ctx context.Context, list []Destination) error {
 	if len(list) == 0 || s.writer.Mentions == nil {
 		return nil
@@ -275,7 +279,7 @@ func (s *Service) withEntries(ctx context.Context, list []Destination) error {
 			list[i].MentionEntries = []mentions.Entry{}
 		}
 	}
-	return nil
+	return s.withWarnings(ctx, list)
 }
 
 // withRoutes sets the Routes of each Destination, the Teams that name it and its Mention entries.

@@ -297,21 +297,25 @@ func TestReplyRenderer(t *testing.T) {
 	}
 }
 
-// fakeMentioner resolves each symbolic Mention into everyone with its name, and records the requests.
+// fakeMentioner resolves each symbolic Mention into everyone with its name, with the people undelivered and
+// mentioned that it is given, and records the requests.
 type fakeMentioner struct {
-	reqs []mentions.Request
-	fail error
+	reqs        []mentions.Request
+	fail        error
+	undelivered []mentions.Undelivered
+	mentioned   []mentions.Mentioned
 }
 
 func (m *fakeMentioner) Resolve(_ context.Context, _ mentions.DBTX, org int64, r mentions.Request) (
-	[]mentions.Target, error) {
+	mentions.Result, error) {
 	if org != orgID {
-		return nil, fmt.Errorf("org %d", org)
+		return mentions.Result{}, fmt.Errorf("org %d", org)
 	}
 	m.reqs = append(m.reqs, r)
-	out := make([]mentions.Target, len(r.Mentions))
+	out := mentions.Result{Targets: make([]mentions.Target, len(r.Mentions)), Undelivered: m.undelivered,
+		Mentioned: m.mentioned}
 	for i, name := range r.Mentions {
-		out[i] = mentions.Target{Kind: mentions.TargetEveryone, Everyone: name}
+		out.Targets[i] = mentions.Target{Kind: mentions.TargetEveryone, Everyone: name}
 	}
 	return out, m.fail
 }

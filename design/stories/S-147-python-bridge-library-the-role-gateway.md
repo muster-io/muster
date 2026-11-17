@@ -18,6 +18,7 @@ files_touched:
   - examples/gateway_bridge.py
   - README.md
   - Makefile
+  - AGENTS.md
   - tests/test_config.py
   - tests/test_gateway.py
   - tests/test_app.py
@@ -25,7 +26,7 @@ files_touched:
   - tests/test_spec.py
 acceptance:
   - "[C-30.FR-2] `api/bridge.yaml` is Muster's copy from `master` byte for byte, `make spec-check` passes, and `make generate-check` finds `src/muster_bridge/models.py` current with `Info.roles`, `NotificationInput`, `NotificationAction`, `NotificationSent` and `NotificationAcknowledgedEvent`."
-  - "[C-30.FR-2] The configuration takes `roles` (`messenger` by default) and a `Gateway` protocol with `async` `send_notification` and `answer`; `BridgeApp` refuses `gateway` without a `Gateway` and `messenger` without a `Messenger` with `ConfigError` naming the reason, and runs a bridge whose only role is `gateway` without a `Messenger` (`test_config.py`)."
+  - "[C-30.FR-2] The configuration takes `roles` (`messenger` by default) and a `Gateway` protocol with `async` `send_notification` and `answer` (`answer` returns `None`, and the library answers `shown_as: notification`); `BridgeApp(config, messenger=None)` takes the `Messenger` as optional; `BridgeApp` refuses `gateway` without a `Gateway` and `messenger` without a `Messenger` with `ConfigError` naming the reason, and runs a bridge whose only role is `gateway` without a `Messenger` (`test_config.py`)."
   - "[C-30.FR-2] `sendNotification` keeps the idempotency of the other calls, refuses `action.data` over 64 bytes, a text over 1,000 code points and a call on a bridge without the role as `invalid` before the `Gateway` is called, and keeps each notification's `action` for the bot (`test_gateway.py`, `test_app.py`)."
   - "[C-30.FR-2] `BridgeApp.acknowledge(bot, notification_id)` queues `notification_acknowledged` with the `data` of that notification, delivered by polling and by push; an id the library did not issue, or a notification without `action`, raises `ValueError`; `answerEvent` for it reaches `Gateway.answer` (`test_events.py`)."
   - "[C-30.FR-2] `examples/gateway_bridge.py` prints each notification and acknowledges it from `/demo/acknowledge`; README.md shows it; `make conformance` runs `muster bridge check` from `ghcr.io/muster-io/muster:edge` against it with `--contact` and passes interactively."
@@ -55,9 +56,12 @@ issue: 436
 - **Specification copy** (`api/bridge.yaml`): replaced by Muster's from `master` after S-145, which also carries the
   changes S-142 took; `src/muster_bridge/models.py` is regenerated (never listed).
 - **Package**: `Config.roles` and `Config.gateway` (`config.py`); the `Gateway` protocol with `send_notification(bot,
-  notification)` and `answer(bot, event, text)` (`gateway.py`); `BridgeApp.acknowledge(bot, notification_id)` and the
-  routes of `sendNotification` and of the answers (`app.py`, `events.py`); the store keeps a notification's action with
-  its key for 24 hours (`store.py`); `muster_bridge` re-exports the new names (`__init__.py`).
+  notification)` and `answer(bot, event, text)`, which returns `None` (the library answers `shown_as: notification`)
+  (`gateway.py`); `BridgeApp(config, messenger=None)`, since a gateway-only bridge has no messenger;
+  `BridgeApp.acknowledge(bot, notification_id)` and the routes of `sendNotification` and of the answers (`app.py`,
+  `events.py`); the store keeps a notification's action for 24 hours through a separate `NotificationStore` protocol (`store.py`), which `MemoryStore` implements: a custom `Store`
+  stays valid for a messenger bridge, and a gateway whose store lacks it gets a `ConfigError`; `muster_bridge`
+  re-exports the new names (`__init__.py`).
 - **Example** (`examples/gateway_bridge.py`): an in-memory gateway; `make conformance` gains a run of it with
   `--contact`.
 - **Tests**: `test_spec.py` validates the call, its problems and the event against the copy with openapi-core;
@@ -86,6 +90,10 @@ None.
 - **Maintainer** (operator attention): merges the release pull request that release-please opens, which releases a new
   `0.x` minor version to PyPI; an agent never merges a release pull request.
 - The copy check fails on the library's `master` from S-145's merge until this story merges; that failure is expected.
+- Decisions the contract left open, made while the story was worked (muster-bridge-python#33): the action's data is
+  kept through the separate `NotificationStore` protocol, not a change of `Store`; `Gateway.answer` returns `None` and
+  the library answers `shown_as: notification`; `BridgeApp(config, messenger=None)` makes the messenger optional for a
+  gateway-only bridge; the `AGENTS.md` layout table gains rows for `gateway.py` and the example.
 
 ## Coverage
 

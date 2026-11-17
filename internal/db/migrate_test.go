@@ -2740,18 +2740,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (47)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (48)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":47`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":48`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":47`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":48`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2767,10 +2767,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (47)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (48)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":47`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":48`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -4833,6 +4833,220 @@ func TestIntegrationEscalationRuns(t *testing.T) {
 		}
 		if err := e.mm.Migrate(47); err != nil {
 			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationMentionDeliveryEvents runs 0048 over a database at 47 whose partitioned delivery_events has two
+// partitions with a publication: up swaps the kind CHECK, validated on the parent and the partitions, so that
+// mention_not_delivered and mention_delivered are accepted beside every kind of 0010, and builds the partial index on
+// each partition, attached to the parent's, which is valid, and given to a partition created afterwards; down deletes
+// the rows of the new kinds, drops the index and restores the old CHECK; up again works.
+func TestIntegrationMentionDeliveryEvents(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 47)
+		e.exec(t, `CREATE TABLE delivery_events_p202610 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`)
+		e.exec(t, `CREATE TABLE delivery_events_p202611 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00')`)
+		event := func(publicID, at, kind string) error {
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO delivery_events (org_id, public_id, occurred_at,
+				destination_id, alert_group_id, kind, loudness, detail)
+				SELECT id, $1, $2::timestamptz, 1, 1, $3, 'quiet', '{"user_id":1}' FROM organizations`,
+				publicID, at, kind)
+			return err
+		}
+		if err := event("DE0000000000P1", "2026-11-16 09:00:00+00", "publication"); err != nil {
+			t.Fatal(err)
+		}
+		if err := event("DE0000000000N0", "2026-11-16 09:00:00+00", "mention_not_delivered"); err == nil {
+			t.Error("mention_not_delivered was accepted before 0048")
+		}
+		const (
+			v2 = "delivery_events.delivery_events_kind_v2_check:true " +
+				"delivery_events_p202610.delivery_events_kind_v2_check:true " +
+				"delivery_events_p202611.delivery_events_kind_v2_check:true"
+			v3 = "delivery_events.delivery_events_kind_v3_check:true " +
+				"delivery_events_p202610.delivery_events_kind_v3_check:true " +
+				"delivery_events_p202611.delivery_events_kind_v3_check:true"
+		)
+		tables := []string{"delivery_events", "delivery_events_p202610", "delivery_events_p202611"}
+		indexes := `SELECT count(*) FROM pg_inherits i JOIN pg_index x ON x.indexrelid = i.inhrelid
+			WHERE i.inhparent = 'delivery_events_mentions_idx'::regclass AND x.indisvalid
+			  AND pg_get_indexdef(x.indexrelid) LIKE
+			      '%(org_id, destination_id, kind, occurred_at DESC) WHERE (kind = ANY (ARRAY[''mention_not_delivered''::text, ''mention_delivered''::text]))'`
+		for round := range 2 {
+			e.step(t, 1)
+			if got := e.constraints(t, tables, "delivery_events_kind"); got != v3 {
+				t.Errorf("after up %d: %s", round, got)
+			}
+			if n := e.count(t, `SELECT count(*) FROM pg_index
+				WHERE indexrelid = 'delivery_events_mentions_idx'::regclass AND indisvalid`); n != 1 {
+				t.Errorf("after up %d: the index of the parent is not valid", round)
+			}
+			if n := e.count(t, indexes); n != 2 {
+				t.Errorf("after up %d: %d partitions have the index, want 2", round, n)
+			}
+			for i, kind := range []string{"mention_not_delivered", "mention_delivered", "republished_past_edit_window",
+				"publication"} {
+				if err := event(fmt.Sprintf("DE00000000%02d%02d", round, i), "2026-10-20 09:00:00+00", kind); err != nil {
+					t.Errorf("after up %d: %s: %v", round, kind, err)
+				}
+			}
+			if err := event(fmt.Sprintf("DE000000000X%02d", round), "2026-11-20 09:00:00+00", "mention_lost"); err == nil {
+				t.Errorf("after up %d: an unknown kind was accepted", round)
+			}
+			if round == 1 {
+				break
+			}
+			e.exec(t, `CREATE TABLE delivery_events_p202612 PARTITION OF delivery_events
+				FOR VALUES FROM ('2026-12-01 00:00:00+00') TO ('2027-01-01 00:00:00+00')`)
+			if n := e.count(t, indexes); n != 3 {
+				t.Errorf("after a new partition: %d partitions have the index, want 3", n)
+			}
+			e.step(t, -1)
+			if got := e.constraints(t, append(tables, "delivery_events_p202612"), "delivery_events_kind"); got !=
+				v2+" delivery_events_p202612.delivery_events_kind_v2_check:true" {
+				t.Errorf("after down: %s", got)
+			}
+			if n := e.count(t, `SELECT count(*) FROM pg_class WHERE relname LIKE 'delivery_events%mentions_idx'`); n != 0 {
+				t.Errorf("after down: %d indexes are left", n)
+			}
+			if n := e.count(t, `SELECT count(*) FROM delivery_events WHERE kind LIKE 'mention%'`); n != 0 {
+				t.Errorf("after down: %d mention events are left", n)
+			}
+			if n := e.count(t, `SELECT count(*) FROM delivery_events`); n != 3 {
+				t.Errorf("after down: %d events, want the 3 of the other kinds", n)
+			}
+			e.exec(t, `DROP TABLE delivery_events_p202612`)
+		}
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 48 {
+			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
+// TestIntegrationMentionIndexRace is the fourth transaction of 0048 when a partition is created between the first and
+// the fourth, as partition maintenance on the Leader may do, which never takes the migration lock: the transactions of
+// the file, run one by one by hand, give the new partition the parent's index at its creation, and the fourth skips it
+// and builds and attaches the others, so that every partition has exactly one attached index and the parent's is
+// valid; down then drops them all.
+func TestIntegrationMentionIndexRace(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 47)
+		e.exec(t, `CREATE TABLE delivery_events_p202610 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`)
+		e.exec(t, `CREATE TABLE delivery_events_p202611 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00')`)
+		up, err := fs.ReadFile(migrationFiles, migrationsDir+"/0048_mention_delivery_events.up.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		txs := strings.Split(string(up), "COMMIT;")
+		if len(txs) != 5 || strings.TrimSpace(txs[4]) != "" {
+			t.Fatalf("0048 has %d transactions, want 4", len(txs)-1)
+		}
+		for _, tx := range txs[:3] {
+			e.exec(t, tx+"COMMIT;")
+		}
+		e.exec(t, `CREATE TABLE delivery_events_p202612 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-12-01 00:00:00+00') TO ('2027-01-01 00:00:00+00')`)
+		attached := `SELECT count(*) FROM pg_inherits i JOIN pg_index x ON x.indexrelid = i.inhrelid
+			WHERE i.inhparent = 'delivery_events_mentions_idx'::regclass`
+		if n := e.count(t, attached); n != 1 {
+			t.Fatalf("before the fourth transaction %d partitions have the index, want the new one", n)
+		}
+		e.exec(t, txs[3]+"COMMIT;")
+		if n := e.count(t, attached); n != 3 {
+			t.Errorf("%d partitions have the index, want 3", n)
+		}
+		// The new partition's copy has a name PostgreSQL chose; the definition says which index it is.
+		if n := e.count(t, `SELECT count(*) FROM pg_index x JOIN pg_class c ON c.oid = x.indrelid
+			WHERE c.relname LIKE 'delivery_events_p%'
+			  AND pg_get_indexdef(x.indexrelid) LIKE '%(org_id, destination_id, kind, occurred_at DESC)%'`); n != 3 {
+			t.Errorf("%d indexes on the partitions, want one each", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_index
+			WHERE indexrelid = 'delivery_events_mentions_idx'::regclass AND indisvalid`); n != 1 {
+			t.Error("the index of the parent is not valid")
+		}
+		if got := e.constraints(t, []string{"delivery_events", "delivery_events_p202612"}, "delivery_events_kind"); got !=
+			"delivery_events.delivery_events_kind_v3_check:true delivery_events_p202612.delivery_events_kind_v3_check:true" {
+			t.Errorf("checks %s", got)
+		}
+		if err := e.mm.Force(48); err != nil {
+			t.Fatal(err)
+		}
+		e.step(t, -1)
+		if n := e.count(t, `SELECT count(*) FROM pg_class WHERE relname LIKE 'delivery_events%mentions_idx'`); n != 0 {
+			t.Errorf("after down: %d indexes are left", n)
+		}
+	})
+}
+
+// TestIntegrationMentionIndexDetachPending runs 0048 over a database at 47 whose oldest delivery_events partition
+// retention left detached concurrently but not finalized (DETACH … CONCURRENTLY cancelled after its first phase, as a
+// Leader of an earlier version may leave it during a rolling update): up skips that partition, builds and attaches
+// the index on the others, and the parent's index is valid; once the detach is finalized it stays valid.
+func TestIntegrationMentionIndexDetachPending(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 47)
+		ctx := t.Context()
+		e.exec(t, `CREATE TABLE delivery_events_p202610 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`)
+		e.exec(t, `CREATE TABLE delivery_events_p202611 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00')`)
+		// A snapshot that reads the parent holds the detach in its second phase, which the statement timeout ends.
+		reader, err := e.d.Pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reader.Release()
+		if _, err := reader.Exec(ctx, `BEGIN ISOLATION LEVEL REPEATABLE READ`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reader.Exec(ctx, `SELECT count(*) FROM delivery_events`); err != nil {
+			t.Fatal(err)
+		}
+		detacher, err := e.d.Pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer detacher.Release()
+		if _, err := detacher.Exec(ctx, `SET statement_timeout = '2s'`); err != nil {
+			t.Fatal(err)
+		}
+		_, err = detacher.Exec(ctx, `ALTER TABLE delivery_events DETACH PARTITION delivery_events_p202610 CONCURRENTLY`)
+		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "57014" {
+			t.Fatalf("the detach was not cancelled: %v", err)
+		}
+		if _, err := detacher.Exec(ctx, `RESET statement_timeout`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reader.Exec(ctx, `ROLLBACK`); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_inherits
+			WHERE inhrelid = 'delivery_events_p202610'::regclass AND inhdetachpending`); n != 1 {
+			t.Fatal("the partition is not pending its detach")
+		}
+		e.step(t, 1)
+		valid := `SELECT count(*) FROM pg_index WHERE indexrelid = 'delivery_events_mentions_idx'::regclass
+			AND indisvalid`
+		if n := e.count(t, valid); n != 1 {
+			t.Error("the index of the parent is not valid with a partition pending its detach")
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_inherits i JOIN pg_index x ON x.indexrelid = i.inhrelid
+			WHERE i.inhparent = 'delivery_events_mentions_idx'::regclass AND x.indrelid =
+				'delivery_events_p202611'::regclass`); n != 1 {
+			t.Errorf("the attached partition has %d indexes of the parent", n)
+		}
+		e.exec(t, `ALTER TABLE delivery_events DETACH PARTITION delivery_events_p202610 FINALIZE`)
+		if n := e.count(t, valid); n != 1 {
+			t.Error("the index of the parent is not valid after the detach was finalized")
+		}
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 48 {
+			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
 		}
 	})
 }

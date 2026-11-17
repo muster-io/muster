@@ -704,6 +704,48 @@ func (s *Service) labelTeams(ctx context.Context, q Queries, org int64, r Reques
 	return out, nil
 }
 
+// The reasons a person whom a Mention entry names is not mentioned as their messenger mentions them
+// (MentionNotDeliveredReason, C-28.FR-3): no Account link in the Destination's identity space, which leaves them out of
+// the message, or a bridge without native_mentions, which names them by the plain name (C-22.FR-16).
+const (
+	ReasonNoAccountLink             = "no_account_link"
+	ReasonBridgeCannotMentionPeople = "bridge_cannot_mention_people"
+)
+
+// EntryRef is the Mention entry that named a person: its id, its position and its target, which is the entry's
+// identity across saves of its Destination — a save writes every entry again, and each target appears once.
+type EntryRef struct {
+	ID       int64
+	Position int
+	Target   EntryTarget
+}
+
+// Undelivered is a person whom an entry named for the Loud event Event and whom the message does not mention as
+// their messenger mentions them, with the reason (C-28.FR-3).
+type Undelivered struct {
+	UserID int64
+	Entry  EntryRef
+	Event  string
+	Reason string
+}
+
+// Mentioned is a person whom an entry named for the Loud event Event and whom the message mentions as their
+// messenger mentions them.
+type Mentioned struct {
+	UserID int64
+	Entry  EntryRef
+	Event  string
+}
+
+// Result is the resolution of a Loud message's Mentions: its targets, in order, and for each person an entry named,
+// once per person and entry, either Undelivered or Mentioned. An outgoing webhook, which takes every person as data,
+// has neither.
+type Result struct {
+	Targets     []Target
+	Undelivered []Undelivered
+	Mentioned   []Mentioned
+}
+
 // Resolve turns the symbolic Mentions of a Loud message into its targets in the Organization org, reading through
 // db (C-28.FR-3, FR-4, FR-7): the Loud events among them into the Destination's entries that apply to any of them, in
 // the entries' order — everyone with its word, a group by its name, a person by their Account link in the
@@ -714,15 +756,18 @@ func (s *Service) labelTeams(ctx context.Context, q Queries, org int64, r Reques
 // Connection cannot mention now mentions nobody. An outgoing webhook takes every target as data, a person without an
 // Account link and a Team as itself included (C-15.FR-11). The Owner turns into the Owner the lifecycle event recorded,
 // or the Owner it released, and the previous Owner into the one a Takeover replaced, named as L1 named them, without a
-// link by their display name. Each person and group is mentioned once.
-func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([]Target, error) {
+// link by their display name. Each person and group is mentioned once. Each person an entry named that is not deleted
+// is, once per entry, Undelivered — left out without an Account link, or named by the plain name through a bridge
+// whose stored info does not declare native_mentions, or has none — or Mentioned, with the first of the message's Loud
+// events the entry applies to.
+func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) (Result, error) {
 	if len(r.Mentions) == 0 {
-		return nil, nil
+		return Result{}, nil
 	}
 	q := s.q(db)
 	owner, previous, err := s.owners(ctx, q, org, r)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	var events []string
 	for _, m := range r.Mentions {
@@ -733,31 +778,29 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 	at := r.At
 	if at.IsZero() && len(events) > 0 {
 		if at, err = s.eventAt(ctx, q, org, r); err != nil {
-			return nil, err
+			return Result{}, err
 		}
 	}
 	rs := s.newResolver(ctx, db, q, at)
-	var parts []part
-	var named []bool // whether each part is named by an entry, whose people need an Account link
+	var parts []entryPart
 	var conn Connection
 	if len(events) > 0 {
-		if parts, named, conn, err = s.entryParts(ctx, rs, org, r, events); err != nil {
-			return nil, err
+		if parts, conn, err = s.entryParts(ctx, rs, org, r, events); err != nil {
+			return Result{}, err
 		}
 	}
 	// The Owner's and the previous Owner's places among the parts: at their places in the symbolic Mentions, the
 	// entries at the place of the first Loud event.
-	var ordered []part
-	var byEntry []bool
+	var ordered []entryPart
 	placed := false
 	for _, m := range r.Mentions {
 		switch {
 		case m == Owner && owner != nil:
-			ordered, byEntry = append(ordered, part{user: *owner}), append(byEntry, false)
+			ordered = append(ordered, entryPart{part: part{user: *owner}})
 		case m == PreviousOwner && previous != nil:
-			ordered, byEntry = append(ordered, part{user: *previous}), append(byEntry, false)
+			ordered = append(ordered, entryPart{part: part{user: *previous}})
 		case slices.Contains(events, m) && !placed:
-			ordered, byEntry = append(ordered, parts...), append(byEntry, named...)
+			ordered = append(ordered, parts...)
 			placed = true
 		}
 	}
@@ -772,15 +815,15 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 	}
 	users, err := rs.users(spaceOf(r.DestinationType, conn), ids)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
-	var out []Target
+	var out Result
 	add := func(t Target) {
-		if !slices.ContainsFunc(out, func(o Target) bool { return same(o, t) }) {
-			out = append(out, t)
+		if !slices.ContainsFunc(out.Targets, func(o Target) bool { return same(o, t) }) {
+			out.Targets = append(out.Targets, t)
 		}
 	}
-	for i, p := range ordered {
+	for _, p := range ordered {
 		switch {
 		case p.everyone != "":
 			add(Target{Kind: TargetEveryone, Everyone: p.everyone})
@@ -790,8 +833,14 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 			add(Target{Kind: TargetTeam, Team: &TeamTarget{Slug: p.team.Slug, Name: p.team.Name}})
 		case p.user != 0:
 			u, ok := users[p.user]
-			if !ok || (byEntry[i] && !u.Linked && r.DestinationType != TypeWebhook) {
+			if !ok {
 				continue
+			}
+			if p.entry != nil && r.DestinationType != TypeWebhook {
+				out.record(p, u.Linked, r.DestinationType == TypeBridge && !conn.NativeMentions)
+				if !u.Linked {
+					continue
+				}
 			}
 			add(Target{Kind: TargetUser, User: &User{PublicID: u.PublicID, Name: u.Name, Login: u.Login,
 				Username: u.Username, ExternalID: u.ExternalID, DisplayName: u.DisplayName}})
@@ -800,13 +849,45 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 	return out, nil
 }
 
-// entryParts are what the Destination's entries that apply to any of the events mention, in their order, each marked
-// as named by an entry, and the Destination's Connection.
-func (s *Service) entryParts(ctx context.Context, rs *resolver, org int64, r Request, events []string) ([]part,
-	[]bool, Connection, error) {
+// record adds the person of the part p, which an entry named, as Undelivered or Mentioned, once per person and entry:
+// Undelivered without an Account link (linked false) and through a bridge that names people by the plain name
+// (plain), Mentioned otherwise.
+func (r *Result) record(p entryPart, linked, plain bool) {
+	seen := func(user, entry int64) bool {
+		return slices.ContainsFunc(r.Undelivered, func(u Undelivered) bool {
+			return u.UserID == user && u.Entry.ID == entry
+		}) || slices.ContainsFunc(r.Mentioned, func(m Mentioned) bool { return m.UserID == user && m.Entry.ID == entry })
+	}
+	if seen(p.user, p.entry.ID) {
+		return
+	}
+	switch {
+	case !linked:
+		r.Undelivered = append(r.Undelivered, Undelivered{UserID: p.user, Entry: *p.entry, Event: p.event,
+			Reason: ReasonNoAccountLink})
+	case plain:
+		r.Undelivered = append(r.Undelivered, Undelivered{UserID: p.user, Entry: *p.entry, Event: p.event,
+			Reason: ReasonBridgeCannotMentionPeople})
+	default:
+		r.Mentioned = append(r.Mentioned, Mentioned{UserID: p.user, Entry: *p.entry, Event: p.event})
+	}
+}
+
+// entryPart is a part of the Mentions of a message with the entry that named it and the Loud event it was named for,
+// nil for the Owner and the previous Owner.
+type entryPart struct {
+	part
+	entry *EntryRef
+	event string
+}
+
+// entryParts are what the Destination's entries that apply to any of the events mention, in their order, each with its
+// entry and the first of the events it applies to, and the Destination's Connection.
+func (s *Service) entryParts(ctx context.Context, rs *resolver, org int64, r Request, events []string) ([]entryPart,
+	Connection, error) {
 	all, err := s.listEntriesOf(ctx, rs.q, org, r.DestinationID)
 	if err != nil {
-		return nil, nil, Connection{}, err
+		return nil, Connection{}, err
 	}
 	var list []Entry
 	label := false
@@ -817,33 +898,33 @@ func (s *Service) entryParts(ctx context.Context, rs *resolver, org int64, r Req
 		}
 	}
 	if len(list) == 0 {
-		return nil, nil, Connection{}, nil
+		return nil, Connection{}, nil
 	}
 	conn, err := rs.connection(r.DestinationType, r.ConnectionID, "")
 	if err != nil {
-		return nil, nil, Connection{}, err
+		return nil, Connection{}, err
 	}
 	var teams []TeamRef
 	if label {
 		if teams, err = s.labelTeams(ctx, rs.q, org, r); err != nil {
-			return nil, nil, Connection{}, err
+			return nil, Connection{}, err
 		}
 	}
-	var parts []part
+	var parts []entryPart
 	for _, e := range list {
 		groups, err := rs.expand(r.DestinationType, conn, e, teams)
 		if err != nil {
-			return nil, nil, Connection{}, err
+			return nil, Connection{}, err
 		}
+		ref := &EntryRef{ID: e.ID, Position: e.Position, Target: e.Target}
+		event := events[slices.IndexFunc(events, func(ev string) bool { return slices.Contains(e.Events, ev) })]
 		for _, g := range groups {
-			parts = append(parts, g.parts...)
+			for _, p := range g.parts {
+				parts = append(parts, entryPart{part: p, entry: ref, event: event})
+			}
 		}
 	}
-	named := make([]bool, len(parts))
-	for i := range named {
-		named[i] = true
-	}
-	return parts, named, conn, nil
+	return parts, conn, nil
 }
 
 // listEntriesOf reads the entries of one Destination of the Organization org through q.

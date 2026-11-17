@@ -2130,7 +2130,7 @@ func (l *live) movedToDefaultRoute(t *testing.T) {
 // produces the new message, the edit or nothing it names, with its loudness and Mentions; the Publication after a
 // recovery is Loud only for an Alert Group firing at that moment.
 func (l *live) deliveryEventRows(t *testing.T) {
-	if len(delivery.DeliveryEvents) != 12 {
+	if len(delivery.DeliveryEvents) != 13 {
 		t.Fatalf("%d rows", len(delivery.DeliveryEvents))
 	}
 	n := 0
@@ -2259,6 +2259,27 @@ func (l *live) deliveryEventRows(t *testing.T) {
 			l.routeEdit(t, route)
 			l.round(t, l.a)
 			return l.rec.Calls()
+		}}},
+		// A Mention not delivered: the first Destination's entry names a person without an Account link; the
+		// Publication is the row of its own event, nothing more is sent, and the delivery event is recorded
+		// (C-28.FR-3).
+		delivery.DeliveryMentionNotDelivered: {{true, func(t *testing.T) []deliverytest.Call {
+			l.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at,
+				updated_at) SELECT id, 'SR0000000000MB', 'unlinked', 'Unlinked', 'responder', 'local', 'active', $1, $1
+				FROM organizations ON CONFLICT DO NOTHING`, t0)
+			l.exec(t, `INSERT INTO mention_entries (org_id, destination_id, position, target_kind, user_id, events,
+				created_at) SELECT u.org_id, $1, 90, 'user', u.id, ARRAY['new_alert_group'], $2 FROM users u
+				WHERE u.public_id = 'SR0000000000MB'`, l.dests[0], t0)
+			defer l.exec(t, `DELETE FROM mention_entries WHERE destination_id = $1 AND position = 90`, l.dests[0])
+			_, gid, _ := start(t, 1_000_000, false)
+			l.round(t, l.a)
+			if l.count(t, `SELECT count(*) FROM delivery_events e JOIN alert_groups g ON g.id = e.alert_group_id
+				WHERE g.public_id = $1 AND e.kind = 'mention_not_delivered' AND e.loudness = 'quiet'
+				AND e.detail ->> 'reason' = 'no_account_link'`, gid) != 1 ||
+				len(only(l.rec.Calls(), deliverytest.MethodPublish)) != 1 {
+				t.Errorf("no mention not delivered: %s", methods(l.rec.Calls()))
+			}
+			return without(l.rec.Calls(), deliverytest.MethodPublish)
 		}}},
 		// A change of status past a bridge's edit window: the new Root message, apart from the pointer reply under
 		// the old one.

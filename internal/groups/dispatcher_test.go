@@ -1610,6 +1610,48 @@ func TestAlerts(t *testing.T) {
 	}
 }
 
+// TestTimelineMentionNotDelivered is C-28.FR-3, AC-4 and C-11.FR-21 revised for L2: a mention_not_delivered delivery
+// event is merged into the Timeline with its person, named as a User, the position and target of its entry — the
+// person of a person entry, the Team of an On-call entry — the Loud event and the reason; a detail that is not JSON
+// fails the read.
+func TestTimelineMentionNotDelivered(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	h.db.users[9] = dbgen.ListUserRefsRow{ID: 9, PublicID: "SRAAAAAAAAAAA9", Name: "Bob", Login: "bob",
+		Status: "active"}
+	h.db.delivery = []dbgen.ListTimelineDeliveryEventsRow{{ID: 1, PublicID: "DEAAAAAAAAAAA1",
+		OccurredAt: t0.Add(time.Second), Kind: "mention_not_delivered", Loudness: "quiet",
+		DestinationPublicID: "DSAAAAAAAAAAAA", DestinationName: "payments-notice",
+		Detail: []byte(`{"user_id":9,"entry_id":71,"position":2,"target":{"kind":"on_call_of_team",` +
+			`"team_id":"TMAAAAAAAAAAA1"},"event":"new_alert_group","reason":"no_account_link"}`),
+		MentionTeamPublicID: "TMAAAAAAAAAAA1", MentionTeamName: "Payments", MentionTeamSlug: "payments"},
+		{ID: 2, PublicID: "DEAAAAAAAAAAA2", OccurredAt: t0.Add(2 * time.Second), Kind: "mention_not_delivered",
+			Loudness: "quiet", DestinationPublicID: "DSAAAAAAAAAAAA", DestinationName: "payments-notice",
+			Detail: []byte(`{"user_id":9,"entry_id":72,"position":0,"target":{"kind":"user",` +
+				`"user_id":"SRAAAAAAAAAAA9"},"event":"reopen","reason":"bridge_cannot_mention_people"}`)}}
+	page, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 10, Kinds: []Kind{KindDelivery}})
+	if err != nil || len(page.Entries) != 2 {
+		t.Fatalf("timeline = %+v, %v", page.Entries, err)
+	}
+	person, onCall := page.Entries[0].Delivery, page.Entries[1].Delivery
+	if m := onCall.Mention; onCall.Event != "mention_not_delivered" || m == nil || m.User.Login != "bob" ||
+		m.User.PublicID != "SRAAAAAAAAAAA9" || m.Position != 2 || m.Target.Kind != "on_call_of_team" ||
+		m.Target.Team == nil || m.Target.Team.Slug != "payments" || m.Target.User != nil ||
+		m.Event != "new_alert_group" || m.Reason != "no_account_link" {
+		t.Errorf("on-call %+v", m)
+	}
+	if m := person.Mention; m == nil || m.Target.User == nil || m.Target.User.Name != "Bob" || m.Target.Team != nil ||
+		m.Target.UserID != "SRAAAAAAAAAAA9" || m.Reason != "bridge_cannot_mention_people" || m.Event != "reopen" {
+		t.Errorf("person %+v", m)
+	}
+	h.db.delivery[0].Detail = []byte(`{"user_id":`)
+	if _, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 10}); err == nil {
+		t.Error("a detail that is not JSON was read")
+	}
+}
+
 // TestTimeline is C-09.FR-11 and FR-14: the Timeline newest first or oldest first, by page, filtered by kind, with
 // the Notes and delivery events merged by time, each with its actor and Transport.
 func TestTimeline(t *testing.T) {

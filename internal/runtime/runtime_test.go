@@ -636,6 +636,12 @@ func (fakeDestinationsStore) ListDestinationInfo(context.Context, int64) ([]dest
 	return nil, nil
 }
 
+// ListMentionWarnings answers no warnings.
+func (fakeDestinationsStore) ListMentionWarnings(context.Context, destdb.ListMentionWarningsParams) (
+	[]destdb.ListMentionWarningsRow, error) {
+	return nil, nil
+}
+
 // ClockStore reads the development clock of devOffset.
 func (f *fakeDB) ClockStore() devmode.ClockStore { return fakeClockStore{f: f} }
 

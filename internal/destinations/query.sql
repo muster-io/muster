@@ -340,3 +340,34 @@ VALUES (@org_id, @kind, @destination_id, @requested_at::timestamptz);
 -- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 -- name: NotifyOpenGroupUpdates :exec
 SELECT pg_notify(@channel::text, '');
+
+-- ListMentionWarnings computes the warnings of the Destinations about undelivered Mentions (C-28.FR-3), in one query
+-- for a page: for each Destination, person and entry target, among the mention_not_delivered and mention_delivered
+-- delivery events kept — within retention.alert_details before @now, as the API hides what is past it even while its
+-- partition exists — those after the last mention_delivered, when the latest is mention_not_delivered: the time of the
+-- first of them and the reason of the latest, with the person, unless deleted. delivered_after counts the
+-- mention_delivered at or after each event. On delivery_events_mentions_idx.
+-- name: ListMentionWarnings :many
+WITH kept AS (
+    SELECT (sqlc.arg('now')::timestamptz - o.retention_alert_details_days * interval '1 day')::timestamptz AS cutoff
+    FROM organizations o
+    WHERE o.id = @org_id
+), events AS (
+    SELECT e.destination_id, e.detail ->> 'user_id' AS user_ref, e.detail -> 'target' AS target,
+           e.detail ->> 'reason' AS reason, e.occurred_at, e.id,
+           count(*) FILTER (WHERE e.kind = 'mention_delivered') OVER (
+               PARTITION BY e.destination_id, e.detail ->> 'user_id', e.detail -> 'target'
+               ORDER BY e.occurred_at DESC, e.id DESC) AS delivered_after
+    FROM delivery_events e
+    JOIN kept k ON e.occurred_at >= k.cutoff
+    WHERE e.org_id = @org_id AND e.destination_id = ANY(@destination_ids::bigint[])
+      AND e.kind IN ('mention_not_delivered', 'mention_delivered')
+)
+SELECT ev.destination_id, u.id AS user_id, u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login,
+       ev.target::jsonb AS target, min(ev.occurred_at)::timestamptz AS since,
+       (array_agg(ev.reason ORDER BY ev.occurred_at DESC, ev.id DESC))[1]::text AS reason
+FROM events ev
+JOIN users u ON u.org_id = @org_id AND u.id = ev.user_ref::bigint AND u.status <> 'deleted'
+WHERE ev.delivered_after = 0
+GROUP BY ev.destination_id, u.id, u.public_id, u.name, u.login, ev.target
+ORDER BY ev.destination_id, lower(u.name), u.id;

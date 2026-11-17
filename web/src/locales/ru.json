@@ -3298,6 +3298,7 @@
       "destinationRecovered": "{{destination}} снова работает",
       "finalEdit": "Больше не обновляется в {{destination}}",
       "markupRejected": "{{destination}} не принял разметку",
+      "mentionNotDelivered": "Упоминание не доставлено в {{destination}}",
       "notDelivered": "Не доставлена в {{destination}}",
       "other": "Событие доставки в {{destination}}",
       "possibleDuplicate": "Возможный дубль в {{destination}}",

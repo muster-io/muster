@@ -105,9 +105,12 @@ type TeamRef struct {
 	Deleted  bool
 }
 
-// Entry is a Mention entry as a read gives it (MentionEntry): its input, the User or the Team it names, whether the
-// Destination's Connection can mention its target now, with the reason when it cannot, and what it mentions now.
+// Entry is a Mention entry as a read gives it (MentionEntry): its id and position, its input, the User or the Team it
+// names, whether the Destination's Connection can mention its target now, with the reason when it cannot, and what it
+// mentions now.
 type Entry struct {
+	ID       int64
+	Position int
 	EntryInput
 	User              *UserRef
 	Team              *TeamRef
@@ -131,13 +134,14 @@ type Resolved struct {
 }
 
 // Connection is what a Destination's Connection can mention (C-28.FR-2): its type, whether the last check of a Slack
-// Connection found usergroups:read, and from a Bridge's stored info whether it declares group mentions, the role
-// messenger and which mentions of everyone.
+// Connection found usergroups:read, and from a Bridge's stored info whether it declares group mentions and native
+// mentions — neither while no info was read — the role messenger and which mentions of everyone.
 type Connection struct {
 	ID             int64
 	Type           string
 	UsergroupsRead bool
 	GroupMentions  bool
+	NativeMentions bool
 	Messenger      bool
 	Everyone       []string
 }
@@ -211,7 +215,7 @@ func unsupportedDetail(reason string) string {
 // connectionOf is what a Connection row can mention.
 func connectionOf(r dbgen.GetMentionConnectionRow) Connection {
 	return Connection{ID: r.ID, Type: r.Type, UsergroupsRead: r.UsergroupsRead, GroupMentions: r.GroupMentions,
-		Messenger: r.Messenger, Everyone: r.EveryoneMentions}
+		NativeMentions: r.NativeMentions, Messenger: r.Messenger, Everyone: r.EveryoneMentions}
 }
 
 // connection reads what the Connection by id or public_id can mention, through q; none for an outgoing webhook, a
@@ -863,7 +867,7 @@ func addTeamEntry(ctx context.Context, q Queries, org, destinationID, teamID int
 
 // entryOf is the entry of a row, with its User and Team; neither availability nor resolution.
 func entryOf(r dbgen.ListMentionEntriesRow) Entry {
-	e := Entry{EntryInput: EntryInput{Target: EntryTarget{Kind: r.TargetKind, Everyone: r.Everyone, Group: r.GroupName,
+	e := Entry{ID: r.ID, Position: int(r.Position), EntryInput: EntryInput{Target: EntryTarget{Kind: r.TargetKind, Everyone: r.Everyone, Group: r.GroupName,
 		GroupID: r.SlackUsergroupID, UserID: r.UserPublicID, TeamID: r.TeamPublicID}, Events: ordered(r.Events)}}
 	if r.UserID.Valid {
 		e.User = &UserRef{ID: r.UserID.Int64, PublicID: r.UserPublicID, Name: r.UserName, Login: r.UserLogin, Deleted: r.UserDeleted}

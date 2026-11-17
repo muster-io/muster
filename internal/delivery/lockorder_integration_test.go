@@ -533,7 +533,7 @@ type gateMentions struct {
 }
 
 func (g *gateMentions) Resolve(ctx context.Context, db mentions.DBTX, org int64, r mentions.Request) (
-	[]mentions.Target, error) {
+	mentions.Result, error) {
 	g.once.Do(func() {
 		_ = db.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&g.pid)
 		close(g.entered)

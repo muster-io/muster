@@ -3188,6 +3188,7 @@
       "destinationRecovered": "{{destination}} recovered",
       "finalEdit": "No longer updated in {{destination}}",
       "markupRejected": "{{destination}} rejected the formatting",
+      "mentionNotDelivered": "Mention not delivered in {{destination}}",
       "notDelivered": "Not delivered to {{destination}}",
       "other": "Delivery event in {{destination}}",
       "possibleDuplicate": "Possible duplicate in {{destination}}",

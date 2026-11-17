@@ -5,7 +5,8 @@
 A Schedule has a **gap** now or one that starts within the next 7 days (`schedule.gap_alert_horizon`): a time when no
 Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is On-call. A person may not be
 Paged when they are a Viewer, disabled, or no longer in the Schedule's Team, and their Shifts are skipped; see
-[Schedules](../../concepts/schedules.md#gaps-and-the-internal-alert).
+[Schedules](../../concepts/schedules.md#gaps-and-the-internal-alert), and its [worked
+example](../../concepts/schedules.md#a-worked-example).
 
 Only a Schedule whose gap alert is active reports its gaps: by default (`schedule.gap_alert` `by_default`) the Team's
 main Schedule, and any Schedule an Admin set to `on`. The Leader looks for gaps every 5 minutes

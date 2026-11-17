@@ -341,6 +341,9 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 				return false, err
 			}
 		}
+		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), a.resolved, now); err != nil {
+			return false, err
+		}
 	}
 	if a.row.GroupUnpublished && (a.publication || a.row.PublishedAt.Valid) {
 		at := now
@@ -595,9 +598,17 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 	id := a.row.ID
 	switch out.Kind {
 	case OutcomeOK:
-		if err := q.RecordReplySent(ctx, dbgen.RecordReplySentParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-			MessageID: nonEmpty(out.MessageID), ButtonKeyID: nonEmpty(buttonKeyOf(a.message)), Now: now}); err != nil {
+		n, err := q.RecordReplySent(ctx, dbgen.RecordReplySentParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
+			MessageID: nonEmpty(out.MessageID), ButtonKeyID: nonEmpty(buttonKeyOf(a.message)), Now: now})
+		if err != nil {
 			return false, fmt.Errorf("record the sent thread reply: %w", err)
+		}
+		// Under the lease only, so that a reply another replica sends again records its Mentions once.
+		if n == 1 {
+			group := a.row.AlertGroupID
+			if err := recordMentions(ctx, q, org, a.destination, &group, nil, a.resolved, now); err != nil {
+				return false, err
+			}
 		}
 		if out.ThreadRef == "" {
 			return true, nil
