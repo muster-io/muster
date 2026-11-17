@@ -232,6 +232,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   _Revised for L2 (2026-11-16, #572):_ a person whom a Mention entry names without an Account link is left out of the
   message (C-28.FR-3); only the Owner's Mentions, the footer and the Assignees (named like the footer's users,
   C-32.FR-12) name them by display name as text.
+  _Revised for L2 (2026-11-17, #583):_ a bridge never refuses a Mention entry for its `kind`: a `group` or `everyone`
+  entry of a kind the bridge did not declare is shown as the marker's link text. Muster decides from its copy of
+  `info`, which may be older than the bridge's own.
 - **C-22.FR-17** The Destination test and preview of C-16 apply: "Send test message" makes one `postMessage` of the
   kind `test`, marked "🧪 Test message", through the interactive path, and a press on it is answered "This is a test
   message; nothing was changed"; "Preview" shows the envelope as Muster would post it.

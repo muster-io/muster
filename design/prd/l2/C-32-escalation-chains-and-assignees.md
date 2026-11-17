@@ -66,7 +66,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-32.FR-4** The chains that run on an Alert Group are those its Route names and — where the Route delivers to the
   Teams from the label and runs their chains (C-26.FR-2) — those that each Team of the Alert Group names, each whose
   Severity condition the Alert Group's Severity level meets. Several chains may run on one Alert Group at the same time.
-  A chain that several of them name runs once and Pages in the Threads of each (_provisional_, P-70).
+  A chain that several of them name runs once and Pages in the Threads of each (P-70).
 - **C-32.FR-5** A chain runs only while the Alert Group is firing, at the points of the ack timeout (C-17.FR-1):
 
   | Point | What happens to the chains |
@@ -81,10 +81,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
   A chain whose condition the Alert Group no longer meets after its Severity level falls goes on (ADR-0018, journal
   D469). A chain that a change of configuration would apply to starts at the next point of the table that starts or
-  starts over the chains, such as Unacknowledge. New Alerts that remove an acknowledgement, where a Route allows it,
-  become a point of starting over with the Route's Loud and Quiet settings, and how a Maintenance window keeps chains
-  waiting is specified with Maintenance windows; both come later in L2. Steps are timer rows that any replica claims
-  (ADR-0007); every step is a system transition of the dispatcher with Muster as the actor (ADR-0016).
+  starts over the chains, such as Unacknowledge. When a configuration released an Alert Group's first Publication
+  Quietly, its chains have not started: a later rise by Alerts then starts only the chains it newly meets, a Team that
+  joins starts only that Team's chains, and the other chains start at the next point of starting over, such as an
+  Unacknowledge. New Alerts that remove an acknowledgement, where a Route allows it, become a point of starting over
+  with the Route's Loud and Quiet settings, and how a Maintenance window keeps chains waiting is specified with
+  Maintenance windows; both come later in L2. Steps are timer rows that any replica claims (ADR-0007); every step is a
+  system transition of the dispatcher with Muster as the actor (ADR-0016).
 - **C-32.FR-6** When the first chain of an Alert Group starts, its running ack timeout stops and sends no more notices.
   When the Alert Group becomes firing again, its ack timeout starts over only if none of its chains starts; an Alert
   Group on which no chain applies keeps the ack timeout of C-17.
@@ -147,8 +150,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   has become a Viewer or been disabled since the step was saved; the chain goes on with its next step at once.
 - **C-32.FR-15** A step "Repeat from step K, up to N times" goes back to step K until it has done so N times and then
   goes on; each pass makes its steps again.
+  _Revised for L2 (2026-11-17, #585):_ a repeat among the steps that a pass makes counts its own passes afresh on each
+  pass, so nested repeats restart their inner counts on each outer pass. A run makes at most 4,020 steps
+  (`escalation.MaxStepsPerRun`) and runs out when it reaches them, logging the warning event
+  `escalation_run_step_limit`.
 - **C-32.FR-16** A change of a chain applies to the runs that start after it; a running chain keeps the steps it started
-  with until it stops or starts over (_provisional_, P-73).
+  with until it stops or starts over (P-73).
 
 ### Pages, warnings and the UI
 
@@ -165,6 +172,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   an Assignee", the Alert Groups where the signed-in User is an Assignee — "Alert Groups that an Escalation chain Paged
   you about. They leave this list once acknowledged." — with their status, Assignees, the chain and its step, and
   Acknowledge and Snooze.
+  _Revised for L2 (2026-11-17, #585):_ "How it went" lists the steps that a run made and the steps that it skipped
+  whole; the people skipped on a step that was made, as Viewers or disabled Users, appear in the Timeline as
+  `escalation_step_skipped`.
 - **C-32.FR-19** Chains use optimistic locking and are recorded in the Audit log with a before/after diff. Each chain
   exports `muster_escalation_chain_info{chain,name}`; Pages are counted by `muster_pages_total{chain,kind,outcome}`,
   where `kind` is `mention` or `call`; the stories register their log events and add the lifecycle events of this

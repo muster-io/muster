@@ -122,6 +122,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Alert list first, then the label sections, always keeping the title, status, footer, buttons and the link to Muster.
   _Revised for L2 (2026-10-26):_ from 0.2.0 a message is shortened in the order of C-29.FR-6: its description, then its
   Alerts, then its summary, then its key labels.
+  _Revised for L2 (2026-11-17, #583):_ through a bridge, the line of Mentions keeps, in their order, the whole Mentions
+  that fit half of `limits.max_body_length`; a Mention that does not fit is left out with its entry, and the text of
+  the message keeps the rest.
 - **C-12.FR-12** A Mention of a user with an Account link in the Destination's identity space uses the messenger's own
   form — `@username` in Mattermost, a `tg://user?id=` link whose text is the display name in Telegram, `<@U…>` in Slack,
   a Mention marker through a Bridge (C-22.FR-16) — and of a user without one the display name as text, which notifies
