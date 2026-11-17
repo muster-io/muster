@@ -10,7 +10,8 @@ files_touched:
   - api/openapi.yaml
   - internal/schedules/reach.go
   - internal/schedules/reach_test.go
-  - internal/schedules/oncallnow.go
+  - internal/schedules/reach_integration_test.go
+  - internal/schedules/schedules.go
   - internal/schedules/oncallnow_test.go
   - internal/schedules/query.sql
   - internal/api/schedules.go
@@ -30,8 +31,11 @@ files_touched:
   - web/src/components/gateway-health.test.tsx
   - web/src/components/connection-check.tsx
   - web/src/components/connection-check.test.tsx
-  - web/src/components/destination-form.tsx
-  - web/src/components/destination-form.test.tsx
+  - web/src/components/bridge-destination-fields.tsx
+  - web/src/components/bridge-destination-fields.test.tsx
+  - web/src/components/schedule-on-call-now.tsx
+  - web/src/routes/connections.new.tsx
+  - web/e2e/support.ts
   - web/src/components/schedule-warnings.tsx
   - web/src/components/schedule-warnings.test.tsx
   - web/src/components/on-call-now.tsx
@@ -51,7 +55,7 @@ acceptance:
   - "[C-30.FR-3, C-30.FR-9, C-30.AC-6] In a real browser, without a Notification gateway the profile's \"Contact for calls and SMS\" shows its hint and \"Unavailable: a Notification gateway is needed (a bridge for calls and SMS)\" with \"How to connect a Notification gateway\" and, for Admins only, \"Connect a bridge\", and no phone field; with the fake gateway it shows the phone field and \"Send code\", then \"Code sent through the Notification gateway to {contact}.\", the code field, \"Confirm\" and \"Another number\"; the code the fake gateway received confirms the contact, shown with \"calls and SMS\", \"confirmed\" and \"Remove\", and the note about acknowledging from a call; in English and in Russian (`gateway-contact-section.test.tsx`, `profile.spec.ts`)."
   - "[C-30.FR-3] A wrong code shows the attempts left; \"Too many code requests\" with the time to wait shows on `429`; with several gateways the section has one block per gateway (`gateway-contact-section.test.tsx`)."
   - "[C-30.FR-3, C-18.FR-6] A User's page shows their contacts with the gateway, the contact and its state, and \"Remove\" for Admins, which asks for confirmation; it offers no way to add one; the Audit log shows the contact's entries (`user-gateway-contacts.test.tsx`, `users.spec.ts`)."
-  - "[C-30.FR-1, C-30.AC-1, C-30.FR-8] The page of a Bridge Connection in the role `gateway` shows \"Notification gateway\" among its roles from `info`, its health — \"Healthy\", or the banner \"Broken since HH:MM: {reason}. Muster tries again every {interval}.\" — and the Connections list marks it \"Notification gateway\"; its check lists the roles; the Destination form does not offer a Connection whose only role is `gateway`; a Connection whose only role is `gateway` and that still has Destinations, saved while its bridge was a messenger, shows \"This bridge now declares only the role gateway: its {count} Destinations no longer receive messages. Remove them or change the bridge.\" (S-145's Open question 1) (`gateway-health.test.tsx`, `connection-check.test.tsx`, `destination-form.test.tsx`, `bridge-connection.spec.ts`, `destinations.spec.ts`)."
+  - "[C-30.FR-1, C-30.AC-1, C-30.FR-8] The page of a Bridge Connection in the role `gateway` shows \"Notification gateway\" among its roles from `info`, its health — \"Healthy\", or the banner \"Broken since HH:MM: {reason}. Muster tries again every {interval}.\" — and the Connections list marks it \"Notification gateway\"; its check lists the roles; the Destination form does not offer a Connection whose only role is `gateway`; a Connection whose only role is `gateway` and that still has Destinations, saved while its bridge was a messenger, shows \"This bridge now declares only the role gateway: its {count} Destinations no longer receive messages. Remove them or change the bridge.\" (S-145's Open question 1) (`gateway-health.test.tsx`, `connection-check.test.tsx`, `bridge-destination-fields.test.tsx`, `bridge-connection.spec.ts`, `destinations.spec.ts`)."
   - "[C-27.FR-8] In `getScheduleOnCall` and `getOnCallNow`, each warning `unreachable` carries `gateway_reaches`: true when the person has a confirmed contact at a Notification gateway, else false; whether the gateway is Broken is not considered (`reach_test.go`, `oncallnow_test.go`)."
   - "[C-27.FR-8] On the Schedule page and in \"On call now\", an unreachable mark of a person with a confirmed contact at a gateway is followed by \"A call through the Notification gateway works.\" (`schedule-warnings.test.tsx`, `on-call-now.test.tsx`, `schedules.spec.ts`)."
   - "Every new text exists in English and Russian; \"How to connect a Notification gateway\" and the link of the Connection page open sections of the page on Notification gateways (`docs-links.json`); `make e2e` passes."
@@ -104,9 +108,11 @@ issue: 439
   type Bridge; `user-gateway-contacts.tsx` — the table of a User's contacts with "Remove"; `gateway-health.tsx` — the
   health of the gateway role with its banner, and the warning about Destinations left on a gateway-only Connection
   (`roles` without `messenger` and `destination_count` above 0); `bridge-connection-fields.tsx` and
-  `connection-check.tsx` — the roles; `destination-form.tsx` — Connections whose `roles` lack `messenger` are not
-  offered; `schedule-warnings.tsx` and `on-call-now.tsx` — the note after an unreachable mark when `gateway_reaches`;
-  `audit-diff.tsx` — the entries `gateway_contact.*`.
+  `connection-check.tsx` — the roles; `bridge-destination-fields.tsx`, whose Connection select the Destination form
+  shows for a Bridge — Connections whose `roles` lack `messenger` are not offered, except the one a saved Destination
+  already names; `connections.new.tsx` — the search `type=bridge` that "Connect a bridge" opens the form with;
+  `schedule-warnings.tsx`, `schedule-on-call-now.tsx` (the mark of the Schedule page) and `on-call-now.tsx` — the note
+  after an unreachable mark when `gateway_reaches`; `audit-diff.tsx` — the entries `gateway_contact.*`.
 - **Documentation links** (`docs-links.json`): `field.gateway_contact` →
   `messengers/notification-gateways.md#contact-for-calls-and-sms`, `page.notification_gateway` →
   `messengers/notification-gateways.md#connect-a-notification-gateway`, the Guide link beside the title of a Bridge
@@ -137,7 +143,7 @@ issue: 439
 2. Write a User's contacts. Check: `user-gateway-contacts.test.tsx`.
 3. Show the roles, the health and the check on the Connection pages, and filter the Destination form. Check:
    `gateway-health.test.tsx`, `bridge-connection-fields.test.tsx`, `connection-check.test.tsx`,
-   `destination-form.test.tsx`.
+   `bridge-destination-fields.test.tsx`.
 4. Add `gateway_reaches` to the API, then the note to the warnings. Check: `make generate-check`; `reach_test.go`,
    `oncallnow_test.go`; `schedule-warnings.test.tsx`, `on-call-now.test.tsx`.
 5. Add the links, the texts and the end-to-end specs. Check: the Verification below; `make e2e`.

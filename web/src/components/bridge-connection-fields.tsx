@@ -23,6 +23,7 @@ import type {
 import { formatDuration, useTimeFormat } from "../lib/time";
 import { unreachable } from "./destination-test-panel";
 import { DocsLink } from "./docs-link";
+import { rolesText } from "./gateway-health";
 import { CopyBlock } from "./integration-token-dialog";
 import { type LimiterValues, limiterValues } from "./limiter-field";
 import { type SecretChange, SecretField } from "./secret-field";
@@ -438,6 +439,9 @@ export function BridgeInfoPanel({
               </li>
               <li data-testid="bridge-info-protocol">
                 {t("connections.bridge.info.protocolVersion", { version: info.protocol_version })}
+              </li>
+              <li data-testid="bridge-info-roles">
+                {t("connections.roles.list", { roles: rolesText(t, info.roles) })}
               </li>
               {limitLines(t, language, info).map((line) => (
                 <li key={line} data-testid="bridge-info-limit">

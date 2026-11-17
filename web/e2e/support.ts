@@ -209,6 +209,68 @@ export async function resetFakeBridge(): Promise<void> {
   });
 }
 
+/** The demo Notification gateway of `muster dev`: the fake bridge's gateway bot, polling under the fake's /gateway. */
+export const GATEWAY_NAME = "Example Gateway";
+export const GATEWAY_TOKEN = "muster-dev-gateway-token";
+export const GATEWAY_URL = `${BRIDGE_URL}/gateway`;
+
+/** The id of the demo gateway, which is created again and checked when a spec removed it. */
+export async function ensureGateway(admin: Api): Promise<string> {
+  const list = await admin.call<{ items: NamedConnection[] }>(
+    "GET",
+    "/api/v1/connections?limit=500",
+  );
+  const found = list.items.find((c) => c.name === GATEWAY_NAME);
+  if (found !== undefined) {
+    return found.id;
+  }
+  const created = await admin.call<{ id: string }>("POST", "/api/v1/connections", {
+    type: "bridge",
+    name: GATEWAY_NAME,
+    base_url: GATEWAY_URL,
+    bot_token: GATEWAY_TOKEN,
+    event_delivery: "poll",
+    proxy: { enabled: false },
+    limiter: { limit: 10, per_seconds: 1 },
+  });
+  await checkConnection(admin, created.id);
+  return created.id;
+}
+
+/** The six-digit code the fake gateway last received for the contact, once it has. */
+export async function sentCode(contact: string): Promise<string> {
+  let code = "";
+  await expect
+    .poll(async () => {
+      const sent = await fbr<{ contact: string; text: string }[]>("GET", "/notifications");
+      const last = sent.filter((n) => n.contact === contact).at(-1);
+      code = /\b(\d{6})\b/.exec(last?.text ?? "")?.[1] ?? "";
+      return code;
+    })
+    .not.toBe("");
+  return code;
+}
+
+/** Adds the contact of the local user login at the gateway gatewayId and confirms it with the code the fake received. */
+export async function confirmContact(
+  login: string,
+  gatewayId: string,
+  contact: string,
+): Promise<string> {
+  const api = await Api.signIn(login, TEAM_SPEC_PASSWORD);
+  try {
+    const added = await api.call<{ id: string }>("POST", "/api/v1/me/gateway-contacts", {
+      connection_id: gatewayId,
+      contact,
+    });
+    const code = await sentCode(contact);
+    await api.call("POST", `/api/v1/me/gateway-contacts/${added.id}/confirmation`, { code });
+    return added.id;
+  } finally {
+    await api.dispose();
+  }
+}
+
 /** Calls the control API of the fake Slack server and returns its answer, null for none. */
 export async function fsl<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${FSL}${path}`, {

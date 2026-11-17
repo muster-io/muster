@@ -122,7 +122,15 @@ export function ScheduleWarnings({
                     : "mt-0.5 size-4 shrink-0 text-muted-foreground"
                 }
               />
-              <span className="wrap-anywhere">{warningText(t, w, zone, locale)}</span>
+              <span className="wrap-anywhere">
+                {warningText(t, w, zone, locale)}
+                {w.kind === "unreachable" && w.gateway_reaches === true && (
+                  <>
+                    {" "}
+                    <span data-testid="schedule-gateway-reaches">{t("gatewayReaches.note")}</span>
+                  </>
+                )}
+              </span>
             </li>
           ))}
         </ul>

@@ -34,4 +34,6 @@ export interface ScheduleWarning {
   messenger: DestinationType | null;
   /** Why a Mention of the person cannot reach `destination`; null for another kind. */
   reason: ReachReason | null;
+  /** Set on every `unreachable` warning, true when the person has a confirmed contact at a Notification gateway, so that a call through it reaches them; whether that gateway is Broken is not considered. Left out for another kind. */
+  gateway_reaches?: boolean;
 }

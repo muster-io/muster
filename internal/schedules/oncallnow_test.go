@@ -146,7 +146,7 @@ func TestOnCallNowUnreachable(t *testing.T) {
 		{UserID: olga.ID, IdentitySpace: "telegram"}}
 	svc, store, c := newReachService(t, reachDests(), links)
 	ctx := t.Context()
-	if _, err := svc.Create(ctx, admin, reachInput(teamPay)); err != nil {
+	if _, err := svc.Create(ctx, admin, reachInput()); err != nil {
 		t.Fatal(err)
 	}
 	marks := func(t *testing.T) map[string]string {
@@ -193,5 +193,35 @@ func TestOnCallNowUnreachable(t *testing.T) {
 	if err != nil || len(list) != 2 || list[1].Current == nil || list[1].Current.User != nil ||
 		len(list[1].Unreachable) != 0 {
 		t.Errorf("a Team in a gap = %+v, %v", list, err)
+	}
+}
+
+// TestOnCallNowGatewayReaches is C-27.FR-8 in "On call now": each mark of the On-call carries gateway_reaches, true
+// while petr, who has a confirmed contact at a Notification gateway, is On-call, false without one.
+func TestOnCallNowGatewayReaches(t *testing.T) {
+	svc, store, _ := newReachService(t, reachDests(), nil)
+	ctx := t.Context()
+	if _, err := svc.Create(ctx, admin, reachInput()); err != nil {
+		t.Fatal(err)
+	}
+	reaches := func() []bool {
+		list, err := svc.OnCallNow(ctx, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []bool
+		for _, team := range list {
+			for _, u := range team.Unreachable {
+				out = append(out, u.GatewayReaches)
+			}
+		}
+		return out
+	}
+	if got := reaches(); len(got) != 2 || got[0] || got[1] {
+		t.Errorf("petr without a contact = %v", got)
+	}
+	store.gateway = []int64{petr.ID}
+	if got := reaches(); len(got) != 2 || !got[0] || !got[1] {
+		t.Errorf("petr with a confirmed contact = %v", got)
 	}
 }

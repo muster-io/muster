@@ -188,6 +188,36 @@ describe("the check of a new Connection", () => {
     expect(document.body.textContent).not.toContain("muster-dev-mattermost-token-b");
   });
 
+  test("lists the roles the bridge declares in its info", async () => {
+    answer(() =>
+      json(200, {
+        ok: true,
+        steps: [step("info", { latency_ms: 4 }), step("event_delivery")],
+        warnings: [],
+        request_log_run: RUN,
+        info: {
+          protocol_version: "1",
+          bridge: { name: "Example gateway", version: "1.0.0" },
+          messenger: { name: "Phone" },
+          capabilities: {},
+          limits: { max_body_length: 1000, edit_max_age_seconds: null },
+          user_lookup: "none",
+          event_delivery: ["poll"],
+          roles: ["gateway"],
+        },
+      } satisfies ConnectionCheckResult),
+    );
+    await renderCheck({ type: "bridge", draft: NEW_DRAFTS.bridge });
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-roles"))
+      .toHaveTextContent("Roles: Notification gateway");
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(page.getByTestId("connection-check-roles"))
+      .toHaveTextContent("Роли: Шлюз оповещений");
+  });
+
   test("is enabled once the address is filled in", async () => {
     const fetch = answer(() => json(200, CONNECTED));
     const screen = await renderCheck({

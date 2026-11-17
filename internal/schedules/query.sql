@@ -417,6 +417,17 @@ FROM account_links
 WHERE org_id = @org_id AND user_id = ANY(@user_ids::bigint[])
 ORDER BY user_id, identity_space;
 
+-- ListGatewayReachUsers reads which of the Users @user_ids have a confirmed contact at a Notification gateway, a Bridge
+-- Connection that is not deleted and whose stored info has the role gateway; whether the gateway is Broken is not
+-- considered (C-27.FR-8). schedules imports no package of Paging, so it reads gateway_contacts itself.
+-- name: ListGatewayReachUsers :many
+SELECT DISTINCT g.user_id
+FROM gateway_contacts g
+JOIN connections c ON c.org_id = g.org_id AND c.id = g.connection_id
+WHERE g.org_id = @org_id AND g.user_id = ANY(@user_ids::bigint[]) AND g.confirmed_at IS NOT NULL
+  AND c.type = 'bridge' AND c.deleted_at IS NULL AND c.bridge_info->'roles' @> '["gateway"]'::jsonb
+ORDER BY g.user_id;
+
 -- ListScheduleChains lists the Escalation chains whose steps name a Schedule, each once, by name, which refuse its
 -- deletion (schedule_in_use, C-27.FR-12). The deletion holds the Schedule locked FOR UPDATE, and a save of a chain
 -- reads the Schedules its steps name FOR KEY SHARE, so a step saved meanwhile is either seen here or waits and finds it

@@ -36,6 +36,7 @@ import {
 import type { PasswordSetupLink, User } from "../api/gen/model";
 import { UpdateUserBody } from "../api/gen/zod/users/users.zod";
 import { AccountLinksTable, accountName } from "../components/account-links-table";
+import { UserGatewayContacts } from "../components/user-gateway-contacts";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
 import { SetupLinkDialog } from "../components/setup-link-dialog";
@@ -610,6 +611,7 @@ function UserView({ userId }: { userId: string }) {
           {canWrite && user.status !== "deleted" && <EditCard key={user.id} user={user} />}
           {canWrite && user.status !== "deleted" && <ActionsCard user={user} />}
           {user.status !== "deleted" && <AccountLinksCard user={user} canWrite={canWrite} />}
+          {user.status !== "deleted" && <UserGatewayContacts user={user} canWrite={canWrite} />}
         </div>
       )}
     </div>

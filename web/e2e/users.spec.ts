@@ -12,6 +12,9 @@ import {
   APP,
   Api,
   adminApi,
+  confirmContact,
+  ensureGateway,
+  ensureLocalUser,
   expectNoHorizontalScroll,
   nextIdpUser,
   shot,
@@ -243,4 +246,45 @@ test("pages through the users with the cursor of the list", async ({ page }) => 
   // The second page is asked for by the cursor of the first, never by an offset.
   expect(new Set(pages.filter((c) => c !== "")).size).toBe(1);
   expect(offsets).toEqual([]);
+});
+
+test("a user's page shows their contacts at Notification gateways, with no way to add one, and an Admin removes one after a confirmation, which the Audit log shows", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const login = "gwu-petr";
+  const phone = "+10000000003";
+  const admin = await adminApi();
+  let userId = "";
+  try {
+    userId = await ensureLocalUser(admin, login, "responder");
+    await confirmContact(login, await ensureGateway(admin), phone);
+  } finally {
+    await admin.dispose();
+  }
+  await signInAdmin(page);
+  await page.goto(`/admin/users/${userId}`);
+  const card = page.getByTestId("user-gateway-contacts");
+  await expect(card.getByRole("heading", { name: "Contacts for calls and SMS" })).toBeVisible();
+  const contacts = card.getByTestId("user-gateway-contact");
+  await expect(contacts).toHaveCount(1);
+  await expect(contacts).toContainText("Example Gateway");
+  await expect(contacts).toContainText(phone);
+  await expect(contacts).toHaveAttribute("data-state", "confirmed");
+  await expect(card.getByRole("button", { name: "Send code" })).toHaveCount(0);
+  await expect(card.getByRole("textbox")).toHaveCount(0);
+  await shot(page, "user-gateway-contacts");
+
+  await card.getByRole("button", { name: `Remove the contact ${phone}` }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText(`Remove the contact ${phone} of ${login} at Example Gateway?`);
+  await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(card.getByText("No contacts at Notification gateways.")).toBeVisible();
+
+  await page.goto("/admin/audit-log?action=gateway_contact.deleted");
+  const entries = page.getByRole("table", { name: "Audit log" }).getByRole("row");
+  const deleted = entries.filter({ hasText: "gateway_contact.deleted" }).first();
+  await expect(deleted).toBeVisible();
+  await expect(deleted).toContainText("Contact:");
+  await expect(deleted).toContainText(phone);
 });

@@ -404,11 +404,14 @@
       "ackTimeoutNoticeTemplate": "Ack timeout notice template",
       "autoUnacknowledge": "Auto-unacknowledge",
       "buttons": "Buttons",
+      "contact": "Contact",
+      "contactConfirmed": "Confirmed",
       "deletedAt": "Deleted at",
       "deliverToTeams": "Also to the Teams from the label",
       "destinations": "Destinations",
       "duplicateWindowSeconds": "Duplicate window (seconds)",
       "email": "Email",
+      "gateway": "Notification gateway",
       "gracePeriodSeconds": "Grace period (seconds)",
       "heartbeatEnabled": "Heartbeat",
       "heartbeatTimeoutSeconds": "Heartbeat timeout (seconds)",
@@ -830,6 +833,15 @@
     "list": {
       "empty": "No Connections yet."
     },
+    "roles": {
+      "brokenNoSince": "Broken: {{reason}}. Muster tries again every {{interval}}.",
+      "brokenSince": "Broken since {{time}}: {{reason}}. Muster tries again every {{interval}}.",
+      "destinationsLeft_one": "This bridge now declares only the role gateway: its {{count}} Destination no longer receives messages. Remove it or change the bridge.",
+      "destinationsLeft_other": "This bridge now declares only the role gateway: its {{count}} Destinations no longer receive messages. Remove them or change the bridge.",
+      "gateway": "Notification gateway",
+      "list": "Roles: {{roles}}",
+      "messenger": "Messenger"
+    },
     "slack": {
       "app": "App: {{id}}",
       "appToken": "App-level token",
@@ -1223,6 +1235,7 @@
       "bridgeEvents": "Bridge event delivery",
       "buttons": "Button sets",
       "deliverToTeams": "Routing to Teams",
+      "gatewayContact": "Contact for calls and SMS",
       "groupKey": "Group key",
       "heartbeat": "Heartbeat",
       "integrationSnippet": "Alertmanager configuration",
@@ -1325,6 +1338,7 @@
       "integrations": "Integrations",
       "linkRules": "Link rules",
       "lookupTables": "Lookup tables",
+      "notificationGateway": "Notification gateways",
       "oidc": "OIDC sign-in settings",
       "organization": {
         "alertHandling": "Alert handling",
@@ -1396,6 +1410,45 @@
     "tooLong": "This value is too long.",
     "tooShort": "This value is too short.",
     "unsupported": "This setting cannot be changed yet."
+  },
+  "gatewayContact": {
+    "anotherNumber": "Another number",
+    "callsAndSms": "calls and SMS",
+    "code": "Code",
+    "codeSent": "Code sent through the Notification gateway to {{contact}}.",
+    "codeWaiting": "{{contact}} is not confirmed yet. Enter the code the gateway sent, or send a new one.",
+    "confirm": "Confirm",
+    "confirmed": "confirmed",
+    "errors": {
+      "codeInvalid_one": "The code is wrong or no longer valid. {{count}} attempt left.",
+      "codeInvalid_other": "The code is wrong or no longer valid. {{count}} attempts left.",
+      "noAttempts": "No attempts left. Send a new code.",
+      "refused": "The Notification gateway refused the code. Check the gateway and try again.",
+      "tooManyCodes_one": "Too many code requests. Try again in {{count}} minute.",
+      "tooManyCodes_other": "Too many code requests. Try again in {{count}} minutes.",
+      "unknownGateway": "This Notification gateway no longer exists."
+    },
+    "hint": "Muster itself does not call, send SMS or check phone numbers: a Notification gateway (a bridge for calls and SMS) does, and it does not depend on a messenger. An Admin sees the contact and can remove it, but not change it.",
+    "newCode": "Send a new code",
+    "note": "From a call you can acknowledge an Alert Group only while nobody has it; otherwise the call answers “Already taken by {{name}}”.",
+    "phone": "Phone",
+    "remove": {
+      "action": "Remove",
+      "confirm": "Remove the contact {{contact}} at {{gateway}}? Calls and SMS no longer reach this person through it.",
+      "label": "Remove the contact {{contact}}"
+    },
+    "replacedBy": "Still the one called until {{contact}} is confirmed.",
+    "sendCode": "Send code",
+    "title": "Contact for calls and SMS"
+  },
+  "gatewayReaches": {
+    "note": "A call through the Notification gateway works."
+  },
+  "gatewayUnavailable": {
+    "connect": "Connect a bridge",
+    "howTo": "How to connect a Notification gateway",
+    "newTab": "opens in a new tab",
+    "title": "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)"
   },
   "heartbeat": {
     "badgeLabel": "Heartbeat:",
@@ -3348,6 +3401,18 @@
     },
     "title": "Two-factor authentication (TOTP)",
     "wrongCode": "Wrong code. Check the time on your device and try again."
+  },
+  "userContacts": {
+    "actions": "Actions",
+    "contact": "Contact",
+    "empty": "No contacts at Notification gateways.",
+    "gateway": "Notification gateway",
+    "hint": "Only the person sets a contact, from their own profile. An Admin can remove it.",
+    "removeConfirm": "Remove the contact {{contact}} of {{user}} at {{gateway}}? Calls and SMS no longer reach them through it.",
+    "removeLabel": "Remove the contact {{contact}}",
+    "state": "State",
+    "title": "Contacts for calls and SMS",
+    "unconfirmed": "not confirmed"
   },
   "userMenu": {
     "label": "User menu: {{name}}",

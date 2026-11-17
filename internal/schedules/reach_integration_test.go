@@ -281,3 +281,67 @@ func TestIntegrationReachReads(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationGatewayReaches is C-27.FR-8 on PostgreSQL: of petr, with a confirmed contact at a gateway that is
+// Broken, olga, whose contact there was sent a code and not confirmed, and sergey, with a confirmed contact at a bridge
+// that is only a messenger and at one that was deleted, and vic, without any, only petr's warnings say that a call
+// reaches him; the state of the gateway is not read.
+func TestIntegrationGatewayReaches(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		e.clock.Set(time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC))
+		bridge := func(publicID, info string, deleted bool) int64 {
+			id := e.id(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url,
+				bridge_event_delivery, bridge_info, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at,
+				limiter_limit, limiter_per_seconds, gateway_broken_since, gateway_broken_reason,
+				gateway_next_probe_at, created_at, updated_at)
+				VALUES ($1, $2, 'bridge', $2, 'http://br', 'poll', $3::jsonb, '\x02', 'k1', $4, 1, 1, $4, 'refused',
+				$4, $4, $4) RETURNING id`, e.orgID, publicID, info, t0)
+			if deleted {
+				e.exec(t, `UPDATE connections SET deleted_at = $1 WHERE id = $2`, t0, id)
+			}
+			return id
+		}
+		gateway := bridge("CNAAAAAAAAAAG1", `{"roles": ["gateway"]}`, false)
+		messenger := bridge("CNAAAAAAAAAAG2", `{"roles": ["messenger"]}`, false)
+		gone := bridge("CNAAAAAAAAAAG3", `{"roles": ["gateway"]}`, true)
+		contact := func(login string, conn int64, n string, confirmed bool) {
+			var at any
+			if confirmed {
+				at = t0
+			}
+			e.exec(t, `INSERT INTO gateway_contacts (org_id, public_id, user_id, connection_id, contact, confirmed_at,
+				created_at)
+				SELECT $1, $2, id, $3, $4, $5, $6 FROM users WHERE public_id = $7`, e.orgID, "GC00000000"+n+"AA",
+				conn, "+1000000000"+n, at, t0, e.people[login])
+		}
+		contact("petr", gateway, "01", true)
+		contact("olga", gateway, "02", false)
+		contact("sergey", messenger, "03", true)
+		contact("sergey", gone, "04", true)
+		e.webhook(t, "DSAAAAAAAAAAW1", "hook-template", `{}`)
+		e.exec(t, `INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+			SELECT $1, t.id, d.id, 'critical', $2 FROM teams t, destinations d WHERE t.public_id = $3
+			AND d.public_id = 'DSAAAAAAAAAAW1'`, e.orgID, t0, e.team.PublicID)
+		sc, err := e.svc.Create(ctx, admin, e.dayInput("petr", "olga", "sergey"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		to := time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
+		res, err := e.svc.OnCall(ctx, sc.PublicID, nil, &to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, w := range res.Warnings {
+			if w.Kind == schedules.WarningUnreachable {
+				got[w.User.Login] = w.Unreachable.GatewayReaches
+			}
+		}
+		want := map[string]bool{"petr": true, "olga": false, "sergey": false}
+		if !maps.Equal(got, want) {
+			t.Errorf("gateway_reaches by person = %v, want %v", got, want)
+		}
+	})
+}

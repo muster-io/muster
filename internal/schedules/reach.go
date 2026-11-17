@@ -46,6 +46,9 @@ type Unreachable struct {
 	Destination DestinationRef
 	Messenger   string
 	Reason      string
+	// GatewayReaches is whether the person has a confirmed contact at a Notification gateway, so that a call through
+	// it reaches them (C-27.FR-8); whether that gateway is Broken is not considered.
+	GatewayReaches bool
 }
 
 // teamDestination is a Destination of a Team with what decides whether a Mention of a person reaches it: its
@@ -95,8 +98,9 @@ func reachReason(d teamDestination, user int64, spaces map[string]bool) string {
 // reach is what the reach of the people of some Teams reads: the Destinations of each Team, by Team id, and the
 // Identity spaces in which each person has an Account link, by User id.
 type reach struct {
-	teams  map[int64][]teamDestination
-	spaces map[int64]map[string]bool
+	teams   map[int64][]teamDestination
+	spaces  map[int64]map[string]bool
+	gateway map[int64]bool
 }
 
 // unreachable are the Destinations of the Team team that a Mention of the person user cannot reach, in the order of
@@ -105,7 +109,8 @@ func (r reach) unreachable(team, user int64) []Unreachable {
 	out := []Unreachable{}
 	for _, d := range r.teams[team] {
 		if reason := reachReason(d, user, r.spaces[user]); reason != "" {
-			out = append(out, Unreachable{Destination: d.DestinationRef, Messenger: d.Type, Reason: reason})
+			out = append(out, Unreachable{Destination: d.DestinationRef, Messenger: d.Type, Reason: reason,
+				GatewayReaches: r.gateway[user]})
 		}
 	}
 	return out
@@ -113,9 +118,10 @@ func (r reach) unreachable(team, user int64) []Unreachable {
 
 // readReach reads the reach of the people users in the Teams teams (C-27.FR-8): the Destinations of each Team, which
 // are the Team's part of the reach rule of C-26.FR-1 whatever their conditions, since an On-call is warned about every
-// Destination of their Team, and the person's Account links. It only reads.
+// Destination of their Team, the person's Account links and who has a confirmed contact at a Notification gateway. It
+// only reads.
 func (s *Service) readReach(ctx context.Context, q Queries, teams, users map[int64]bool) (reach, error) {
-	out := reach{teams: map[int64][]teamDestination{}, spaces: map[int64]map[string]bool{}}
+	out := reach{teams: map[int64][]teamDestination{}, spaces: map[int64]map[string]bool{}, gateway: map[int64]bool{}}
 	if len(teams) == 0 || len(users) == 0 {
 		return out, nil
 	}
@@ -151,6 +157,14 @@ func (s *Service) readReach(ctx context.Context, q Queries, teams, users map[int
 			out.spaces[l.UserID] = map[string]bool{}
 		}
 		out.spaces[l.UserID][l.IdentitySpace] = true
+	}
+	reached, err := q.ListGatewayReachUsers(ctx, dbgen.ListGatewayReachUsersParams{OrgID: s.orgID,
+		UserIds: sortedKeys(users)})
+	if err != nil {
+		return reach{}, fmt.Errorf("read the contacts of the on-calls at notification gateways: %w", err)
+	}
+	for _, u := range reached {
+		out.gateway[u] = true
 	}
 	return out, nil
 }

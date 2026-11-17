@@ -676,6 +676,7 @@ describe("BridgeInfoPanel", () => {
         "Bridge: Example bridge 1.0.0",
         "Messenger: Example chat",
         "Protocol version 1",
+        "Roles: Messenger",
         "Longest message text: 4000 characters",
         "Edits without a time limit",
         "Finds people by login",
@@ -724,6 +725,7 @@ describe("BridgeInfoPanel", () => {
         "Bridge: Example bridge 1.0.0",
         "Messenger: Example chat",
         "Protocol version 1",
+        "Roles: Messenger",
         "Longest message text: 501 characters",
         "Edits for 48 h after posting",
         "Sends per second: 30",
@@ -739,6 +741,24 @@ describe("BridgeInfoPanel", () => {
       .element(page.getByTestId("bridge-info-no-features"))
       .toHaveTextContent("Only posting and editing");
     await expect.element(page.getByTestId("bridge-info-read-at")).not.toBeInTheDocument();
+  });
+
+  test("lists the roles from info, Notification gateway among them", async () => {
+    await render(
+      providers(
+        <BridgeInfoPanel
+          info={{ ...INFO, roles: ["messenger", "gateway"] }}
+          readAt="2026-10-17T09:31:00Z"
+        />,
+      ),
+    );
+    await expect
+      .element(page.getByTestId("bridge-info-roles"))
+      .toHaveTextContent("Roles: Messenger, Notification gateway");
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(page.getByTestId("bridge-info-roles"))
+      .toHaveTextContent("Роли: Мессенджер, Шлюз оповещений");
   });
 
   test("says that nothing was read before the first check", async () => {
@@ -759,6 +779,7 @@ describe("BridgeInfoPanel", () => {
         "Мост: Example bridge 1.0.0",
         "Мессенджер: Example chat",
         "Версия протокола 1",
+        "Роли: Мессенджер",
         "Самый длинный текст сообщения: 4000 символов",
         "Правка без ограничения по времени",
         "Ищет людей по логину",

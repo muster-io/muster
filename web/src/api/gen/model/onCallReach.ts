@@ -14,4 +14,6 @@ export interface OnCallReach {
   /** The messenger of the Destination — the type of its Connection, or `webhook`. */
   messenger: DestinationType;
   reason: ReachReason;
+  /** True when the current On-call has a confirmed contact at a Notification gateway, so that a call through it reaches them; whether that gateway is Broken is not considered (C-27.FR-8). */
+  gateway_reaches?: boolean;
 }

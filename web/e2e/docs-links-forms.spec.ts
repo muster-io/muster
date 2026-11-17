@@ -17,6 +17,7 @@ import {
   type Api,
   adminApi,
   advance,
+  ensureGateway,
   ensureTeam,
   expectNoHorizontalScroll,
   fakeIntegration,
@@ -649,6 +650,33 @@ test("a Destination whose template keeps failing links its banner to the runbook
     }
     await admin.dispose();
   }
+});
+
+test("the contact for calls and SMS and the Notification gateway's page link to the gateway documentation", async ({
+  page,
+}) => {
+  const admin = await adminApi();
+  let gateway = "";
+  try {
+    gateway = await ensureGateway(admin);
+  } finally {
+    await admin.dispose();
+  }
+  await signInAdmin(page);
+  await page.goto("/profile");
+  const section = page.getByTestId("gateway-contact-section");
+  await expectTarget(
+    docsLink(section, "Learn more", "Contact for calls and SMS"),
+    "messengers/notification-gateways/",
+    "#contact-for-calls-and-sms",
+  );
+  // A Connection whose only role is gateway links the page on Notification gateways beside its title.
+  await page.goto(`/connections/${gateway}`);
+  await expectTarget(
+    docsLink(page.getByTestId("page-title"), "Guide", "Notification gateways"),
+    "messengers/notification-gateways/",
+    "#connect-a-notification-gateway",
+  );
 });
 
 test("a check that passes and an empty state show no link of their own", async ({ page }) => {

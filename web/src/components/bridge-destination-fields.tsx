@@ -13,6 +13,7 @@ import { useListConnections } from "../api/gen/endpoints/connections/connections
 import type { BridgeConnection, BridgeInfo, Destination, Limiter } from "../api/gen/model";
 import { useCan } from "./app-shell";
 import { halfRate } from "./bridge-connection-fields";
+import { isGatewayOnly } from "./gateway-health";
 import type { DestinationKind, TypeFieldsProps } from "./destination-form";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -60,8 +61,12 @@ export function BridgeDestinationFields({
   const { t } = useTranslation();
   const canConnections = useCan("connections:read");
   const connections = useListConnections({ limit: 500 }, { query: { enabled: canConnections } });
-  const items = (connections.data?.items ?? []).filter(isBridgeConnection);
   const stored = destination?.type === "bridge" ? destination : undefined;
+  // A bridge that declares only the role gateway is no messenger and takes no Destination (C-30.FR-1); the one the
+  // Destination was saved with stays, so that its page still names it.
+  const items = (connections.data?.items ?? [])
+    .filter(isBridgeConnection)
+    .filter((c) => !isGatewayOnly(c) || c.id === stored?.connection_id);
   const connectionError = errors["/connection_id"];
   const channelError = errors["/channel_id"];
   const options = items.map((c) => ({ id: c.id, name: c.name }));

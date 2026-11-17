@@ -18,11 +18,15 @@ import {
   type Api,
   TEAM_SPEC_PASSWORD,
   adminApi,
+  confirmContact,
   devClockOffset,
+  ensureGateway,
   ensureLocalUser,
   ensureTeam,
   expectNoHorizontalScroll,
   removeConnection,
+  removeOnCall,
+  seedOnCall,
   removeTeamsBySlug,
   setTeamDestinations,
   shot,
@@ -733,6 +737,59 @@ test("an Admin creates a Schedule from New Schedule: it is not main and its gap 
     expect(second).toBeDefined();
     await admin.call("DELETE", `/api/v1/schedules/${second?.id}`);
   } finally {
+    await admin.dispose();
+  }
+});
+
+test("an On-call with a confirmed contact at a Notification gateway: the Schedule page and On call now follow the unreachable mark with the call that works", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const phone = "+10000000005";
+  const admin = await adminApi();
+  let petr = "";
+  let contact = "";
+  try {
+    const seeded = await seedOnCall(admin, "gwr-");
+    petr = seeded.users.petr;
+    const gateway = await ensureGateway(admin);
+    await signIn(page, "petr", TEAM_SPEC_PASSWORD);
+    const mark = page.getByTestId("schedule-unreachable");
+    const homeRow = page.getByTestId("on-call-row").filter({ hasText: "gwr-payments" });
+
+    // Without a contact the mark stands alone.
+    await page.goto(`/schedules/${seeded.schedules.payments}`);
+    await expect(mark).toContainText("Unreachable in Mattermost: no linked account.");
+    await expect(mark.getByTestId("schedule-gateway-reaches")).toHaveCount(0);
+    await page.goto("/");
+    await expect(homeRow.getByTestId("on-call-unreachable")).toHaveText(
+      "unreachable in Mattermost",
+    );
+    await expect(homeRow.getByTestId("on-call-gateway-reaches")).toHaveCount(0);
+
+    // With a confirmed contact the call that works follows it, on the Schedule page and in On call now.
+    contact = await confirmContact("petr", gateway, phone);
+    await page.goto(`/schedules/${seeded.schedules.payments}`);
+    await expect(mark).toContainText(
+      "Unreachable in Mattermost: no linked account. A call through the Notification gateway works.",
+    );
+    await expect(
+      page.getByTestId("schedule-warnings").getByTestId("schedule-gateway-reaches").first(),
+    ).toHaveText("A call through the Notification gateway works.");
+    await shot(page, "schedule-gateway-reaches");
+    await page.goto("/");
+    await expect(homeRow.getByTestId("on-call-unreachable")).toHaveText(
+      "unreachable in Mattermost",
+    );
+    await expect(homeRow.getByTestId("on-call-gateway-reaches")).toHaveText(
+      "A call through the Notification gateway works.",
+    );
+    await shot(page, "home-gateway-reaches");
+  } finally {
+    if (contact !== "") {
+      await admin.call("DELETE", `/api/v1/users/${petr}/gateway-contacts/${contact}`);
+    }
+    await removeOnCall(admin, "gwr-");
     await admin.dispose();
   }
 });
