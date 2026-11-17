@@ -88,7 +88,8 @@ func embeddedVersions(t *testing.T) []uint {
 	}
 }
 
-// TestIntegrationUpDownUp runs up, down and up again over every migration, one step at a time.
+// TestIntegrationUpDownUp runs up, down and up again over every migration, one step at a time. The COMMITs the server
+// reports for each file are its lines COMMIT;, which a retry after a deadlock or a lock timeout counts on.
 func TestIntegrationUpDownUp(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
@@ -97,11 +98,29 @@ func TestIntegrationUpDownUp(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer closeQuietly(t.Context(), c)
-		m, err := newMigrate(t.Context(), c)
+		drv, err := newDriver(t.Context(), logging.New(io.Discard, logging.LevelInfo), c)
 		if err != nil {
 			t.Fatal(err)
 		}
-		mm := m.(*migrate.Migrate)
+		exec := drv.exec
+		drv.exec = func(ctx context.Context, sql string) (int, error) {
+			commits, err := exec(ctx, sql)
+			lines := 0
+			for line := range strings.Lines(sql) {
+				if strings.ToUpper(strings.TrimSpace(line)) == "COMMIT;" {
+					lines++
+				}
+			}
+			if err == nil && commits != lines {
+				t.Errorf("the migration to version %d committed %d times, but has %d lines COMMIT;", drv.version,
+					commits, lines)
+			}
+			return commits, err
+		}
+		mm, err := migrateWith(migrationFiles, migrationsDir, drv)
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer mm.Close()
 		for i, step := range embeddedVersions(t) {
 			if step != uint(i+1) {
@@ -139,7 +158,7 @@ func TestIntegrationDeliveryEventsKindCheck(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer closeQuietly(t.Context(), c)
-		m, err := newMigrate(t.Context(), c)
+		m, err := newMigrate(t.Context(), logging.New(io.Discard, logging.LevelInfo), c)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -271,7 +290,7 @@ func newMigrationEnv(t *testing.T, s dbtest.Server, version uint) *migrationEnv 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { closeQuietly(t.Context(), c) })
-	m, err := newMigrate(t.Context(), c)
+	m, err := newMigrate(t.Context(), logging.New(io.Discard, logging.LevelInfo), c)
 	if err != nil {
 		t.Fatal(err)
 	}
