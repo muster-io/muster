@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/oapi-codegen/nullable"
@@ -23,9 +24,11 @@ import (
 const MessageGone = "The message no longer exists."
 
 // Message is a message a bot posted, as GET /_fake/messages lists it: its id, the bot that posted it — 1 for Token, 2
-// for SecondToken, never the token — its channel, the envelope as Muster sent it, each edit as the whole envelope
-// Muster sent — each with the `layout` it carried, which the fake keeps and renders nothing from — its Thread replies, the link the fake answered, whether it was deleted, by a person or by its bot, and
-// whether its body was longer than limits.max_body_length, which the fake answers as truncated.
+// for SecondToken, never the token — its channel, the envelope as Muster sent it, its `mentions` each with the `kind`
+// Muster sent, none for a person, each edit as the whole envelope Muster sent — each with the `layout` it carried,
+// which the fake keeps and renders nothing from — its Thread replies, the link the fake answered, whether it was
+// deleted, by a person or by its bot, and whether its body was longer than limits.max_body_length, which the fake
+// answers as truncated.
 type Message struct {
 	ID        string               `json:"id"`
 	Bot       int                  `json:"bot"`
@@ -39,7 +42,8 @@ type Message struct {
 }
 
 // Reply is a Thread reply under its message: its id, the thread_ref Muster sent (null for none), the reply as Muster
-// sent it, the thread_ref the fake answered, t-<message id>, and whether its body was too long.
+// sent it, its `mentions` with their `kind` included, the thread_ref the fake answered, t-<message id>, and whether
+// its body was too long.
 type Reply struct {
 	ID            string               `json:"id"`
 	SentThreadRef *string              `json:"sent_thread_ref"`
@@ -275,7 +279,8 @@ func invalid(w http.ResponseWriter, err error) {
 	writeProblemDetail(w, http.StatusBadRequest, gen.ErrorClassInvalid, "Invalid", err.Error())
 }
 
-// checkPost checks what decoding a postMessage cannot: its channel, its kind and the members the protocol requires.
+// checkPost checks what decoding a postMessage cannot: its channel, its kind, the members the protocol requires and
+// its Mentions.
 func checkPost(in gen.MessageInput) error {
 	switch {
 	case in.ChannelId == "":
@@ -285,7 +290,29 @@ func checkPost(in gen.MessageInput) error {
 	case in.Mentions == nil:
 		return errors.New("mentions is required")
 	}
+	if err := checkMentions(in.Mentions, in.Body); err != nil {
+		return err
+	}
 	return checkContent(in.Status, in.Buttons, in.Layout)
+}
+
+// checkMentions checks the Mentions of a body as a bridge that renders their markers needs them: each of a kind of the
+// protocol, or none, which is user, with a ref of its own whose marker `](muster-mention:<ref>)` the body carries. It
+// does not look at what the info declares.
+func checkMentions(list []gen.Mention, body string) error {
+	refs := map[string]bool{}
+	for _, m := range list {
+		switch {
+		case m.Kind != nil && !m.Kind.Valid():
+			return fmt.Errorf("mentions: kind %q is not a kind of Mention", *m.Kind)
+		case refs[m.Ref]:
+			return fmt.Errorf("mentions: the ref %q is repeated", m.Ref)
+		case !strings.Contains(body, "](muster-mention:"+m.Ref+")"):
+			return fmt.Errorf("mentions: the body has no marker of the ref %q", m.Ref)
+		}
+		refs[m.Ref] = true
+	}
+	return nil
 }
 
 // checkContent checks the status and the buttons of an envelope, which the protocol requires, and the status of its
@@ -313,5 +340,5 @@ func checkReply(in gen.ThreadReplyInput) error {
 	case in.Mentions == nil:
 		return errors.New("mentions is required")
 	}
-	return nil
+	return checkMentions(in.Mentions, in.Body)
 }

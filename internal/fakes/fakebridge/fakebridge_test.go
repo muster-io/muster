@@ -137,7 +137,10 @@ func (s *spec) exchange(t *testing.T, rq request) answer {
 		t.Fatalf("%s %s is no operation of api/bridge.yaml: %v", rq.method, rq.path, err)
 	}
 	in := &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route,
-		Options: &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc}}
+		// The fake must record the body as Muster sent it: a validator that set the defaults would add kind user to
+		// the Mention of a person, which Muster sends without it.
+		Options: &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+			SkipSettingDefaults: true}}
 	switch err := openapi3filter.ValidateRequest(t.Context(), in); {
 	case err != nil && !rq.broken:
 		t.Fatalf("the request %s %s does not match api/bridge.yaml: %v", rq.method, rq.path, err)
@@ -782,6 +785,87 @@ func TestMessageRefusals(t *testing.T) {
 		gen.ErrorClassForbidden)
 	if ms := s.fake.Messages(); len(ms) != 1 || len(ms[0].Edits) != 0 || len(ms[0].Replies) != 0 {
 		t.Errorf("messages %+v", ms)
+	}
+}
+
+// TestMentionKinds covers C-22.FR-16 revised for the fake: each message and each Thread reply keeps the `kind` of its
+// `mentions` as Muster sent it, which /_fake/messages lists — a person without one, a group and everyone in the chat
+// with theirs, though the info declares neither — and a kind the protocol does not define, a repeated ref and an entry
+// whose marker the body lacks are refused as invalid, nothing posted.
+func TestMentionKinds(t *testing.T) {
+	s := start(t)
+	group, everyone := gen.MentionKindGroup, gen.MentionKindEveryone
+	list := []gen.Mention{{Ref: "m1", ExternalId: "payments_team", DisplayName: "payments_team", Kind: &group},
+		{Ref: "m2", ExternalId: "u-alice", DisplayName: "Alice Smith"},
+		{Ref: "m3", ExternalId: "here", DisplayName: "here", Kind: &everyone}}
+	in := envelope(fakebridge.ChannelAlerts)
+	in.Body = "[@payments\\_team](muster-mention:m1) [@Alice Smith](muster-mention:m2) [@here](muster-mention:m3)"
+	in.Mentions = list
+	s.post(t, fakebridge.Token, "pub-kinds", in).posted(t)
+	reply := replyOf(nil)
+	reply.Body, reply.Mentions = "[@payments\\_team](muster-mention:m1) New Alerts: 1", list[:1]
+	s.reply(t, fakebridge.Token, "m1", "reply-kinds", reply).replied(t)
+
+	ms, body := s.listing(t)
+	kinds := func(list []gen.Mention) string {
+		var out []string
+		for _, m := range list {
+			k := "-"
+			if m.Kind != nil {
+				k = string(*m.Kind)
+			}
+			out = append(out, k+":"+m.ExternalId)
+		}
+		return strings.Join(out, ",")
+	}
+	if len(ms) != 1 || kinds(ms[0].Envelope.Mentions) != "group:payments_team,-:u-alice,everyone:here" ||
+		len(ms[0].Replies) != 1 || kinds(ms[0].Replies[0].Input.Mentions) != "group:payments_team" {
+		t.Fatalf("messages %s", body)
+	}
+	if !strings.Contains(body, `{"display_name":"Alice Smith","external_id":"u-alice","ref":"m2"}`) {
+		t.Errorf("a person's Mention has a kind in /_fake/messages: %s", body)
+	}
+
+	post, replyJSON := mustJSON(t, in), mustJSON(t, reply)
+	for name, rq := range map[string]request{
+		"a post with an unknown kind": {method: http.MethodPost, path: "/v1/messages", key: "k1",
+			body: strings.Replace(post, `"kind":"group"`, `"kind":"role"`, 1), broken: true},
+		"a reply with an unknown kind": {method: http.MethodPost, path: "/v1/messages/m1/thread-replies", key: "k2",
+			body: strings.Replace(replyJSON, `"kind":"group"`, `"kind":"role"`, 1), broken: true},
+	} {
+		rq.token = fakebridge.Token
+		a := s.exchange(t, rq)
+		a.refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+		if !strings.Contains(string(a.body), "not a kind of Mention") {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+	}
+	// A repeated ref and an entry whose marker the body lacks are invalid too; an entry of a kind the info does not
+	// declare is not.
+	repeated := in
+	repeated.Mentions = append(slices.Clone(list), gen.Mention{Ref: "m1", ExternalId: "u-bob", DisplayName: "Bob"})
+	unmarked := in
+	unmarked.Body = "[@payments\\_team](muster-mention:m1) [@here](muster-mention:m3)"
+	replyUnmarked := reply
+	replyUnmarked.Body = "New Alerts: 1"
+	for name, rq := range map[string]request{
+		"a repeated ref":              {method: http.MethodPost, path: "/v1/messages", key: "k3", body: repeated},
+		"an entry without its marker": {method: http.MethodPost, path: "/v1/messages", key: "k4", body: unmarked},
+		"a reply entry without its marker": {method: http.MethodPost, path: "/v1/messages/m1/thread-replies",
+			key: "k5", body: replyUnmarked},
+	} {
+		rq.token = fakebridge.Token
+		a := s.exchange(t, rq)
+		a.refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+		if want := map[string]string{"a repeated ref": `the ref \"m1\" is repeated`,
+			"an entry without its marker":      `no marker of the ref \"m2\"`,
+			"a reply entry without its marker": `no marker of the ref \"m1\"`}[name]; !strings.Contains(
+			string(a.body), want) {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+	}
+	if ms := s.fake.Messages(); len(ms) != 1 || len(ms[0].Replies) != 1 {
+		t.Errorf("messages after the refusals %+v", ms)
 	}
 }
 

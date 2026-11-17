@@ -236,9 +236,9 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   uses in poll mode under the path prefix `/gateway`, checked at start; `/_fake/config` changes what its `info` says,
   the roles of each bot included, and its `capabilities` `group_mentions` and `everyone_mentions`, which it declares
   neither of by default, `/_fake/messages` lists every message and edit with the `layout` Muster sent, from
-  which the fake renders nothing, `/_fake/notifications` lists the notifications the bots sent, and
-  `POST /_fake/acknowledge` acknowledges one. The fake Slack server serves two Slack apps, each a
-  workspace with a bot: the bot token `xoxb-muster-dev-slack-token` with the app-level token
+  which the fake renders nothing, and the `kind` of each Mention, none for a person, `/_fake/notifications` lists the
+  notifications the bots sent, and `POST /_fake/acknowledge` acknowledges one. The fake Slack server serves two Slack
+  apps, each a workspace with a bot: the bot token `xoxb-muster-dev-slack-token` with the app-level token
   `xapp-muster-dev-slack-token`, which the demo Connection "Example Slack" uses in `socket` mode, and
   `xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which `muster dev` creates no Connection;
   their Slack signing secrets are `muster-dev-slack-signing-secret` and `muster-dev-slack-signing-secret-b`. Under

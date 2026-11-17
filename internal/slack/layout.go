@@ -22,7 +22,8 @@ import (
 // `attachments`, an empty list where there are none, because an edit without them keeps or replaces what was there
 // (F-085), and turns unfurling off (F-083); it uses only `section`, `context` and `actions` blocks, never `rich_text`
 // or `markdown` (F-081, F-086). A Root message's `text` and top `section` hold the summary line — the status emoji, #N
-// and the title — and, on a Loud message, its Mentions after it: a User with an Account link for the Destination's
+// and the title — and, on a Loud message, its Mentions after it: everyone in the chat as `<!channel>` or `<!here>`, a
+// user group or a Team mention as `<!subteam^S…>` (F-126), a User with an Account link for the Destination's
 // Connection as `<@U…>` (F-097), anyone else by their display name as text; one attachment in the colour of its status
 // (F-075) holds the compact layout of C-29.FR-4 in mrkdwn — a `section` with the heading linked to the Alert Group page
 // and the status as a word, one `section` with the fields of item 2 as its `fields`, a `section` with the summary and
@@ -110,7 +111,8 @@ var actionIDs = map[string]string{
 }
 
 // everyoneMentions are the Mentions of everyone in the chat by their word, a Destination's setting or a template's
-// token alike (C-24.FR-6): Slack has no `@all`, and Muster names no groups.
+// token alike (C-24.FR-6): Slack has no `@all`, and `<!everyone>`, which mentions only in the workspace's general
+// channel (F-127), is never written.
 var everyoneMentions = map[string]string{
 	mentions.EveryoneChannel: "<!channel>",
 	mentions.EveryoneHere:    "<!here>",
@@ -611,10 +613,11 @@ func templateTokens(m messages.Message) []templates.Token {
 }
 
 // mentionText are the Mentions of a Loud message in mrkdwn, in order and without duplicates (C-24.FR-6): of the
-// targets, everyone in the chat as <!channel> or <!here>, a User with an Account link for the Destination's Connection
-// as <@U…> of the link's user id (F-097), and anyone else by their display name as text, escaped, which notifies
-// nobody; then everyone of the template tokens. `all` and messenger groups, which a Slack Destination refuses,
-// mention nobody.
+// targets, everyone in the chat as <!channel> or <!here>, a user group — a group entry or a Team mention — as
+// <!subteam^S…> of its id (F-126), a User with an Account link for the Destination's Connection as <@U…> of the link's
+// user id (F-097), and anyone else by their display name as text, escaped, which notifies nobody; then everyone of the
+// template tokens. `all`, `everyone` and a group without a user group's id, which a Slack Destination refuses, mention
+// nobody.
 func mentionText(ts []mentions.Target, tokens []templates.Token) []string {
 	var out []string
 	add := func(s string) {
@@ -626,6 +629,10 @@ func mentionText(ts []mentions.Target, tokens []templates.Token) []string {
 		switch t.Kind {
 		case mentions.TargetEveryone:
 			add(everyoneMentions[t.Everyone])
+		case mentions.TargetGroup:
+			if mentions.SlackUserGroupID(t.GroupID) {
+				add("<!subteam^" + t.GroupID + ">")
+			}
 		case mentions.TargetUser:
 			if t.User != nil {
 				add(userMention(*t.User))
