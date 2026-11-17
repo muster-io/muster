@@ -34,7 +34,6 @@ import { webhookDestination } from "../test/fixtures/destinations";
 import { DestinationDeleteDialog, deleteDescription } from "./destination-delete-dialog";
 import { DestinationForm, versionAction } from "./destination-form";
 import { shownProblem } from "./header-editor";
-import { defaultMentions } from "./mention-settings";
 import {
   WEBHOOK_KIND,
   responseRefs,
@@ -169,8 +168,7 @@ describe("the outgoing webhook type", () => {
     expect(v.requests.update.method).toBe("PUT");
     expect(v.added).toEqual({ open_thread: false, reply_in_thread: false });
     expect(WEBHOOK_KIND.defaultLimiter).toEqual({ limit: 5, per_seconds: 1 });
-    expect(WEBHOOK_KIND.everyone).toEqual(["all"]);
-    expect(WEBHOOK_KIND.groups).toBe(true);
+    expect(WEBHOOK_KIND.connectionId).toBeUndefined();
   });
 
   test("checks the URLs, header names and extraction rules of the requests the mode sends", () => {
@@ -292,20 +290,11 @@ describe("DestinationForm with the outgoing webhook fields", () => {
     await expect.element(page.getByLabelText("Requests")).toHaveValue("5");
     await expect.element(page.getByLabelText("Period in seconds")).toHaveValue("1");
     await expect.element(page.getByTestId("webhook-template")).not.toBeInTheDocument();
-    // Mentions are data: everyone, and the receiver formats it.
-    const everyone = document.querySelectorAll<HTMLSelectElement>('select[id$="-everyone"]');
-    for (const select of everyone) {
-      expect([...select.options].map((o) => o.value)).toEqual(["none", "all"]);
+    // Mentions are data the receiver formats: every target is offered, none greyed.
+    await userEvent.click(page.getByRole("button", { name: "Add", exact: true }));
+    for (const option of page.getByTestId("mention-add-panel").getByRole("button").all()) {
+      await expect.element(option).not.toHaveAttribute("aria-disabled", "true");
     }
-    await expect
-      .element(page.getByLabelText("New Alert Group", { exact: true }))
-      .toHaveAccessibleDescription(
-        "Muster sends mentions as data the receiver formats: everyone, groups by name and users with their login. Chosen users and groups are mentioned as well.",
-      );
-
-    // Groups are names the receiver resolves, not Mattermost groups.
-    await expect.element(page.getByPlaceholder("Group name").first()).toBeVisible();
-    await expect.element(page.getByPlaceholder("Mattermost group").first()).not.toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Name", { exact: true }), "automation");
     await userEvent.fill(
       page.getByLabelText("URL", { exact: true }),
@@ -327,7 +316,7 @@ describe("DestinationForm with the outgoing webhook fields", () => {
       },
       proxy: { enabled: false, type: "http", username: null },
       owning_team_id: null,
-      mentions: defaultMentions(),
+      mention_entries: [],
       limiter: { limit: 5, per_seconds: 1 },
     });
   });
@@ -406,7 +395,7 @@ describe("DestinationForm with the outgoing webhook fields", () => {
       },
       proxy: { enabled: false, type: "http", username: null },
       owning_team_id: null,
-      mentions: defaultMentions(),
+      mention_entries: [],
       limiter: { limit: 5, per_seconds: 1 },
     });
 

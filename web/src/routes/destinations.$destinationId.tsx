@@ -161,6 +161,7 @@ function EditForm<V>({
         key={formKey}
         kind={kind}
         destination={base}
+        latest={current}
         readOnly={!canWrite}
         submitLabel={t("common.save")}
         stale={versionOf(current) !== versionOf(base)}

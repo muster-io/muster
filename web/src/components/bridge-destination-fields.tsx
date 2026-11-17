@@ -167,11 +167,9 @@ export function BridgeDestinationFields({
 /** The Bridge type of the Destination form: no chat-wide mention, no groups, and its own limiter per channel. */
 export const BRIDGE_KIND: DestinationKind<BridgeFieldValues> = {
   type: "bridge",
-  everyone: [],
-  groups: false,
   defaultLimiter: DEFAULT_BRIDGE_DESTINATION_LIMITER,
   limiterHint: (t) => t("destinations.bridge.limiterHint"),
-  mentionsHint: (t) => t("mentions.everyoneHintBridge"),
+  connectionId: (v) => v.connection_id,
   values: bridgeValues,
   check: (v) => {
     const errors: Record<string, string> = {};

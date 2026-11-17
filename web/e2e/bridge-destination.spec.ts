@@ -5,7 +5,7 @@
 // 2 of their story. The spec creates its own Bridge Connection "br" on the fake bridge's second bot and checks it. The
 // Admin picks "br" and the channel ch-nobot, which the bridge forbids: the save is refused with the bridge's text at
 // the channel field and nothing is saved; ch-alerts saves, and the page shows the channel's name "alerts" and the
-// messenger "Example chat". The Mention settings offer only "Nobody" and chosen users. "Check" lists "Channel"; "Send
+// messenger "Example chat". The Mentions offer what its info declares: people and the On-call, and no group and no mention of everyone, greyed with their reasons. "Check" lists "Channel"; "Send
 // test message" shows the Bridge hint and passes; "Preview" shows the envelope as JSON. The Route editor's picker reads
 // the full label. A reader of Russian sees the form and the page at phone width. No page scrolls sideways at 360 px; no
 // Content Security Policy violation. Everything the spec creates is deleted at the end.
@@ -62,11 +62,6 @@ async function cleanUp(): Promise<void> {
   }
 }
 
-/** The selects of "whom in the chat to mention" of every kind of Loud event. */
-function everyoneSelects(page: Page) {
-  return page.getByTestId("mention-kind").locator('select[id$="-everyone"]');
-}
-
 function nav(page: Page, name: string) {
   return page.getByRole("navigation", { name: "Main" }).getByRole("link", { name, exact: true });
 }
@@ -103,18 +98,26 @@ test("creates a Bridge Destination with a channel the bridge allows, and checks,
   await expect(page.getByLabel("Period in seconds")).toHaveValue("60");
   await expect(fields.getByText("As the messenger names it.")).toBeVisible();
 
-  // The Mention settings offer only "Nobody" and chosen users: no chat-wide mention, no groups.
-  const selects = everyoneSelects(page);
-  await expect(selects).toHaveCount(6);
-  for (const select of await selects.all()) {
-    await expect(select.locator("option")).toHaveText(["Nobody"]);
-    await expect(select).toBeDisabled();
+  // The Mentions offer what the bridge declares in its info: this one declares no group mentions and none of
+  // @channel, @here, @all and @everyone, so those are greyed with their reasons; people and the On-call stay.
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  for (const word of ["channel", "here", "all", "everyone"]) {
+    await expect(
+      page.getByTestId(`mention-option-everyone-${word}`).getByTestId("mention-option-reason"),
+    ).toHaveText(`The bridge does not declare @${word}`);
   }
-  await expect(page.getByRole("option", { name: /^@/ })).toHaveCount(0);
-  await expect(page.getByRole("textbox", { name: /^Group to mention for/ })).toHaveCount(0);
-  await expect(page.getByLabel("New Alert Group", { exact: true })).toHaveAccessibleDescription(
-    "A Bridge has no mention of the whole chat and no groups: only the chosen users are mentioned, through their accounts linked to this Connection.",
-  );
+  for (const id of ["group", "team", "teams-from-label"]) {
+    await expect(
+      page.getByTestId(`mention-option-${id}`).getByTestId("mention-option-reason"),
+    ).toHaveText("The bridge declares no group mentions");
+  }
+  for (const id of ["user", "on-call-of-team", "on-call-of-teams-from-label"]) {
+    await expect(page.getByTestId(`mention-option-${id}`)).toHaveAttribute(
+      "aria-disabled",
+      "false",
+    );
+  }
+  await page.getByRole("button", { name: "Add", exact: true }).click();
 
   // ch-nobot → "Save" → refused with the bridge's text at the channel field; nothing is saved.
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("alerts");
@@ -222,7 +225,14 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(fields.getByLabel("Подключение", { exact: true })).toBeVisible();
   await expect(fields.getByLabel("ID канала", { exact: true })).toBeVisible();
   await expect(fields.getByText("Так, как его называет мессенджер.")).toBeVisible();
-  await expect(everyoneSelects(page).first().locator("option")).toHaveText(["Никого"]);
+  await fields.getByLabel("Подключение", { exact: true }).selectOption({ label: "br" });
+  await page.getByRole("button", { name: "Добавить", exact: true }).click();
+  await expect(
+    page.getByTestId("mention-option-group").getByTestId("mention-option-reason"),
+  ).toHaveText("Мост не объявил групповые упоминания");
+  await expect(
+    page.getByTestId("mention-option-everyone-here").getByTestId("mention-option-reason"),
+  ).toHaveText("Мост не объявил @here");
   await expectNoHorizontalScroll(page);
   await shot(page, "bridge-destination-new-ru-360");
 

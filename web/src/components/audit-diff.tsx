@@ -261,6 +261,7 @@ function destinationField(t: TFunction, pointer: string): string | undefined {
     case "/channel_id":
       return t("destinations.mattermost.channel");
     case "/mentions":
+    case "/mention_entries":
       return t("mentions.title");
     case "/buttons":
       return t("audit.fields.buttons");
@@ -292,6 +293,8 @@ function teamField(t: TFunction, pointer: string): string | undefined {
       return t("teams.rules.matchersField");
     case "/destination_entries":
       return t("teams.destinations.title");
+    case "/team_mentions":
+      return t("teams.mentions.title");
     default:
       return undefined;
   }

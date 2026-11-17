@@ -403,6 +403,56 @@ test("a Telegram channel without comments fails its check with How to fix", asyn
   expect(csp).toEqual([]);
 });
 
+test("the Mentions and What each messenger supports of a Destination and How to mention the Team of a Team have Learn more", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  let teamId = "";
+  try {
+    teamId = await ensureTeam(admin, "dlf-mentions");
+  } finally {
+    await admin.dispose();
+  }
+  try {
+    await signInAdmin(page);
+    await page.goto(`/destinations/${ids.alerts}`);
+    await expectTarget(
+      docsLink(page, "Learn more", "Mentions"),
+      "concepts/mentions/",
+      "#mention-entries",
+    );
+    await expectTarget(
+      docsLink(page, "Learn more", "What each messenger supports"),
+      "concepts/mentions/",
+      "#what-each-messenger-supports",
+    );
+    await page.goto(`/teams/${teamId}`);
+    await expectTarget(
+      docsLink(page, "Learn more", "How to mention the Team"),
+      "concepts/teams/",
+      "#team-mentions",
+    );
+    expect(csp).toEqual([]);
+    await narrow(browser, async (phone) => {
+      await phone.goto(`/destinations/${ids.alerts}`);
+      await expect(docsLink(phone, "Learn more", "Mentions")).toBeVisible();
+      await expectNarrow(phone, "the Mentions of a Destination");
+      await phone.goto(`/teams/${teamId}`);
+      await expect(docsLink(phone, "Learn more", "How to mention the Team")).toBeVisible();
+      await expectNarrow(phone, "How to mention the Team");
+    });
+  } finally {
+    const cleanup = await adminApi();
+    try {
+      await removeTeamsBySlug(cleanup, ["dlf-mentions"]);
+    } finally {
+      await cleanup.dispose();
+    }
+  }
+});
+
 test("a Broken Destination links to its recovery on its page, on its Route and on its Alert Group", async ({
   page,
 }) => {
@@ -819,6 +869,17 @@ async function russian(page: Page): Promise<void> {
   });
   await expect(buttons).toHaveText("Подробнее");
   await expectTarget(buttons, "concepts/statuses-and-commands/", "#button-sets");
+  const mentions = page.getByTestId("mention-settings").getByRole("link", {
+    name: "Подробнее: Упоминания (откроется в новой вкладке)",
+    exact: true,
+  });
+  await expect(mentions).toHaveText("Подробнее");
+  await expectTarget(mentions, "concepts/mentions/", "#mention-entries");
+  const support = page.getByTestId("mention-support").getByRole("link", {
+    name: "Подробнее: Поддержка мессенджерами (откроется в новой вкладке)",
+    exact: true,
+  });
+  await expectTarget(support, "concepts/mentions/", "#what-each-messenger-supports");
 }
 
 /** Runs the steps in a new context at 360 px wide, signed in as the Admin. */

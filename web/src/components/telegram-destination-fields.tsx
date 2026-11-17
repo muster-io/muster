@@ -174,11 +174,9 @@ export function TelegramDestinationFields({
 /** The Telegram type of the Destination form: no chat-wide mention, no groups, and its own limiter per chat. */
 export const TELEGRAM_KIND: DestinationKind<TelegramFieldValues> = {
   type: "telegram",
-  everyone: [],
-  groups: false,
   defaultLimiter: DEFAULT_TELEGRAM_DESTINATION_LIMITER,
   limiterHint: (t) => t("destinations.telegram.limiterHint"),
-  mentionsHint: (t) => t("mentions.everyoneHintTelegram"),
+  connectionId: (v) => v.connection_id,
   values: telegramValues,
   check: (v) => {
     const errors: Record<string, string> = {};
