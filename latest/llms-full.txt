@@ -7,9 +7,9 @@ The full text of the documentation is split into one file per section of the nav
 - [Install](https://muster-io.github.io/muster/latest/llms-full-install.txt): 3 pages, 91691 bytes, about 22922 tokens.
 - [Configure](https://muster-io.github.io/muster/latest/llms-full-configure.txt): 3 pages, 50763 bytes, about 12690 tokens.
 - [Integrations](https://muster-io.github.io/muster/latest/llms-full-integrations.txt): 3 pages, 45452 bytes, about 11363 tokens.
-- [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, 238687 bytes, about 59671 tokens.
+- [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, 241793 bytes, about 60448 tokens.
 - [Outgoing webhooks](https://muster-io.github.io/muster/latest/llms-full-outgoing-webhooks.txt): 3 pages, 46285 bytes, about 11571 tokens.
 - [Sign-in](https://muster-io.github.io/muster/latest/llms-full-sign-in.txt): 5 pages, 44939 bytes, about 11234 tokens.
-- [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 13 pages, 184962 bytes, about 46240 tokens.
+- [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 13 pages, 185153 bytes, about 46288 tokens.
 - [Operations](https://muster-io.github.io/muster/latest/llms-full-operations.txt): 26 pages, 125820 bytes, about 31455 tokens.
 - [Reference](https://muster-io.github.io/muster/latest/llms-full-reference.txt): 8 pages, 127796 bytes, about 31949 tokens.

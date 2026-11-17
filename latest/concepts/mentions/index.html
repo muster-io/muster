@@ -3278,8 +3278,9 @@ reaches the same people. A Slack Connection takes user groups and Teams once its
 <p>An entry stays when its Connection later loses an ability, such as a Slack app reinstalled without the scope: it reads
 <code>available: false</code> with the reason in <code>unavailable_reason</code>, and mentions nobody. An entry whose User or Team was deleted
 stays too, shows them as deleted and mentions nobody.</p>
-<p>Slack user groups, and the group mentions and mentions of everyone of bridges, are saved and resolved, but Muster does
-not write them in Slack and bridge messages yet.</p>
+<p>In Slack a user group or a Team mention is written as <code>&lt;!subteam^…&gt;</code> of the user group's id, which Slack shows as its
+handle and which mentions its members. A bridge receives a group and a mention of everyone as entries of <code>mentions</code>
+of their own kind (<a href="../../messengers/bridge/#what-muster-posts">What Muster posts</a>).</p>
 <p>An outgoing webhook receives the targets as data in <code>mentions</code> and <code>.Mentions</code>: a Team as <code>{"type": "team", "slug":
 …, "name": …}</code>, one per Team of the Alert Group for "Team from the label", and the On-call as a <code>user</code>.</p>
 <h2 id="teams-and-the-on-call">Teams and the On-call<a class="headerlink" href="#teams-and-the-on-call" title="Permanent link">&para;</a></h2>

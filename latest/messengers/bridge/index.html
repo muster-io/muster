@@ -3452,7 +3452,7 @@ gets no entry.</p>
 <p>A <strong>Bridge Destination</strong> is one channel of the messenger, named by its <strong>channel id</strong> — the channel as your messenger
 names it, which the bridge's documentation explains how to find. Its <a href="../../concepts/mentions/">Mention entries</a>
 take people and the On-call, and everyone in the chat, groups and Teams as far as the bridge declares them in its
-<code>info</code>; Muster does not write the last three in bridge messages yet. Its limiter allows 30 requests per minute by
+<code>info</code>; <a href="#what-muster-posts">What Muster posts</a> says how each arrives. Its limiter allows 30 requests per minute by
 default, sends and edits together.</p>
 <ol>
 <li>Open <strong>Destinations</strong>, select <strong>Create destination</strong> and choose <strong>Bridge</strong>.</li>
@@ -3498,7 +3498,46 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   the summary and the description, the key labels, the Alerts, the links, the notices and the footer. A Thread reply
   carries its text in CommonMark. Alert data are escaped, so a label value cannot format the message, link anywhere or
   mention anyone. A Loud message asks the bridge to notify; a Quiet one does not.</li>
-<li><strong>The layout.</strong> Beside <code>body</code>, a Root message and a test message carry the same content as structured data in
+<li>
+<p><strong>Mentions.</strong> A Loud message starts its <code>body</code> with its Mentions, each a marker <code>[@name](muster-mention:m1)</code> whose
+  <code>ref</code> names an entry of <code>mentions</code>, and each entry has a kind:</p>
+<dl>
+<dt><code>user</code></dt>
+<dd>A person with an Account link for the Connection: <code>external_id</code> is their account's id, and <code>display_name</code> the
+display name of their Account link, or their display name in Muster when the link has none. It is the default,
+and Muster sends such an entry without <code>kind</code>, so a bridge that declares no group or everyone mentions sees the
+entries it always saw.</dd>
+<dt><code>group</code></dt>
+<dd>A group of the messenger — a <a href="../../concepts/teams/#team-mentions">Team mention</a> or a group entry of the
+Destination — with the name an Admin typed for it as <code>external_id</code> and <code>display_name</code>, which the bridge maps to
+its messenger's group. It comes only while Muster's copy of the bridge's <code>info</code> declares <code>group_mentions</code>.</dd>
+<dt><code>everyone</code></dt>
+<dd>Everyone in the chat, with the symbolic name <code>channel</code>, <code>here</code>, <code>all</code> or <code>everyone</code> as <code>external_id</code> and
+<code>display_name</code>. It comes only with a name that Muster's copy of the bridge's <code>info</code> lists in
+<code>everyone_mentions</code>.</dd>
+</dl>
+<p>A bridge that declares group mentions or a mention of everyone renders the markers of those entries as its
+messenger's mentions, <code>@payments_team</code> or <code>@here</code> for example, whether or not it has native mentions. A bridge with
+native mentions renders the markers of people as its mentions of their accounts, and any other bridge shows them by
+their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's <code>info</code>
+does not declare is left out of the message, and so is a person whom an entry names without an Account link. That
+copy is at most <code>bridge.info_max_age</code> (10 minutes) old: Muster reads <code>info</code> again when it is older, and when a
+Connection check runs. A long line of Mentions keeps, in their order, the whole markers that fit half of the
+bridge's longest text, with their entries, and leaves out the others. Only the Owner's Mentions — of a Reminder, an
+auto-unacknowledge or a Takeover — the footer and the Assignees name a person without one, by their display name as
+text. A Root message of a Destination that mentions the Team payments, <code>here</code> and Alice starts:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"body"</span><span class="p">:</span><span class="w"> </span><span class="s2">"[@payments\\_team](muster-mention:m1) [@here](muster-mention:m2) [@Alice Smith](muster-mention:m3)\n\n…"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"mentions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"m1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"group"</span><span class="p">,</span><span class="w"> </span><span class="nt">"external_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments_team"</span><span class="p">,</span><span class="w"> </span><span class="nt">"display_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments_team"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"m2"</span><span class="p">,</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"everyone"</span><span class="p">,</span><span class="w"> </span><span class="nt">"external_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"here"</span><span class="p">,</span><span class="w"> </span><span class="nt">"display_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"here"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"m3"</span><span class="p">,</span><span class="w"> </span><span class="nt">"external_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"u-alice"</span><span class="p">,</span><span class="w"> </span><span class="nt">"display_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Alice Smith"</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+</li>
+<li>
+<p><strong>The layout.</strong> Beside <code>body</code>, a Root message and a test message carry the same content as structured data in
   <code>layout</code>: the number alone and the title without it, the status as a key and a word, the fields as name and value,
   the summary and the description, the key labels as key and value, the Alerts by the label that tells them apart
   with whether each is resolved and how many there are in all, the notices, the people and the links. Its values are
@@ -3518,7 +3557,8 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   <a href="../write-a-bridge/#render-the-structured-layout">Render the structured layout</a>; the
   <a href="../../reference/bridge-protocol/">Bridge protocol</a> reference shows its schema, and
   <a href="../../configure/messages-and-templates/#the-default-message">Messages and templates</a> shows what it says in each
-  messenger.</li>
+  messenger.</p>
+</li>
 <li><strong>The length.</strong> The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
   long Root message drops its description first, then its Alerts, its summary and its key labels, but always keeps its
   title, its status, its fields, its footer, its buttons and its links, the one to Muster first. <code>layout</code> loses the

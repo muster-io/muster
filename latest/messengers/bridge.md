@@ -169,7 +169,7 @@ curl -X POST https://muster.example.org/api/v1/connections/checks \
 A **Bridge Destination** is one channel of the messenger, named by its **channel id** — the channel as your messenger
 names it, which the bridge's documentation explains how to find. Its [Mention entries](../concepts/mentions.md)
 take people and the On-call, and everyone in the chat, groups and Teams as far as the bridge declares them in its
-`info`; Muster does not write the last three in bridge messages yet. Its limiter allows 30 requests per minute by
+`info`; [What Muster posts](#what-muster-posts) says how each arrives. Its limiter allows 30 requests per minute by
 default, sends and edits together.
 
 1. Open **Destinations**, select **Create destination** and choose **Bridge**.
@@ -218,6 +218,47 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   the summary and the description, the key labels, the Alerts, the links, the notices and the footer. A Thread reply
   carries its text in CommonMark. Alert data are escaped, so a label value cannot format the message, link anywhere or
   mention anyone. A Loud message asks the bridge to notify; a Quiet one does not.
+- **Mentions.** A Loud message starts its `body` with its Mentions, each a marker `[@name](muster-mention:m1)` whose
+  `ref` names an entry of `mentions`, and each entry has a kind:
+
+    `user`
+    :   A person with an Account link for the Connection: `external_id` is their account's id, and `display_name` the
+        display name of their Account link, or their display name in Muster when the link has none. It is the default,
+        and Muster sends such an entry without `kind`, so a bridge that declares no group or everyone mentions sees the
+        entries it always saw.
+
+    `group`
+    :   A group of the messenger — a [Team mention](../concepts/teams.md#team-mentions) or a group entry of the
+        Destination — with the name an Admin typed for it as `external_id` and `display_name`, which the bridge maps to
+        its messenger's group. It comes only while Muster's copy of the bridge's `info` declares `group_mentions`.
+
+    `everyone`
+    :   Everyone in the chat, with the symbolic name `channel`, `here`, `all` or `everyone` as `external_id` and
+        `display_name`. It comes only with a name that Muster's copy of the bridge's `info` lists in
+        `everyone_mentions`.
+
+    A bridge that declares group mentions or a mention of everyone renders the markers of those entries as its
+    messenger's mentions, `@payments_team` or `@here` for example, whether or not it has native mentions. A bridge with
+    native mentions renders the markers of people as its mentions of their accounts, and any other bridge shows them by
+    their link text, which mentions nobody. A group or a mention of everyone that Muster's copy of the bridge's `info`
+    does not declare is left out of the message, and so is a person whom an entry names without an Account link. That
+    copy is at most `bridge.info_max_age` (10 minutes) old: Muster reads `info` again when it is older, and when a
+    Connection check runs. A long line of Mentions keeps, in their order, the whole markers that fit half of the
+    bridge's longest text, with their entries, and leaves out the others. Only the Owner's Mentions — of a Reminder, an
+    auto-unacknowledge or a Takeover — the footer and the Assignees name a person without one, by their display name as
+    text. A Root message of a Destination that mentions the Team payments, `here` and Alice starts:
+
+    ```json
+    {
+      "body": "[@payments\\_team](muster-mention:m1) [@here](muster-mention:m2) [@Alice Smith](muster-mention:m3)\n\n…",
+      "mentions": [
+        { "ref": "m1", "kind": "group", "external_id": "payments_team", "display_name": "payments_team" },
+        { "ref": "m2", "kind": "everyone", "external_id": "here", "display_name": "here" },
+        { "ref": "m3", "external_id": "u-alice", "display_name": "Alice Smith" }
+      ]
+    }
+    ```
+
 - **The layout.** Beside `body`, a Root message and a test message carry the same content as structured data in
   `layout`: the number alone and the title without it, the status as a key and a word, the fields as name and value,
   the summary and the description, the key labels as key and value, the Alerts by the label that tells them apart

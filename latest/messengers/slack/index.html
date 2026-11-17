@@ -3856,14 +3856,15 @@ the channel and the Thread. So, as in Mattermost, <strong>Quiet</strong> means "
 <li><strong>Edits are Quiet.</strong> An edit of the Root message carries no Mention, so a Loud change is always a new message: a new
   Root message, or a reply in the Thread. The edit drops the Mentions that the Root message had; Slack may then remove
   them from the person's list of mentions.</li>
-<li><strong>Mentions</strong> are those of the Destination's <a href="../../concepts/mentions/">Mention entries</a>: <code>@channel</code> and <code>@here</code>, and
-  people through their Account links. A person whom an entry names is mentioned only through their Account link;
-  without one they are left out. The Owner of a Reminder, an auto-unacknowledge or a Takeover is still named by their
-  display name as text without a link, which notifies nobody. A Slack Destination takes neither
-  <code>@everyone</code> nor <code>@all</code>. User groups and Teams are taken once the check found <code>usergroups:read</code>, but Muster does not
-  write them in Slack messages yet. The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" —
-  writes a person with an Account link for the Connection as their Mention, which Slack shows as their name, in an
-  edit as in a new message; a person without one is their display name as text.</li>
+<li><strong>Mentions</strong> are those of the Destination's <a href="../../concepts/mentions/">Mention entries</a>: <code>@channel</code> and <code>@here</code>, user
+  groups and Teams, and people through their Account links. A person whom an entry names is mentioned only through their
+  Account link; without one they are left out. The Owner of a Reminder, an auto-unacknowledge or a Takeover is still
+  named by their display name as text without a link, which notifies nobody. A Slack Destination takes neither
+  <code>@everyone</code> nor <code>@all</code>. User groups and Teams are taken once the check found <code>usergroups:read</code>, and a user group or a
+  Team mention is written as <code>&lt;!subteam^…&gt;</code> of the user group's id, which Slack shows as its handle and which mentions
+  its members, in a Root message and in a Thread reply alike. The footer of a Root message — "Acknowledged by", "Snoozed
+  by", "Resolved by" — writes a person with an Account link for the Connection as their Mention, which Slack shows as
+  their name, in an edit as in a new message; a person without one is their display name as text.</li>
 <li><strong>Thread replies</strong> stay in the Thread: Muster never also broadcasts them to the channel.</li>
 <li><strong>Alert data and template text never mention anyone.</strong> An <code>&amp;</code>, <code>&lt;</code> or <code>&gt;</code> in a label or an annotation is escaped, and
   so is <code>@</code>. A literal <code>&lt;!here&gt;</code> or <code>&lt;@U…&gt;</code> written in a template is shown as text and notifies nobody. Only the
