@@ -41,4 +41,5 @@ export const LifecycleEvent = {
   destination_joined: 'destination_joined',
   page_not_delivered: 'page_not_delivered',
   escalation_step_skipped: 'escalation_step_skipped',
+  escalation_webhook: 'escalation_webhook',
 } as const;

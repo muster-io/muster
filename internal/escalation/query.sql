@@ -392,6 +392,14 @@ SELECT count(*)::bigint AS total, count(*) FILTER (WHERE state = 'ran_out')::big
 FROM escalation_runs
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id AND generation = @generation;
 
+-- GetStepDestination reads the Destination of a webhook step with its type and mode, deleted or not. It takes no lock:
+-- locking the Destination after the Alert Group would close cycles with the delivery worker, which locks deliveries
+-- before it updates a Destination's health, and with a Team save, which locks Destinations by id.
+-- name: GetStepDestination :one
+SELECT id, public_id, name, type, webhook_mode, (deleted_at IS NOT NULL)::boolean AS deleted
+FROM destinations
+WHERE org_id = @org_id AND id = @id;
+
 -- ListPeopleStates reads the Role and status of the people a step names, deleted ones included.
 -- name: ListPeopleStates :many
 SELECT id, public_id, name, login, role, status

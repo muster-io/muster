@@ -227,3 +227,47 @@ func TestRecordRetiredAfterRejoin(t *testing.T) {
 		}
 	})
 }
+
+// TestGroupDestinationsLeaveOutEscalationWebhook is ListGroupDestinations as PostgreSQL runs it (C-26.FR-4,
+// C-32.FR-13): an escalation_webhook alone does not make its step's Destination one the Alert Group reached, so that it
+// receives none of the Alert Group's later events; any other event of the Alert Group there does.
+func TestGroupDestinationsLeaveOutEscalationWebhook(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		l.fire(t, "gd", "gd/a")
+		g := l.groupID(t, l.group(t, "gd"))
+		ops := l.eventsHook(t, "DSAAAAAAAAAAWB", "ops-bot", false)
+		q := deliverydb.New(l.d.Pool)
+		listed := func() bool {
+			t.Helper()
+			rows, err := q.ListGroupDestinations(t.Context(), deliverydb.ListGroupDestinationsParams{OrgID: l.orgID,
+				AlertGroupID: g})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range rows {
+				if r.ID == ops {
+					return true
+				}
+			}
+			return false
+		}
+		insert := func(seq int64, event string) {
+			t.Helper()
+			if err := q.InsertWebhookEvent(t.Context(), deliverydb.InsertWebhookEventParams{OrgID: l.orgID,
+				DestinationID: ops, AlertGroupID: g, Sequence: seq, WebhookID: "msg_" + event, Event: event,
+				Now: l.business.Now(), Body: []byte(`{"version":1}`)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		insert(5, "escalation_webhook")
+		if listed() {
+			t.Error("an escalation_webhook alone lists its step's destination")
+		}
+		insert(6, "acknowledged")
+		if !listed() {
+			t.Error("another event does not list the destination")
+		}
+	})
+}

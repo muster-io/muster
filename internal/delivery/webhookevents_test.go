@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // fakeEvent is a row of webhook_events.
@@ -104,6 +105,9 @@ func (f *fakeDB) InsertWebhookEvent(_ context.Context, arg dbgen.InsertWebhookEv
 	defer f.mu.Unlock()
 	if err := f.call("InsertWebhookEvent"); err != nil {
 		return err
+	}
+	if d := f.dests[arg.DestinationID]; d != nil && d.deleted {
+		return nil // InsertWebhookEvent queues nothing for a deleted Destination
 	}
 	if slices.ContainsFunc(f.webhookEvents, func(e *fakeEvent) bool {
 		return e.dest == arg.DestinationID && e.group == arg.AlertGroupID && e.seq == arg.Sequence
@@ -527,6 +531,10 @@ func TestWebhookEventsEveryRow(t *testing.T) {
 				Mentions: row.Mentions}
 			if row.EventMentions {
 				ev.Mentions = []groups.Mention{groups.MentionOwner}
+			}
+			if row.Event == groups.EventEscalationWebhook {
+				// It goes to the Destination of its step only, here the Route's own.
+				ev.Destination = &groups.JoinedDestination{ID: destWH, PublicID: "DSAAAAAAAAAAEV", Type: "webhook"}
 			}
 			e.enqueue(t, e.group(groups.StatusFiring, "t"), actor, ev)
 			if len(e.db.webhookEvents) != 1 {
@@ -1221,5 +1229,300 @@ func TestWebhookEventsMarkPublished(t *testing.T) {
 	e.round(t)
 	if len(*calls) != 1 || !strings.Contains(e.log.String(), "read when the created event was delivered: boom") {
 		t.Errorf("a failing read: calls %+v, log %s", *calls, e.log)
+	}
+}
+
+// destOps is the outgoing webhook Destination "ops-bot" in the events mode that the webhook step names, on no Route.
+const destOps = 14
+
+// withOps adds the Destination ops-bot, on no Route of the Alert Group.
+func (e *eventsEnv) withOps() *groups.JoinedDestination {
+	e.db.dests[destOps] = &fakeDest{id: destOps, publicID: "DSAAAAAAAAAAOB", name: "ops-bot", typ: delivery.TypeWebhook,
+		health: "healthy", limit: 600, per: 60, mode: "events"}
+	return &groups.JoinedDestination{ID: destOps, PublicID: "DSAAAAAAAAAAOB", Name: "ops-bot", Type: "webhook"}
+}
+
+// stepEvent is the escalation_webhook of a step that sends to d, recorded as the lifecycle event seq.
+func stepEvent(seq int64, d *groups.JoinedDestination) groups.Recorded {
+	return groups.Recorded{Seq: seq, Event: groups.EventEscalationWebhook, Loudness: groups.Quiet, Destination: d,
+		Chain: &groups.ChainEntry{Run: 1, Chain: 5, ChainPublicID: "EC0000000000DO", ChainName: "devops", Step: 1}}
+}
+
+// sentTo are the events of the calls to the Destination d, as "event#sequence" in order.
+func (s *fakeSender) sentTo(t *testing.T, d int64) []string {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, c := range s.calls {
+		if c.Destination.ID != d {
+			continue
+		}
+		var b stubBody
+		if err := json.Unmarshal(c.Body, &b); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fmt.Sprintf("%s#%d", b.Event, b.Sequence))
+	}
+	return out
+}
+
+// TestEscalationWebhookOnlyToItsDestination is C-32.FR-13, C-32.AC-9 and C-15.FR-2 revised: escalation_webhook goes,
+// Quiet, to the Destination of its step only, which is on none of the Alert Group's Routes and receives no other
+// event of it, with the Alert Group's sequence; the events-mode Destination of the Route receives the other events but
+// not escalation_webhook. Its delivery marks no Publication, as the step's Destination is not one of the Alert
+// Group's.
+func TestEscalationWebhookOnlyToItsDestination(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	ops := e.withOps()
+	calls := e.recordPublished()
+	g := e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, created())
+	e.enqueue(t, g, groups.System, event(2, groups.EventAlertsAdded, groups.VariantFiring), stepEvent(3, ops),
+		event(4, groups.EventEscalationStepSkipped, groups.VariantAny))
+	e.drain(t)
+	if got := e.sender.sentTo(t, destOps); !slices.Equal(got, []string{"escalation_webhook#3"}) {
+		t.Errorf("ops-bot received %v", got)
+	}
+	if got := e.sender.sentTo(t, destWH); !slices.Equal(got, []string{"created#1", "alerts_added#2",
+		"escalation_step_skipped#4"}) {
+		t.Errorf("the route's webhook received %v", got)
+	}
+	var step *fakeEvent
+	for _, we := range e.db.webhookEvents {
+		if we.event == string(groups.EventEscalationWebhook) {
+			if step != nil {
+				t.Fatal("two escalation_webhook events")
+			}
+			step = we
+		}
+	}
+	if step == nil || step.dest != destOps || step.notify || step.seq != 3 || step.state != "delivered" {
+		t.Fatalf("escalation_webhook %+v", step)
+	}
+	var b stubBody
+	if err := json.Unmarshal(step.body, &b); err != nil || b.Notify || len(b.Mentions) != 0 || b.Sequence != 3 {
+		t.Errorf("body %+v %v", b, err)
+	}
+	if len(*calls) != 1 {
+		t.Errorf("publications marked %+v", *calls)
+	}
+	// The step's Destination receives no later event of the Alert Group.
+	e.enqueue(t, g, webUser, event(5, groups.EventAcknowledged, groups.VariantAny))
+	e.drain(t)
+	if got := e.sender.sentTo(t, destOps); len(got) != 1 {
+		t.Errorf("ops-bot received %v", got)
+	}
+	if got := e.sender.sentTo(t, destWH); len(got) != 4 || got[3] != "acknowledged#5" {
+		t.Errorf("the route's webhook received %v", got)
+	}
+}
+
+// TestEscalationWebhookUnpublished: an Alert Group that no Destination reaches, whose chains started at once
+// (C-32.FR-5), still sends escalation_webhook to its step's Destination, and that delivery marks no first Publication.
+func TestEscalationWebhookUnpublished(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	ops := e.withOps()
+	calls := e.recordPublished()
+	e.db.routeDests[routeID] = nil
+	g := e.group(groups.StatusFiring, "t")
+	notified := e.db.notified
+	e.enqueue(t, g, groups.System, stepEvent(2, ops))
+	if len(e.db.webhookEvents) != 1 || e.db.webhookEvents[0].dest != destOps || e.db.notified == notified {
+		t.Fatalf("events %+v, notified %d", e.db.webhookEvents, e.db.notified)
+	}
+	e.drain(t)
+	if got := e.sender.sentTo(t, destOps); !slices.Equal(got, []string{"escalation_webhook#2"}) || len(*calls) != 0 {
+		t.Errorf("sent %v, publications marked %+v", got, *calls)
+	}
+	// The step's Destination is not one the Alert Group reached: its later events do not go there
+	// (ListGroupDestinations).
+	e.enqueue(t, g, groups.System, event(3, groups.EventEscalationStepSkipped, groups.VariantAny))
+	if len(e.db.webhookEvents) != 1 {
+		t.Errorf("events %d", len(e.db.webhookEvents))
+	}
+	boom := errors.New("boom")
+	e.db.fail["InsertWebhookEvent"] = boom
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Events: []groups.Recorded{stepEvent(4, ops)}}); !errors.Is(err, boom) {
+		t.Errorf("a failing insert: %v", err)
+	}
+}
+
+// TestEscalationWebhookAlsoTheGroups is C-32.FR-13: a Destination that is also one of the Alert Group's receives
+// escalation_webhook once, among its other events in the order of their sequence, the fan-out leaving it out.
+func TestEscalationWebhookAlsoTheGroups(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	own := &groups.JoinedDestination{ID: destWH, PublicID: "DSAAAAAAAAAAEV", Name: "webhook", Type: "webhook"}
+	g := e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, created())
+	e.enqueue(t, g, groups.System, event(2, groups.EventAlertsAdded, groups.VariantFiring), stepEvent(3, own))
+	e.enqueue(t, g, webUser, event(4, groups.EventAcknowledged, groups.VariantAny))
+	e.drain(t)
+	if got := e.sender.sentTo(t, destWH); !slices.Equal(got, []string{"created#1", "alerts_added#2",
+		"escalation_webhook#3", "acknowledged#4"}) {
+		t.Errorf("sent %v", got)
+	}
+	if len(e.db.webhookEvents) != 4 {
+		t.Errorf("events %d", len(e.db.webhookEvents))
+	}
+}
+
+// TestEscalationWebhookRetry is C-32.FR-13 and C-15.FR-2: escalation_webhook is delivered at least once like every
+// event: a Transient answer retries it after the backoff with the same webhook-id, sequence and body, and the next
+// event of the Alert Group at that Destination waits until it is delivered.
+func TestEscalationWebhookRetry(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	e.w.Random = func() float64 { return 0 }
+	ops := e.withOps()
+	g := e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, stepEvent(2, ops))
+	e.enqueue(t, g, groups.System, stepEvent(5, ops))
+	e.sender.answers = []delivery.Outcome{{Kind: delivery.OutcomeTransient, Status: 500, Error: "answered 500"}}
+	e.drain(t)
+	if got := e.sender.sentTo(t, destOps); !slices.Equal(got, []string{"escalation_webhook#2"}) {
+		t.Fatalf("sent %v", got)
+	}
+	first := e.db.webhookEvents[0]
+	if first.state != "pending" || first.attempts != 1 || *first.errorClass != "transient" {
+		t.Fatalf("after the failure %+v", first)
+	}
+	e.business.Advance(delivery.TransientBackoffMax)
+	e.drain(t)
+	if got := e.sender.sentTo(t, destOps); !slices.Equal(got, []string{"escalation_webhook#2", "escalation_webhook#2",
+		"escalation_webhook#5"}) {
+		t.Fatalf("sent %v", got)
+	}
+	c := e.sender.calls
+	if c[0].WebhookID != c[1].WebhookID || string(c[0].Body) != string(c[1].Body) || c[1].WebhookID == c[2].WebhookID {
+		t.Error("webhook ids")
+	}
+	if first.state != "delivered" || e.db.webhookEvents[1].state != "delivered" {
+		t.Errorf("events %+v %+v", first, e.db.webhookEvents[1])
+	}
+}
+
+// TestEscalationWebhookModeBoth is C-32.FR-13: an outgoing webhook in the mode both that is on the Route and named by
+// the step receives escalation_webhook once, among its events in order, and the event causes no Root message work
+// there: no Publication, edit or Thread reply beyond those of its other events.
+func TestEscalationWebhookModeBoth(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	e.db.dests[destWH].mode = "both"
+	e.w.Adapters[delivery.TypeWebhook] = e.rec
+	own := &groups.JoinedDestination{ID: destWH, PublicID: "DSAAAAAAAAAAEV", Name: "webhook", Type: "webhook"}
+	g := e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, created())
+	e.drain(t)
+	before := len(e.rec.Calls())
+	if e.rec.Count(deliverytest.MethodPublish) != 1 {
+		t.Fatalf("published %d", e.rec.Count(deliverytest.MethodPublish))
+	}
+	e.enqueue(t, g, groups.System, stepEvent(2, own))
+	e.drain(t)
+	if got := e.sender.sentTo(t, destWH); !slices.Equal(got, []string{"created#1", "escalation_webhook#2"}) {
+		t.Errorf("sent %v", got)
+	}
+	if n := len(e.rec.Calls()); n != before {
+		t.Errorf("escalation_webhook caused %d Root message calls: %v", n-before, e.rec.Calls()[before:])
+	}
+	if d := e.db.deliveries[0]; d.state != "delivered" || d.configOnly {
+		t.Errorf("delivery %s, configuration only %v", d.state, d.configOnly)
+	}
+}
+
+// TestEscalationWebhookBroken is C-32.FR-13 and C-11.FR-9: escalation_webhook to a Broken step Destination is queued
+// and waits; it is the probe, and once the Destination recovers the events that waited are sent in order.
+func TestEscalationWebhookBroken(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	ops := e.withOps()
+	e.breakDest(destOps, "answered 503")
+	g := e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, stepEvent(2, ops))
+	e.enqueue(t, g, groups.System, stepEvent(4, ops))
+	if len(e.db.webhookEvents) != 2 {
+		t.Fatalf("events %d", len(e.db.webhookEvents))
+	}
+	e.drain(t)
+	if got := e.sender.sentTo(t, destOps); len(got) != 0 {
+		t.Fatalf("sent while Broken: %v", got)
+	}
+	e.business.Advance(delivery.BrokenProbeInterval)
+	e.real.Advance(time.Hour)
+	e.drain(t)
+	if got := e.sender.sentTo(t, destOps); !slices.Equal(got, []string{"escalation_webhook#2",
+		"escalation_webhook#4"}) {
+		t.Fatalf("sent %v", got)
+	}
+	if ds := e.db.dests[destOps]; ds.health != "healthy" {
+		t.Errorf("dest %+v", ds)
+	}
+}
+
+// TestEscalationWebhookDeletedDestination: a step's Destination deleted before its event is inserted, as a deletion
+// that commits while the step reads it, gets no event (InsertWebhookEvent).
+func TestEscalationWebhookDeletedDestination(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	ops := e.withOps()
+	e.db.dests[destOps].deleted = true
+	e.enqueue(t, e.group(groups.StatusFiring, "t"), groups.System, stepEvent(2, ops))
+	if len(e.db.webhookEvents) != 0 {
+		t.Errorf("events %+v", e.db.webhookEvents)
+	}
+}
+
+// TestEscalationWebhookNotFromOtherEvents: only escalation_webhook takes the path of its step's Destination — a
+// destination_joined, which also carries a Destination, queues no webhook event for a messenger Destination, and for
+// an events-mode one exactly its usual event of the fan-out.
+func TestEscalationWebhookNotFromOtherEvents(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	mm := &groups.JoinedDestination{ID: destMM, PublicID: e.db.dests[destMM].publicID, Name: "ops", Type: "mattermost"}
+	joined := groups.Recorded{Seq: 2, Event: groups.EventDestinationJoined, Variant: groups.VariantFiring,
+		Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionNewAlertGroup}, Destination: mm}
+	g := e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, created())
+	e.enqueue(t, g, groups.System, joined)
+	for _, we := range e.db.webhookEvents {
+		if we.dest == destMM {
+			t.Errorf("a webhook event for the messenger destination: %+v", we)
+		}
+	}
+	own := &groups.JoinedDestination{ID: destWH, PublicID: "DSAAAAAAAAAAEV", Name: "webhook", Type: "webhook"}
+	joined.Seq, joined.Destination = 3, own
+	e.enqueue(t, g, groups.System, joined)
+	var got []string
+	for _, we := range e.db.webhookEvents {
+		got = append(got, fmt.Sprintf("%d:%s#%d", we.dest, we.event, we.seq))
+	}
+	want := []string{"12:created#1", "12:destination_joined#2", "12:destination_joined#3"}
+	if !slices.Equal(got, want) {
+		t.Errorf("events %v, want %v", got, want)
+	}
+}
+
+// TestEscalationWebhookNotToTeamDestinations is C-32.FR-13 and C-32.AC-9 for the Teams: an events-mode Destination that
+// reaches the Alert Group through its Team, and is not the step's, receives the Alert Group's events but not
+// escalation_webhook, which goes to the step's Destination only.
+func TestEscalationWebhookNotToTeamDestinations(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	ops := e.withOps()
+	const teamHook, team = 16, 7
+	e.db.dests[teamHook] = &fakeDest{id: teamHook, publicID: "DSAAAAAAAAAA16", name: "team-hook",
+		typ: delivery.TypeWebhook, health: "healthy", limit: 600, per: 60, mode: "events"}
+	r := e.db.routes[routeID]
+	r.toTeams = true
+	e.db.routes[routeID] = r
+	e.db.teamDests = map[int64][]routing.Entry{team: {{DestinationID: teamHook, Condition: routing.ConditionAny}}}
+	e.db.teamRefs = map[int64]dbgen.ListEntryTeamsRow{team: {ID: team, PublicID: "TMAAAAAAAAAAA7", Name: "Payments",
+		Slug: "payments"}}
+	g := e.group(groups.StatusFiring, "t")
+	e.render(t, g, groups.System, false, []int64{team}, created())
+	e.render(t, g, groups.System, false, []int64{team}, stepEvent(2, ops),
+		event(3, groups.EventEscalationStepSkipped, groups.VariantAny))
+	e.drain(t)
+	if got := e.sender.sentTo(t, teamHook); !slices.Equal(got, []string{"created#1", "escalation_step_skipped#3"}) {
+		t.Errorf("the team's webhook received %v", got)
+	}
+	if got := e.sender.sentTo(t, destOps); !slices.Equal(got, []string{"escalation_webhook#2"}) {
+		t.Errorf("ops-bot received %v", got)
 	}
 }

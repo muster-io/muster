@@ -32,13 +32,14 @@ type Body struct {
 	Actor      Actor           `json:"actor"`
 	AlertGroup AlertGroup      `json:"alert_group"`
 	Alerts     []Alert         `json:"alerts"`
-	// Destination is set only on destination_joined: the Destination the Alert Group joined (C-15.FR-2, C-26.FR-5).
+	// Destination is set only on destination_joined, the Destination the Alert Group joined (C-15.FR-2, C-26.FR-5),
+	// and on escalation_webhook, the outgoing webhook Destination its step sent to (C-32.FR-13).
 	Destination *DestinationRef `json:"destination,omitempty"`
 	// Page is set only on page_not_delivered: the people of the Page, its Notification gateway and the reason
 	// (C-15.FR-2, C-30.FR-7).
 	Page *Page `json:"page,omitempty"`
-	// Escalation is set only on escalation_step_skipped: the chain, the step, the reason, and the person of a skip of
-	// a person (C-15.FR-2, C-32.FR-14).
+	// Escalation is set only on escalation_step_skipped, the chain, the step, the reason, and the person of a skip of
+	// a person (C-15.FR-2, C-32.FR-14), and on escalation_webhook, the chain and the step (C-32.FR-13).
 	Escalation *EscalationStep `json:"escalation_step,omitempty"`
 	// Test is set only on the test event of a Destination test (C-16.FR-1), which belongs to no Alert Group's order.
 	Test bool `json:"test,omitempty"`
@@ -52,16 +53,17 @@ type Page struct {
 	Reason  *string   `json:"reason"`
 }
 
-// EscalationStep is the step of an escalation_step_skipped (WebhookEscalationStep): its chain, null once deleted, its
-// number, the reason, and the person of a skip of a person, none otherwise.
+// EscalationStep is the step of an escalation_step_skipped or an escalation_webhook (WebhookEscalationStep): its chain,
+// null once deleted, its number, the reason of a skip, null on escalation_webhook, whose step was made, and the person
+// of a skip of a person, none otherwise.
 type EscalationStep struct {
 	Chain  *RouteRef `json:"chain"`
 	Step   int       `json:"step"`
-	Reason string    `json:"reason"`
+	Reason *string   `json:"reason"`
 	Users  []User    `json:"users"`
 }
 
-// DestinationRef names the Destination of a destination_joined (WebhookDestinationRef).
+// DestinationRef names the Destination of a destination_joined or an escalation_webhook (WebhookDestinationRef).
 type DestinationRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -209,13 +211,15 @@ func (s *Service) eventBodies(ctx context.Context, q bodyQueries, in delivery.Ev
 		if !e.Notify {
 			b.Mentions = []MentionTarget{}
 		}
-		if d := e.Event.Destination; d != nil && e.Event.Event == groups.EventDestinationJoined {
+		if d := e.Event.Destination; d != nil && (e.Event.Event == groups.EventDestinationJoined ||
+			e.Event.Event == groups.EventEscalationWebhook) {
 			b.Destination = &DestinationRef{ID: d.PublicID, Name: d.Name, Type: d.Type}
 		}
 		if p := e.Event.Page; p != nil && e.Event.Event == groups.EventPageNotDelivered {
 			b.Page = pageOf(p)
 		}
-		if c := e.Event.Chain; c != nil && e.Event.Event == groups.EventEscalationStepSkipped {
+		if c := e.Event.Chain; c != nil && (e.Event.Event == groups.EventEscalationStepSkipped ||
+			e.Event.Event == groups.EventEscalationWebhook) {
 			b.Escalation = escalationOf(c, e.Event.Reason, e.Event.Page)
 		}
 		return json.Marshal(b)
@@ -238,9 +242,13 @@ func pageOf(p *groups.Page) *Page {
 	return out
 }
 
-// escalationOf is the step of an escalation_step_skipped as the body names it, with the person of page, if any.
+// escalationOf is the step of an escalation_step_skipped or an escalation_webhook as the body names it, with the reason
+// of a skip and the person of page, if any.
 func escalationOf(c *groups.ChainEntry, reason string, page *groups.Page) *EscalationStep {
-	out := &EscalationStep{Step: c.Step, Reason: reason, Users: []User{}}
+	out := &EscalationStep{Step: c.Step, Users: []User{}}
+	if reason != "" {
+		out.Reason = &reason
+	}
 	if c.ChainPublicID != "" {
 		out.Chain = &RouteRef{ID: c.ChainPublicID, Name: c.ChainName}
 	}

@@ -1581,8 +1581,8 @@ JOIN destinations d ON d.org_id = @org_id AND d.id = e.destination_id
 WHERE d.deleted_at IS NULL AND (d.type <> 'webhook' OR d.webhook_mode IS DISTINCT FROM 'events')
 ORDER BY e.destination_id, e.kind, e.team_id;
 
--- ListTimelineDestinations names the Destinations of destination_joined entries, deleted ones included, with their
--- health.
+-- ListTimelineDestinations names the Destinations of destination_joined and escalation_webhook entries, deleted ones
+-- included, with their health.
 -- name: ListTimelineDestinations :many
 SELECT id, public_id, name, type, health, broken_since, broken_reason
 FROM destinations

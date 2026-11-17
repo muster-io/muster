@@ -23,17 +23,28 @@ import (
 // step and the reason, and the person for a skip of a person.
 const EventEscalationStepSkipped Event = "escalation_step_skipped"
 
-// The reasons of escalation_step_skipped (EscalationSkipReason); S-155 and S-157 add theirs.
+// EventEscalationWebhook is the lifecycle event of C-32.FR-13 (revised C-09.FR-22): a step "Send to an outgoing
+// webhook" that was made — Quiet, without Mentions, of the Timeline kind escalation, nothing in a messenger, and, unlike
+// every other event, sent only to the outgoing webhook Destination the step names (C-15.FR-2 revised). Its entry names
+// the run, the chain, the step and that Destination.
+const EventEscalationWebhook Event = "escalation_webhook"
+
+// The reasons of escalation_step_skipped (EscalationSkipReason); S-155 and S-157 add theirs. A webhook step whose
+// Destination was deleted, or is no longer an outgoing webhook in the mode events or both, is skipped with
+// SkipDestinationDeleted or SkipWebhookEventsRequired.
 const (
-	SkipOutsideWorkingHours = "outside_working_hours"
-	SkipSeverity            = "severity"
-	SkipScheduleGap         = "schedule_gap"
-	SkipViewer              = "viewer"
-	SkipDisabled            = "disabled"
+	SkipOutsideWorkingHours   = "outside_working_hours"
+	SkipSeverity              = "severity"
+	SkipScheduleGap           = "schedule_gap"
+	SkipViewer                = "viewer"
+	SkipDisabled              = "disabled"
+	SkipDestinationDeleted    = "destination_deleted"
+	SkipWebhookEventsRequired = "webhook_events_required" //nolint:gosec // G101: a skip reason, not a credential
 )
 
 // SkipReasons are the reasons of escalation_step_skipped, a closed list.
-var SkipReasons = []string{SkipOutsideWorkingHours, SkipSeverity, SkipScheduleGap, SkipViewer, SkipDisabled}
+var SkipReasons = []string{SkipOutsideWorkingHours, SkipSeverity, SkipScheduleGap, SkipViewer, SkipDisabled,
+	SkipDestinationDeleted, SkipWebhookEventsRequired}
 
 // The Commands that stop the runs of the chains of an Alert Group (stop_command), and started_over for a run that a
 // start-over found still running.
@@ -232,31 +243,53 @@ type StepSkip struct {
 	Person *PagedUser
 }
 
-// ChainProgress is what one step of a run did to its Alert Group: the skips to record, whether the run ran out, and
-// whether anything of the run changed, which the Alert Group's read shows.
+// StepWebhook is one escalation_webhook (C-32.FR-13): the run, the chain and the step, and the outgoing webhook
+// Destination it is sent to, which the run checked in the step's transaction. After is its place among the skips of
+// the same ChainProgress: it was made after the first After of them, so that the events keep the order of the steps.
+type StepWebhook struct {
+	ChainEntry
+	Destination JoinedDestination
+	After       int
+}
+
+// ChainProgress is what one step of a run did to its Alert Group: the skips and the webhooks to record, whether the
+// run ran out, and whether anything of the run changed, which the Alert Group's read shows.
 type ChainProgress struct {
-	Skips   []StepSkip
-	RanOut  bool
-	Changed bool
+	Skips    []StepSkip
+	Webhooks []StepWebhook
+	RanOut   bool
+	Changed  bool
 }
 
-// escalationStepSkipped records the Quiet escalation_step_skipped of each skip (C-32.FR-14), whatever the status: a
-// system transition that changes no status.
-type escalationStepSkipped struct {
-	skips []StepSkip
+// chainSteps records, in the order of the steps, the Quiet escalation_step_skipped of each skip (C-32.FR-14) and the
+// Quiet escalation_webhook of each step that sent to an outgoing webhook (C-32.FR-13), which ChainStep dispatches,
+// whatever the status: a system transition that changes no status.
+type chainSteps struct {
+	skips    []StepSkip
+	webhooks []StepWebhook
 }
 
-func (escalationStepSkipped) precondition(*Group) error { return nil }
+func (chainSteps) precondition(*Group) error { return nil }
 
-func (t escalationStepSkipped) apply(_ context.Context, _ Queries, _ *Group, c *change) error {
-	for _, s := range t.skips {
-		chain := s.ChainEntry
-		e := entry{Event: EventEscalationStepSkipped, Reason: s.Reason, Chain: &chain}
-		if s.Person != nil {
-			e.Page = &Page{Users: []PagedUser{*s.Person}, Reason: s.Reason}
+func (t chainSteps) apply(_ context.Context, _ Queries, _ *Group, c *change) error {
+	next := 0
+	skipsTo := func(n int) {
+		for ; next < n && next < len(t.skips); next++ {
+			s := t.skips[next]
+			chain := s.ChainEntry
+			e := entry{Event: EventEscalationStepSkipped, Reason: s.Reason, Chain: &chain}
+			if s.Person != nil {
+				e.Page = &Page{Users: []PagedUser{*s.Person}, Reason: s.Reason}
+			}
+			c.add(e)
 		}
-		c.add(e)
 	}
+	for _, w := range t.webhooks {
+		skipsTo(w.After)
+		chain, dest := w.ChainEntry, w.Destination
+		c.add(entry{Event: EventEscalationWebhook, Chain: &chain, Destination: &dest})
+	}
+	skipsTo(len(t.skips))
 	return nil
 }
 
@@ -289,11 +322,12 @@ func (t chainsRanOut) apply(ctx context.Context, _ Queries, g *Group, c *change)
 }
 
 // ChainStep makes one step of a run of an Escalation chain on the Alert Group groupID in the timer's transaction tx
-// (C-32.FR-5, FR-14): it locks the Alert Group first, as every change of it does, runs step on it — which reads and
-// writes the run under that lock — and records what step did through the dispatcher as system transitions with Muster
-// as the actor: escalation_step_skipped for each skip (EscalationStepSkipped), and, when the run ran out, unclaimed once
-// every run of the current start has (ChainsRanOut). An Alert Group that no longer exists changes nothing. It returns
-// what to run once tx committed.
+// (C-32.FR-5, FR-13, FR-14): it locks the Alert Group first, as every change of it does, runs step on it — which reads
+// and writes the run under that lock — and records what step did through the dispatcher as system transitions with
+// Muster as the actor: escalation_step_skipped for each skip and escalation_webhook for each step that sent to an
+// outgoing webhook, in the order of the steps (chainSteps), and, when the run ran out, unclaimed once every run of the
+// current start has (ChainsRanOut). An Alert Group that no longer exists changes nothing. It returns what to run once
+// tx committed.
 func (s *Service) ChainStep(ctx context.Context, tx DBTX, groupID int64,
 	step func(ctx context.Context, g *Group) (ChainProgress, error)) (func(context.Context), error) {
 	q := s.queries(tx)
@@ -314,9 +348,15 @@ func (s *Service) ChainStep(ctx context.Context, tx DBTX, groupID int64,
 			return nil, fmt.Errorf("escalation_step_skipped with the reason %q", sk.Reason)
 		}
 	}
+	for _, w := range p.Webhooks {
+		if w.Destination.ID == 0 {
+			return nil, fmt.Errorf("escalation_webhook of step %d without its destination", w.Step)
+		}
+	}
 	var after committed
-	if len(p.Skips) > 0 {
-		if err := s.d.dispatch(ctx, q, g, System, escalationStepSkipped{skips: p.Skips}, &after); err != nil {
+	if len(p.Skips) > 0 || len(p.Webhooks) > 0 {
+		if err := s.d.dispatch(ctx, q, g, System, chainSteps{skips: p.Skips, webhooks: p.Webhooks},
+			&after); err != nil {
 			return nil, err
 		}
 	}

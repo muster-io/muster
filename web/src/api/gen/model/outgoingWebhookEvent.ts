@@ -31,11 +31,11 @@ export interface OutgoingWebhookEvent {
   alert_group: WebhookAlertGroup;
   /** One element per Alert, by fingerprint. */
   alerts: WebhookAlert[];
-  /** The Destination the Alert Group joined, only on `destination_joined`. */
+  /** The Destination the Alert Group joined, only on `destination_joined`; the outgoing webhook Destination the step sent to, only on `escalation_webhook`. */
   destination?: WebhookDestinationRef;
   /** The Page, only on `page_not_delivered`. */
   page?: WebhookPage;
-  /** The chain, the step and the reason, only on `escalation_step_skipped`. */
+  /** The chain, the step and the reason, only on `escalation_step_skipped` and `escalation_webhook`, whose reason is null. */
   escalation_step?: WebhookEscalationStep;
   /** True only on the `test` event, which carries an example or recent Alert Group and belongs to no Alert Group's order. */
   test?: boolean;

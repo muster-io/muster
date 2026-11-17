@@ -1015,8 +1015,12 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   `deleted_at` is set and the Destination leaves its Routes; its open Root messages get their final edit
   (`deliveries.desired_retire`), and then its secrets — the Signing secrets, the proxy password and its
   `destination_secrets` rows — are wiped. An outgoing webhook in events mode has no Root message: its pending
-  `webhook_events` end as `not_delivered`, no final event is sent and its secrets are wiped at once. The row stays for
-  the deliveries, events and Audit log entries that point at it.
+  `webhook_events` end as `not_delivered`, no final event is sent and its secrets are wiped at once. One exception: a
+  webhook step reads its Destination without a lock (S-156), so a deletion that commits while the step runs can leave
+  the `escalation_webhook` rows of that one firing — several, when repeats make the step again without a wait —
+  `pending` for good: never claimed, as the claim skips deleted Destinations, with no `not_delivered` delivery event,
+  and removed with their Alert Group; `InsertWebhookEvent` inserts nothing for a
+  Destination already deleted. The row stays for the deliveries, events and Audit log entries that point at it.
 - **`mention_entries`** (migration 0043, C-28.FR-1) — the Mention entries of a Destination, in `position` order (unique
   `(destination_id, position)`), each one target and the Loud events it applies to: `target_kind` — `everyone` with
   `everyone` (`channel`, `here`, `all` or `everyone`), `user` with `user_id`, `group` with `group_name` and, for a Slack

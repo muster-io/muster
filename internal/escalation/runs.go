@@ -36,7 +36,8 @@ import (
 // then the chains a start runs FOR KEY SHARE, in id order, before any run is written — the deletion of a chain locks it
 // FOR UPDATE and then sets chain_id of its runs to null, so it waits for the start or the start finds it gone, never
 // both holding what the other waits for — then the runs, then their timers. A step locks its Alert Group, then its run,
-// then writes its timer. No transaction locks a run before its Alert Group.
+// then writes its timer; a webhook step reads its Destination without a lock (webhook.go). No transaction locks a run
+// before its Alert Group.
 
 // The states of a run, and the outcomes of its steps.
 const (
@@ -110,6 +111,7 @@ type runQueries interface {
 	InsertRunStep(ctx context.Context, arg dbgen.InsertRunStepParams) error
 	CountGenerationRuns(ctx context.Context, arg dbgen.CountGenerationRunsParams) (dbgen.CountGenerationRunsRow, error)
 	ListPeopleStates(ctx context.Context, arg dbgen.ListPeopleStatesParams) ([]dbgen.ListPeopleStatesRow, error)
+	GetStepDestination(ctx context.Context, arg dbgen.GetStepDestinationParams) (dbgen.GetStepDestinationRow, error)
 	ListGroupRuns(ctx context.Context, arg dbgen.ListGroupRunsParams) ([]dbgen.ListGroupRunsRow, error)
 	ListTeamRefs(ctx context.Context, arg dbgen.ListTeamRefsParams) ([]dbgen.ListTeamRefsRow, error)
 	GetChainID(ctx context.Context, arg dbgen.GetChainIDParams) (int64, error)
@@ -130,9 +132,10 @@ type OnCalls interface {
 	OnCallAtIn(ctx context.Context, db mentions.DBTX, scheduleID string, t time.Time) (schedules.Segment, error)
 }
 
-// StepPages makes what a step that Pages or sends does — a Page of the On-call, of chosen people or of a whole Team, a
-// call, a webhook — once the run decided to make it, with the people it may Page: S-155, S-156 and S-157 implement it.
-// This story wires none, so such a step is made without Paging anyone.
+// StepPages makes what a step that Pages does — a Page of the On-call, of chosen people or of a whole Team, a call —
+// once the run decided to make it, with the people it may Page: S-155 and S-157 implement it. Until they do none is
+// wired, so such a step is made without Paging anyone. A webhook step does not reach it: the run records its
+// escalation_webhook itself (webhook.go).
 type StepPages interface {
 	MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, run RunRef, step StepRef, people []int64) error
 }
@@ -160,8 +163,6 @@ type StepRef struct {
 	TeamID     int64
 	Everyone   string
 	GatewayID  int64
-	// DestinationID is the Destination of a webhook step.
-	DestinationID int64
 }
 
 // Runs holds the runs of the Organization's Escalation chains and implements groups.ChainRuns. Its zero value runs

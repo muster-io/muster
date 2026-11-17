@@ -29,7 +29,9 @@ import (
 // version leaves it, which stops no run, is stopped then. Otherwise it makes the steps from the current one on: a step
 // that Pages or sends is skipped, recording escalation_step_skipped, outside the Working hours of its chain when it is
 // limited to them, for a Severity level its condition does not meet, in a gap of the Schedule it Pages, or for a
-// person it names who became a Viewer or was disabled since; it is made otherwise, by StepPages, none until S-155.
+// person it names who became a Viewer or was disabled since; it is made otherwise, by StepPages, none until S-155. A
+// step "Send to an outgoing webhook" is also skipped when its Destination was deleted or takes no events any more, and
+// is made by recording escalation_webhook (webhook.go).
 // Skips and Pages go on at once; a wait sets the timer at the end of the wait, from the deadline the step was due, on
 // the business clock, and a wait that is already over by then goes on; a repeat goes back to its step until it did so
 // its times. After the last step the run has run out, which ChainsRanOut checks for the whole start. It returns what
@@ -179,6 +181,19 @@ func (w *walk) walk(ctx context.Context) (groups.ChainProgress, error) {
 			} else {
 				idx++
 			}
+		case KindWebhook:
+			skip, hook, err := w.webhook(ctx, st)
+			if err != nil {
+				return p, err
+			}
+			if skip != nil {
+				p.Skips = append(p.Skips, *skip)
+			}
+			if hook != nil {
+				hook.After = len(p.Skips)
+				p.Webhooks = append(p.Webhooks, *hook)
+			}
+			idx++
 		default:
 			skips, err := w.page(ctx, st)
 			if err != nil {
@@ -229,7 +244,7 @@ func (w *walk) page(ctx context.Context, st runStep) ([]groups.StepSkip, error) 
 	if w.r.pages != nil {
 		ref := RunRef{ID: w.run.ID, PublicID: w.run.PublicID, ChainID: w.run.ChainID.Int64}
 		step := StepRef{Number: st.Number, Kind: st.Kind, Importance: st.Importance, ScheduleID: st.ScheduleID,
-			TeamID: st.TeamID, Everyone: st.Everyone, GatewayID: st.GatewayID, DestinationID: st.DestinationID}
+			TeamID: st.TeamID, Everyone: st.Everyone, GatewayID: st.GatewayID}
 		if err := w.r.pages.MakeStep(ctx, w.tx, w.g, ref, step, people); err != nil {
 			return nil, err
 		}

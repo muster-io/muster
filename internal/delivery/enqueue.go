@@ -58,7 +58,8 @@ type Row struct {
 // it leaves, a Quiet Publication in those it joins, an update in those of both. destination_joined is a new Root message
 // in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update. page_not_delivered and
 // escalation_step_skipped show nothing in a messenger (C-30.FR-7, C-32.FR-14): outgoing webhooks in events mode receive
-// them.
+// them. escalation_webhook shows nothing in a messenger either, and goes only to the outgoing webhook Destination its
+// step names, whether or not the Alert Group is delivered there (C-32.FR-13, C-15.FR-2 revised): queueEvents.
 var Table = []Row{
 	{groups.EventCreated, groups.VariantAny, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup},
 		false},
@@ -86,6 +87,7 @@ var Table = []Row{
 	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventPageNotDelivered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventEscalationStepSkipped, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
+	{groups.EventEscalationWebhook, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventDestinationJoined, groups.VariantFiring, FormPublication, groups.Loud,
 		[]groups.Mention{groups.MentionNewAlertGroup}, false},
 	{groups.EventDestinationJoined, groups.VariantAcknowledged, FormPublication, groups.Quiet, nil, false},
@@ -221,8 +223,9 @@ func (r Row) mentionsOf(e groups.Recorded) []string {
 // Group that resolves is settled by the rules of late Publications and Broken Destinations; an Alert Group moved to the
 // Default route gets the final edit in the Destinations it leaves and a Quiet Publication in those it joins
 // (C-09.FR-19). An outgoing webhook in the events mode has no Root message: each lifecycle event is queued for it as
-// one event (C-15.FR-2), whether it is Broken or a Storm holds the Alert Group. It wakes the delivery workers once tx
-// commits.
+// one event (C-15.FR-2), whether it is Broken or a Storm holds the Alert Group, except escalation_webhook, which is
+// queued only for the Destination of its step, even one the Alert Group does not reach (C-32.FR-13). It wakes the
+// delivery workers once tx commits.
 //
 // It first takes the Route's membership lock shared (ShareRouteMembership), which a change of the Route's Destinations
 // and the deletion of one of them take exclusively, so that an Enqueue and such a change serialize: neither misses a
@@ -317,7 +320,12 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		r.Unreached()
 	}
 	if len(targets) == 0 && !created {
-		return s.wake(ctx, q, left > 0)
+		// An escalation_webhook still goes to its step's Destination, which the Alert Group need not reach.
+		queued, err := s.queueEvents(ctx, tx, q, r, nil, route, now)
+		if err != nil {
+			return err
+		}
+		return s.wake(ctx, q, left > 0 || queued)
 	}
 	var dests []target
 	var eventDests []dbgen.ListRouteDestinationsRow
@@ -329,11 +337,12 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 			dests = append(dests, t)
 		}
 	}
-	if err := s.queueEvents(ctx, tx, q, r, eventDests, route, now); err != nil {
+	queued, err := s.queueEvents(ctx, tx, q, r, eventDests, route, now)
+	if err != nil {
 		return err
 	}
 	if len(dests) == 0 {
-		return s.wake(ctx, q, left > 0 || len(eventDests) > 0)
+		return s.wake(ctx, q, left > 0 || queued)
 	}
 	joined := r.Joined()
 	window := time.Duration(route.ThreadBatchingWindowSeconds) * time.Second

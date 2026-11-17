@@ -40,5 +40,6 @@ export const WebhookEventName = {
   destination_joined: 'destination_joined',
   page_not_delivered: 'page_not_delivered',
   escalation_step_skipped: 'escalation_step_skipped',
+  escalation_webhook: 'escalation_webhook',
   test: 'test',
 } as const;

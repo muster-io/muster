@@ -31,9 +31,12 @@ import (
 // version 1 body rendered at that moment, whether the Destination is Broken or a Storm holds the Alert Group. The
 // worker claims only the head event of each Alert Group and Destination, so that the events of an Alert Group are
 // sent in order and at least once, never collapsed, while other Alert Groups do not wait; a retry keeps the webhook-id
-// and the body. The outcomes follow the rules of outcomes.go, with the events kept through a Broken period, whatever
-// their age, and an unknown answer ending the event as Not delivered so that the next one goes. Deleting the
-// Destination ends its waiting events as Not delivered.
+// and the body. escalation_webhook is the one event that does not fan out: it is queued only for the outgoing webhook
+// Destination its step names, whether or not that Destination is one of the Alert Group's, with the Alert Group's
+// sequence, so that a Destination that is also one of the Alert Group's receives it in order among its other events
+// and once (C-32.FR-13, C-15.FR-2 revised). The outcomes follow the rules of outcomes.go, with the events kept through
+// a Broken period, whatever their age, and an unknown answer ending the event as Not delivered so that the next one
+// goes. Deleting the Destination ends its waiting events as Not delivered, and no event is queued for a deleted one.
 
 // The modes of an outgoing webhook Destination.
 const (
@@ -92,47 +95,75 @@ func newWebhookID() string {
 // queueEvents queues, in the dispatcher's transaction tx, one event per lifecycle event of the rendering for each
 // events-mode Destination of the Alert Group's Route (C-15.FR-2): notify is the loudness of its row and a Loud one
 // carries its Mentions in that Destination as data (C-15.FR-11); the body is rendered now. Neither a Broken Destination
-// nor a Storm holds them back (C-11.FR-6).
+// nor a Storm holds them back (C-11.FR-6). An escalation_webhook is left out of that fan-out and queued once, for the
+// Destination of its step (stepDestinations), which its step checked in tx; the insert leaves out a Destination
+// deleted since. It reports whether it queued an event.
 func (s *Service) queueEvents(ctx context.Context, tx groups.DBTX, q queries, r groups.Rendering,
-	dests []dbgen.ListRouteDestinationsRow, route dbgen.GetRouteDeliveryRow, now time.Time) error {
-	if s.bodies == nil || len(dests) == 0 || len(r.Events) == 0 {
-		return nil
+	dests []dbgen.ListRouteDestinationsRow, route dbgen.GetRouteDeliveryRow, now time.Time) (bool, error) {
+	steps := stepDestinations(r.Events)
+	if s.bodies == nil || len(r.Events) == 0 || (len(dests) == 0 && len(steps) == 0) {
+		return false, nil
 	}
 	g := r.Group
 	render, err := s.bodies.EventBodies(ctx, tx, EventSource{Group: g, RoutePublicID: route.PublicID,
 		RouteName: route.Name, Actor: r.Actor})
 	if err != nil {
-		return fmt.Errorf("read alert group #%d for its webhook events: %w", g.Number, err)
+		return false, fmt.Errorf("read alert group #%d for its webhook events: %w", g.Number, err)
 	}
 	var received pgtype.Timestamptz
 	if r.ReceivedAt != nil {
 		received = pgtype.Timestamptz{Time: r.ReceivedAt.UTC(), Valid: true}
 	}
+	queue := func(d int64, name string, e groups.Recorded, loud bool, targets []mentions.Target) error {
+		body, err := render(EventBody{Event: e, Notify: loud, Mentions: targets, OccurredAt: now})
+		if err != nil {
+			return fmt.Errorf("render the %s event of alert group #%d: %w", e.Event, g.Number, err)
+		}
+		if err := q.InsertWebhookEvent(ctx, dbgen.InsertWebhookEventParams{OrgID: s.orgID, DestinationID: d,
+			AlertGroupID: g.ID, Sequence: e.Seq, WebhookID: newWebhookID(), Event: string(e.Event), Notify: loud,
+			Now: now, Body: body, ReceivedAt: received}); err != nil {
+			return fmt.Errorf("queue the %s event of alert group #%d to %s: %w", e.Event, g.Number, name, err)
+		}
+		return nil
+	}
 	for _, d := range dests {
 		for _, e := range r.Events {
+			if e.Event == groups.EventEscalationWebhook {
+				continue // only to the Destination of its step, below
+			}
 			row, _ := rowOf(e, r.Actor) // Enqueue refused an event without a row before
 			loud := row.Loudness == groups.Loud
 			var targets []mentions.Target
 			if names := row.mentionsOf(e); loud && s.mentions != nil && len(names) > 0 {
 				if targets, err = s.mentions.Resolve(ctx, tx, s.orgID, mentions.Request{DestinationID: d.ID,
 					DestinationType: d.Type, AlertGroupID: g.ID, Seq: e.Seq, At: now, Mentions: names}); err != nil {
-					return fmt.Errorf("resolve the mentions of the %s event of alert group #%d in %s: %w", e.Event,
-						g.Number, d.PublicID, err)
+					return false, fmt.Errorf("resolve the mentions of the %s event of alert group #%d in %s: %w",
+						e.Event, g.Number, d.PublicID, err)
 				}
 			}
-			body, err := render(EventBody{Event: e, Notify: loud, Mentions: targets, OccurredAt: now})
-			if err != nil {
-				return fmt.Errorf("render the %s event of alert group #%d: %w", e.Event, g.Number, err)
-			}
-			if err := q.InsertWebhookEvent(ctx, dbgen.InsertWebhookEventParams{OrgID: s.orgID, DestinationID: d.ID,
-				AlertGroupID: g.ID, Sequence: e.Seq, WebhookID: newWebhookID(), Event: string(e.Event), Notify: loud,
-				Now: now, Body: body, ReceivedAt: received}); err != nil {
-				return fmt.Errorf("queue the %s event of alert group #%d to %s: %w", e.Event, g.Number, d.PublicID,
-					err)
+			if err := queue(d.ID, d.PublicID, e, loud, targets); err != nil {
+				return false, err
 			}
 		}
 	}
-	return nil
+	for _, e := range steps {
+		// Quiet, without Mentions (C-32.FR-13).
+		if err := queue(e.Destination.ID, e.Destination.PublicID, e, false, nil); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// stepDestinations are the escalation_webhook events of a rendering, each with the Destination of its step.
+func stepDestinations(events []groups.Recorded) []groups.Recorded {
+	var out []groups.Recorded
+	for _, e := range events {
+		if e.Event == groups.EventEscalationWebhook && e.Destination != nil {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // abandonEvents ends the waiting events of the deleted Destination d as Not delivered in the transaction that deletes
@@ -341,10 +372,11 @@ func (w *Worker) releaseEvent(ctx context.Context, q queries, org, id int64, rea
 // mode, which has no Root message (C-17.FR-1, C-15.AC-11): its created event delivered at now; for a later event
 // delivered while the Alert Group is still unmarked, when its created event was delivered there, or at now when none
 // was (a webhook added to a Route with open Alert Groups, or a created event not delivered). It starts the Escalation
-// chains, as an Alert made the Alert Group (C-32.FR-5): no change of configuration releases an event.
+// chains, as an Alert made the Alert Group (C-32.FR-5): no change of configuration releases an event. An
+// escalation_webhook is no Publication: its Destination need not be one of the Alert Group's (C-32.FR-13).
 func (w *Worker) eventPublished(ctx context.Context, q queries, org int64, a eventAttempt, now time.Time,
 	logs *after) error {
-	if !a.row.GroupUnpublished {
+	if !a.row.GroupUnpublished || a.row.Event == string(groups.EventEscalationWebhook) {
 		return nil
 	}
 	at := now

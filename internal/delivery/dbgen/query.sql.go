@@ -2396,14 +2396,16 @@ const insertWebhookEvent = `-- name: InsertWebhookEvent :exec
 
 INSERT INTO webhook_events (org_id, destination_id, alert_group_id, sequence, webhook_id, event, notify, occurred_at,
                             body, state, next_attempt_at, received_at, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9,
-        'pending', $8::timestamptz, $10::timestamptz, $8::timestamptz)
+SELECT $1::bigint, d.id, $2::bigint, $3::bigint, $4::text, $5::text,
+       $6::boolean, $7::timestamptz, $8::jsonb, 'pending', $7::timestamptz,
+       $9::timestamptz, $7::timestamptz
+FROM destinations d
+WHERE d.org_id = $1::bigint AND d.id = $10::bigint AND d.deleted_at IS NULL
 ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING
 `
 
 type InsertWebhookEventParams struct {
 	OrgID         int64
-	DestinationID int64
 	AlertGroupID  int64
 	Sequence      int64
 	WebhookID     string
@@ -2412,17 +2414,18 @@ type InsertWebhookEventParams struct {
 	Now           time.Time
 	Body          []byte
 	ReceivedAt    pgtype.Timestamptz
+	DestinationID int64
 }
 
 // Outgoing webhook events (C-15.FR-2, schema.md §4.11 and §5): one row per lifecycle event and events-mode
 // Destination, sent in order per Alert Group — only the head event of an Alert Group and Destination is claimed — at
 // least once and never collapsed.
 // InsertWebhookEvent queues one lifecycle event of an Alert Group for an events-mode Destination, due now, with its
-// body rendered now; the event is queued once whatever the retries of the change.
+// body rendered now; the event is queued once whatever the retries of the change, and not for a Destination that is
+// deleted, as one whose deletion committed while a webhook step read it (C-32.FR-13).
 func (q *Queries) InsertWebhookEvent(ctx context.Context, arg InsertWebhookEventParams) error {
 	_, err := q.db.Exec(ctx, insertWebhookEvent,
 		arg.OrgID,
-		arg.DestinationID,
 		arg.AlertGroupID,
 		arg.Sequence,
 		arg.WebhookID,
@@ -2431,6 +2434,7 @@ func (q *Queries) InsertWebhookEvent(ctx context.Context, arg InsertWebhookEvent
 		arg.Now,
 		arg.Body,
 		arg.ReceivedAt,
+		arg.DestinationID,
 	)
 	return err
 }
@@ -2965,7 +2969,7 @@ WHERE d.org_id = $1 AND d.deleted_at IS NULL
        OR EXISTS (SELECT 1
                   FROM webhook_events w
                   WHERE w.org_id = $1 AND w.alert_group_id = $2::bigint
-                    AND w.destination_id = d.id))
+                    AND w.destination_id = d.id AND w.event <> 'escalation_webhook'))
 ORDER BY d.id
 `
 
@@ -2994,6 +2998,7 @@ type ListGroupDestinationsRow struct {
 // ListGroupDestinations lists the Destinations that are not deleted that an Alert Group reached before: those it has a
 // delivery in, with its state, the Storm that holds it and whether its final edit waits, and the outgoing webhooks in
 // the events mode that have an event of it, with what ListRouteDestinations reads of them, in id order (C-26.FR-4).
+// An escalation_webhook does not make its step's Destination one the Alert Group reached (C-32.FR-13).
 func (q *Queries) ListGroupDestinations(ctx context.Context, arg ListGroupDestinationsParams) ([]ListGroupDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listGroupDestinations, arg.OrgID, arg.AlertGroupID)
 	if err != nil {

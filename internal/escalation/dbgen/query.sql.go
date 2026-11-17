@@ -207,6 +207,43 @@ func (q *Queries) GetRunGroup(ctx context.Context, arg GetRunGroupParams) (int64
 	return alert_group_id, err
 }
 
+const getStepDestination = `-- name: GetStepDestination :one
+SELECT id, public_id, name, type, webhook_mode, (deleted_at IS NOT NULL)::boolean AS deleted
+FROM destinations
+WHERE org_id = $1 AND id = $2
+`
+
+type GetStepDestinationParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetStepDestinationRow struct {
+	ID          int64
+	PublicID    string
+	Name        string
+	Type        string
+	WebhookMode pgtype.Text
+	Deleted     bool
+}
+
+// GetStepDestination reads the Destination of a webhook step with its type and mode, deleted or not. It takes no lock:
+// locking the Destination after the Alert Group would close cycles with the delivery worker, which locks deliveries
+// before it updates a Destination's health, and with a Team save, which locks Destinations by id.
+func (q *Queries) GetStepDestination(ctx context.Context, arg GetStepDestinationParams) (GetStepDestinationRow, error) {
+	row := q.db.QueryRow(ctx, getStepDestination, arg.OrgID, arg.ID)
+	var i GetStepDestinationRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Type,
+		&i.WebhookMode,
+		&i.Deleted,
+	)
+	return i, err
+}
+
 const getTeamID = `-- name: GetTeamID :one
 SELECT id
 FROM teams

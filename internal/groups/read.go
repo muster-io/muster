@@ -549,7 +549,8 @@ type TimelineEntry struct {
 	TeamRule    *string
 	TeamMatcher *string
 	TeamValue   *string
-	// Destination is the Destination of a destination_joined (C-26.FR-5).
+	// Destination is the Destination of a destination_joined (C-26.FR-5), or the outgoing webhook Destination of an
+	// escalation_webhook (C-32.FR-13).
 	Destination *TimelineDestination
 	// PagedUsers are the people a Page names and Gateway the Notification gateway of a call, for an event of the kind
 	// escalation (C-32.FR-19, C-30.FR-7), the reason being Reason, or of the call an acknowledgement through the
@@ -896,7 +897,7 @@ func orEmpty(s []string) []string {
 	return s
 }
 
-// entryDestinations names the Destinations of the destination_joined entries.
+// entryDestinations names the Destinations of the destination_joined and escalation_webhook entries.
 func (s *Service) entryDestinations(ctx context.Context, entries []TimelineEntry) error {
 	var ids []int64
 	for _, e := range entries {

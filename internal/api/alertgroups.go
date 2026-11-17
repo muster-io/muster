@@ -747,6 +747,10 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 			v.Reason.Set(gen.PageNotDeliveredReason(*e.Reason))
 		}
 		v.Chain, v.ChainName, v.Step = timelineChainOf(e)
+		if d := e.Destination; d != nil {
+			v.Destination = &gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
+				Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
+		}
 		err = out.FromTimelineEscalationEntry(v)
 	default:
 		v := gen.TimelineSystemEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineSystemEntryKindSystem, Actor: actor,

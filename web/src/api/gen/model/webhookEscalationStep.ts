@@ -7,13 +7,14 @@ import type { WebhookChainRef } from './webhookChainRef';
 import type { WebhookUser } from './webhookUser';
 
 /**
- * A step of an Escalation chain as an outgoing webhook event names it, on `escalation_step_skipped`; `users` names the person of a skip of a person, and is empty otherwise.
+ * A step of an Escalation chain as an outgoing webhook event names it, on `escalation_step_skipped` and `escalation_webhook`; `users` names the person of a skip of a person, and is empty otherwise.
  */
 export interface WebhookEscalationStep {
   /** The chain, null once it was deleted. */
   chain: WebhookChainRef | null;
   /** @minimum 1 */
   step: number;
+  /** Why the step was skipped on `escalation_step_skipped`; null on `escalation_webhook`, whose step was made. */
   reason: EscalationSkipReason | null;
   users: WebhookUser[];
 }

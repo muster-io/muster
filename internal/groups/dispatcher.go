@@ -403,7 +403,8 @@ type entry struct {
 	TeamRule    string
 	TeamMatcher string
 	TeamValue   string
-	// Destination is the Destination of a destination_joined (C-26.FR-5).
+	// Destination is the Destination of a destination_joined (C-26.FR-5), or the outgoing webhook Destination of an
+	// escalation_webhook (C-32.FR-13).
 	Destination *JoinedDestination
 	// Page is the Page of an event of the kind escalation: the people it names, its gateway and its reason
 	// (C-32.FR-19, C-30.FR-7).
@@ -519,7 +520,8 @@ type Recorded struct {
 	Mentions     []Mention
 	Fingerprints []string
 	Reason       string
-	// Destination is the Destination a destination_joined joined, and Team the Team a team_joined joined, 0 for none.
+	// Destination is the Destination a destination_joined joined, or the only one an escalation_webhook is sent to;
+	// Team is the Team a team_joined joined, 0 for none.
 	Destination *JoinedDestination
 	Team        int64
 	// Page is the Page of an event of the kind escalation, which outgoing webhooks carry (C-15.FR-2).

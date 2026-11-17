@@ -4,7 +4,7 @@
  */
 
 /**
- * Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved. Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+ * Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
  * @nullable
  */
 export type EscalationSkipReason = typeof EscalationSkipReason[keyof typeof EscalationSkipReason] | null;
@@ -16,4 +16,6 @@ export const EscalationSkipReason = {
   schedule_gap: 'schedule_gap',
   viewer: 'viewer',
   disabled: 'disabled',
+  destination_deleted: 'destination_deleted',
+  webhook_events_required: 'webhook_events_required',
 } as const;
