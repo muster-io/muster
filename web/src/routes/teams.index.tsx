@@ -46,6 +46,37 @@ function PeopleCell({ row }: { row: Team }) {
   );
 }
 
+function MentionsCell({ row }: { row: Team }) {
+  const { t } = useTranslation();
+  const mentions = row.mention_connections.flatMap((mc) =>
+    mc.team_mention === null ? [] : [mc.team_mention],
+  );
+  if (mentions.length === 0) {
+    return (
+      <span className="text-muted-foreground" data-testid="team-mention-none">
+        {t("teams.list.noTeamMention")}
+      </span>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-0.5" data-testid="team-mentions-cell">
+      {mentions.map((m) => (
+        <li
+          key={m.connection_id}
+          className={
+            m.available
+              ? "font-mono text-xs wrap-anywhere"
+              : "font-mono text-xs wrap-anywhere text-muted-foreground line-through"
+          }
+          title={m.connection.name}
+        >
+          @{m.group}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function OnCallNowCell({ row }: { row: Team }) {
   return <OnCallCell teamId={row.id} />;
 }
@@ -61,6 +92,12 @@ function TeamsTable() {
       { id: "name", header: t("teams.fields.name"), className: "min-w-32", Cell: NameCell },
       { id: "slug", header: t("teams.fields.slug"), className: "min-w-28", Cell: SlugCell },
       { id: "people", header: t("teams.fields.people"), Cell: PeopleCell },
+      {
+        id: "mentions",
+        header: t("teams.fields.teamMention"),
+        className: "min-w-32",
+        Cell: MentionsCell,
+      },
       ...(canSchedules
         ? [
             {

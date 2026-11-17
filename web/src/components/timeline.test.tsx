@@ -524,6 +524,42 @@ describe("Timeline", () => {
     expect(requests[0]?.searchParams.get("order")).toBe("desc");
   });
 
+  test("shows the person, the entry, the event and the reason of a Mention not delivered, in English and Russian", async () => {
+    const undelivered: TimelineDeliveryEntry = {
+      id: "DE",
+      at: AT,
+      kind: "delivery",
+      actor: SYSTEM,
+      delivery_event: "mention_not_delivered",
+      destination: { id: "DS0000000000OP", name: "ops" },
+      loudness: "quiet",
+      mentions: [],
+      mention: {
+        user: { id: "US0000000000PE", name: "Bob Jones", login: "bob", deactivated: false },
+        entry: { position: 0, target: { kind: "on_call_of_teams_from_label" } },
+        event: "new_alert_group",
+        reason: "no_account_link",
+      },
+    };
+    entries = [undelivered];
+    await renderTimeline();
+    const row = page.getByTestId("timeline-entry");
+    await expect.element(row.getByTestId("mention-person")).toHaveTextContent("@bob");
+    await expect
+      .element(row.getByTestId("mention-entry"))
+      .toHaveTextContent("On-call of the Team from the label");
+    await expect.element(row.getByTestId("mention-event")).toHaveTextContent("New Alert Group");
+    await expect
+      .element(row.getByTestId("mention-reason"))
+      .toHaveTextContent("has no linked account");
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(row.getByTestId("mention-entry"))
+      .toHaveTextContent("Дежурный команды из метки");
+    await expect.element(row.getByTestId("mention-event")).toHaveTextContent("Новая группа");
+    await expect.element(row.getByTestId("mention-reason")).toHaveTextContent("нет привязки");
+  });
+
   test("names the gateway of the call an acknowledgement came from", async () => {
     entries = [
       status("acknowledged", {

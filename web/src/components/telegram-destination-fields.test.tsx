@@ -29,7 +29,7 @@ import { mattermostConnection, telegramConnection } from "../test/fixtures/conne
 import { telegramDestination } from "../test/fixtures/destinations";
 import { DestinationCheck } from "./destination-check";
 import { DestinationForm } from "./destination-form";
-import { defaultMentions } from "./mention-settings";
+import { reasonOf } from "../test/text";
 import { TELEGRAM_KIND, channelName, telegramValues } from "./telegram-destination-fields";
 
 const NO_COMMENTS =
@@ -183,8 +183,7 @@ describe("the Telegram type", () => {
       "/connection_id": "required",
       "/channel_id": "required",
     });
-    expect(TELEGRAM_KIND.everyone).toEqual([]);
-    expect(TELEGRAM_KIND.groups).toBe(false);
+    expect(TELEGRAM_KIND.connectionId?.({ connection_id: TG.id, channel_id: "" })).toBe(TG.id);
     expect(TELEGRAM_KIND.defaultLimiter).toEqual({ limit: 10, per_seconds: 60 });
   });
 });
@@ -214,21 +213,27 @@ describe("DestinationForm with the Telegram fields", () => {
         ),
       )
       .toBeVisible();
-    // No chat-wide mention: the choice holds nobody only.
-    const everyone = document.querySelectorAll<HTMLSelectElement>('select[id$="-everyone"]');
-    expect(everyone.length).toBeGreaterThan(0);
-    for (const select of everyone) {
-      expect([...select.options].map((o) => o.value)).toEqual(["none"]);
+    // No chat-wide mention, no groups and no Teams (C-28.FR-2, C-28.AC-9): greyed with the reason; people and the
+    // On-call are offered.
+    await userEvent.click(page.getByRole("button", { name: "Add", exact: true }));
+    for (const id of [
+      "everyone-channel",
+      "everyone-here",
+      "everyone-all",
+      "everyone-everyone",
+      "group",
+      "team",
+      "teams-from-label",
+    ]) {
+      await expect
+        .element(reasonOf(id))
+        .toHaveTextContent("Telegram cannot mention everyone or groups");
     }
-    // The help text of the Mention choices is Telegram's: no chat-wide mention and no groups (S-043, C-12.FR-8).
-    await expect
-      .element(page.getByLabelText("New Alert Group", { exact: true }))
-      .toHaveAccessibleDescription(
-        "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
-      );
-    expect(
-      document.getElementById("destination-mentions-everyone-hint")?.textContent,
-    ).not.toContain("@channel");
+    for (const id of ["user", "on-call-of-team", "on-call-of-teams-from-label"]) {
+      await expect
+        .element(page.getByTestId(`mention-option-${id}`))
+        .toHaveAttribute("aria-disabled", "false");
+    }
     await expect.element(page.getByLabelText("Requests")).toHaveValue("10");
     await expect.element(page.getByLabelText("Period in seconds")).toHaveValue("60");
 
@@ -245,7 +250,7 @@ describe("DestinationForm with the Telegram fields", () => {
       connection_id: TG.id,
       channel_id: "@muster_alerts",
       owning_team_id: null,
-      mentions: defaultMentions(),
+      mention_entries: [],
       buttons: { source: "organization" },
       limiter: { limit: 10, per_seconds: 60 },
     });
@@ -354,11 +359,10 @@ describe("DestinationForm with the Telegram fields", () => {
     await expect
       .element(page.getByTestId("telegram-discussion-group"))
       .toHaveTextContent("Группа обсуждения: Muster alerts Chat (-1001000000002)");
+    await userEvent.click(page.getByRole("button", { name: "Добавить", exact: true }));
     await expect
-      .element(page.getByLabelText("Новая группа алертов", { exact: true }))
-      .toHaveAccessibleDescription(
-        "В Telegram нет упоминания всего чата и групп: упоминаются только выбранные пользователи — через их привязанные аккаунты Telegram.",
-      );
+      .element(reasonOf("group"))
+      .toHaveTextContent("В Telegram нет упоминания всех и групп");
   });
 });
 

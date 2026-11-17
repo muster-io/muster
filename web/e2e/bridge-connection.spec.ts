@@ -16,6 +16,7 @@ import { type Browser, type Page, expect, test } from "@playwright/test";
 import {
   BRIDGE_SECOND_TOKEN,
   BRIDGE_URL,
+  DEFAULT_BRIDGE_CAPABILITIES,
   GATEWAY_NAME,
   adminApi,
   alertGroupOf,
@@ -125,7 +126,28 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
     "Event delivery: Polling, Push",
   );
   await expect(info.getByTestId("bridge-info-read-at")).toHaveText(/^Read /);
+  await expect(info.getByTestId("bridge-info-features")).not.toContainText("Group mentions");
+  await expect(info.getByTestId("bridge-info-features")).not.toContainText("Mentions of everyone");
   await shot(page, "bridge-connection-check");
+
+  // The bridge declares group mentions and the mentions of @channel and @here: the check lists them among the features.
+  await fbr("PUT", "/config", {
+    capabilities: {
+      ...DEFAULT_BRIDGE_CAPABILITIES,
+      group_mentions: true,
+      everyone_mentions: ["channel", "here"],
+    },
+  });
+  await page.getByRole("button", { name: "Check connection" }).click();
+  await expect(page.getByTestId("connection-check-summary")).toHaveText("The check passed.");
+  await expect(info.getByTestId("bridge-info-features")).toContainText("Group mentions");
+  await expect(info.getByTestId("bridge-info-features")).toContainText(
+    "Mentions of everyone: @channel, @here",
+  );
+  await shot(page, "bridge-connection-check-mentions");
+  await resetFakeBridge();
+  await page.getByRole("button", { name: "Check connection" }).click();
+  await expect(info.getByTestId("bridge-info-features")).not.toContainText("Group mentions");
 
   // 3. "Push" → the push secret and the callback address with its hint; back to polling without saving.
   await fields.getByRole("radio", { name: "Push" }).check();

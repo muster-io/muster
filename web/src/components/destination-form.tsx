@@ -19,8 +19,7 @@ import type {
   DestinationInput,
   DestinationType,
   Limiter,
-  MentionSettingEveryone,
-  MentionSettings,
+  MentionEntryInput,
 } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import {
@@ -29,6 +28,14 @@ import {
   destinationButtonsInput,
   itemErrors,
 } from "../lib/button-sets";
+import {
+  type MentionEntryValue,
+  entryIndexOf,
+  entryInputs,
+  entryValues,
+  isEntriesPointer,
+  mentionErrorText,
+} from "../lib/mention-entries";
 import { ButtonSetEditor } from "./button-set-editor";
 import { type CheckCode, checkCodeText, checkDetail, checkErrorText } from "./connection-check";
 import {
@@ -38,13 +45,10 @@ import {
   limiterInput,
   limiterValues,
 } from "./limiter-field";
-import {
-  MENTION_KINDS,
-  type MentionKind,
-  MentionSettingsField,
-  defaultMentions,
-  mentionErrorText,
-} from "./mention-settings";
+import { DocsLink } from "./docs-link";
+import { MentionEntriesEditor } from "./mention-entries-editor";
+import { MentionSupportTable } from "./mention-support-table";
+import { MentionWarnings } from "./mention-warnings";
 import { OwningTeamField } from "./team-filter";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -67,7 +71,7 @@ export interface FieldProblem {
   column?: number;
 }
 
-/** Field problems by JSON pointer, such as "/name", "/channel_id" or "/mentions/new_alerts/everyone". */
+/** Field problems by JSON pointer, such as "/name", "/channel_id" or "/mention_entries/0/target". */
 export type DestinationErrors = Record<string, FieldProblem>;
 
 /** What a type's fields component gets from the form. */
@@ -93,18 +97,12 @@ export interface TypeFieldsProps<V> {
 /** A type of Destination as the form needs it: its fields, their values and checks, and its Mentions. */
 export interface DestinationKind<V> {
   type: DestinationType;
-  /** The chat-wide mentions the type takes besides nobody. */
-  everyone: readonly MentionSettingEveryone[];
-  /** Whether the type takes messenger groups. */
-  groups: boolean;
   /** The limiter of a new Destination before anything suggests another. */
   defaultLimiter: Limiter;
   /** The hint under the limiter. */
   limiterHint: (t: TFunction) => string;
-  /** The help text of the Mention choices, when the type's differs from the chat-wide one of Mattermost. */
-  mentionsHint?: (t: TFunction) => string;
-  /** The placeholder of a group's name, when the type's groups are not Mattermost's. */
-  groupPlaceholder?: (t: TFunction) => string;
+  /** The Connection of the values, whose abilities the Mentions grid offers; none for a type without one. */
+  connectionId?: (v: V) => string | undefined;
   values: (d: Destination | undefined) => V;
   /** The checks the server repeats on the type's fields, as codes by pointer. */
   check: (v: V) => Record<string, string>;
@@ -112,7 +110,7 @@ export interface DestinationKind<V> {
   input: (
     common: {
       name: string;
-      mentions: MentionSettings;
+      mention_entries: MentionEntryInput[];
       limiter: Limiter;
       /** The button set, for the types that have one: not an outgoing webhook. */
       buttons?: DestinationButtonSet;
@@ -138,7 +136,7 @@ interface Values<V> {
   name: string;
   /** The id of the owning Team, empty for none. */
   owning_team_id: string;
-  mentions: MentionSettings;
+  mention_entries: MentionEntryValue[];
   buttons: ButtonSetValue;
   limiter: LimiterValues;
   fields: V;
@@ -153,7 +151,7 @@ function valuesOf<V>(kind: DestinationKind<V>, d: Destination | undefined): Valu
   return {
     name: d?.name ?? "",
     owning_team_id: d?.owning_team?.id ?? "",
-    mentions: d?.mentions ?? defaultMentions(),
+    mention_entries: entryValues(d),
     buttons: destinationButtons(d && d.type !== "webhook" ? d.buttons : undefined),
     limiter: limiterValues(d?.limiter ?? kind.defaultLimiter),
     fields: kind.values(d),
@@ -208,6 +206,11 @@ export function destinationErrors<V>(kind: DestinationKind<V>, v: Values<V>): De
   for (const [pointer, code] of Object.entries(kind.check(v.fields))) {
     errors[pointer] = { code };
   }
+  v.mention_entries.forEach((entry, index) => {
+    if (entry.events.length === 0) {
+      errors[`/mention_entries/${index}/events`] = { code: "required" };
+    }
+  });
   for (const [field, code] of Object.entries(limiterErrors(v.limiter))) {
     errors[`/limiter/${field}`] = { code };
   }
@@ -271,8 +274,10 @@ export function destinationErrorText(t: TFunction, pointer: string, problem: Fie
   if (problem.code === "name_taken") {
     return t("destinations.errors.nameTaken");
   }
-  if (pointer.startsWith("/mentions/")) {
-    return mentionErrorText(t, problem.code);
+  if (isEntriesPointer(pointer)) {
+    return pointer.endsWith("/events") && problem.code === "required"
+      ? t("mentions.errors.noEvent")
+      : mentionErrorText(t, problem.code);
   }
   if (problem.code === "unknown_id" && pointer === "/connection_id") {
     return t("destinations.errors.unknownConnection");
@@ -283,12 +288,6 @@ export function destinationErrorText(t: TFunction, pointer: string, problem: Fie
 /** Whether a pointer is the button set or below it, such as /buttons/items/2. */
 function isButtonsPointer(pointer: string): boolean {
   return pointer === "/buttons" || pointer.startsWith("/buttons/");
-}
-
-/** The kind of Loud event a Mention pointer names, such as /mentions/new_alerts/user_ids/0. */
-function mentionKindOf(pointer: string): MentionKind | undefined {
-  const name = pointer.split("/")[2];
-  return MENTION_KINDS.find((k) => k === name);
 }
 
 function isOutdated(err: unknown): boolean {
@@ -303,6 +302,11 @@ export interface DestinationFormProps<V> {
   kind: DestinationKind<V>;
   /** The stored Destination of an edit. */
   destination?: Destination;
+  /**
+   * The newest read of the Destination, for what a read computes and the form never edits: what each entry mentions now
+   * and the warnings of undelivered Mentions.
+   */
+  latest?: Destination;
   readOnly?: boolean;
   submitLabel: string;
   /**
@@ -322,6 +326,7 @@ export interface DestinationFormProps<V> {
 export function DestinationForm<V>({
   kind,
   destination,
+  latest,
   readOnly = false,
   submitLabel,
   save,
@@ -401,13 +406,20 @@ export function DestinationForm<V>({
       typeProblems[pointer] = problem;
     }
   }
-  const mentionErrors: Partial<Record<MentionKind, string>> = {};
+  const entryErrors: Record<number, string> = {};
+  let listError: string | undefined;
   for (const [pointer, problem] of Object.entries(errors)) {
-    const mentionKind = mentionKindOf(pointer);
-    if (mentionKind !== undefined && mentionErrors[mentionKind] === undefined) {
-      mentionErrors[mentionKind] = destinationErrorText(t, pointer, problem);
+    if (!isEntriesPointer(pointer)) {
+      continue;
+    }
+    const index = entryIndexOf(pointer);
+    if (index === undefined) {
+      listError = destinationErrorText(t, pointer, problem);
+    } else if (entryErrors[index] === undefined) {
+      entryErrors[index] = destinationErrorText(t, pointer, problem);
     }
   }
+  const read = latest ?? destination;
   const buttonsError = Object.entries(errors).find(([pointer]) => isButtonsPointer(pointer))?.[1];
   const limiterFieldErrors: Partial<Record<keyof LimiterValues, string>> = {};
   for (const field of ["limit", "per_seconds"] as const) {
@@ -420,7 +432,7 @@ export function DestinationForm<V>({
     pointer === "/name" ||
     pointer === "/owning_team_id" ||
     isTypePointer(kind.pointers, pointer) ||
-    mentionKindOf(pointer) !== undefined ||
+    isEntriesPointer(pointer) ||
     isButtonsPointer(pointer) ||
     pointer === "/limiter/limit" ||
     pointer === "/limiter/per_seconds";
@@ -444,7 +456,7 @@ export function DestinationForm<V>({
               {
                 name: values.name.trim(),
                 owning_team_id: values.owning_team_id === "" ? null : values.owning_team_id,
-                mentions: values.mentions,
+                mention_entries: entryInputs(values.mention_entries),
                 limiter: limiterInput(values.limiter),
                 ...(kind.type === "webhook"
                   ? {}
@@ -541,17 +553,34 @@ export function DestinationForm<V>({
         </Card>
         <Card>
           <CardContent>
-            <MentionSettingsField
-              id={`${ID}-mentions`}
-              value={values.mentions}
-              everyone={kind.everyone}
-              groups={kind.groups}
-              everyoneHint={kind.mentionsHint?.(t)}
-              groupPlaceholder={kind.groupPlaceholder?.(t)}
-              errors={mentionErrors}
-              disabled={readOnly}
-              onChange={(next) => change("mentions", next, ["/mentions"])}
-            />
+            <fieldset
+              aria-labelledby={`${ID}-mentions-title`}
+              className="flex min-w-0 flex-col gap-3"
+              data-testid="mention-settings"
+            >
+              <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+                <span id={`${ID}-mentions-title`}>{t("mentions.title")}</span>
+                <DocsLink to="field.mentions" kind="learn_more" about={t("docs.fields.mentions")} />
+              </legend>
+              <p className="text-sm text-muted-foreground">{t("mentions.hint")}</p>
+              <MentionWarnings
+                type={kind.type}
+                warnings={read?.mention_warnings ?? []}
+                entries={read?.mention_entries ?? []}
+              />
+              <MentionEntriesEditor
+                id={`${ID}-mentions`}
+                type={kind.type}
+                connectionId={kind.connectionId?.(values.fields)}
+                value={values.mention_entries}
+                stored={read?.mention_entries ?? []}
+                errors={entryErrors}
+                listError={listError}
+                disabled={readOnly}
+                onChange={(next) => change("mention_entries", next, ["/mention_entries"])}
+              />
+              <MentionSupportTable />
+            </fieldset>
           </CardContent>
         </Card>
         {kind.type !== "webhook" && (

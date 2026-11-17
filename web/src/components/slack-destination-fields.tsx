@@ -326,11 +326,9 @@ export function SlackDestinationFields({
  */
 export const SLACK_KIND: DestinationKind<SlackFieldValues> = {
   type: "slack",
-  everyone: ["channel", "here"],
-  groups: false,
   defaultLimiter: DEFAULT_SLACK_DESTINATION_LIMITER,
   limiterHint: (t) => t("destinations.slack.limiterHint"),
-  mentionsHint: (t) => t("mentions.everyoneHintSlack"),
+  connectionId: (v) => v.connection_id,
   values: slackValues,
   check: (v) => {
     const errors: Record<string, string> = {};

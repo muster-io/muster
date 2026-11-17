@@ -121,10 +121,9 @@ export function MattermostDestinationFields({
 /** The Mattermost type of the Destination form: @channel, @all and @here, groups, and the Connection's limiter. */
 export const MATTERMOST_KIND: DestinationKind<MattermostFieldValues> = {
   type: "mattermost",
-  everyone: ["channel", "all", "here"],
-  groups: true,
   defaultLimiter: { limit: 5, per_seconds: 1 },
   limiterHint: (t) => t("destinations.mattermost.limiterHint"),
+  connectionId: (v) => v.connection_id,
   values: mattermostValues,
   check: (v) => {
     const errors: Record<string, string> = {};

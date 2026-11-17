@@ -29,6 +29,7 @@ import {
   type UserRef,
 } from "../api/gen/model";
 import { problemText } from "../lib/api";
+import { eventName, notDeliveredReasonText, targetLabel } from "../lib/mention-entries";
 import { useTimeFormat } from "../lib/time";
 import { reasonLabel } from "./integration-alerts";
 import { useDestinationLabels } from "./destination-label";
@@ -383,6 +384,25 @@ function EntryDetails({ entry }: { entry: TimelineEntry }) {
     rows.push(
       <Detail key="previous" term={t("timeline.details.previousOwner")}>
         {userName(t, entry.previous_owner)}
+      </Detail>,
+    );
+  }
+  if (entry.kind === "delivery" && entry.mention !== undefined) {
+    const { user, entry: named, event, reason } = entry.mention;
+    rows.push(
+      <Detail key="mention-person" term={t("timeline.details.mentionPerson")}>
+        <span data-testid="mention-person">
+          {user.login !== undefined && user.login !== "" ? `@${user.login}` : userName(t, user)}
+        </span>
+      </Detail>,
+      <Detail key="mention-entry" term={t("timeline.details.mentionEntry")}>
+        <span data-testid="mention-entry">{targetLabel(t, named.target)}</span>
+      </Detail>,
+      <Detail key="mention-event" term={t("timeline.details.mentionEvent")}>
+        <span data-testid="mention-event">{eventName(t, event)}</span>
+      </Detail>,
+      <Detail key="mention-reason" term={t("timeline.details.mentionReason")}>
+        <span data-testid="mention-reason">{notDeliveredReasonText(t, reason)}</span>
       </Detail>,
     );
   }

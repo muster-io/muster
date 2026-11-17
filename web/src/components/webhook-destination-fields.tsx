@@ -527,12 +527,8 @@ export function WebhookDestinationFields({
  */
 export const WEBHOOK_KIND: DestinationKind<WebhookFieldValues> = {
   type: "webhook",
-  everyone: ["all"],
-  groups: true,
   defaultLimiter: DEFAULT_WEBHOOK_LIMITER,
   limiterHint: (t) => t("destinations.webhook.limiterHint"),
-  mentionsHint: (t) => t("mentions.everyoneHintWebhook"),
-  groupPlaceholder: (t) => t("mentions.groupPlaceholderWebhook"),
   values: webhookValues,
   check: webhookErrors,
   input: (common, v) => ({

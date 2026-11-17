@@ -21,7 +21,9 @@ import {
   fam,
   notify,
   removeIntegration,
+  removeMentions,
   removeTeamsBySlug,
+  seedMentions,
   seedTeamAlerts,
   teamSlugs,
   setTeamMatchers,
@@ -404,4 +406,51 @@ test("shows the page in Russian", async ({ page }) => {
   );
   await shot(page, "alert-group-list-ru");
   expect(csp).toEqual([]);
+});
+
+test("the Timeline shows a Mention not delivered with the person, the entry, the event and the reason, in English and Russian", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const seed = await seedMentions("mga-");
+  const csp = watchCsp(page);
+  try {
+    await signInAdmin(page);
+    await page.goto(`/alert-groups/${seed.alertGroupId}`);
+    const undelivered = entry(page, "Mention not delivered in mga-payments-notice");
+    await expect(undelivered).toHaveCount(1);
+    await expect(undelivered.getByTestId("mention-person")).toHaveText("@petr");
+    await expect(undelivered.getByTestId("mention-entry")).toHaveText(
+      "On-call of the Team from the label",
+    );
+    await expect(undelivered.getByTestId("mention-event")).toHaveText("New Alert Group");
+    await expect(undelivered.getByTestId("mention-reason")).toHaveText("has no linked account");
+    await shot(page, "alert-group-mention-not-delivered");
+    expect(csp).toEqual([]);
+
+    // A reader of Russian at phone width reads the same entry.
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, "ag-vera", "ag-vera-password-1");
+    await ru.goto(`/alert-groups/${seed.alertGroupId}`);
+    const ruEntry = entry(ru, "Упоминание не доставлено в mga-payments-notice");
+    await expect(ruEntry).toHaveCount(1);
+    await expect(ruEntry.getByTestId("mention-person")).toHaveText("@petr");
+    await expect(ruEntry.getByTestId("mention-entry")).toHaveText("Дежурный команды из метки");
+    await expect(ruEntry.getByTestId("mention-event")).toHaveText("Новая группа");
+    await expect(ruEntry.getByTestId("mention-reason")).toHaveText("нет привязки");
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "alert-group-mention-not-delivered-ru-360");
+    expect(ruCsp).toEqual([]);
+    await context.close();
+  } finally {
+    const admin = await adminApi();
+    try {
+      await removeMentions(admin, "mga-");
+    } finally {
+      await admin.dispose();
+    }
+  }
 });

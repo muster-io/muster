@@ -33,7 +33,7 @@ import { mattermostConnection, slackConnection } from "../test/fixtures/connecti
 import { slackDestination } from "../test/fixtures/destinations";
 import { DestinationCheck } from "./destination-check";
 import { DestinationForm } from "./destination-form";
-import { defaultMentions } from "./mention-settings";
+import { reasonOf } from "../test/text";
 import {
   SLACK_KIND,
   channelQuery,
@@ -122,6 +122,9 @@ function mockReads(list: SlackChannelList = CHANNELS) {
     if (url.includes("/channels")) {
       return Promise.resolve(json(200, list));
     }
+    if (url === `/api/v1/connections/${UI.id}`) {
+      return Promise.resolve(json(200, UI));
+    }
     if (url.startsWith("/api/v1/connections")) {
       return Promise.resolve(json(200, { items: [MM, UI, UNCHECKED], next_cursor: null }));
     }
@@ -202,8 +205,7 @@ describe("the Slack type", () => {
       "/channel_id": "invalid_format",
     });
     expect(SLACK_KIND.defaultLimiter).toEqual({ limit: 30, per_seconds: 60 });
-    expect(SLACK_KIND.everyone).toEqual(["channel", "here"]);
-    expect(SLACK_KIND.groups).toBe(false);
+    expect(SLACK_KIND.connectionId?.({ connection_id: UI.id, channel_id: "" })).toBe(UI.id);
   });
 
   test("drops a leading # of the filter, as Slack names channels without it", () => {
@@ -262,7 +264,7 @@ describe("DestinationForm with the Slack fields", () => {
       connection_id: UI.id,
       channel_id: "C0FAKEALERTS",
       owning_team_id: null,
-      mentions: defaultMentions(),
+      mention_entries: [],
       buttons: { source: "organization" },
       limiter: { limit: 30, per_seconds: 60 },
     });
@@ -308,27 +310,32 @@ describe("DestinationForm with the Slack fields", () => {
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ channel_id: "C0FAKEOTHER" }));
   });
 
-  test("offers @channel and @here, and no groups", async () => {
+  test("offers @channel and @here, greys @all and @everyone, and greys groups and Teams until usergroups:read", async () => {
     mockReads();
     await render(
       providers(
         <DestinationForm
           kind={SLACK_KIND}
+          destination={DESTINATION}
           submitLabel="Save"
           save={() => Promise.resolve(undefined)}
         />,
       ),
     );
-    const everyone = document.querySelectorAll<HTMLSelectElement>('select[id$="-everyone"]');
-    expect(everyone.length).toBe(6);
-    for (const select of everyone) {
-      expect([...select.options].map((o) => o.textContent)).toEqual([
-        "Nobody",
-        "@channel",
-        "@here",
-      ]);
+    await userEvent.click(page.getByRole("button", { name: "Add", exact: true }));
+    for (const word of ["channel", "here"]) {
+      await expect
+        .element(page.getByTestId(`mention-option-everyone-${word}`))
+        .toHaveAttribute("aria-disabled", "false");
     }
-    await expect.element(page.getByRole("button", { name: "Add group" })).not.toBeInTheDocument();
+    await expect.element(reasonOf("everyone-all")).toHaveTextContent("Slack has no @all");
+    await expect.element(reasonOf("everyone-everyone")).toHaveTextContent("Slack has no @everyone");
+    for (const id of ["group", "team", "teams-from-label"]) {
+      await expect.element(reasonOf(id)).toHaveTextContent("Needs the scope usergroups:read");
+    }
+    await expect
+      .element(page.getByTestId("mention-option-user"))
+      .toHaveAttribute("aria-disabled", "false");
   });
 
   test("asks to invite the bot to a channel without it, naming the bot, in English and Russian", async () => {
@@ -413,10 +420,12 @@ describe("DestinationForm with the Slack fields", () => {
     );
     await expect.element(page.getByTestId("slack-found")).toHaveTextContent("Канал: #alerts");
     await expect
-      .element(page.getByLabelText("Новая группа алертов", { exact: true }))
-      .toHaveAccessibleDescription(
-        "Кого в канале упоминать целиком: никого, @channel или @here; @everyone и группы Slack не предлагаются. Выбранные пользователи упоминаются через свои аккаунты Slack, привязанные к этому подключению.",
-      );
+      .element(
+        page.getByText(
+          "Кого упоминать и на каких громких событиях. Новая строка отмечена на всех событиях.",
+        ),
+      )
+      .toBeVisible();
   });
 
   test("takes only a typed id without connections:write, which the list needs", async () => {

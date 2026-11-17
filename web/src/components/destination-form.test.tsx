@@ -34,6 +34,9 @@ import type {
   MattermostChannel,
   MattermostConnection,
   MattermostDestination,
+  MentionEntry,
+  MentionEvent,
+  MentionTarget,
   Permission,
   Session,
 } from "../api/gen/model";
@@ -57,7 +60,15 @@ import {
 import { BrokenBanner, brokenText } from "./destination-health";
 import { MATTERMOST_KIND } from "./mattermost-destination-fields";
 import { WEBHOOK_KIND } from "./webhook-destination-fields";
-import { defaultMentions } from "./mention-settings";
+import { MENTION_EVENTS } from "../lib/mention-entries";
+
+/** A stored entry as a read gives it: available, mentioning nobody now, with the given events or every one. */
+function entryOf(
+  target: MentionTarget,
+  events: MentionEvent[] = [...MENTION_EVENTS],
+): MentionEntry {
+  return { target, events, available: true, unavailable_reason: null, resolves_to: [] };
+}
 
 const CONNECTION: MattermostConnection = mattermostConnection({
   id: "CN0000000000AA",
@@ -239,11 +250,11 @@ describe("a new Mattermost Destination", () => {
     await expect.element(page.getByLabelText("Name", { exact: true })).toHaveValue("alerts");
     await expect.element(page.getByLabelText("Requests")).toHaveValue("7");
     await expect.element(page.getByLabelText("Period in seconds")).toHaveValue("2");
-    await userEvent.selectOptions(page.getByLabelText("New Alerts", { exact: true }), "@channel");
+    await userEvent.click(page.getByRole("button", { name: "Add", exact: true }));
+    await userEvent.click(page.getByTestId("mention-option-everyone-channel"));
+    await userEvent.click(page.getByLabelText("New Alerts: @channel", { exact: true }));
     await page.getByRole("button", { name: "Save" }).click();
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    const mentions = defaultMentions();
-    mentions.new_alerts = { everyone: "channel", user_ids: [], groups: [] };
     expect(save.mock.calls[0]?.[0]).toEqual({
       type: "mattermost",
       name: "alerts",
@@ -251,7 +262,19 @@ describe("a new Mattermost Destination", () => {
       team_id: "team-dev",
       channel_id: "ch-alerts",
       owning_team_id: null,
-      mentions,
+      mention_entries: [
+        {
+          target: { kind: "everyone", everyone: "channel" },
+          events: [
+            "new_alert_group",
+            "reopen",
+            "ack_timeout",
+            "snooze_ended",
+            "rise_to_urgent",
+            "storm_started",
+          ],
+        },
+      ],
       buttons: { source: "organization" },
       limiter: { limit: 7, per_seconds: 2 },
     });
@@ -333,7 +356,7 @@ describe("the refusals of a save", () => {
           errors: [
             { pointer: "/connection_id", code: "unknown_id" },
             { pointer: "/limiter", code: "invalid_format" },
-            { pointer: "/mentions/reopen/user_ids/0", code: "unknown_id" },
+            { pointer: "/mention_entries/0/target/user_id", code: "unknown_id" },
           ],
         }),
       ),
@@ -341,7 +364,7 @@ describe("the refusals of a save", () => {
       "/connection_id": { code: "unknown_id" },
       "/limiter/limit": { code: "invalid_format" },
       "/limiter/per_seconds": { code: "invalid_format" },
-      "/mentions/reopen/user_ids/0": { code: "unknown_id" },
+      "/mention_entries/0/target/user_id": { code: "unknown_id" },
     });
     // Several failing checks at one field show every message.
     expect(
@@ -361,8 +384,8 @@ describe("the refusals of a save", () => {
       "Another Destination has this name.",
     );
     expect(
-      destinationErrorText(i18n.t, "/mentions/reopen/user_ids/0", { code: "unknown_id" }),
-    ).toBe("A chosen user no longer exists.");
+      destinationErrorText(i18n.t, "/mention_entries/0/target/user_id", { code: "unknown_id" }),
+    ).toBe("The chosen person or Team no longer exists.");
     expect(destinationErrorText(i18n.t, "/channel_id", { code: "destination_check_failed" })).toBe(
       "The Destination check failed.",
     );
@@ -406,7 +429,7 @@ describe("the refusals of a save", () => {
     );
   });
 
-  test("puts an unknown Connection at the Connection and a refused Mention at its kind", async () => {
+  test("puts an unknown Connection at the Connection and a refused Mention at its entry", async () => {
     mockReads();
     await renderForm(
       () =>
@@ -414,11 +437,19 @@ describe("the refusals of a save", () => {
           refusal(422, {
             errors: [
               { pointer: "/connection_id", code: "unknown_id" },
-              { pointer: "/mentions/reopen/everyone", code: "unsupported" },
+              { pointer: "/mention_entries/1/target", code: "mention_unsupported" },
             ],
           }),
         ),
-      { destination: DESTINATION },
+      {
+        destination: mattermostDestination({
+          ...DESTINATION,
+          mention_entries: [
+            entryOf({ kind: "everyone", everyone: "here" }),
+            entryOf({ kind: "everyone", everyone: "everyone" }),
+          ],
+        }),
+      },
     );
     await page.getByRole("button", { name: "Save" }).click();
     await expect
@@ -427,11 +458,28 @@ describe("the refusals of a save", () => {
     await expect
       .element(
         page
-          .getByTestId("mention-kind")
-          .nth(2)
-          .getByText("This messenger does not support this mention.", { exact: true }),
+          .getByTestId("mention-entry")
+          .nth(1)
+          .getByText("This Connection cannot mention this target.", { exact: true }),
       )
       .toBeVisible();
+  });
+
+  test("refuses an entry without an event before sending", async () => {
+    mockReads();
+    const save = vi.fn((_input: DestinationInput) => Promise.resolve(undefined));
+    await renderForm(save, {
+      destination: mattermostDestination({
+        ...DESTINATION,
+        mention_entries: [entryOf({ kind: "everyone", everyone: "here" }, ["reopen"])],
+      }),
+    });
+    await userEvent.click(page.getByLabelText("Reopen: @here", { exact: true }));
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect
+      .element(page.getByTestId("mention-entry-error"))
+      .toHaveTextContent("Tick at least one event.");
+    expect(save).not.toHaveBeenCalled();
   });
 
   test("offers to reload a version that changed elsewhere (412) and a missing one (428)", async () => {
@@ -519,7 +567,10 @@ describe("a stored Destination", () => {
     await renderForm(() => Promise.resolve(undefined), { destination: DESTINATION });
     await expect.element(page.getByLabelText("Подключение", { exact: true })).toBeVisible();
     await expect.element(page.getByLabelText("Канал", { exact: true })).toBeVisible();
-    await expect.element(page.getByLabelText("Новые алерты", { exact: true })).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Добавить", exact: true })).toBeVisible();
+    await expect
+      .element(page.getByTestId("mention-empty"))
+      .toHaveTextContent("Никого не упоминаем: сообщения приходят без упоминаний.");
   });
 });
 
@@ -601,7 +652,7 @@ describe("the Buttons section", () => {
     const values = {
       name: "alerts",
       owning_team_id: "",
-      mentions: defaultMentions(),
+      mention_entries: [],
       buttons: { follows: false, items: [{ button: "snooze" as const, snooze_seconds: 0 }] },
       limiter: { limit: "5", per_seconds: "1" },
       fields: kind.values(DESTINATION),

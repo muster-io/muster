@@ -15,12 +15,20 @@ import { type Browser, expect, test, type Page } from "@playwright/test";
 
 import {
   type Api,
+  SLACK_DEFAULT_SCOPES,
   adminApi,
+  checkConnection,
   createRoute,
+  createSlackConnection,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
+  fsl,
   notify,
+  removeMentions,
+  removeSlackConnection,
+  resetFakeSlack,
+  seedMentions,
   shot,
   signIn,
   signInAdmin,
@@ -238,12 +246,17 @@ test("creates a Mattermost Destination, refusing a channel without the bot next 
 
   await page.getByLabel("Channel", { exact: true }).selectOption({ label: "alerts" });
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("alerts");
-  await page.getByLabel("New Alerts", { exact: true }).selectOption({ label: "@channel" });
+  await expect(page.getByTestId("mention-empty")).toHaveText(
+    "Nobody is mentioned: messages arrive without Mentions.",
+  );
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByTestId("mention-option-everyone-channel").click();
+  await expect(page.getByLabel("New Alerts: @channel", { exact: true })).toBeChecked();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page).toHaveURL(/\/destinations\/DS[0-9A-Z]+$/);
   destinationId = new URL(page.url()).pathname.split("/").pop() ?? "";
   await expect(page.getByRole("heading", { name: "alerts", level: 1 })).toBeVisible();
-  await expect(page.getByLabel("New Alerts", { exact: true })).toHaveValue("channel");
+  await expect(page.getByLabel("New Alerts: @channel", { exact: true })).toBeChecked();
 
   await page.getByRole("link", { name: "Destinations" }).first().click();
   const row = page
@@ -532,10 +545,11 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await shot(page, "destinations-ru-360");
 
   await row.getByRole("link", { name: "alerts", exact: true }).click();
-  await expect(page.getByLabel("Новые алерты", { exact: true })).toHaveValue("channel");
-  await expect(page.getByTestId("mention-note")).toHaveText(
+  await expect(page.getByLabel("Новые алерты: @channel", { exact: true })).toBeChecked();
+  await expect(page.getByTestId("mention-note").nth(2)).toHaveText(
     "Напоминания и автоматическая отмена подтверждения всегда упоминают владельца, а перехват — прежнего владельца.",
   );
+  await expectNoHorizontalScroll(page);
   await expect(page.getByTestId("button-set")).toContainText("Кнопки");
   await expect(page.getByLabel("Как в Организации")).toBeChecked();
   await expect(page.getByText("Так увидят в alerts")).toBeVisible();
@@ -612,3 +626,262 @@ async function viewer(browser: Browser): Promise<void> {
   expect(csp).toEqual([]);
   await context.close();
 }
+
+const MENTION_EVENTS = [
+  "new_alert_group",
+  "new_alerts",
+  "reopen",
+  "ack_timeout",
+  "snooze_ended",
+  "rise_to_urgent",
+  "storm_started",
+] as const;
+
+/** The row of the Mentions grid whose target reads exactly text. */
+function mentionRow(page: Page, text: string) {
+  return page
+    .getByTestId("mention-entry")
+    .filter({ has: page.getByTestId("mention-entry-target").getByText(text, { exact: true }) });
+}
+
+test("the Mentions grid shows what each entry resolves to now, warns about an undelivered Mention and saves the events", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const seed = await seedMentions("mgd-");
+  const csp = watchCsp(page);
+  await signInAdmin(page);
+  await page.goto(`/destinations/${seed.destinationId}`);
+  const section = page.getByTestId("mention-settings");
+  await expect(section.getByText("Mentions", { exact: true })).toBeVisible();
+  await expect(
+    section.getByText(
+      "Whom to mention and on which Loud events. A new entry is ticked for every event.",
+    ),
+  ).toBeVisible();
+
+  // 1. "On-call of the Team from the label" resolves to petr of mgd-payments and to nobody for mgd-search; seven ticked
+  // events; the warning above the grid.
+  const onCall = mentionRow(page, "On-call of the Team from the label");
+  await expect(onCall.getByTestId("mention-entry-now")).toContainText("mgd-payments — @petr");
+  await expect(onCall.getByTestId("mention-entry-now")).toContainText("mgd-search");
+  await expect(onCall.getByTestId("mention-entry-now")).toContainText("— nobody");
+  for (const event of MENTION_EVENTS) {
+    await expect(onCall.getByTestId(`mention-event-${event}`)).toBeChecked();
+  }
+  await expect(onCall.getByRole("checkbox")).toHaveCount(7);
+  const fromLabel = mentionRow(page, "Team from the label");
+  await expect(fromLabel.getByTestId("mention-entry-now")).toContainText(
+    "mgd-payments — @payments_team",
+  );
+  await expect(section.getByTestId("mention-warning")).toHaveText(
+    "Mention not delivered: @petr, On-call of the Team from the label, has no linked Mattermost account",
+  );
+  await expect(section.getByTestId("mention-warning")).toBeVisible();
+  const grid = section.getByTestId("mention-entries");
+  const warningBox = await section.getByTestId("mention-warning").boundingBox();
+  const gridBox = await grid.boundingBox();
+  expect((warningBox?.y ?? 0) < (gridBox?.y ?? 0)).toBe(true);
+  for (const note of [
+    "'Team' is the Team mention for this Connection, if it is set; otherwise nobody. The On-call is not mentioned instead.",
+    "A person without a linked account is not mentioned; the Alert Group's Timeline and this page say so.",
+    "Reminders and auto-unacknowledge always mention the Owner, and a Takeover the previous Owner.",
+  ]) {
+    await expect(section.getByTestId("mention-note").filter({ hasText: note })).toHaveCount(1);
+  }
+  // What each messenger supports.
+  const support = section.getByTestId("mention-support");
+  await expect(
+    support.getByRole("heading", { name: /What each messenger supports/ }),
+  ).toBeVisible();
+  await expect(support.getByTestId("mention-support-mattermost")).toContainText(
+    "@channel, @here, @all",
+  );
+  await expect(support.getByTestId("mention-support-slack")).toContainText("<!channel>, <!here>");
+  await expect(support.getByTestId("mention-support-telegram")).toContainText("Linked people");
+  await shot(page, "destination-mentions");
+
+  // 2. "Add" → @here → a new row ticked for every event; untick all but "New Alert Group" → "Save".
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByTestId("mention-add-panel").getByRole("button")).toHaveCount(10);
+  await expect(page.getByTestId("mention-option-everyone-everyone")).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await expect(
+    page.getByTestId("mention-option-everyone-everyone").getByTestId("mention-option-reason"),
+  ).toHaveText("Mattermost has no @everyone");
+  await page.getByTestId("mention-option-everyone-here").click();
+  const here = mentionRow(page, "@here");
+  for (const event of MENTION_EVENTS) {
+    await expect(here.getByTestId(`mention-event-${event}`)).toBeChecked();
+  }
+  for (const event of MENTION_EVENTS.slice(1)) {
+    await here.getByTestId(`mention-event-${event}`).uncheck();
+  }
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByTestId("destination-status")).toHaveText("Saved.");
+  const admin = await adminApi();
+  try {
+    const stored = await admin.call<{
+      mention_entries: { target: { kind: string; everyone?: string }; events: string[] }[];
+    }>("GET", `/api/v1/destinations/${seed.destinationId}`);
+    expect(
+      stored.mention_entries.map((e) => [e.target.kind, e.target.everyone ?? "", e.events.length]),
+    ).toEqual([
+      ["on_call_of_teams_from_label", "", 7],
+      ["teams_from_label", "", 7],
+      ["everyone", "here", 1],
+    ]);
+    expect(stored.mention_entries[2]?.events).toEqual(["new_alert_group"]);
+    await removeMentions(admin, "mgd-");
+  } finally {
+    await admin.dispose();
+  }
+  expect(csp).toEqual([]);
+});
+
+test("a Slack Destination's user group entry stays greyed after its Connection lost usergroups:read, with a warning", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const admin = await adminApi();
+  let slackDestinationId = "";
+  try {
+    await removeSlackConnection(admin, "mgd-sl");
+    await resetFakeSlack();
+    const connectionId = await createSlackConnection(admin, "mgd-sl");
+    const created = await admin.call<{ destination: { id: string } }>(
+      "POST",
+      "/api/v1/destinations",
+      {
+        type: "slack",
+        name: "mgd-slack",
+        connection_id: connectionId,
+        channel_id: "C0FAKEALERTS",
+        limiter: { limit: 50, per_seconds: 60 },
+      },
+    );
+    slackDestinationId = created.destination.id;
+    const csp = watchCsp(page);
+    await signInAdmin(page);
+    await page.goto(`/destinations/${slackDestinationId}`);
+
+    // Without the scope: @all, @everyone, groups and Teams are greyed with their reasons.
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    const reason = (id: string) =>
+      page.getByTestId(`mention-option-${id}`).getByTestId("mention-option-reason");
+    await expect(reason("everyone-all")).toHaveText("Slack has no @all");
+    await expect(reason("everyone-everyone")).toHaveText("Slack has no @everyone");
+    for (const id of ["group", "team", "teams-from-label"]) {
+      await expect(reason(id)).toHaveText("Needs the scope usergroups:read");
+    }
+
+    // The scope is granted and the Connection checked: "Group…" lists the user groups; payments-team is saved.
+    await fsl("PUT", "/config", {
+      scopes: { b: `${SLACK_DEFAULT_SCOPES},usergroups:read` },
+    });
+    await checkConnection(admin, connectionId);
+    await page.reload();
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByTestId("mention-option-group")).toHaveAttribute(
+      "aria-disabled",
+      "false",
+    );
+    await page.getByTestId("mention-option-group").click();
+    await page
+      .getByLabel("Group", { exact: true })
+      .selectOption({ label: "Payments team (@payments-team)" });
+    const row = mentionRow(page, "Group @payments-team");
+    await expect(row).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("destination-status")).toHaveText("Saved.");
+    await expect(page.getByTestId("mention-warnings")).toHaveCount(0);
+
+    // The scope is gone and the Connection checked again: the entry stays, greyed, and the page warns about it.
+    await fsl("PUT", "/config", { scopes: { b: null } });
+    await checkConnection(admin, connectionId);
+    await page.reload();
+    const lost = mentionRow(page, "Group @payments-team");
+    await expect(lost).toHaveAttribute("data-available", "false");
+    await expect(lost.getByTestId("mention-entry-unavailable")).toHaveText(
+      "Needs the scope usergroups:read",
+    );
+    await expect(page.getByTestId("mention-warning")).toHaveText(
+      "Group @payments-team mentions nobody: Needs the scope usergroups:read",
+    );
+    await shot(page, "destination-mentions-lost-scope");
+    expect(csp).toEqual([]);
+  } finally {
+    await resetFakeSlack();
+    if (slackDestinationId !== "") {
+      await admin.call("DELETE", `/api/v1/destinations/${slackDestinationId}`);
+    }
+    await removeSlackConnection(admin, "mgd-sl");
+    await admin.dispose();
+  }
+});
+
+test("a reader of Russian sees the Mentions grid and its warning at phone width", async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const seed = await seedMentions("mgr-");
+  const setup = await adminApi();
+  let userId = "";
+  try {
+    const created = await setup.createUser("mgr-admin-ru", "admin");
+    userId = created.id;
+    await setup.call("POST", "/api/v1/password-setups", {
+      token: created.token,
+      password: "mgr-admin-ru-1",
+    });
+  } finally {
+    await setup.dispose();
+  }
+  const context = await browser.newContext({ viewport: { width: 360, height: 740 } });
+  const page = await context.newPage();
+  const csp = watchCsp(page);
+  try {
+    await signIn(page, "mgr-admin-ru", "mgr-admin-ru-1");
+    await page.goto("/profile");
+    await page.getByLabel("Language").selectOption("ru");
+    await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await page.goto(`/destinations/${seed.destinationId}`);
+    const section = page.getByTestId("mention-settings");
+    await expect(section.getByText("Упоминания", { exact: true })).toBeVisible();
+    await expect(
+      section.getByText(
+        "Кого упоминать и на каких громких событиях. Новая строка отмечена на всех событиях.",
+      ),
+    ).toBeVisible();
+    const onCall = mentionRow(page, "Дежурный команды из метки");
+    await expect(onCall.getByTestId("mention-entry-now")).toHaveText(/^сейчас: /);
+    await expect(onCall.getByTestId("mention-entry-now")).toContainText("mgr-payments — @petr");
+    await expect(onCall.getByTestId("mention-entry-now")).toContainText("mgr-search — никого");
+    await expect(section.getByTestId("mention-warning")).toHaveText(
+      "Упоминание не доставлено: @petr, Дежурный команды из метки, нет привязки к Mattermost",
+    );
+    // The seven events are named at 360 px, where each row stacks.
+    await expect(onCall.getByText("Начало шторма", { exact: true })).toBeVisible();
+    await expect(onCall.getByText("Рост до critical", { exact: true })).toBeVisible();
+    await expect(onCall.getByRole("button", { name: /^Убрать/ })).toBeVisible();
+    await expect(section.getByRole("heading", { name: /Поддержка мессенджерами/ })).toBeVisible();
+    await page.getByRole("button", { name: "Добавить", exact: true }).first().click();
+    await expect(
+      page.getByTestId("mention-option-everyone-everyone").getByTestId("mention-option-reason"),
+    ).toHaveText("В Mattermost нет @everyone");
+    await expectNoHorizontalScroll(page);
+    await shot(page, "destination-mentions-ru-360");
+    expect(csp).toEqual([]);
+  } finally {
+    const admin = await adminApi();
+    try {
+      await removeMentions(admin, "mgr-");
+      await admin.call("DELETE", `/api/v1/users/${userId}`);
+    } finally {
+      await admin.dispose();
+    }
+    await context.close();
+  }
+});

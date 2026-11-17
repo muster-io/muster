@@ -673,6 +673,8 @@
         "delete": "Deleting its messages",
         "deletionEvents": "Reports of deleted messages",
         "directMessages": "Direct messages",
+        "everyoneMentions": "Mentions of everyone: {{tokens}}",
+        "groupMentions": "Group mentions",
         "nativeMentions": "Mentions that notify",
         "privateAnswers": "Answers only one person sees",
         "quietMessages": "Messages that notify no one",
@@ -1246,6 +1248,7 @@
       "matchers": "Matchers",
       "mattermostCallback": "Button presses in Mattermost",
       "mentions": "Mentions",
+      "mentionSupport": "What each messenger supports",
       "messageLabels": "Labels in the message",
       "minimumSeverity": "Minimum severity",
       "oidcGroups": "Group mapping",
@@ -1262,6 +1265,7 @@
       "staticLabels": "Static labels",
       "teamIdp": "Identity provider groups",
       "teamLabel": "Team label and Team matchers",
+      "teamMentions": "How to mention the Team",
       "telegramBaseUrl": "Telegram in restricted networks",
       "telegramMode": "Long polling or webhook",
       "template": "Message templates",
@@ -1765,37 +1769,118 @@
     }
   },
   "mentions": {
-    "addGroup": "Add group",
-    "addGroupTo": "Group to mention for {{kind}}",
-    "addUser": "Add a user…",
-    "addUserTo": "Add a user to mention for {{kind}}",
-    "always": "Reminders and auto-unacknowledge always mention the Owner; a Takeover mentions the previous Owner.",
-    "chosen": "Also mentioned for {{kind}}",
-    "errors": {
-      "duplicateUser": "A user is listed twice.",
-      "invalidGroup": "A group name has letters, digits, \".\", \"_\" and \"-\".",
-      "unknownUser": "A chosen user no longer exists.",
-      "unsupported": "This messenger does not support this mention."
+    "add": {
+      "alreadyAdded": "Already in the list",
+      "button": "Add",
+      "full": "A Destination takes at most {{limit}} entries.",
+      "group": "Group…",
+      "onCallOfTeam": "On-call of a Team…",
+      "onCallOfTeamsFromLabel": "On-call of the Team from the label",
+      "team": "Team…",
+      "teamsFromLabel": "Team from the label",
+      "user": "Person…"
     },
-    "everyoneHint": "Whom in the chat to mention as a whole: nobody, @channel, @all or @here. Chosen users and groups are mentioned as well.",
-    "everyoneHintBridge": "A Bridge has no mention of the whole chat and no groups: only the chosen users are mentioned, through their accounts linked to this Connection.",
-    "everyoneHintSlack": "Whom in the channel to mention as a whole: nobody, @channel or @here; Slack's @everyone and groups are not offered. Chosen users are mentioned through their Slack accounts linked to this Connection.",
-    "everyoneHintTelegram": "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
-    "everyoneHintWebhook": "Muster sends mentions as data the receiver formats: everyone, groups by name and users with their login. Chosen users and groups are mentioned as well.",
-    "groupPlaceholder": "Mattermost group",
-    "groupPlaceholderWebhook": "Group name",
-    "hint": "Whom the message of each kind of Loud event mentions in this Destination.",
-    "kinds": {
-      "ackTimeout": "Ack timeout notice",
+    "deleted": "{{name}} (deleted)",
+    "empty": "Nobody is mentioned: messages arrive without Mentions.",
+    "errors": {
+      "duplicate": "This target is listed twice.",
+      "invalidGroup": "A group name has letters, digits, \".\", \"_\" and \"-\", and starts with a letter or a digit.",
+      "noEvent": "Tick at least one event.",
+      "required": "This target needs a value.",
+      "unknownId": "The chosen person or Team no longer exists.",
+      "unsupported": "This Connection cannot mention this target."
+    },
+    "eventOf": "{{event}}: {{target}}",
+    "events": {
+      "ackTimeout": "Ack timeout",
       "newAlertGroup": "New Alert Group",
       "newAlerts": "New Alerts",
       "reopen": "Reopen",
-      "riseToUrgent": "Rise to Urgent",
-      "snoozeEnded": "Snooze ended"
+      "riseToUrgent": "Rise to critical",
+      "snoozeEnded": "End of Snooze",
+      "stormStarted": "Start of a Storm"
     },
-    "nobody": "Nobody",
-    "remove": "Remove {{value}}",
-    "title": "Mentions"
+    "hint": "Whom to mention and on which Loud events. A new entry is ticked for every event.",
+    "messengers": {
+      "bridge": "Bridge",
+      "mattermost": "Mattermost",
+      "slack": "Slack",
+      "telegram": "Telegram",
+      "webhook": "Outgoing webhook"
+    },
+    "nobody": "nobody",
+    "notDelivered": {
+      "bridgeCannotMentionPeople": "the bridge cannot mention people",
+      "noAccountLink": "has no linked {{messenger}} account",
+      "noAccountLinkHere": "has no linked account"
+    },
+    "notes": {
+      "always": "Reminders and auto-unacknowledge always mention the Owner, and a Takeover the previous Owner.",
+      "team": "'Team' is the Team mention for this Connection, if it is set; otherwise nobody. The On-call is not mentioned instead.",
+      "unlinked": "A person without a linked account is not mentioned; the Alert Group's Timeline and this page say so."
+    },
+    "now": "now: {{who}}",
+    "picker": {
+      "addGroup": "Add group",
+      "chooseGroup": "Choose a group…",
+      "choosePerson": "Choose a person…",
+      "chooseTeam": "Choose a Team…",
+      "group": "Group",
+      "groupName": "Group name",
+      "groupPlaceholder": "payments_team",
+      "groupsNotListed": "The Connection did not list its groups: enter the name of a group.",
+      "groupsTruncated": "More groups exist than are listed.",
+      "noGroups": "The Connection has no groups to mention.",
+      "onCallTeam": "On-call of the Team",
+      "person": "Person",
+      "team": "Team"
+    },
+    "reasons": {
+      "bridgeNoGroupMentions": "The bridge declares no group mentions",
+      "bridgeNotDeclared": "The bridge does not declare {{token}}",
+      "messengerHasNoToken": "{{messenger}} has no {{token}}",
+      "telegramNoGroups": "Telegram cannot mention everyone or groups",
+      "usergroupsReadMissing": "Needs the scope usergroups:read"
+    },
+    "remove": "Remove",
+    "removeEntry": "Remove: {{target}}",
+    "support": {
+      "bridge": {
+        "everyone": "Those of @channel, @here, @all and @everyone that the bridge declares",
+        "groups": "Group names, when the bridge declares group mentions",
+        "people": "Linked people; a bridge without native mentions shows their plain name, which notifies nobody"
+      },
+      "everyone": "Everyone in the chat",
+      "groups": "Messenger groups and Teams",
+      "linkedPeople": "Linked people",
+      "mattermost": {
+        "everyone": "@channel, @here, @all",
+        "groups": "Mattermost groups by name"
+      },
+      "messenger": "Messenger",
+      "none": "None",
+      "people": "People and On-call",
+      "slack": {
+        "everyone": "<!channel>, <!here>",
+        "groups": "Slack user groups, when the Connection's check found the scope usergroups:read"
+      },
+      "title": "What each messenger supports",
+      "webhook": "Every target, as data"
+    },
+    "target": "Target",
+    "targets": {
+      "group": "Group {{name}}",
+      "onCallOfTeam": "On-call of {{name}}",
+      "onCallOfTeamsFromLabel": "On-call of the Team from the label",
+      "team": "Team {{name}}",
+      "teamsFromLabel": "Team from the label"
+    },
+    "teamMentions": "{{team}} — {{mentions}}",
+    "title": "Mentions",
+    "warnings": {
+      "notDelivered": "Mention not delivered: @{{login}}, {{entry}}, {{reason}}",
+      "unavailable": "{{entry}} mentions nobody: {{reason}}"
+    }
   },
   "nav": {
     "access": "Access",
@@ -3011,7 +3096,8 @@
     "fields": {
       "name": "Name",
       "people": "People",
-      "slug": "Slug"
+      "slug": "Slug",
+      "teamMention": "Team mention"
     },
     "filter": {
       "all": "All",
@@ -3056,8 +3142,22 @@
     },
     "list": {
       "empty": "No Teams yet.",
+      "noTeamMention": "no Team mention",
       "people_one": "{{count}} person",
       "people_other": "{{count}} people"
+    },
+    "mentions": {
+      "errors": {
+        "unsupported": "This Connection cannot mention a group."
+      },
+      "groupsNotListed": "The Connection could not list its groups.",
+      "hint": "The entry 'Team' of a Destination's Mentions is this Team mention. Without one, nobody is mentioned, and the On-call is not mentioned instead.",
+      "needsConnectionsWrite": "Choosing a group needs the permission to manage Connections.",
+      "noConnections": "No Connection can have a Destination yet.",
+      "noMention": "No Team mention",
+      "placeholder": "payments_team",
+      "remove": "Remove",
+      "title": "How to mention the Team"
     },
     "owner": {
       "hint": "For ownership and the filter of the UI; does not affect delivery.",
@@ -3204,6 +3304,10 @@
       "fingerprints_one": "{{count}} fingerprint",
       "fingerprints_other": "{{count}} fingerprints",
       "labelConflicts": "Static labels the alerts already had",
+      "mentionEntry": "Entry",
+      "mentionEvent": "Event",
+      "mentionPerson": "Person",
+      "mentionReason": "Reason",
       "owner": "Owner",
       "previousOwner": "Previous owner",
       "replacedLabel": "Changed label"

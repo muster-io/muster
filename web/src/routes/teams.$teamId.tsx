@@ -35,6 +35,7 @@ import { TeamOnCallNow } from "../components/on-call-now";
 import { TeamAlertRules } from "../components/team-alert-rules";
 import { TeamDestinations } from "../components/team-destinations";
 import { TeamForm } from "../components/team-form";
+import { TeamMentionsEditor } from "../components/team-mentions-editor";
 import { TeamPeople } from "../components/team-people";
 import { TeamSchedules } from "../components/team-schedules";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -396,6 +397,31 @@ function DestinationsSection({ session, canWrite }: { session: TeamBase; canWrit
   );
 }
 
+/** "How to mention the Team": the Team mention of each Connection, saved on its own. */
+function MentionsSection({ session, canWrite }: { session: TeamBase; canWrite: boolean }) {
+  const { t } = useTranslation();
+  const save = useTeamSave(session);
+  return (
+    <Section
+      id="team-mentions-section"
+      title={t("teams.mentions.title")}
+      docs={
+        <DocsLink
+          to="field.team_mentions"
+          kind="learn_more"
+          about={t("docs.fields.teamMentions")}
+        />
+      }
+    >
+      <TeamMentionsEditor
+        team={session.base}
+        canWrite={canWrite}
+        save={(team_mentions) => save.mutateAsync({ team_mentions })}
+      />
+    </Section>
+  );
+}
+
 /** The checks the server repeats on the Working hours, before they are sent. */
 function hoursChecks(hours: WorkingHours): HoursErrors {
   const found: HoursErrors = {};
@@ -663,6 +689,7 @@ export function TeamDetails({ team, reload }: { team: Team; reload: () => void }
       {canSchedules && <TeamSchedules teamId={team.id} />}
       <AlertRules session={session} canWrite={canWrite} />
       <DestinationsSection session={session} canWrite={canWrite} />
+      <MentionsSection session={session} canWrite={canWrite} />
       <TeamPeople teamId={team.id} canWrite={canWrite} />
       <IdpGroups session={session} canWrite={canWrite} />
       <WorkingHoursSection session={session} canWrite={canWrite} />
