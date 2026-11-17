@@ -12,7 +12,7 @@ Mention.
 ## Which changes are Loud
 
 A new Alert Group starts
-:   Loud, as a new Root message · mentions: the Destination's `new_alert_group` setting
+:   Loud, as a new Root message · mentions: the entries for `new_alert_group`
 
 New Alerts join a **firing** Alert Group
 :   Loud, as a Thread reply; batched · mentions: `new_alerts`

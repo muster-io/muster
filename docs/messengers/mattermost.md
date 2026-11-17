@@ -13,7 +13,10 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_IN
 2. In **Integrations → Bot Accounts**, add a bot, for example `muster`. Give it the role **Member**: Muster needs no
    system admin role and no **post:all** or **post:channels** permission, because it posts only to channels the bot
    is a member of. With the role Member, the answers to button presses show in the Thread of the Root message; see
-   [Where answers to presses show](#where-answers-to-presses-show).
+   [Where answers to presses show](#where-answers-to-presses-show). The role Member is also enough to read the
+   server's custom groups, which Muster lists so that a Team can be mentioned by its group; it needs no permission
+   added for that ([Team mentions](../concepts/teams.md#team-mentions)). This was checked on Mattermost 11.2.2 with the
+   Entry licence (F-122); groups synced from LDAP were not checked (F-121).
 3. Copy the bot's access token. Mattermost shows it once.
 4. Add the bot to the team, and to every channel a Destination posts to. A public channel is enough; a private channel
    works the same once the bot is a member.
@@ -187,8 +190,11 @@ characters; a long one drops its description first, then its Alerts, its summary
   mentioned a follower of the Thread. "Quiet" therefore means "without a Mention", not "nobody notified".
 - A Loud Root message carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's
   `@username` through their Account link — as one line at the top of the attachment, directly under its title. There a
-  person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post; whether a group's Mention
-  notifies from an attachment has not been checked. The post's own text is empty: everything is in the attachment, so
+  person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post (F-124), and so does a
+  custom group's `@payments_team`, whose members are mentioned in an attachment and in a Thread reply alike; a custom
+  group's setting to allow references cannot be turned off, so it can always be mentioned (F-123). The Mentions are
+  those of the Destination's [Mention entries](../concepts/mentions.md); a person whom an entry names without an
+  Account link is left out of the message. The post's own text is empty: everything is in the attachment, so
   the post shows its title once. What a notification shows follows from that: an email notification shows no content;
   a push notification, when the server's **PushNotificationContents** is `full`, and a desktop notification show the
   attachment's summary line — the status, `#N` and the title — which Muster sets as its `fallback` and the channel does
