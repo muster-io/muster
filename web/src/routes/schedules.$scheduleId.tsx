@@ -27,6 +27,7 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
 import { OverrideForm } from "../components/override-form";
 import { RotationLayersSummary, useTeamPeople } from "../components/rotation-layers-editor";
+import { IcalSubscription } from "../components/ical-subscription";
 import { ScheduleForm } from "../components/schedule-form";
 import { ScheduleOnCallNow } from "../components/schedule-on-call-now";
 import { ScheduleOverrides } from "../components/schedule-overrides";
@@ -250,6 +251,7 @@ function ScheduleBody({ schedule }: { schedule: Schedule }) {
           )}
         </ScheduleOverrides>
       )}
+      <IcalSubscription />
       {canWrite ? (
         <ScheduleForm
           key={formVersion}

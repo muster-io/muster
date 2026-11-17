@@ -29,7 +29,8 @@ import (
 // body is shortened as C-12.FR-11 says, keeping its line of links, its notices and its footer; without `buttons`, a
 // bridge that forwards Thread messages gets the commands line at the end of a Root message (messages.CommandsLine).
 // The Mentions of a Loud message are its first line, with a Mention marker for each User linked through the
-// Connection, listed in `mentions` (C-22.FR-16). The footer names a user linked through the Connection by a marker of
+// Connection, each group and each mention of everyone in the chat that the bridge declares, listed in `mentions` with
+// their kind (C-22.FR-16). The footer names a user linked through the Connection by a marker of
 // their own in a new message for a bridge with `native_mentions`; an edit carries no Mentions, and any other bridge
 // would show the marker's `@`, so there it names them by the link's display name (C-12.FR-12).
 // Template output keeps its trusted Mention tokens as text that notifies nobody. A Root message and a test message of
@@ -165,39 +166,78 @@ func replyInput(threadRef string, m messages.Message, i Info, head []string, lis
 		Mentions: list, Notify: notify}
 }
 
-// mentionsOf are the Mentions of a Loud call (C-22.FR-16) as the line that starts the body and the envelope's
-// `mentions`: a User with an Account link for the Destination's Connection is a marker `[@name](muster-mention:mN)`,
-// whose entry carries the link's external id and display name — the Muster display name when the link has none — and
-// any other User is their display name as text, which mentions nobody; in the order of the targets, each once. A Quiet
-// call has neither, and the list is never nil.
-func mentionsOf(c delivery.Call) ([]string, []gen.Mention) {
+// mentionsOf are the Mentions of a Loud call (C-22.FR-16) for a bridge whose info is i, as the line that starts the
+// body and the envelope's `mentions`, in the order of the targets, each once: a User with an Account link for the
+// Destination's Connection is a marker `[@name](muster-mention:mN)`, whose entry carries the link's external id and
+// display name — the Muster display name when the link has none — and any other User is their display name as text,
+// which mentions nobody; a group — a group entry or a Team mention — is a marker whose entry has the kind group and the
+// group's name, and everyone in the chat one whose entry has the kind everyone and the symbolic name. The line keeps
+// in their order the whole Mentions that fit half of the body limit, so that the text of the message keeps the rest,
+// and the entries are those of its markers. A Quiet call has neither, and the list is never nil.
+//
+// A group goes only to a bridge whose info declares group mentions, and everyone only with a symbolic name it lists:
+// the resolution of the Mentions decided so from the stored info, and the info i of the send, which may differ when it
+// was read since, decides again. i is the copy that the replica sending keeps in memory, up to bridge.info_max_age
+// old: a Connection check refreshes the copy of the replica that runs it and the stored one, not those of the other
+// replicas, so for up to that age another replica may still send, or leave out, what the bridge no longer, or newly,
+// declares.
+func mentionsOf(c delivery.Call, i Info) ([]string, []gen.Mention) {
 	list := []gen.Mention{}
 	if c.Loudness != groups.Loud {
 		return nil, list
 	}
 	var names []string
-	for _, t := range c.Targets {
-		if t.Kind != mentions.TargetUser || t.User == nil {
-			continue
-		}
-		u := *t.User
-		if !markable(u) {
-			if n := messages.EscapeCommonMark(messages.Value(oneLine(u.Name))); n != "" && !slices.Contains(names, n) {
-				names = append(names, n)
-			}
-			continue
-		}
-		if slices.ContainsFunc(list, func(m gen.Mention) bool { return m.ExternalId == u.ExternalID }) {
-			continue
+	mark := func(kind gen.MentionKind, id, name string) {
+		if entryOf(list, kind, id) >= 0 {
+			return
 		}
 		var n string
-		n, list = marker(u, list)
+		n, list = marker(kind, id, name, list)
 		names = append(names, n)
 	}
-	if len(names) == 0 {
-		return nil, list
+	for _, t := range c.Targets {
+		switch {
+		case t.Kind == mentions.TargetGroup && i.GroupMentions():
+			if name := oneLine(t.Group); namable(name) {
+				mark(gen.MentionKindGroup, name, name)
+			}
+		case t.Kind == mentions.TargetEveryone && slices.Contains(i.EveryoneMentions(), t.Everyone):
+			mark(gen.MentionKindEveryone, t.Everyone, t.Everyone)
+		case t.Kind == mentions.TargetUser && t.User != nil:
+			u := *t.User
+			if markable(u) {
+				mark(gen.MentionKindUser, u.ExternalID, markerName(u))
+			} else if n := messages.EscapeCommonMark(messages.Value(oneLine(u.Name))); n != "" &&
+				!slices.Contains(names, n) {
+				names = append(names, n)
+			}
+		}
 	}
-	return []string{strings.Join(names, " ")}, list
+	line := fitLine(names, bodyLimit(i)/2)
+	if line == "" {
+		return nil, []gen.Mention{}
+	}
+	return []string{line}, marked(list, line)
+}
+
+// fitLine joins names, whole and in their order, by spaces within limit characters, leaving out each one that no
+// longer fits; empty when none fits.
+func fitLine(names []string, limit int) string {
+	line, size := "", 0
+	for _, n := range names {
+		next := utf8.RuneCountInString(n)
+		if size > 0 {
+			next++
+		}
+		if size+next > limit {
+			continue
+		}
+		if size > 0 {
+			line += " "
+		}
+		line, size = line+n, size+next
+	}
+	return line
 }
 
 // markerName is the display name of a User's marker and entry: the link's display name, else the Muster display
@@ -211,14 +251,48 @@ func markable(u mentions.User) bool {
 	return u.ExternalID != "" && utf8.RuneCountInString(u.ExternalID) <= maxID && markerName(u) != ""
 }
 
-// marker is the marker `[@name](muster-mention:mN)` of a markable User and the Mentions with their entry: the entry of
-// the same account when list has one, otherwise a new one at its end.
-func marker(u mentions.User, list []gen.Mention) (string, []gen.Mention) {
-	name := markerName(u)
-	n := slices.IndexFunc(list, func(m gen.Mention) bool { return m.ExternalId == u.ExternalID })
+// namable reports whether a group's name fits an entry as its external id and its display name.
+func namable(name string) bool {
+	n := utf8.RuneCountInString(name)
+	return n >= 1 && n <= maxDisplayName
+}
+
+// kindOf is the kind of an entry of `mentions`: user when it has none.
+func kindOf(m gen.Mention) gen.MentionKind {
+	if m.Kind == nil {
+		return gen.MentionKindUser
+	}
+	return *m.Kind
+}
+
+// entryOf is the index in list of the entry of the kind for id, -1 without one.
+func entryOf(list []gen.Mention, kind gen.MentionKind, id string) int {
+	return slices.IndexFunc(list, func(m gen.Mention) bool { return kindOf(m) == kind && m.ExternalId == id })
+}
+
+// nextRef is the ref of a new entry of list: m and one more than the highest number of its refs, m1 for none, so that
+// it is new even when the Mention line left out entries before others.
+func nextRef(list []gen.Mention) string {
+	n := 0
+	for _, m := range list {
+		if k, err := strconv.Atoi(strings.TrimPrefix(m.Ref, "m")); err == nil && strings.HasPrefix(m.Ref, "m") && k > n {
+			n = k
+		}
+	}
+	return "m" + strconv.Itoa(n+1)
+}
+
+// marker is the marker `[@name](muster-mention:mN)` of the entry of the kind for id and the Mentions with that entry:
+// the one list has, otherwise a new one at its end with the display name name — without a kind for a User, so that a
+// bridge that declares no group or everyone mentions never sees the field (C-22.FR-16).
+func marker(kind gen.MentionKind, id, name string, list []gen.Mention) (string, []gen.Mention) {
+	n := entryOf(list, kind, id)
 	if n < 0 {
-		list = append(list, gen.Mention{Ref: "m" + strconv.Itoa(len(list)+1), ExternalId: u.ExternalID,
-			DisplayName: name})
+		m := gen.Mention{Ref: nextRef(list), ExternalId: id, DisplayName: name}
+		if kind != gen.MentionKindUser {
+			m.Kind = &kind
+		}
+		list = append(list, m)
 		n = len(list) - 1
 	}
 	return "[@" + messages.EscapeCommonMark(messages.Value(name)) + "](" + markerScheme + list[n].Ref + ")", list
@@ -257,8 +331,8 @@ func withFooterMention(m messages.Message, conn int64, i Info, list []gen.Mentio
 			return footerName(u)
 		}
 		var s string
-		s, list = marker(u, list)
-		ref = list[slices.IndexFunc(list, func(e gen.Mention) bool { return e.ExternalId == u.ExternalID })].Ref
+		s, list = marker(gen.MentionKindUser, u.ExternalID, markerName(u), list)
+		ref = list[entryOf(list, gen.MentionKindUser, u.ExternalID)].Ref
 		return s
 	})
 	return m, list, ref

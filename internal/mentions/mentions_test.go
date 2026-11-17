@@ -911,6 +911,40 @@ func TestResolveTimeAndUsers(t *testing.T) {
 // dummyDB is a transaction the fakes ignore, to see that it reaches the On-call and the Team mentions.
 type dummyDB struct{ DBTX }
 
+// TestTargetsForTheAdapters covers C-24.FR-6 revised, C-22.FR-16 revised and C-25.FR-8: a resolved target carries what
+// the adapters write — in Slack a group entry and a Team mention by the user group's id, which only an id of the form
+// S… names; through a bridge that declares them a group entry and a Team mention by the group's name and here by its
+// symbolic name, beside a linked person.
+func TestTargetsForTheAdapters(t *testing.T) {
+	for id, ok := range map[string]bool{"S0FAKEPAYTEAM": true, "S1": true, "S": false, "s0fake": false,
+		"U0FAKEALICE": false, "S0 FAKE": false, "S0>X": false, "": false} {
+		if SlackUserGroupID(id) != ok {
+			t.Errorf("SlackUserGroupID(%q) = %v", id, !ok)
+		}
+	}
+	ctx := t.Context()
+	f := resolveFake()
+	f.users[0].links["bridge:5"], f.users[0].externals["bridge:5"] = "alice@example.org", "u-alice"
+	s, _, _ := wired(f)
+	conn := func(id int64) *int64 { return &id }
+	f.entries[60] = []EntryInput{group("payments-team", "S0FAKEPAYTEAM"), teamEntry(TargetTeam, payments),
+		everyone(EveryoneHere)}
+	f.entries[61] = []EntryInput{group("ops", ""), teamEntry(TargetTeam, payments), everyone(EveryoneHere),
+		person(alice)}
+	got, err := s.Resolve(ctx, nil, orgID, Request{DestinationID: 60, DestinationType: TypeSlack, ConnectionID: conn(4),
+		AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	if err != nil || len(got) != 2 || got[0].Kind != TargetGroup || got[0].GroupID != "S0FAKEPAYTEAM" ||
+		!SlackUserGroupID(got[0].GroupID) || got[1].Everyone != EveryoneHere {
+		t.Errorf("slack = %+v %v", got, err)
+	}
+	got, err = s.Resolve(ctx, nil, orgID, Request{DestinationID: 61, DestinationType: TypeBridge, ConnectionID: conn(5),
+		AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	if err != nil || describe(got) != "group:ops,group:payments,everyone:here,user:alice@example.org" ||
+		got[3].User.ExternalID != "u-alice" {
+		t.Errorf("bridge = %q %v", describe(got), err)
+	}
+}
+
 // TestResolveEventTime is C-28.FR-3 "at the moment of the event": a request without a time takes the On-call at the
 // time of its event, read in its transaction, not at the attempt — a reply at its lifecycle event's Timeline entry, a
 // first Publication at the latest of the creation and destination_joined in the Destination, the first publication of

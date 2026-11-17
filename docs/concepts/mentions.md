@@ -82,8 +82,9 @@ An entry stays when its Connection later loses an ability, such as a Slack app r
 `available: false` with the reason in `unavailable_reason`, and mentions nobody. An entry whose User or Team was deleted
 stays too, shows them as deleted and mentions nobody.
 
-Slack user groups, and the group mentions and mentions of everyone of bridges, are saved and resolved, but Muster does
-not write them in Slack and bridge messages yet.
+In Slack a user group or a Team mention is written as `<!subteam^…>` of the user group's id, which Slack shows as its
+handle and which mentions its members. A bridge receives a group and a mention of everyone as entries of `mentions`
+of their own kind ([What Muster posts](../messengers/bridge.md#what-muster-posts)).
 
 An outgoing webhook receives the targets as data in `mentions` and `.Mentions`: a Team as `{"type": "team", "slug":
 …, "name": …}`, one per Team of the Alert Group for "Team from the label", and the On-call as a `user`.

@@ -30,6 +30,7 @@ files_touched:
   - web/e2e/sign-in.spec.ts
   - web/e2e/oidc-settings.spec.ts
   - web/e2e/alert-group-list.spec.ts
+  - web/e2e/support.ts
 acceptance:
   - "[C-27.FR-9, C-27.AC-9] In a real browser the Home page shows \"On call now\" with \"All Teams\" and \"By the main Schedule of each Team\": devops — @ivan, \"Main\", until Monday 10:00; payments — @petr with \"unreachable in Mattermost\" and \"next: gap\"; search — \"No Schedule\"; \"My Teams\" shows only the Teams of the signed-in User, in English and in Russian (`on-call-now.test.tsx`, `home.spec.ts`)."
   - "[C-27.FR-9, C-27.FR-8, C-27.AC-6] The Team page shows \"On call now\" for its Team with the same marks, and the Teams list shows each Team's On-call now, or \"No Schedule\" (`teams.spec.ts`)."
@@ -131,6 +132,11 @@ None open. Settled:
 - Suggested commit: `feat(web): show who is on call now and the ical link`.
 - The link of the iCal feed is shown once from the answer of `issueMyIcalFeed` and never stored by the SPA.
 - "unreachable in Mattermost" on the Home page is the short form of the mark that the Schedule page writes in full.
+- `web/e2e/support.ts` holds the set-up of scenario 5 of C-27 (`seedOnCall`), which `home.spec.ts`, `teams.spec.ts` and
+  `phone-width.spec.ts` share, each under a prefix of its own for its Team slugs so that the specs do not remove each
+  other's Teams; it was missing from `files_touched`.
+- "until {time}" in "On call now" is in the signed-in User's time zone: the API's `TeamOnCall` names no zone. The
+  Team page's "Schedules" shows each Schedule's own times in its time zone, as the Schedule page does.
 
 ## Coverage
 

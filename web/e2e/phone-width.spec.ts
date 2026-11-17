@@ -23,6 +23,9 @@ import {
   fakeIntegration,
   fam,
   notify,
+  onCallNames,
+  removeOnCall,
+  seedOnCall,
   removeIntegration,
   removeTeamsBySlug,
   seedTeamAlerts,
@@ -317,4 +320,35 @@ test("the navigations reach every entry 360 px wide", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "OIDC", level: 1 })).toBeVisible();
   await expectNoHorizontalScroll(page);
   expect(csp).toEqual([]);
+});
+
+test("the Home page with On call now fits 360 px, without horizontal scrolling", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const names = onCallNames("pw-");
+  const admin = await adminApi();
+  try {
+    await seedOnCall(admin, "pw-");
+    await signInAdmin(page);
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+    const section = page.getByTestId("on-call-now");
+    await expect(section.getByRole("heading", { name: "On call now", level: 2 })).toBeVisible();
+    const payments = page.locator(`[data-testid="on-call-row"][data-team="${names.payments}"]`);
+    await expect(payments.getByTestId("on-call-unreachable")).toHaveText(
+      "unreachable in Mattermost",
+    );
+    await expect(payments.getByTestId("on-call-gap")).toHaveText("next: gap");
+    await expectNoHorizontalScroll(page);
+    await shot(page, "home-360");
+    await section.getByRole("button", { name: "My Teams" }).click();
+    await expect(
+      page.locator(`[data-testid="on-call-row"][data-team="${names.devops}"]`),
+    ).toBeVisible();
+    await expectNoHorizontalScroll(page);
+  } finally {
+    await removeOnCall(admin, "pw-");
+    await admin.dispose();
+  }
 });

@@ -307,7 +307,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="border-b bg-background">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
           <Link
-            to="/alert-groups"
+            to="/"
             className="flex shrink-0 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <BrandMark className="size-7" />

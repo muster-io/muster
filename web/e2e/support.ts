@@ -1129,3 +1129,205 @@ export async function dropRouting(prefix: string): Promise<void> {
     await admin.dispose();
   }
 }
+
+/** The Teams of scenario 5 of C-27 that the "On call now" specs read, with the people and the Schedules in them. */
+export const ON_CALL = {
+  ivan: "ivan",
+  petr: "petr",
+  oleg: "oleg",
+  zone: "Europe/Berlin",
+} as const;
+
+/** The slugs of the Teams, and the name of the Connection, of a set-up whose names start with prefix. */
+export function onCallNames(prefix = ""): {
+  devops: string;
+  payments: string;
+  search: string;
+  connection: string;
+  destination: string;
+} {
+  return {
+    devops: `${prefix}devops`,
+    payments: `${prefix}payments`,
+    search: `${prefix}search`,
+    connection: `${prefix}oncall-mm`,
+    destination: `${prefix}payments-notice`,
+  };
+}
+
+const ON_CALL_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** The weekday, the day and the hour of an instant on the wall clock of Berlin. */
+function berlinWall(at: Date): { day: string; hour: number; weekday: string } {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: ON_CALL.zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23",
+      weekday: "short",
+    })
+      .formatToParts(at)
+      .map((x) => [x.type, x.value]),
+  );
+  return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour), weekday: String(p.weekday) };
+}
+
+/** "Mon 10:00": the weekday and the time of an instant in Berlin, as "until …" reads. */
+export function berlinStamp(iso: string): string {
+  const at = new Date(iso);
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: ON_CALL.zone,
+    weekday: "short",
+  }).format(at);
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone: ON_CALL.zone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(at);
+  return `${weekday} ${clock}`;
+}
+
+/** The Monday at 10:00 in Berlin that the business clock's now has passed: where a weekly rotation starts. */
+async function onCallRotationStart(): Promise<string> {
+  const now = new Date(Date.now() + (await devClockOffset()) * 1000);
+  const w = berlinWall(now);
+  let back = ON_CALL_WEEKDAYS.indexOf(w.weekday);
+  if (back === 0 && w.hour < 10) {
+    back = 7;
+  }
+  const [y = 1970, m = 1, d = 1] = w.day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d - back)).toISOString().slice(0, 10);
+}
+
+/** Deletes what seedOnCall made: the Schedules and Teams, the Destination and Connection, whatever a run left. */
+export async function removeOnCall(admin: Api, prefix = ""): Promise<void> {
+  const names = onCallNames(prefix);
+  const teams = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  const slugs: string[] = [names.devops, names.payments, names.search];
+  for (const team of teams.items.filter((t) => slugs.includes(t.slug))) {
+    const schedules = await admin.call<{ items: { id: string }[] }>(
+      "GET",
+      `/api/v1/schedules?team=${team.id}`,
+    );
+    for (const s of schedules.items) {
+      await admin.call("DELETE", `/api/v1/schedules/${s.id}`);
+    }
+  }
+  await removeTeamsBySlug(admin, slugs);
+  await removeConnection(admin, names.connection);
+}
+
+/**
+ * Sets up scenario 5 of C-27 and returns the ids: "devops" with the Admin and ivan, whose main Schedule has ivan
+ * On-call until next Monday at 10:00; "payments" with petr, who has no Mattermost Account link, and the Mattermost
+ * Destination "payments-notice", whose main Schedule has petr On-call now by an Override and nobody after it; and
+ * "search", which has no Schedule and no one in it.
+ */
+export async function seedOnCall(
+  admin: Api,
+  prefix = "",
+): Promise<{
+  teams: { devops: string; payments: string; search: string };
+  schedules: { devops: string; payments: string };
+  users: { ivan: string; petr: string };
+}> {
+  const names = onCallNames(prefix);
+  await removeOnCall(admin, prefix);
+  const ivan = await ensureLocalUser(admin, ON_CALL.ivan, "responder");
+  const petr = await ensureLocalUser(admin, ON_CALL.petr, "responder");
+  const oleg = await ensureLocalUser(admin, ON_CALL.oleg, "responder");
+  const me = await admin.call<{ user: { id: string } }>("GET", "/api/v1/sessions/current");
+  const devops = await ensureTeam(admin, names.devops, [me.user.id, ivan, oleg]);
+  const payments = await ensureTeam(admin, names.payments, [petr]);
+  const search = await ensureTeam(admin, names.search);
+  const connection = await admin.call<{ id: string }>("POST", "/api/v1/connections", {
+    type: "mattermost",
+    name: names.connection,
+    server_url: "http://127.0.0.1:18065",
+    bot_token: "mm-dev-token",
+    proxy: { enabled: false },
+    limiter: { limit: 50, per_seconds: 1 },
+  });
+  const nobody = { everyone: "none", user_ids: [], groups: [] };
+  const destination = await admin.call<{ destination: { id: string } }>(
+    "POST",
+    "/api/v1/destinations",
+    {
+      type: "mattermost",
+      name: names.destination,
+      connection_id: connection.id,
+      team_id: "team-dev",
+      channel_id: "ch-payments-notice",
+      mentions: Object.fromEntries(
+        [
+          "new_alert_group",
+          "new_alerts",
+          "reopen",
+          "ack_timeout",
+          "snooze_ended",
+          "rise_to_urgent",
+        ].map((k) => [k, nobody]),
+      ),
+      limiter: { limit: 50, per_seconds: 1 },
+    },
+  );
+  await setTeamDestinations(admin, names.payments, [
+    { destination_id: destination.destination.id },
+  ]);
+  const start = await onCallRotationStart();
+  const devopsMain = await admin.call<{ id: string }>("POST", "/api/v1/schedules", {
+    team_id: devops,
+    name: "Main",
+    time_zone: ON_CALL.zone,
+    rotation_layers: [
+      {
+        name: "Weekly",
+        user_ids: [ivan, oleg],
+        shift_length: "week",
+        handover_time: "10:00",
+        handover_day: "monday",
+        start_date: start,
+        limits: null,
+      },
+    ],
+  });
+  const paymentsMain = await admin.call<{ id: string }>("POST", "/api/v1/schedules", {
+    team_id: payments,
+    name: "Main",
+    time_zone: ON_CALL.zone,
+    // Both Rotation layers have a Shift of one minute a day, so that the Override is what makes petr On-call now and a
+    // gap follows it, whatever the time of the run.
+    rotation_layers: ["00:00", "12:00"].map((from, index) => ({
+      name: index === 0 ? "Midnight" : "Noon",
+      user_ids: [petr],
+      shift_length: "week",
+      handover_time: "10:00",
+      handover_day: "monday",
+      start_date: start,
+      limits: {
+        days: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+        start: from,
+        end: from === "00:00" ? "00:01" : "12:01",
+      },
+    })),
+  });
+  // petr is On-call now through an Override of three hours: a gap follows it.
+  const now = Date.now() + (await devClockOffset()) * 1000;
+  await admin.call("POST", `/api/v1/schedules/${paymentsMain.id}/overrides`, {
+    user_id: petr,
+    start: new Date(now - 60_000).toISOString(),
+    end: new Date(now + 3 * 3600_000).toISOString(),
+  });
+  return {
+    teams: { devops, payments, search },
+    schedules: { devops: devopsMain.id, payments: paymentsMain.id },
+    users: { ivan, petr },
+  };
+}
