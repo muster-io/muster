@@ -1220,6 +1220,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#escalation_webhook" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        escalation_webhook
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#versioning" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3212,6 +3223,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#escalation_webhook" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        escalation_webhook
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#versioning" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3305,7 +3327,8 @@
 <h1 id="outgoing-webhook-events-mode">Outgoing webhook: events mode<a class="headerlink" href="#outgoing-webhook-events-mode" title="Permanent link">&para;</a></h1>
 <p>An outgoing webhook Destination in the <strong>events mode</strong> sends one HTTP <code>POST</code> for every lifecycle event of every Alert
 Group on its Routes: an ordered, signed stream of versioned JSON events that an automation can record, react to or
-forward. Muster renders nothing for a chat here; for a chat with a REST API, use the template mode instead.</p>
+forward. A step "Send to an outgoing webhook" of an Escalation chain also sends it <code>escalation_webhook</code>, even about an
+Alert Group on none of its Routes (<a href="#escalation_webhook">escalation_webhook</a>). Muster renders nothing for a chat here; for a chat with a REST API, use the template mode instead.</p>
 <p>In the examples, <code>MUSTER_PUBLIC_URL</code> is <code>https://muster.example.org</code> and the receiving endpoint is
 <code>https://automation.example.org/muster</code>.</p>
 <h2 id="create-the-destination">Create the Destination<a class="headerlink" href="#create-the-destination" title="Permanent link">&para;</a></h2>
@@ -3459,16 +3482,17 @@ its name, <code>[]</code> for none (<a href="../../concepts/teams/#which-alerts-
 <dt><code>alerts</code></dt>
 <dd>One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.</dd>
 <dt><code>destination</code></dt>
-<dd>Only on <code>destination_joined</code>: the <code>id</code>, <code>name</code> and <code>type</code> of the Destination the Alert Group joined. No other
-event carries it.</dd>
+<dd>Only on <code>destination_joined</code>, the <code>id</code>, <code>name</code> and <code>type</code> of the Destination the Alert Group joined, and on
+<code>escalation_webhook</code>, those of the outgoing webhook Destination the step sends to. No other event carries it.</dd>
 <dt><code>page</code></dt>
 <dd>Only on <code>page_not_delivered</code>: the people the Page names in <code>users</code> (<code>id</code>, <code>name</code>, <code>login</code>), the Notification
 gateway of a call in <code>gateway</code> (<code>id</code>, <code>name</code>), null for a Page by Mention, and the <code>reason</code>. No other event
 carries it.</dd>
 <dt><code>escalation_step</code></dt>
-<dd>Only on <code>escalation_step_skipped</code>: the Escalation chain in <code>chain</code> (<code>id</code>, <code>name</code>), null once the chain was deleted,
-the number of the step in <code>step</code>, the <code>reason</code> and, for a person the step names who was skipped, that person in
-<code>users</code> (<code>id</code>, <code>name</code>, <code>login</code>), empty otherwise. No other event carries it.</dd>
+<dd>Only on <code>escalation_step_skipped</code> and <code>escalation_webhook</code>: the Escalation chain in <code>chain</code> (<code>id</code>, <code>name</code>), null
+once the chain was deleted, the number of the step in <code>step</code>, and the <code>reason</code> of a skip, null on
+<code>escalation_webhook</code>, whose step was made. For a person the step names who was skipped, <code>users</code> names that person
+(<code>id</code>, <code>name</code>, <code>login</code>); it is empty otherwise, and always on <code>escalation_webhook</code>. No other event carries it.</dd>
 </dl>
 <p>The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.</p>
 <h3 id="event-names">Event names<a class="headerlink" href="#event-names" title="Permanent link">&para;</a></h3>
@@ -3530,12 +3554,80 @@ budget was used (<code>call_budget_used</code>), the person had no confirmed con
 <dt><code>escalation_step_skipped</code></dt>
 <dd><code>notify</code>: false. A step of an Escalation chain on the Alert Group was skipped, and the chain went on with its next
 step: outside the Working hours of its chain (<code>outside_working_hours</code>), for a Severity level its condition does not
-meet (<code>severity</code>), in a gap of the Schedule it Pages (<code>schedule_gap</code>), or for a person it names who became a Viewer
-(<code>viewer</code>) or was disabled (<code>disabled</code>) since it was saved; named in <code>escalation_step</code>
+meet (<code>severity</code>), in a gap of the Schedule it Pages (<code>schedule_gap</code>), for a person it names who became a Viewer
+(<code>viewer</code>) or was disabled (<code>disabled</code>) since it was saved, or for a step "Send to an outgoing webhook" whose
+Destination was deleted (<code>destination_deleted</code>) or is no longer an outgoing webhook in the mode events or both
+(<code>webhook_events_required</code>); named in <code>escalation_step</code>
 (<a href="../../concepts/escalation-chains/#when-chains-run">Escalation chains</a>).</dd>
+<dt><code>escalation_webhook</code></dt>
+<dd><code>notify</code>: false. A step "Send to an outgoing webhook" of an Escalation chain on the Alert Group was made. Unlike
+every other event, it is sent <strong>only to the outgoing webhook Destination the step names</strong>, not to the
+events-mode Destinations of the Alert Group's Routes; see <a href="#escalation_webhook">escalation_webhook</a>.</dd>
 </dl>
 <p>The event <code>test</code> is sent only by a Destination test: it carries <code>test: true</code> and <code>sequence</code> 0 and belongs to no Alert
 Group's order.</p>
+<h3 id="escalation_webhook">escalation_webhook<a class="headerlink" href="#escalation_webhook" title="Permanent link">&para;</a></h3>
+<p>A step "Send to an outgoing webhook" of an <a href="../../concepts/escalation-chains/#steps">Escalation chain</a> names an
+outgoing webhook Destination in the mode events or both. When the step is made, Muster sends that Destination one
+<code>escalation_webhook</code>: the Alert Group as in every event, the chain and the step in <code>escalation_step</code>, and the
+Destination itself in <code>destination</code>. Muster is the actor, with the Transport <code>system</code>.</p>
+<ul>
+<li>Only the step's Destination receives it. It receives it whether or not the Alert Group is delivered there, and
+  receives no other event of the Alert Group, unless it is also one of the Alert Group's Destinations.</li>
+<li>A Destination that is also one of the Alert Group's receives it once, among its other events in the order of
+  <code>sequence</code>.</li>
+<li>It is signed, ordered by <code>sequence</code> and delivered at least once, with its own <code>webhook-id</code>, like every event.</li>
+<li>The Timeline of the Alert Group records it as a Quiet entry of the kind <code>escalation</code> with the chain, the step and
+  the Destination; nothing appears in a messenger.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="s2">"escalation_webhook"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"notify"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"mentions"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">  </span><span class="nt">"sequence"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"occurred_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-03T09:41:09Z"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"actor"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"system"</span><span class="p">,</span><span class="w"> </span><span class="nt">"transport"</span><span class="p">:</span><span class="w"> </span><span class="s2">"system"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"alert_group"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"number"</span><span class="p">:</span><span class="w"> </span><span class="mi">412</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"AGK7M3QX9P2RTA"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"title"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HighErrorRate payments-api"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"summary"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Error rate above 5% for 10 minutes"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"firing"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"route"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RT8Q2M4X7K1P3B"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"urgent"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"severity_level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"critical"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"started_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-03T09:41:07Z"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"resolved_at"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"snooze_until"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"reopen_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://muster.example.org/alert-groups/AGK7M3QX9P2RTA"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"teams"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"TM4D7K2Q9X1VBN"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Payments"</span><span class="p">,</span><span class="w"> </span><span class="nt">"slug"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments"</span><span class="w"> </span><span class="p">}]</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"alerts"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"fingerprint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"6f1c2b0e9d4a7c31"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"firing"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"labels"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"alertname"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HighErrorRate"</span><span class="p">,</span><span class="w"> </span><span class="nt">"service"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments-api"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">"annotations"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"summary"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Error rate above 5%"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">"starts_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-10-03T09:31:07Z"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"resolved_at"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"resolve_reason"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"generator_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://prometheus.example.org/graph?g0.expr=…"</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"destination"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"DS3N8T1K6W2QXA"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ops-bot"</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"webhook"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"escalation_step"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"chain"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"EC5R2W8M1K7Q3D"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"step"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"users"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>A step whose Destination was deleted, or switched to the template mode, since the chain was saved sends nothing: it is
+skipped with <code>escalation_step_skipped</code> and the reason <code>destination_deleted</code> or <code>webhook_events_required</code>, and the
+chain goes on with its next step.</p>
 <h3 id="versioning">Versioning<a class="headerlink" href="#versioning" title="Permanent link">&para;</a></h3>
 <p>New event names and new fields are added within <code>version</code> 1. Removing a field or changing its meaning needs a new
 <code>version</code>. Ignore event names and fields you do not know.</p>
@@ -3648,7 +3740,9 @@ secrets but never changes them.</p>
 <h2 id="delete-the-destination">Delete the Destination<a class="headerlink" href="#delete-the-destination" title="Permanent link">&para;</a></h2>
 <p>Deleting an events-mode Destination sends nothing more: its waiting events end as Not delivered with "the Destination
 was deleted", no final event is sent, and its secrets — the Signing secrets, the Secrets and the proxy password — are
-wiped at once, or as soon as a request that was already being sent ends.</p>
+wiped at once, or as soon as a request that was already being sent ends. An <code>escalation_webhook</code> that a step of an
+Escalation chain queues at the very moment of the deletion is never sent either; it stays waiting until its Alert
+Group is removed.</p>
 
 
 

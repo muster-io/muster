@@ -7,7 +7,8 @@ This file holds the full text of the section Outgoing webhooks. The index of the
 
 An outgoing webhook Destination in the **events mode** sends one HTTP `POST` for every lifecycle event of every Alert
 Group on its Routes: an ordered, signed stream of versioned JSON events that an automation can record, react to or
-forward. Muster renders nothing for a chat here; for a chat with a REST API, use the template mode instead.
+forward. A step "Send to an outgoing webhook" of an Escalation chain also sends it `escalation_webhook`, even about an
+Alert Group on none of its Routes ([escalation_webhook](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#escalation_webhook)). Muster renders nothing for a chat here; for a chat with a REST API, use the template mode instead.
 
 In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the receiving endpoint is
 `https://automation.example.org/muster`.
@@ -181,8 +182,8 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 :   One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.
 
 `destination`
-:   Only on `destination_joined`: the `id`, `name` and `type` of the Destination the Alert Group joined. No other
-    event carries it.
+:   Only on `destination_joined`, the `id`, `name` and `type` of the Destination the Alert Group joined, and on
+    `escalation_webhook`, those of the outgoing webhook Destination the step sends to. No other event carries it.
 
 `page`
 :   Only on `page_not_delivered`: the people the Page names in `users` (`id`, `name`, `login`), the Notification
@@ -190,9 +191,10 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
     carries it.
 
 `escalation_step`
-:   Only on `escalation_step_skipped`: the Escalation chain in `chain` (`id`, `name`), null once the chain was deleted,
-    the number of the step in `step`, the `reason` and, for a person the step names who was skipped, that person in
-    `users` (`id`, `name`, `login`), empty otherwise. No other event carries it.
+:   Only on `escalation_step_skipped` and `escalation_webhook`: the Escalation chain in `chain` (`id`, `name`), null
+    once the chain was deleted, the number of the step in `step`, and the `reason` of a skip, null on
+    `escalation_webhook`, whose step was made. For a person the step names who was skipped, `users` names that person
+    (`id`, `name`, `login`); it is empty otherwise, and always on `escalation_webhook`. No other event carries it.
 
 The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
 
@@ -278,12 +280,85 @@ never sent.
 `escalation_step_skipped`
 :   `notify`: false. A step of an Escalation chain on the Alert Group was skipped, and the chain went on with its next
     step: outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not
-    meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), or for a person it names who became a Viewer
-    (`viewer`) or was disabled (`disabled`) since it was saved; named in `escalation_step`
+    meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer
+    (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose
+    Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both
+    (`webhook_events_required`); named in `escalation_step`
     ([Escalation chains](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#when-chains-run)).
+
+`escalation_webhook`
+:   `notify`: false. A step "Send to an outgoing webhook" of an Escalation chain on the Alert Group was made. Unlike
+    every other event, it is sent **only to the outgoing webhook Destination the step names**, not to the
+    events-mode Destinations of the Alert Group's Routes; see [escalation_webhook](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#escalation_webhook).
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.
+
+### escalation_webhook
+
+A step "Send to an outgoing webhook" of an [Escalation chain](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#steps) names an
+outgoing webhook Destination in the mode events or both. When the step is made, Muster sends that Destination one
+`escalation_webhook`: the Alert Group as in every event, the chain and the step in `escalation_step`, and the
+Destination itself in `destination`. Muster is the actor, with the Transport `system`.
+
+- Only the step's Destination receives it. It receives it whether or not the Alert Group is delivered there, and
+  receives no other event of the Alert Group, unless it is also one of the Alert Group's Destinations.
+- A Destination that is also one of the Alert Group's receives it once, among its other events in the order of
+  `sequence`.
+- It is signed, ordered by `sequence` and delivered at least once, with its own `webhook-id`, like every event.
+- The Timeline of the Alert Group records it as a Quiet entry of the kind `escalation` with the chain, the step and
+  the Destination; nothing appears in a messenger.
+
+```json
+{
+  "version": 1,
+  "event": "escalation_webhook",
+  "notify": false,
+  "mentions": [],
+  "sequence": 3,
+  "occurred_at": "2026-10-03T09:41:09Z",
+  "actor": { "kind": "system", "transport": "system" },
+  "alert_group": {
+    "number": 412,
+    "id": "AGK7M3QX9P2RTA",
+    "title": "HighErrorRate payments-api",
+    "summary": "Error rate above 5% for 10 minutes",
+    "status": "firing",
+    "route": { "id": "RT8Q2M4X7K1P3B", "name": "payments" },
+    "urgent": false,
+    "severity_level": "critical",
+    "started_at": "2026-10-03T09:41:07Z",
+    "resolved_at": null,
+    "snooze_until": null,
+    "reopen_count": 0,
+    "url": "https://muster.example.org/alert-groups/AGK7M3QX9P2RTA",
+    "teams": [{ "id": "TM4D7K2Q9X1VBN", "name": "Payments", "slug": "payments" }]
+  },
+  "alerts": [
+    {
+      "fingerprint": "6f1c2b0e9d4a7c31",
+      "status": "firing",
+      "labels": { "alertname": "HighErrorRate", "service": "payments-api" },
+      "annotations": { "summary": "Error rate above 5%" },
+      "starts_at": "2026-10-03T09:31:07Z",
+      "resolved_at": null,
+      "resolve_reason": null,
+      "generator_url": "https://prometheus.example.org/graph?g0.expr=…"
+    }
+  ],
+  "destination": { "id": "DS3N8T1K6W2QXA", "name": "ops-bot", "type": "webhook" },
+  "escalation_step": {
+    "chain": { "id": "EC5R2W8M1K7Q3D", "name": "payments" },
+    "step": 1,
+    "reason": null,
+    "users": []
+  }
+}
+```
+
+A step whose Destination was deleted, or switched to the template mode, since the chain was saved sends nothing: it is
+skipped with `escalation_step_skipped` and the reason `destination_deleted` or `webhook_events_required`, and the
+chain goes on with its next step.
 
 ### Versioning
 
@@ -416,7 +491,9 @@ secrets but never changes them.
 
 Deleting an events-mode Destination sends nothing more: its waiting events end as Not delivered with "the Destination
 was deleted", no final event is sent, and its secrets — the Signing secrets, the Secrets and the proxy password — are
-wiped at once, or as soon as a request that was already being sent ends.
+wiped at once, or as soon as a request that was already being sent ends. An `escalation_webhook` that a step of an
+Escalation chain queues at the very moment of the deletion is never sent either; it stays waiting until its Alert
+Group is removed.
 
 <!-- Source: https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md -->
 # Outgoing webhook: template mode

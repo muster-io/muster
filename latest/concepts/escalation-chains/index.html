@@ -1849,6 +1849,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#webhook-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Webhook steps
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3136,6 +3153,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#webhook-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Webhook steps
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3208,9 +3242,9 @@ Schedule, chosen people or a whole Team, call through a <a href="../../messenger
 wait, send to an outgoing webhook and repeat. Routes and Teams name their chains. Chains are managed through the API under
 <code>/api/v1/escalation-chains</code>, listed in the <a href="../../reference/api/">API reference</a>.</p>
 <p>Chains run on Alert Groups at the points described under <a href="#when-chains-run">When chains run</a>: their steps follow one
-another with their waits and repeats, and a step is skipped where it cannot be made. In this version a step that Pages
-or sends is made without Paging anyone yet; the Pages by Mention, the calls and the webhook step follow in later
-versions. Where no chain runs, the ack timeout of a Route keeps working as before.</p>
+another with their waits and repeats, and a step is skipped where it cannot be made. A webhook step sends its event
+to its outgoing webhook (<a href="#webhook-steps">Webhook steps</a>). In this version a step that Pages is made without Paging
+anyone yet; the Pages by Mention and the calls follow in later versions. Where no chain runs, the ack timeout of a Route keeps working as before.</p>
 <h2 id="what-an-escalation-chain-is">What an Escalation chain is<a class="headerlink" href="#what-an-escalation-chain-is" title="Permanent link">&para;</a></h2>
 <p>An Escalation chain has:</p>
 <ul>
@@ -3314,6 +3348,24 @@ field of another kind is refused with <code>422</code> <code>unsupported</code> 
 </ul>
 <p>A gateway or a webhook Destination that a stored step names may be deleted; the chain warns about it and can still be
 saved.</p>
+<h3 id="webhook-steps">Webhook steps<a class="headerlink" href="#webhook-steps" title="Permanent link">&para;</a></h3>
+<p>A step "Send to an outgoing webhook" (<code>webhook</code>) sends the event <code>escalation_webhook</code> to the outgoing webhook
+Destination it names when the step is made. The event carries the Alert Group, as every event does, with the chain and
+the step. The Destination receives it whether or not the Alert Group is delivered there, so an outgoing webhook on
+none of the Alert Group's Routes can be called at a chosen step of a chain. Such a Destination receives no other event
+of the Alert Group, and the events-mode Destinations of the Alert Group's Routes do not receive <code>escalation_webhook</code>.
+A Destination that is also one of the Alert Group's receives it once, in order among its other events. The event is
+signed, ordered and delivered at least once like every event
+(<a href="../../outgoing-webhooks/events/#escalation_webhook">escalation_webhook</a>).</p>
+<p>The Timeline records the Quiet <code>escalation_webhook</code>, of the kind <code>escalation</code>, with the chain, the step and the
+Destination; nothing appears in a messenger. Like every step that sends, a webhook step can be limited to Working hours
+and to a Severity condition. A running chain skips a webhook step, recording <code>escalation_step_skipped</code>, when its
+Destination:</p>
+<ul>
+<li>was deleted since the step was saved: <code>destination_deleted</code>;</li>
+<li>is no longer an outgoing webhook in the mode <code>events</code> or <code>both</code>, such as one switched to the template mode:
+  <code>webhook_events_required</code>.</li>
+</ul>
 <h2 id="naming-chains-on-routes-and-teams">Naming chains on Routes and Teams<a class="headerlink" href="#naming-chains-on-routes-and-teams" title="Permanent link">&para;</a></h2>
 <p>Routes and Teams name their chains in <code>chain_entries</code>, as they name their Destinations: each entry is a chain with a
 Severity condition — <code>any</code>, the default, <code>critical</code> or <code>below_critical</code> — checked against the Severity level of the
@@ -3381,8 +3433,9 @@ of the chain's owning Team, else the Organization's; a step whose Severity condi
 step that Pages the On-call of a Schedule with a gap now, and each person a step names who has become a Viewer or been
 disabled since the step was saved are skipped too. Each skip records the Quiet lifecycle event
 <code>escalation_step_skipped</code> in the Timeline, of the kind <code>escalation</code>, with the chain, the step and the reason —
-<code>outside_working_hours</code>, <code>severity</code>, <code>schedule_gap</code>, <code>viewer</code> or <code>disabled</code> — and the chain goes on with its next step
-at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
+<code>outside_working_hours</code>, <code>severity</code>, <code>schedule_gap</code>, <code>viewer</code> or <code>disabled</code>, and for a webhook step
+<code>destination_deleted</code> or <code>webhook_events_required</code> (<a href="#webhook-steps">Webhook steps</a>) — and the chain goes on with its
+next step at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
 steps 3 to the repeat three times in all, then goes on. Outgoing webhooks in the mode events receive
 <code>escalation_step_skipped</code> with the chain, the step and the reason (<a href="../../outgoing-webhooks/events/">Events</a>).</p>
 <p>Steps are timer rows that any replica claims, and each step is a change of its Alert Group made by Muster, so a replica

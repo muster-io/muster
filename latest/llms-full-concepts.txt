@@ -2504,9 +2504,9 @@ wait, send to an outgoing webhook and repeat. Routes and Teams name their chains
 `/api/v1/escalation-chains`, listed in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
 
 Chains run on Alert Groups at the points described under [When chains run](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#when-chains-run): their steps follow one
-another with their waits and repeats, and a step is skipped where it cannot be made. In this version a step that Pages
-or sends is made without Paging anyone yet; the Pages by Mention, the calls and the webhook step follow in later
-versions. Where no chain runs, the ack timeout of a Route keeps working as before.
+another with their waits and repeats, and a step is skipped where it cannot be made. A webhook step sends its event
+to its outgoing webhook ([Webhook steps](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#webhook-steps)). In this version a step that Pages is made without Paging
+anyone yet; the Pages by Mention and the calls follow in later versions. Where no chain runs, the ack timeout of a Route keeps working as before.
 
 ## What an Escalation chain is
 
@@ -2580,6 +2580,26 @@ field of another kind is refused with `422` `unsupported` at it, and a missing o
 A gateway or a webhook Destination that a stored step names may be deleted; the chain warns about it and can still be
 saved.
 
+### Webhook steps
+
+A step "Send to an outgoing webhook" (`webhook`) sends the event `escalation_webhook` to the outgoing webhook
+Destination it names when the step is made. The event carries the Alert Group, as every event does, with the chain and
+the step. The Destination receives it whether or not the Alert Group is delivered there, so an outgoing webhook on
+none of the Alert Group's Routes can be called at a chosen step of a chain. Such a Destination receives no other event
+of the Alert Group, and the events-mode Destinations of the Alert Group's Routes do not receive `escalation_webhook`.
+A Destination that is also one of the Alert Group's receives it once, in order among its other events. The event is
+signed, ordered and delivered at least once like every event
+([escalation_webhook](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#escalation_webhook)).
+
+The Timeline records the Quiet `escalation_webhook`, of the kind `escalation`, with the chain, the step and the
+Destination; nothing appears in a messenger. Like every step that sends, a webhook step can be limited to Working hours
+and to a Severity condition. A running chain skips a webhook step, recording `escalation_step_skipped`, when its
+Destination:
+
+- was deleted since the step was saved: `destination_deleted`;
+- is no longer an outgoing webhook in the mode `events` or `both`, such as one switched to the template mode:
+  `webhook_events_required`.
+
 ## Naming chains on Routes and Teams
 
 Routes and Teams name their chains in `chain_entries`, as they name their Destinations: each entry is a chain with a
@@ -2628,8 +2648,9 @@ of the chain's owning Team, else the Organization's; a step whose Severity condi
 step that Pages the On-call of a Schedule with a gap now, and each person a step names who has become a Viewer or been
 disabled since the step was saved are skipped too. Each skip records the Quiet lifecycle event
 `escalation_step_skipped` in the Timeline, of the kind `escalation`, with the chain, the step and the reason —
-`outside_working_hours`, `severity`, `schedule_gap`, `viewer` or `disabled` — and the chain goes on with its next step
-at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
+`outside_working_hours`, `severity`, `schedule_gap`, `viewer` or `disabled`, and for a webhook step
+`destination_deleted` or `webhook_events_required` ([Webhook steps](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#webhook-steps)) — and the chain goes on with its
+next step at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
 steps 3 to the repeat three times in all, then goes on. Outgoing webhooks in the mode events receive
 `escalation_step_skipped` with the chain, the step and the reason ([Events](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md)).
 
