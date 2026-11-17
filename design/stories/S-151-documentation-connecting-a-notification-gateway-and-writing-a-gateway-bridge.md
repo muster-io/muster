@@ -12,8 +12,8 @@ files_touched:
   - docs/messengers/bridge.md
   - docs/messengers/index.md
   - docs/index.md
+  - docs/concepts/alert-groups.md
   - docs/llms.txt.tmpl
-  - mkdocs.yml
   - web/e2e/screenshots/notification-gateways.spec.ts
 acceptance:
   - "[C-30.FR-11] Messengers → Notification gateways explains what a Notification gateway is and that Muster ships none and never calls by itself; setting one up — a Bridge Connection for a bridge in the role `gateway`, its check showing \"Notification gateway\", a bridge with both roles; confirming a contact in the profile, the code and its limits, what Admins see; how calls combine within `gateway.combine_window`, are retried and acknowledged only while nobody owns the Alert Group, with \"Already taken by …\"; Broken gateways and their runbook; and, until the push of Mentions in Threads is verified (S-160), that at night only a Notification gateway is reliable."
@@ -76,6 +76,8 @@ None.
 - Suggested commit: `docs: connect a notification gateway and write a gateway bridge`.
 - `covers` is C-30.FR-11 in full: every part it names is here; S-161 adds only the Notification rules and the steps of
   chains that call through a gateway.
+- The section "Calls" of the page became "How calls are made", so the link to it from `docs/concepts/alert-groups.md`
+  follows; the page is already in the navigation of `mkdocs.yml`, which S-167 added.
 - Examples use the contacts `+10000000001` and `+10000000002` and the people `alice` and `bob`; no real provider is
   named.
 

@@ -5,7 +5,12 @@ of its own. It is a bridge in the role `gateway`: a service that speaks the [Bri
 with Muster and calls or texts people through your provider. Muster ships no gateway and never calls or texts anyone
 by itself: you run a gateway written for your provider, and Muster sends it the person's contact and a plain text.
 
-A gateway does not depend on a messenger, so it still reaches a person whose messenger is down or silent at night.
+A gateway does not depend on a messenger, so it still reaches a person whose messenger is down or silent at night. Read
+[At night](#at-night) before you rely on a messenger alone for that.
+
+The page follows the way a gateway is used: [connect it](#connect-a-notification-gateway), [let people confirm a
+contact](#contact-for-calls-and-sms), then see [how calls are made](#how-calls-are-made), [how a person acknowledges
+from a call](#acknowledging-from-a-call) and [what to do when a gateway is Broken](#broken-gateways).
 
 In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, and the contacts are numbers such as
 `+10000000001`, which reach nobody.
@@ -21,8 +26,19 @@ A Notification gateway is a [Bridge Connection](bridge.md) whose bridge declares
 3. Check the Connection. The check reads the roles from the bridge's `info` and shows **Notification gateway**; the
    read of the Connection has `"roles": ["gateway"]`, and `GET /api/v1/connections?role=gateway` lists it.
 
+    ![The Notification gateway card of the Connection page of Phone calls: Roles: Notification gateway, and Healthy](../assets/screenshots/messengers/notification-gateways/01-gateway-connection.png){ .screenshot }
+
 A Bridge Connection whose only role is `gateway` cannot be a Destination and is not offered for Account links
-([Roles](bridge.md#roles)). A bridge may have both roles, `messenger` and `gateway`.
+([Roles](bridge.md#roles)). A bridge may have both roles, `messenger` and `gateway`: its Connection is then both a
+messenger, whose channels are Destinations, and a gateway, and the Connection page shows both roles. A bridge that
+once had the role `messenger` and now declares only `gateway` leaves its Destinations without messages, and the
+Connection page warns about them: remove them or change the bridge.
+
+Choose the event delivery mode with the answer to a call in mind. A person who acknowledges in a call is on the line
+while Muster answers, and only a gateway that **pushes** its events, with the Connection's push secret, makes Muster
+answer before it answers the push, so that the answer is read out in the same call. A gateway that is polled still
+works, but the time of the answer depends on Muster's next read of the event, so it may come after the person has hung
+up; see [Answering during a call](write-a-bridge.md#answering-during-a-call).
 
 `muster dev` runs the demo Connection "Example Gateway" on its fake bridge, whose `info` declares only the role
 `gateway`; the fake bridge lists what it was sent at `/_fake/notifications`.
@@ -36,7 +52,16 @@ only a confirmed contact is called.
 ### Add and confirm a contact
 
 A person adds their own contact from their signed-in web session, and confirms it with a code that the gateway
-delivers:
+delivers. In the web UI this is **Profile**, the section **Contact for calls and SMS**, with a block for each
+Notification gateway: type the number in **Phone**, select **Send code**, type the code in **Code** and select
+**Confirm**. The section then shows the contact as "+10000000001 · calls and SMS · confirmed", with **Remove**, and
+the note that a call acknowledges an Alert Group only while nobody has it. **Another number** starts a change, and
+**Send a new code** asks for another code. Without a gateway the section says "Unavailable: a Notification gateway is
+needed (a bridge for calls and SMS)" and links here; a person who may create Connections sees **Connect a bridge** beside it.
+
+![The Contact for calls and SMS section of a profile: the Notification gateway Phone calls, +10000000001 · calls and SMS · confirmed, with Another number and Remove](../assets/screenshots/messengers/notification-gateways/02-confirmed-contact.png){ .screenshot }
+
+The same steps through the API:
 
 1. Add the contact for the gateway (`createMyGatewayContact`, `POST /api/v1/me/gateway-contacts`, with
    `connection_id` and `contact`). The contact is trimmed and holds 1 to 200 characters. Muster stores it
@@ -101,15 +126,15 @@ A contact is personal data, not a secret: the person, Admins and the gateway rea
 Audit log. Deleting a User erases their contacts and codes, and the Audit log then shows their earlier contacts as
 `[erased]`.
 
-## Calls
+## How calls are made
 
 A call is one notification through a gateway to one person, about one or more Alert Groups. Escalation chains and
 Notification rules make calls in a later release; until then `muster dev` queues them with `POST /_dev/gateway-calls`
 on its internal listener.
 
 - The first call to a person through a gateway goes at once. The Pages to the same person through the same gateway
-  that come due while a call to them waits, is being retried, or within 60 seconds after the previous call ended —
-  accepted or not — go together in the next call, once those 60 seconds have passed.
+  that come due while a call to them waits, is being retried, or within 60 seconds (`gateway.combine_window`) after
+  the previous call ended — accepted or not — go together in the next call, once those 60 seconds have passed.
 - Right before its first attempt, a call drops the Alert Groups that were acknowledged, snoozed or resolved meanwhile;
   a call left without any is not sent. From its first attempt on, a call keeps its Alert Groups and its text, and
   takes no more.
@@ -122,6 +147,8 @@ on its internal listener.
   phone ring twice. An answer of the class `transient` is retried within the retry budget of deliveries; a gateway
   that asks to wait (`rate_limited` with `Retry-After`) is waited for, and its waits count toward the time of that
   budget. Retries end when every Alert Group of the call has stopped.
+- A call is never reconciled: it has no Root message to keep up to date, and a call that has gone is not changed
+  afterwards.
 - A text longer than the 1,000 characters of the Bridge protocol lists as many Alert Groups as fit, then "And N
   more.", and always ends with how to acknowledge.
 - A call that the gateway refuses, answers in a way Muster cannot classify, or that used up its retry budget, ends Not
@@ -130,12 +157,8 @@ on its internal listener.
   (`gateway_broken`). Each of its Alert Groups records
   `page_not_delivered` in its Timeline, of the kind **Escalation chains**, naming the person, the gateway and the
   reason; outgoing webhooks in events mode receive it.
-- A gateway that answers a call with a Fatal error — it, or its provider, refuses the token or the credentials — or
-  whose call used up its retry budget becomes **Broken**: the calls that come due while it is Broken are not sent, not
-  even after it recovers, and `MusterNotificationGatewayBroken` is raised. Muster reads its `info` every 5 minutes
-  (`delivery.broken_probe_interval`), and the first success, or a check of the Connection whose step `info` passes,
-  ends the state. The Destinations of the same bridge are not affected. See the
-  [runbook](../operations/runbooks/MusterNotificationGatewayBroken.md).
+- A gateway that answers a call with a Fatal error, or whose call used up its retry budget, becomes
+  [Broken](#broken-gateways).
 
 The text of a call, which names its Alert Groups, is cleared when the call ends; the call itself is kept until every
 Alert Group it is about is removed by `retention.alert_group_summaries`.
@@ -145,7 +168,7 @@ is 1 while a gateway is Broken, and the log has the events `gateway_call_queued`
 `gateway_call_not_delivered`, `gateway_call_dropped`, `gateway_call_failed`, `gateway_broken` and
 `gateway_recovered`, none with the contact or the text.
 
-## Acknowledge from a call
+## Acknowledging from a call
 
 When the person acknowledges in the call — presses 1, for example — the gateway reports `notification_acknowledged` with
 the call's action data. Muster verifies the data, which names the call and its Connection, and acknowledges each Alert
@@ -163,3 +186,32 @@ unanswered, and logged as `bridge_acknowledgement_dropped`. An acknowledgement t
 while the call is being sent, and for two hours after it ended — accepted, or not delivered after an attempt — while
 any of its Alert Groups is open: the hour in which an acknowledgement is acted on, and as long again for the call to
 ring or be retried by the gateway after it was accepted.
+
+## Broken gateways
+
+A gateway becomes **Broken** when a call through it ends with a Fatal error — the bridge, or the provider behind it,
+refuses the token or the credentials (`forbidden`), or the outbound address policy blocks the bridge's address — or
+when a call used up its retry budget (`delivery.transient_budget`). A call that the gateway refuses as `invalid`, a
+contact the provider refuses for good for example, does not make it Broken: that call alone ends Not delivered.
+
+While a gateway is Broken, the calls that come due are not sent and end Not delivered with the reason
+`gateway_broken`, and they are not sent after the gateway recovers either: check the Alert Groups whose Timeline shows
+them. Muster raises the Internal alert `MusterNotificationGatewayBroken`, and the Connection page shows "Broken since"
+with the time and the reason in a banner. It reads the gateway's `info` every 5 minutes (`delivery.broken_probe_interval`);
+the first success, or a check of the Connection whose step `info` passes, ends the state. The Destinations of the same
+bridge are not affected, nor the other way round.
+
+A Broken gateway cannot call anybody about itself: route the Internal alert to a messenger Destination. The
+[runbook of `MusterNotificationGatewayBroken`](../operations/runbooks/MusterNotificationGatewayBroken.md) says how to
+find the cause, fix it and check that calls go through again, with `muster bridge check` and its `--contact` flag.
+
+## At night
+
+A person's phone is quiet at night unless something rings or buzzes it. Whether a Mention in a Thread reply reaches a
+phone as a push, in Mattermost, Slack and Telegram, is not verified yet, and until it is, **only a Notification
+gateway is reliable at night**. A messenger's own push may arrive, or may not, depending on the messenger, its app, the
+settings of the person's phone and the mode of the push notifications.
+
+So, for anybody who must be reached at night, connect a Notification gateway, have them [confirm a
+contact](#contact-for-calls-and-sms), and do not count on a Mention alone. This note is revisited when the facts are
+checked.

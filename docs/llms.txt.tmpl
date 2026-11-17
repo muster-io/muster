@@ -72,6 +72,15 @@
 5. [Unreachable On-calls]({{page "concepts/schedules.md#unreachable-on-calls"}}) and [the iCal feed]({{page "concepts/schedules.md#ical-feed"}}).
 6. Finished when [On call now]({{page "concepts/schedules.md#on-call-now"}}) shows the person you expect for each Team, with no unreachable mark.
 
+### Reach people at night
+
+1. [Notification gateways]({{page "messengers/notification-gateways.md#at-night"}}): {{quote "docs/messengers/notification-gateways.md" "Muster ships no gateway and never calls or texts anyone by itself"}}. Until the push of Mentions in Threads is verified, {{quote "docs/messengers/notification-gateways.md" "only a Notification gateway is reliable at night"}}.
+2. [A gateway bridge]({{page "messengers/write-a-bridge.md#a-gateway-bridge"}}): a gateway is a bridge in the role `gateway`, written for your provider with the Go or the Python library ([The role in `info`]({{page "messengers/write-a-bridge.md#the-role-in-info"}}), [`sendNotification`]({{page "messengers/write-a-bridge.md#sendnotification"}}), [`notification_acknowledged`]({{page "messengers/write-a-bridge.md#notification_acknowledged"}})). {{quote "docs/messengers/write-a-bridge.md" "The answer must come while the person is still on the line, and that needs the **push** mode"}}: see [Answering during a call]({{page "messengers/write-a-bridge.md#answering-during-a-call"}}).
+3. [Connect a Notification gateway]({{page "messengers/notification-gateways.md#connect-a-notification-gateway"}}): create the Bridge Connection and check it; the check shows "Notification gateway".
+4. [Contact for calls and SMS]({{page "messengers/notification-gateways.md#contact-for-calls-and-sms"}}): each person adds a contact in their profile and confirms it with a code; {{quote "docs/messengers/notification-gateways.md" "only a confirmed contact is called"}}.
+5. [How calls are made]({{page "messengers/notification-gateways.md#how-calls-are-made"}}), [Acknowledging from a call]({{page "messengers/notification-gateways.md#acknowledging-from-a-call"}}) and [Broken gateways]({{page "messengers/notification-gateways.md#broken-gateways"}}), with the [runbook]({{page "operations/runbooks/MusterNotificationGatewayBroken.md"}}).
+6. Finished when [`muster bridge check`]({{page "messengers/write-a-bridge.md#muster-bridge-check"}}) with `--contact` passes against the gateway and the profile of a person shows their contact as confirmed.
+
 ### Automate through the API
 
 1. [API]({{page "reference/api.md"}}): the conventions of the API and its tokens. {{quote "docs/reference/api.md" "Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token."}} [Sign-in]({{page "sign-in/index.md#ways-to-sign-in"}}) describes both.
