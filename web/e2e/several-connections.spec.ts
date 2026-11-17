@@ -8,7 +8,7 @@
 // Connections list with the Mattermost server or the Telegram @bot; the Destinations list with "Connection · channel";
 // a Telegram Destination of the second bot; the Route's Destinations with their full labels, the picker's options and
 // one duplicate-chat warning per chat; the delivery section and the Timeline of an Alert Group with the full label as
-// tooltip; the "Delivery problem" filter; the profile's Messenger accounts with the Telegram row, "Relink Telegram"
+// tooltip; the "Delivery problem" filter; the profile's Linked accounts with the Telegram row, "Relink Telegram"
 // and the Mattermost hint; and the user page's Account links — each at 1280 and 360 px wide, in English and Russian.
 // With MUSTER_E2E_SCREENSHOTS set, each page is saved as <name>-desktop.png, <name>-360.png, <name>-ru-desktop.png and
 // <name>-ru-360.png. Everything the spec creates is removed at the end, and every language it switches is restored, so
@@ -676,7 +676,7 @@ inBothLanguages(
     const ru = lang === "ru";
     await page.goto("/profile");
     await expect(
-      page.getByRole("heading", { name: ru ? "Аккаунты в мессенджерах" : "Messenger accounts" }),
+      page.getByRole("heading", { name: ru ? "Привязанные аккаунты" : "Linked accounts" }),
     ).toBeVisible();
     const rows = page.getByTestId("account-link-row");
     await expect(rows).toHaveCount(2);

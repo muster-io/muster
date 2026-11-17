@@ -57,7 +57,7 @@
     "errors": {
       "busy": "The messenger is busy. Try again in a few seconds."
     },
-    "hint": "Button presses from linked accounts act as you.",
+    "hint": "A Page is a Mention in the Thread; it reaches only a linked account. Button presses from linked accounts act as you.",
     "list": {
       "allTelegramBots": "for all Telegram bots",
       "label": "Linked messenger accounts",
@@ -124,7 +124,7 @@
       "relink": "Relink Telegram",
       "start": "Link Telegram"
     },
-    "title": "Messenger accounts",
+    "title": "Linked accounts",
     "unlink": {
       "action": "Unlink",
       "confirm": "Unlink {{account}} from Muster? Presses from this account will no longer act as you.",
@@ -406,6 +406,8 @@
       "buttons": "Buttons",
       "contact": "Contact",
       "contactConfirmed": "Confirmed",
+      "defaultRuleImportant": "Default important rule",
+      "defaultRuleNormal": "Default normal rule",
       "deletedAt": "Deleted at",
       "deliverToTeams": "Also to the Teams from the label",
       "destinations": "Destinations",
@@ -437,6 +439,8 @@
       "role": "Role",
       "rootMessageTemplate": "Root message template",
       "routeOrder": "Order of the routes",
+      "rulesGateway": "Gateway of the call",
+      "rulesState": "Also call through the Notification gateway",
       "runTeamChains": "Run the Teams' Escalation chains",
       "scheduleGapAlert": "Gap alert",
       "scheduleMain": "Main Schedule",
@@ -1251,6 +1255,8 @@
       "mentionSupport": "What each messenger supports",
       "messageLabels": "Labels in the message",
       "minimumSeverity": "Minimum severity",
+      "notificationRules": "Notification rules",
+      "notificationRulesSwitch": "The switch for calls",
       "oidcGroups": "Group mapping",
       "outboundPolicy": "Allowed networks",
       "permissions": "Service account Permissions",
@@ -1907,6 +1913,42 @@
     "recoveringAfterDowntime": "Muster is recovering after downtime. Data may be incomplete until {{time}}.",
     "recoveringAfterDowntimeNoEnd": "Muster is recovering after downtime. Data may be incomplete for a while."
   },
+  "notificationRules": {
+    "callTo": "to {{contact}}",
+    "custom": "These rules are custom: they were set through the API or by an Admin.",
+    "gatewayChoice": "Call through",
+    "hint": "What happens when an Escalation step calls you 'normally' or 'importantly'. Muster sends no direct messages.",
+    "important": "Important",
+    "noContact": "Confirm your contact for calls and SMS below first.",
+    "noContactUser": "{{name}} has no confirmed contact for calls and SMS.",
+    "normal": "Normal",
+    "reset": "Reset to the Organization's rules",
+    "stale": "The rules changed in the meantime. They are shown as they are now; try again.",
+    "switch": {
+      "call": "Call",
+      "noCall": "Don't call",
+      "organization": "As in the Organization",
+      "title": "Also call through the Notification gateway"
+    },
+    "title": "Personal notification rules",
+    "words": {
+      "again_one": "again after {{count}} minute",
+      "again_other": "again after {{count}} minutes",
+      "and": "and",
+      "callGone": "a call to Notification gateway (unavailable)",
+      "callThrough": "a call through {{gateway}}",
+      "callThroughAny": "a call through the Notification gateway",
+      "callTo": "a call to {{contact}}",
+      "mention_one": "a Mention in the Thread",
+      "mention_other": "{{count}} Mentions in the Thread",
+      "mentionRoot": "a Mention in the Thread of the Root message",
+      "repeat": "{{first}} and {{rest}}",
+      "sameTime": "at the same time",
+      "then_one": "then {{what}} after {{count}} minute",
+      "then_other": "then {{what}} after {{count}} minutes",
+      "unanswered": "{{text}} if you did not answer"
+    }
+  },
   "oidc": {
     "check": {
       "authorizationEndpoint": "Authorization endpoint",
@@ -1995,6 +2037,11 @@
       "addInstanceLabel": "Add label",
       "instanceLabels": "Instance labels",
       "instanceLabelsHint": "A new Alert that differs from a firing one only in these labels is a Replacement: it stays in the same Alert Group and the Timeline names the label that changed."
+    },
+    "defaultRules": {
+      "hint": "They change through the API until an editor comes.",
+      "note": "Change them with updateOrganization, in the field notification_rules; a User who follows the Organization's rules gets the change at once.",
+      "title": "Default notification rules"
     },
     "evaluationNote": "Changes apply to Alerts evaluated from now on; open Alert Groups keep their status.",
     "general": {
@@ -3521,6 +3568,10 @@
   "userMenu": {
     "label": "User menu: {{name}}",
     "signOut": "Sign out"
+  },
+  "userNotificationRules": {
+    "hint": "What happens when an Escalation step calls {{name}} 'normally' or 'importantly'. Admins change the rules.",
+    "title": "Notification rules"
   },
   "users": {
     "actions": {

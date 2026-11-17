@@ -288,3 +288,78 @@ test("a user's page shows their contacts at Notification gateways, with no way t
   await expect(deleted).toContainText("Contact:");
   await expect(deleted).toContainText(phone);
 });
+
+test("a user's page shows their Notification rules with the switch for an Admin, who changes them with a diff in the Audit log, and read-only without users:write", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const login = "nr-sergey";
+  const phone = "+10000000006";
+  const admin = await adminApi();
+  let userId = "";
+  try {
+    userId = await ensureLocalUser(admin, login, "responder");
+    await admin.setUserNotificationRules(userId, { state: "organization" });
+    await confirmContact(login, await ensureGateway(admin), phone);
+  } finally {
+    await admin.dispose();
+  }
+  await signInAdmin(page);
+  await page.goto(`/admin/users/${userId}`);
+  const card = page.getByTestId("user-notification-rules");
+  await expect(card.getByRole("heading", { name: "Notification rules" })).toBeVisible();
+  await expect(card.getByTestId("rule-normal")).toHaveText(
+    "Normal: a Mention in the Thread of the Root message.",
+  );
+  await expect(card.getByTestId("rule-important")).toHaveText(
+    "Important: a Mention in the Thread and again after 5 minutes if you did not answer.",
+  );
+  await expect(card.getByRole("radio", { name: "As in the Organization" })).toBeChecked();
+  await card.getByRole("radio", { name: "Call", exact: true }).click();
+  await expect(card.getByTestId("rule-important")).toHaveText(
+    `Important: a Mention in the Thread and a call to ${phone} at the same time, again after 5 minutes.`,
+  );
+  await expect(card.getByRole("radio", { name: "Call", exact: true })).toBeChecked();
+  await shot(page, "user-notification-rules");
+
+  // The Audit log shows the change with its diff.
+  await page.goto("/admin/audit-log?action=notification_rules.updated");
+  const entries = page.getByRole("table", { name: "Audit log" }).getByRole("row");
+  const updated = entries.filter({ hasText: login }).first();
+  await expect(updated).toContainText("notification_rules.updated");
+  await expect(updated.getByTestId("audit-diff")).toContainText(
+    /Also call through the Notification gateway:\s*organization\s*→\s*changed to\s*call/,
+  );
+  await expect(updated.getByTestId("audit-diff")).toContainText("Important:");
+  await shot(page, "audit-notification-rules");
+
+  // The Admin puts it back.
+  await page.goto(`/admin/users/${userId}`);
+  await card.getByRole("radio", { name: "As in the Organization" }).click();
+  await expect(card.getByRole("radio", { name: "As in the Organization" })).toBeChecked();
+  await expect(card.getByTestId("rule-important")).toHaveText(
+    "Important: a Mention in the Thread and again after 5 minutes if you did not answer.",
+  );
+
+  // Without users:write the section is read-only: the switch cannot be pressed.
+  const context = await browser.newContext();
+  const reader = await context.newPage();
+  await reader.route("**/api/v1/sessions/current", async (route) => {
+    const response = await route.fetch();
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "permissions" in body) {
+      const permissions = Array.isArray(body.permissions) ? body.permissions : [];
+      body.permissions = permissions.filter((p) => p !== "users:write");
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await signInAdmin(reader);
+  await reader.goto(`/admin/users/${userId}`);
+  const readOnly = reader.getByTestId("user-notification-rules");
+  await expect(readOnly.getByTestId("rule-normal")).toBeVisible();
+  await expect(readOnly.getByRole("radio", { name: "As in the Organization" })).toBeChecked();
+  await expect(readOnly.getByRole("radio", { name: "Call", exact: true })).toBeDisabled();
+  await expect(readOnly.getByRole("radio", { name: "Don't call" })).toBeDisabled();
+  await context.close();
+});

@@ -19,7 +19,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   type Api,
+  TEAM_SPEC_PASSWORD,
   adminApi,
+  ensureLocalUser,
   fakeIntegration,
   fam,
   notify,
@@ -529,6 +531,83 @@ test("Alert handling has no Critical is Urgent, and saves the Instance labels wi
   expect(body).toMatchObject({ instance_labels: expect.arrayContaining(["zone"]) });
   await expect(page.getByTestId("alert-handling-status")).toHaveText("Saved.");
   expect(csp).toEqual([]);
+});
+
+/** The Organization's default Notification rules with a wait of the important rule in minutes. */
+function rules(minutes: number) {
+  return {
+    normal: [{ kind: "mention" }],
+    important: [
+      { kind: "mention" },
+      { kind: "wait", wait_seconds: minutes * 60 },
+      { kind: "mention" },
+    ],
+  };
+}
+
+test("Alert handling shows the default Notification rules in words, and a change through the API shows there and in a profile that follows them", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const login = "nr-ivan";
+  const admin = await adminApi();
+  const me = await admin.call<{ user: { language?: Language } }>("GET", "/api/v1/me");
+  const language = me.user.language ?? null;
+  try {
+    const userId = await ensureLocalUser(admin, login, "responder");
+    await admin.setUserNotificationRules(userId, { state: "organization" });
+    await admin.setNotificationRules(rules(5));
+    await signInAdmin(page);
+    await page.goto("/admin/organization/alert-handling");
+    const card = page.getByTestId("default-notification-rules");
+    await expect(card.getByRole("heading", { name: "Default notification rules" })).toBeVisible();
+    await expect(card.getByTestId("default-rule-normal")).toHaveText(
+      "Normal: a Mention in the Thread of the Root message.",
+    );
+    await expect(card.getByTestId("default-rule-important")).toHaveText(
+      "Important: a Mention in the Thread and again after 5 minutes if you did not answer.",
+    );
+    await expect(card).toContainText("They change through the API until an editor comes.");
+    await expect(card.getByTestId("default-rules-note")).toContainText("updateOrganization");
+    await expect(
+      card.getByRole("link", { name: /^Learn more: Notification rules/ }),
+    ).toHaveAttribute(
+      "href",
+      "https://muster-io.github.io/muster/latest/concepts/notification-rules/",
+    );
+    await shot(page, "organization-default-rules");
+
+    // The wait of the important rule changes through the API: the page and a profile that follows it show it.
+    await admin.setNotificationRules(rules(10));
+    await page.reload();
+    await expect(card.getByTestId("default-rule-important")).toHaveText(
+      "Important: a Mention in the Thread and again after 10 minutes if you did not answer.",
+    );
+    const context = await browser.newContext();
+    const ivan = await context.newPage();
+    await signIn(ivan, login, TEAM_SPEC_PASSWORD);
+    await ivan.goto("/profile");
+    await expect(ivan.getByTestId("rule-important")).toHaveText(
+      "Important: a Mention in the Thread and again after 10 minutes if you did not answer.",
+    );
+    await context.close();
+
+    // Russian.
+    await adminLanguage("ru");
+    await page.goto("/admin/organization/alert-handling");
+    await expect(
+      card.getByRole("heading", { name: "Правила уведомлений по умолчанию" }),
+    ).toBeVisible();
+    await expect(card.getByTestId("default-rule-important")).toHaveText(
+      "Важное: упоминание в треде и ещё раз через 10 минут, если вы не ответили.",
+    );
+    await expect(card).toContainText("Пока их меняют через API; редактор появится позже.");
+  } finally {
+    await admin.setNotificationRules(rules(5));
+    await adminLanguage(language);
+    await admin.dispose();
+  }
 });
 
 test("Severity levels lists the unmapped value P5 and maps it", async ({ page }) => {

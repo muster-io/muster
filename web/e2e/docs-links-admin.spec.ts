@@ -303,6 +303,21 @@ test("Learn more beside the fields of the admin forms", async ({ page }) => {
       "messengers/proxies/",
       "#what-the-outbound-address-policy-checks",
     ],
+    [
+      "/admin/organization/alert-handling",
+      "Notification rules",
+      "concepts/notification-rules/",
+      "",
+    ],
+    [`/admin/users/${ids.admin}`, "Notification rules", "concepts/notification-rules/", ""],
+    [
+      `/admin/users/${ids.admin}`,
+      "The switch for calls",
+      "concepts/notification-rules/",
+      "#the-switch",
+    ],
+    ["/profile", "Notification rules", "concepts/notification-rules/", ""],
+    ["/profile", "The switch for calls", "concepts/notification-rules/", "#the-switch"],
   ] as const) {
     await page.goto(address);
     const link = docsLink(page, "Learn more", about);

@@ -238,7 +238,7 @@ test("an alert reaches Telegram and is acknowledged from there", async ({ page }
     text: `/start ${start}`,
   });
   await expect(link).toBeHidden({ timeout: 15_000 });
-  const accounts = cardOf(page.getByRole("heading", { name: "Messenger accounts", exact: true }));
+  const accounts = cardOf(page.getByRole("heading", { name: "Linked accounts", exact: true }));
   await expect(accounts.getByTestId("account-link-summary")).toHaveText(
     "Telegram · @oncall_admin · for all Telegram bots",
   );

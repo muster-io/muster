@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Messenger accounts in the profile and Account links on the user page against `muster dev`: the Verification steps of
+// Linked accounts in the profile and Account links on the user page against `muster dev`: the Verification steps of
 // their story. Alice links Telegram through the deep link (the fake Telegram server sends her /start) and Mattermost
 // with the code the bot sent (read from the fake Mattermost server), Bob links his Mattermost account so that Alice's
 // try is refused, Alice unlinks, the Admin removes her last link from her user page — her open "Relink Telegram" dialog
@@ -192,7 +192,7 @@ async function profileOf(browser: Browser, login: string): Promise<{ page: Page;
   const csp = watchCsp(page);
   await signIn(page, login, PASSWORD);
   await page.goto("/profile");
-  await expect(page.getByRole("heading", { name: "Messenger accounts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Linked accounts" })).toBeVisible();
   return { page, csp };
 }
 
@@ -611,10 +611,10 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   await bob.setViewportSize({ width: 360, height: 740 });
   await bob.goto("/profile");
   await bob.getByLabel("Language").selectOption("ru");
-  await expect(bob.getByRole("heading", { name: "Аккаунты в мессенджерах" })).toBeVisible();
+  await expect(bob.getByRole("heading", { name: "Привязанные аккаунты" })).toBeVisible();
   await russianBridgeDialogs(bob);
   await bob.getByLabel("Язык").selectOption("en");
-  await expect(bob.getByRole("heading", { name: "Messenger accounts" })).toBeVisible();
+  await expect(bob.getByRole("heading", { name: "Linked accounts" })).toBeVisible();
 
   expect(csp).toEqual([]);
   expect(adminCsp).toEqual([]);
@@ -695,7 +695,7 @@ test("links a Slack account by email and code, and unlinks it", async ({ page })
     const csp = watchCsp(page);
     await signInAdmin(page);
     await page.goto("/profile");
-    await expect(page.getByRole("heading", { name: "Messenger accounts" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Linked accounts" })).toBeVisible();
 
     // 5. "Link Slack" → "ui": the email, "Send code", the code from the direct message to alice.
     await page.getByRole("button", { name: "Link Slack" }).click();

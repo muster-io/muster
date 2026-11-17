@@ -26,6 +26,13 @@ files_touched:
   - web/e2e/users.spec.ts
   - web/e2e/organization-settings.spec.ts
   - web/e2e/docs-links-admin.spec.ts
+  - web/e2e/support.ts
+  - web/src/test/fixtures/notification-rules.ts
+  - web/src/components/profile-account-links.tsx
+  - web/e2e/account-links.spec.ts
+  - web/e2e/several-connections.spec.ts
+  - web/e2e/screenshots/account-links.spec.ts
+  - web/e2e/screenshots/first-alert.spec.ts
 acceptance:
   - "[C-31.FR-5, C-31.AC-5, C-30.FR-9] In a real browser the profile shows \"Linked accounts\" first with \"A Page is a Mention in the Thread; it reaches only a linked account.\", then \"Personal notification rules\" with its hint, \"Normal: a Mention in the Thread of the Root message.\" and \"Important: a Mention in the Thread and again after 5 minutes if you did not answer.\" as the User's current sequences in words, and the switch \"Also call through the Notification gateway\" with \"As in the Organization\", \"Call\" and \"Don't call\"; without a gateway the switch is unavailable with \"Unavailable: a Notification gateway is needed (a bridge for calls and SMS)\"; with the fake gateway and no confirmed contact it says \"Confirm your contact for calls and SMS below first.\"; once the contact is confirmed it is available; in English and in Russian (`notification-rules-section.test.tsx`, `profile.spec.ts`)."
   - "[C-31.FR-5, C-31.AC-6] Choosing \"Call\" shows the important rule as \"a Mention in the Thread and a call to {contact} at the same time, again after 5 minutes\" — exactly a Mention with a call, a wait of 5 minutes and a Mention — and \"As in the Organization\" brings back the Organization's rules; with two gateways at which the User has confirmed contacts, the profile asks which one the call uses next to the switch; after an Admin set three Mentions through the API, the profile shows them in words without the switch, with \"Reset to the Organization's rules\", which brings the switch back to \"As in the Organization\" (`notification-rules.test.ts`, `profile.spec.ts`)."
@@ -120,6 +127,9 @@ Run `make dev`; petr is a Responder with a Mattermost Account link. Remove the d
 ## Notes
 
 - The Russian texts follow the vocabulary settled in S-162 (Open question 1).
+- The Account links card of the profile (`profile-account-links.tsx`) takes the title "Linked accounts" and keeps its
+  sentence about button presses after the new hint; the specs that looked for the heading "Messenger accounts" follow
+  the new title. The documentation pages that say "open Messenger accounts" are S-161's to update.
 - Suggested commit: `feat(web): show and switch notification rules in the profile and the organization`.
 - The rules in words follow the mockup's sentences and the sequence, so custom rules read naturally too; a call names
   the contact of its gateway, or "Notification gateway" for an action whose contact is gone, marked unavailable.
