@@ -202,6 +202,7 @@ commands of Bridges, the UI and the API keep every action.
 | Keyring | activation refused | "Replicas {names} do not hold key {id} yet." | C-20 |
 | Teams page | values of the Team label that name no Team | "Unknown values of {team label}: Alerts arrived with these values, but there is no such Team: no Destinations of a Team are added and nobody is Paged." | C-25 |
 | Team page, Team mention · Destination form, an unavailable Mention target | the Connection cannot mention a group | "Needs the scope usergroups:read" · "The bridge declares no group mentions" · "Telegram cannot mention everyone or groups" | C-25, C-28 |
+| Team page, Team mention · Destination form, an unavailable Mention target | the messenger has no such mention of everyone, or the bridge does not declare it | "{messenger} has no {token}" (`@everyone` in Mattermost, `@all` and `@everyone` in Slack) · "The bridge does not declare {token}" | C-28 |
 | Route form | "Also to the Teams from the label" on and the Team label not in the Group key | "Alerts of different Teams with the same key share one Alert Group, shown in the channels of all of them. Add {team label} to the key if each Team needs its own." | C-26 |
 | Route form | it names an Escalation chain and no Destination, and does not deliver to Teams | "Only a Notification gateway can reach anyone from this Escalation chain: the Route has no Destination." | C-32 |
 | Destination page; Alert Group page, delivery event | a Mention entry names a person without an Account link | "Mention not delivered: @{login}, {entry}, has no linked {messenger} account" | C-28 |
@@ -262,7 +263,9 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Route, Group key and its preview | `field.group_key` | `concepts/routes-and-group-keys.md#group-keys` | S-109 |
 | Route, Route profile · Urgent | `field.route_profile` · `field.urgent` | `concepts/routes-and-group-keys.md#route-profiles` · `#urgent` | S-109 |
 | Route, message template | `field.template` | `configure/messages-and-templates.md#the-template-language` | S-109 |
-| Destination, Mention settings | `field.mentions` | `configure/messages-and-templates.md#whom-a-message-mentions` | S-109 |
+| Destination, Mentions | `field.mentions` | `concepts/mentions.md#mention-entries` | S-143 |
+| Destination, What each messenger supports | `field.mention_support` | `concepts/mentions.md#what-each-messenger-supports` | S-143 |
+| Team, How to mention the Team | `field.team_mentions` | `concepts/teams.md#team-mentions` | S-143 |
 | Route, delivery (Loud and Quiet) | `field.loud_quiet` | `concepts/loud-and-quiet.md` | S-109 |
 | Route, ack timeout and Reminders | `field.timers` | `concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge` | S-109 |
 | Route, Snooze durations | `field.snooze` | `concepts/statuses-and-commands.md#snooze-presets` | S-109 |

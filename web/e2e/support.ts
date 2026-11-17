@@ -192,6 +192,24 @@ export async function fbr<T = unknown>(method: string, path: string, body?: unkn
   return parse<T>(text === "" ? "null" : text);
 }
 
+/** The capabilities of the fake bridge by default: no group mentions and no mentions of everyone in the chat. */
+export const DEFAULT_BRIDGE_CAPABILITIES = {
+  buttons: {
+    max_per_message: 10,
+    max_per_row: 5,
+    data_max_bytes: 64,
+    styles: ["primary", "danger", "neutral", "success"],
+  },
+  thread_messages: "all",
+  direct_messages: { bot_can_start: true },
+  private_answers: ["ephemeral", "popup"],
+  native_mentions: true,
+  quiet_messages: true,
+  status_color: true,
+  delete: { max_age_seconds: null },
+  deletion_events: true,
+} as const;
+
 /**
  * Puts back what the specs change in the fake bridge's configuration, which both of its bots share: protocol version
  * 1, user lookup by login, no link template, edits that never expire, both event delivery modes and nobody the bots
@@ -200,6 +218,7 @@ export async function fbr<T = unknown>(method: string, path: string, body?: unkn
 export async function resetFakeBridge(): Promise<void> {
   await fbr("PUT", "/config", {
     protocol_version: "1",
+    capabilities: DEFAULT_BRIDGE_CAPABILITIES,
     user_lookup: "login",
     link_url_template: null,
     limits: { max_body_length: 4000, edit_max_age_seconds: null },
@@ -281,6 +300,10 @@ export async function fsl<T = unknown>(method: string, path: string, body?: unkn
   expect(res.ok, `${method} ${path}: ${res.status} ${text}`).toBe(true);
   return parse<T>(text === "" ? "null" : text);
 }
+
+/** The scopes of the fake Slack server's bot tokens by default, which lack usergroups:read. */
+export const SLACK_DEFAULT_SCOPES =
+  "chat:write,im:write,channels:read,groups:read,users:read,users:read.email";
 
 /**
  * Puts back what the specs change in the configuration of the fake Slack server's second app: its default scopes and
@@ -1392,4 +1415,168 @@ export async function seedOnCall(
     schedules: { devops: devopsMain.id, payments: paymentsMain.id },
     users: { ivan, petr },
   };
+}
+
+/** A Mention entry as the API takes it. */
+export interface MentionEntryInput {
+  target: Record<string, unknown>;
+  events?: string[];
+}
+
+/** Replaces the Mention entries of a Destination, as the Destination page saves them: the rest goes as it was read. */
+export async function setMentionEntries(
+  admin: Api,
+  destinationId: string,
+  entries: MentionEntryInput[],
+): Promise<void> {
+  const read = await admin.call<Record<string, unknown> & { etag: string }>(
+    "GET",
+    `/api/v1/destinations/${destinationId}`,
+  );
+  const {
+    id: _id,
+    etag,
+    mentions: _mentions,
+    mention_entries: _entries,
+    mention_warnings: _warnings,
+    health: _health,
+    routes: _routes,
+    teams: _teams,
+    created_at: _created,
+    owning_team: _owner,
+    team_name: _teamName,
+    channel_name: _channelName,
+    ...input
+  } = read;
+  await admin.call(
+    "PUT",
+    `/api/v1/destinations/${destinationId}`,
+    { ...input, mention_entries: entries },
+    { "If-Match": etag },
+  );
+}
+
+/** Sets the Team mentions of the Team with this slug, replacing them as a whole. */
+export async function setTeamMentions(
+  admin: Api,
+  slug: string,
+  mentions: { connection_id: string; group: string; group_id?: string }[],
+): Promise<void> {
+  const list = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  const id = list.items.find((t) => t.slug === slug)?.id;
+  expect(id, `the Team ${slug}`).toBeDefined();
+  const team = await admin.call<{ name: string; description: string; etag: string }>(
+    "GET",
+    `/api/v1/teams/${id}`,
+  );
+  await admin.call(
+    "PUT",
+    `/api/v1/teams/${id}`,
+    {
+      name: team.name,
+      slug,
+      description: team.description,
+      own_working_hours: false,
+      team_mentions: mentions,
+    },
+    { "If-Match": team.etag },
+  );
+}
+
+/** The names a seedMentions set-up starts with prefix. */
+export function mentionNames(prefix: string): {
+  route: string;
+  integration: string;
+  category: string;
+} {
+  return { route: `${prefix}route`, integration: `${prefix}int`, category: `${prefix}cat` };
+}
+
+/** Deletes what seedMentions made, the Route and the Integration first, then the Teams, Schedules and Connection. */
+export async function removeMentions(admin: Api, prefix: string): Promise<void> {
+  const names = mentionNames(prefix);
+  await removeRoute(admin, names.route);
+  await removeIntegration(admin, names.integration);
+  await removeOnCall(admin, prefix);
+}
+
+/**
+ * Sets up what the Mentions grid and the Timeline show, from scenario 4 of C-28: the Teams, Schedules and Connection of
+ * seedOnCall (petr is On-call of "<prefix>payments" and has no Mattermost Account link), the Team mention
+ * `payments_team` of "<prefix>payments" for its Connection, none for "<prefix>search", the Destination
+ * "<prefix>payments-notice" with the entries "On-call of the Team from the label" and "Team from the label", and an
+ * Alert Group of team="<prefix>payments" delivered there, whose Loud message could not mention petr.
+ */
+export async function seedMentions(prefix: string): Promise<{
+  destinationId: string;
+  connectionId: string;
+  alertGroupId: string;
+  teams: { devops: string; payments: string; search: string };
+}> {
+  const names = mentionNames(prefix);
+  const on = onCallNames(prefix);
+  const admin = await adminApi();
+  try {
+    await removeMentions(admin, prefix);
+    const seeded = await seedOnCall(admin, prefix);
+    const connectionId = await connectionNamed(admin, on.connection);
+    await setTeamMentions(admin, on.payments, [
+      { connection_id: connectionId, group: "payments_team" },
+    ]);
+    const destinations = await admin.call<{ items: { id: string; name: string }[] }>(
+      "GET",
+      "/api/v1/destinations?limit=500",
+    );
+    const destinationId = destinations.items.find((d) => d.name === on.destination)?.id ?? "";
+    expect(destinationId, `the Destination ${on.destination}`).not.toBe("");
+    await setMentionEntries(admin, destinationId, [
+      { target: { kind: "on_call_of_teams_from_label" } },
+      { target: { kind: "teams_from_label" } },
+    ]);
+    const profiles = await admin.call<{ items: { id: string; policy: unknown }[] }>(
+      "GET",
+      "/api/v1/route-profiles",
+    );
+    const run = Math.random().toString(36).slice(2, 7);
+    const category = `${names.category}-${run}`;
+    await admin.call("POST", "/api/v1/routes", {
+      name: names.route,
+      matchers: [{ label: "category", op: "=", value: category }],
+      group_key: ["alertname", "team"],
+      destination_entries: [{ destination_id: destinationId }],
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
+    });
+    const integrationId = await fakeIntegration(names.integration);
+    await fam("PUT", `/groups/${names.integration}`, {
+      receiver: names.integration,
+      route: "{}",
+      labels: { job: prefix },
+    });
+    const alertName = `${prefix}Queue${run}`;
+    await fam("PUT", `/groups/${names.integration}/alerts/a`, {
+      labels: { alertname: alertName, category, team: on.payments, severity: "warning" },
+      annotations: { summary: `${alertName} is firing` },
+    });
+    await notify(integrationId, names.integration, { reason: "first notification" });
+    const alertGroupId = await alertGroupOf(integrationId, alertName);
+    // The Loud message is delivered by a worker: the warning of the Destination is what shows it was.
+    await expect
+      .poll(
+        async () =>
+          (
+            await admin.call<{ mention_warnings: unknown[] }>(
+              "GET",
+              `/api/v1/destinations/${destinationId}`,
+            )
+          ).mention_warnings.length,
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(0);
+    return { destinationId, connectionId, alertGroupId, teams: seeded.teams };
+  } finally {
+    await admin.dispose();
+  }
 }

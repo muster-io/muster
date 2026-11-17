@@ -12,13 +12,21 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import {
   APP,
   type Api,
+  SLACK_DEFAULT_SCOPES,
   adminApi,
   TEAM_SPEC_PASSWORD,
   alertGroupOf,
+  checkConnection,
+  connectionNamed,
   createRoute,
   createRoutingRoute,
+  createSlackConnection,
   dropRouting,
   ensureLocalUser,
+  ensureTeam,
+  fsl,
+  removeSlackConnection,
+  resetFakeSlack,
   seedRouting,
   deleteRoute,
   expectNoHorizontalScroll,
@@ -1132,4 +1140,126 @@ test("the Teams list shows each Team's On-call, and the Team page its On call no
     await admin.dispose();
   }
   expect(csp).toEqual([]);
+});
+
+const MENTION_HINT =
+  "The entry 'Team' of a Destination's Mentions is this Team mention. Without one, nobody is mentioned, and the On-call is not mentioned instead.";
+
+test("How to mention the Team has a field per Connection or the reason it has none, and the Teams list shows each Team mention", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  const payments = "tmn-payments";
+  const search = "tmn-search";
+  try {
+    await removeTeamsBySlug(admin, [payments, search]);
+    await removeSlackConnection(admin, "tmn-sl");
+    await resetFakeSlack();
+    const paymentsId = await ensureTeam(admin, payments);
+    await ensureTeam(admin, search);
+    await createSlackConnection(admin, "tmn-sl");
+    await ensureUser(admin, RU_ADMIN, "admin");
+
+    // 4. Teams → "payments" → "How to mention the Team": a field for Mattermost, the reasons of the others.
+    await signInAdmin(page);
+    await page.goto(`/teams/${paymentsId}`);
+    const mentions = page.getByTestId("team-mentions-section");
+    await expect(
+      mentions.getByRole("heading", { name: "How to mention the Team", level: 2 }),
+    ).toBeVisible();
+    const field = (name: string) =>
+      mentions.getByTestId("team-mention-field").filter({ hasText: name });
+    const reason = (name: string) => field(name).getByTestId("team-mention-reason");
+    await expect(field("Example Mattermost").getByRole("textbox")).toHaveValue("");
+    await expect(reason("tmn-sl")).toHaveText("Needs the scope usergroups:read");
+    await expect(reason("Example Telegram")).toHaveText(
+      "Telegram cannot mention everyone or groups",
+    );
+    await expect(reason("Example Bridge")).toHaveText("The bridge declares no group mentions");
+    await expect(mentions.getByTestId("team-mentions-hint")).toHaveText(MENTION_HINT);
+    await field("Example Mattermost").getByRole("textbox").fill("payments_team");
+    await mentions.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(mentions.getByTestId("team-mentions-status")).toHaveText("Saved.");
+    await shot(page, "team-how-to-mention");
+
+    // The Slack Connection's check finds usergroups:read: its field lists the user groups, and one is saved with its id.
+    await fsl("PUT", "/config", { scopes: { b: `${SLACK_DEFAULT_SCOPES},usergroups:read` } });
+    await checkConnection(admin, await connectionNamed(admin, "tmn-sl"));
+    await page.reload();
+    await expect(field("tmn-sl").getByRole("combobox")).toBeVisible();
+    await field("tmn-sl")
+      .getByRole("combobox")
+      .selectOption({ label: "Payments team (@payments-team)" });
+    await mentions.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(mentions.getByTestId("team-mentions-status")).toHaveText("Saved.");
+    const stored = await admin.call<{
+      team_mentions: { group: string; group_id?: string; connection: { name: string } }[];
+    }>("GET", `/api/v1/teams/${paymentsId}`);
+    expect(stored.team_mentions.map((m) => [m.connection.name, m.group, m.group_id ?? ""])).toEqual(
+      [
+        ["Example Mattermost", "payments_team", ""],
+        ["tmn-sl", "payments-team", "S0FAKEPAYTEAM"],
+      ],
+    );
+
+    // The Teams list shows each Team's Team mentions, "no Team mention" for the Team without one.
+    await page.goto("/teams");
+    const table = page.getByRole("table", { name: "Teams" });
+    await expect(table.getByRole("columnheader", { name: "Team mention" })).toBeVisible();
+    const rowOf = (slug: string) => table.getByRole("row").filter({ hasText: slug });
+    await expect(rowOf(payments).getByTestId("team-mentions-cell")).toContainText("@payments_team");
+    await expect(rowOf(payments).getByTestId("team-mentions-cell")).toContainText("@payments-team");
+    await expect(rowOf(search).getByTestId("team-mention-none")).toHaveText("no Team mention");
+    await shot(page, "teams-list-mentions");
+    expect(csp).toEqual([]);
+
+    // The same in Russian at phone width.
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, RU_ADMIN, PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/teams");
+    const ruTable = ru.getByRole("table", { name: "Команды" });
+    await expect(ruTable.getByRole("columnheader", { name: "Упоминание команды" })).toBeVisible();
+    await expect(
+      ruTable.getByRole("row").filter({ hasText: search }).getByTestId("team-mention-none"),
+    ).toHaveText("упоминания нет");
+    await ru.goto(`/teams/${paymentsId}`);
+    const ruMentions = ru.getByTestId("team-mentions-section");
+    await expect(
+      ruMentions.getByRole("heading", { name: "Как упоминать команду", level: 2 }),
+    ).toBeVisible();
+    await expect(ruMentions.getByTestId("team-mentions-hint")).toHaveText(
+      "Строка «Команда» в упоминаниях места доставки — это упоминание команды для этого подключения. Если его нет, команду не упоминают и дежурного вместо неё не зовут.",
+    );
+    await expect(
+      ruMentions
+        .getByTestId("team-mention-field")
+        .filter({ hasText: "Example Telegram" })
+        .getByTestId("team-mention-reason"),
+    ).toHaveText("В Telegram нет упоминания всех и групп");
+    await expect(
+      ruMentions
+        .getByTestId("team-mention-field")
+        .filter({ hasText: "Example Bridge" })
+        .getByTestId("team-mention-reason"),
+    ).toHaveText("Мост не объявил групповые упоминания");
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "team-how-to-mention-ru-360");
+    expect(ruCsp).toEqual([]);
+    await ru.goto("/profile");
+    await ru.getByLabel("Язык").selectOption("en");
+    await context.close();
+  } finally {
+    await resetFakeSlack();
+    await removeSlackConnection(admin, "tmn-sl");
+    await removeTeamsBySlug(admin, [payments, search]);
+    await admin.dispose();
+  }
 });

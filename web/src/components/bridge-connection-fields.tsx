@@ -346,6 +346,16 @@ export function bridgeFeatures(t: TFunction, c: BridgeCapabilities): string[] {
   if (c.native_mentions === true) {
     features.push(t("connections.bridge.features.nativeMentions"));
   }
+  if (c.group_mentions === true) {
+    features.push(t("connections.bridge.features.groupMentions"));
+  }
+  if (c.everyone_mentions !== undefined && c.everyone_mentions.length > 0) {
+    features.push(
+      t("connections.bridge.features.everyoneMentions", {
+        tokens: c.everyone_mentions.map((word) => `@${word}`).join(", "),
+      }),
+    );
+  }
   if (c.quiet_messages === true) {
     features.push(t("connections.bridge.features.quietMessages"));
   }

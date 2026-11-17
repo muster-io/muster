@@ -25,14 +25,29 @@ files_touched:
   - web/src/routes/teams.index.tsx
   - web/src/components/timeline.tsx
   - web/src/components/timeline.test.tsx
-  - web/src/components/connection-check.tsx
+  - web/src/components/bridge-connection-fields.tsx
+  - web/src/components/bridge-connection-fields.test.tsx
   - web/src/components/audit-diff.tsx
+  - web/src/components/mattermost-destination-fields.tsx
+  - web/src/components/slack-destination-fields.tsx
+  - web/src/components/slack-destination-fields.test.tsx
+  - web/src/components/telegram-destination-fields.tsx
+  - web/src/components/telegram-destination-fields.test.tsx
+  - web/src/components/bridge-destination-fields.tsx
+  - web/src/components/bridge-destination-fields.test.tsx
+  - web/src/components/webhook-destination-fields.tsx
+  - web/src/components/webhook-destination-fields.test.tsx
+  - web/src/routes/destinations.$destinationId.tsx
+  - web/src/test/text.ts
   - web/src/lib/docs-links.json
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - design/prd/l1/reference.md
+  - web/e2e/support.ts
   - web/e2e/destinations.spec.ts
   - web/e2e/telegram-destination.spec.ts
+  - web/e2e/bridge-destination.spec.ts
+  - web/e2e/bridge-connection.spec.ts
   - web/e2e/teams.spec.ts
   - web/e2e/alert-group-page.spec.ts
   - web/e2e/docs-links-forms.spec.ts
@@ -42,7 +57,7 @@ acceptance:
   - "[C-28.FR-3, C-12.FR-3] Above the grid the Destination's warnings read \"Mention not delivered: @bob, On-call of the Team from the label, has no linked Mattermost account\" or \"… the bridge cannot mention people\"; the Alert Group's Timeline shows the delivery event \"Mention not delivered\" with the person, the entry, the event and the reason (`timeline.test.tsx`, `alert-group-page.spec.ts`)."
   - "[C-25.FR-8, C-25.AC-10] The Team page's \"How to mention the Team\" has one field per Connection — the Mattermost group's name, the Slack user group picked from the Connection's groups, the bridge's group name — or the reason it has none (\"needs the scope usergroups:read\", \"the bridge declares no group mentions\", \"Telegram cannot mention everyone or groups\"), with the hint \"The entry 'Team' of a Destination's Mentions is this Team mention. Without one, nobody is mentioned, and the On-call is not mentioned instead.\"; the Teams list shows each Team's Team mentions or \"no Team mention\", in English and in Russian (`team-mentions-editor.test.tsx`, `teams.spec.ts`)."
   - "[C-28.FR-2] When a Connection loses an ability later — a Slack Connection whose check no longer finds `usergroups:read` — its Destination's user group entry stays, is shown greyed with \"Needs the scope usergroups:read\" and mentions nobody, and the Destination page warns about it above the grid (`mention-entries-editor.test.tsx`, `destinations.spec.ts`)."
-  - "[C-28.FR-2] The check of a Bridge Connection lists its group mentions and the mentions of everyone in the chat among the features of `info` (`destinations.spec.ts`)."
+  - "[C-28.FR-2] The check of a Bridge Connection lists its group mentions and the mentions of everyone in the chat among the features of `info` (`bridge-connection-fields.test.tsx`, `bridge-connection.spec.ts`)."
   - "Every new text exists in English and Russian; \"Mentions\" has \"Learn more\" to Concepts → Whom a message mentions and \"How to mention the Team\" to Concepts → Teams, section \"Team mentions\"; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
@@ -79,8 +94,9 @@ issue: 432
   only `defaultMentions`, the L1 form that reads stay with until 0.3.0, which the existing test fixtures use, and loses
   its editor; the form sends `mention_entries` and no longer `mentions`, which S-140 converts only in a request
   without entries; `team-mentions-editor.tsx` — "How to mention the Team"; `timeline.tsx` — the delivery event with its
-  person, entry, event and reason; `connection-check.tsx` — "Group mentions" and "Mentions of everyone: {tokens}" among
-  the bridge's features.
+  person, entry, event and reason; `bridge-connection-fields.tsx`, where the bridge's features are listed — "Group mentions"
+  and "Mentions of everyone: {tokens}" among them; the type of each Destination (`DestinationKind`) names its Connection
+  (`connectionId`) instead of the chat-wide mentions and groups it took, which the grid now offers from the Connection.
 - **Documentation links** (`docs-links.json`): `field.mentions` moves to `concepts/mentions.md#mention-entries`,
   `field.mention_support` → `concepts/mentions.md#what-each-messenger-supports`, `field.team_mentions` →
   `concepts/teams.md#team-mentions`; the anchors exist from S-139 and S-140.

@@ -27,10 +27,10 @@ import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { bridgeConnection, mattermostConnection } from "../test/fixtures/connections";
 import { bridgeDestination } from "../test/fixtures/destinations";
+import { reasonOf } from "../test/text";
 import { connectionLimiterProposal } from "./bridge-connection-fields";
 import { BRIDGE_KIND, bridgeValues, destinationLimiterProposal } from "./bridge-destination-fields";
 import { DestinationForm } from "./destination-form";
-import { defaultMentions } from "./mention-settings";
 
 const FORBIDDEN_TEXT =
   "The bridge refused the channel: it does not exist, or the bot cannot use it. Details: The bot is not a member of this channel.";
@@ -110,6 +110,9 @@ function json(status: number, body: unknown): Response {
 function mockReads() {
   return vi.spyOn(window, "fetch").mockImplementation((input) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url === `/api/v1/connections/${BR.id}`) {
+      return Promise.resolve(json(200, BR));
+    }
     if (url.startsWith("/api/v1/connections")) {
       return Promise.resolve(json(200, { items: [MM, BR, PLAIN, UNREAD], next_cursor: null }));
     }
@@ -228,8 +231,7 @@ describe("the Bridge type", () => {
     });
     // Characters, not UTF-16 units.
     expect(BRIDGE_KIND.check({ connection_id: BR.id, channel_id: "😀".repeat(512) })).toEqual({});
-    expect(BRIDGE_KIND.everyone).toEqual([]);
-    expect(BRIDGE_KIND.groups).toBe(false);
+    expect(BRIDGE_KIND.connectionId?.({ connection_id: BR.id, channel_id: "" })).toBe(BR.id);
   });
 });
 
@@ -293,7 +295,7 @@ describe("DestinationForm with the Bridge fields", () => {
       connection_id: BR.id,
       channel_id: "ch-alerts",
       owning_team_id: null,
-      mentions: defaultMentions(),
+      mention_entries: [],
       buttons: { source: "organization" },
       limiter: { limit: 60, per_seconds: 60 },
     });
@@ -332,28 +334,33 @@ describe("DestinationForm with the Bridge fields", () => {
       .not.toBeInTheDocument();
   });
 
-  test("offers nobody and chosen users only", async () => {
-    await renderNew(() => Promise.resolve(undefined));
-    const everyone = document.querySelectorAll<HTMLSelectElement>('select[id$="-everyone"]');
-    expect(everyone.length).toBe(6);
-    for (const select of everyone) {
-      expect([...select.options].map((o) => o.textContent)).toEqual(["Nobody"]);
-      expect(select.disabled).toBe(true);
+  test("greys what the bridge does not declare and takes people", async () => {
+    mockReads();
+    await render(
+      providers(
+        <DestinationForm
+          kind={BRIDGE_KIND}
+          destination={DESTINATION}
+          submitLabel="Save"
+          save={() => Promise.resolve(undefined)}
+        />,
+      ),
+    );
+    await userEvent.click(page.getByRole("button", { name: "Add", exact: true }));
+    for (const word of ["channel", "here", "all", "everyone"]) {
+      await expect
+        .element(reasonOf(`everyone-${word}`))
+        .toHaveTextContent(`The bridge does not declare @${word}`);
     }
+    for (const id of ["group", "team", "teams-from-label"]) {
+      await expect.element(reasonOf(id)).toHaveTextContent("The bridge declares no group mentions");
+    }
+    // A person is taken on any bridge: the picker adds a row ticked for every event.
+    await userEvent.click(page.getByTestId("mention-option-user"));
+    await userEvent.selectOptions(page.getByLabelText("Person", { exact: true }), "US0000000000AA");
+    await expect.element(page.getByTestId("mention-entry-target")).toHaveTextContent("@alice");
     await expect
-      .element(page.getByLabelText("New Alert Group", { exact: true }))
-      .toHaveAccessibleDescription(
-        "A Bridge has no mention of the whole chat and no groups: only the chosen users are mentioned, through their accounts linked to this Connection.",
-      );
-    await expect.element(page.getByRole("button", { name: "Add group" })).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toContain("@channel");
-    // The chosen users stay: a picker for each kind, which mentions the user it adds.
-    const users = page.getByLabelText("Add a user to mention for New Alert Group", { exact: true });
-    await expect.element(users).toBeEnabled();
-    expect(document.querySelectorAll('select[id$="-users"]').length).toBe(6);
-    await userEvent.selectOptions(users, "US0000000000AA");
-    await expect
-      .element(page.getByRole("button", { name: "Remove Alice (alice)", exact: true }))
+      .element(page.getByRole("button", { name: "Remove: @alice", exact: true }))
       .toBeVisible();
   });
 
@@ -434,9 +441,7 @@ describe("DestinationForm with the Bridge fields", () => {
       .element(page.getByLabelText("ID канала"))
       .toHaveAccessibleDescription("Так, как его называет мессенджер.");
     await expect
-      .element(page.getByLabelText("Новая группа алертов", { exact: true }))
-      .toHaveAccessibleDescription(
-        "У моста нет упоминания всего чата и групп: упоминаются только выбранные пользователи — через их аккаунты, привязанные к этому подключению.",
-      );
+      .element(page.getByText("Кого упоминать и на каких громких событиях.", { exact: false }))
+      .toBeVisible();
   });
 });

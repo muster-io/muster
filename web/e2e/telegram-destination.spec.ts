@@ -16,10 +16,12 @@ import {
   type Api,
   adminApi,
   advance,
+  ensureTeam,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
+  removeTeamsBySlug,
   shot,
   signIn,
   signInAdmin,
@@ -34,6 +36,7 @@ const BOT_ID = 123456;
 const CHANNEL_ID = -1001000000001;
 const GROUP_ID = -1001000000002;
 const TEAM = "tgd-team";
+const MENTION_TEAM = "tgd-mention-team";
 const NO_COMMENTS =
   "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group.";
 const NOT_ADMIN =
@@ -97,6 +100,7 @@ async function cleanUp(admin: Api): Promise<void> {
   for (const d of destinations.items.filter((x) => x.name === "muster_alerts")) {
     await admin.call("DELETE", `/api/v1/destinations/${d.id}`);
   }
+  await removeTeamsBySlug(admin, [MENTION_TEAM]);
 }
 
 /** The Alert Group of the Alert with the label cluster. */
@@ -137,6 +141,7 @@ test.beforeAll(async () => {
   const admin = await adminApi();
   try {
     await cleanUp(admin);
+    await ensureTeam(admin, MENTION_TEAM);
   } finally {
     await admin.dispose();
   }
@@ -219,10 +224,72 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
   await expect(
     page.getByTestId("telegram-fields").getByLabel("Channel", { exact: true }),
   ).toHaveValue("@muster_alerts");
-  // The Mentions section speaks of Telegram: no chat-wide mention and no groups (S-043, C-12.FR-8).
-  await expect(page.getByLabel("New Alert Group", { exact: true })).toHaveAccessibleDescription(
-    "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
-  );
+  // The Mentions section: no chat-wide mention, no groups and no Teams for Telegram (C-28.FR-2, C-28.AC-9), greyed
+  // with their reason; people and the On-call stay.
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  for (const id of [
+    "everyone-channel",
+    "everyone-here",
+    "everyone-all",
+    "everyone-everyone",
+    "group",
+    "team",
+    "teams-from-label",
+  ]) {
+    await expect(page.getByTestId(`mention-option-${id}`)).toHaveAttribute("aria-disabled", "true");
+    await expect(
+      page.getByTestId(`mention-option-${id}`).getByTestId("mention-option-reason"),
+    ).toHaveText("Telegram cannot mention everyone or groups");
+  }
+  for (const id of ["user", "on-call-of-team", "on-call-of-teams-from-label"]) {
+    await expect(page.getByTestId(`mention-option-${id}`)).toHaveAttribute(
+      "aria-disabled",
+      "false",
+    );
+  }
+  // "On-call of a Team…" → the Team → saved with the Destination.
+  await page.getByTestId("mention-option-on-call-of-team").click();
+  await page
+    .getByLabel("On-call of the Team", { exact: true })
+    .selectOption({ label: MENTION_TEAM });
+  await expect(page.getByTestId("mention-entry-target")).toHaveText(`On-call of ${MENTION_TEAM}`);
+  // "What each messenger supports" shows the table of C-28.FR-2.
+  const support = page.getByTestId("mention-support");
+  await expect(
+    support.getByRole("heading", { name: /What each messenger supports/ }),
+  ).toBeVisible();
+  await expect(support.getByRole("columnheader")).toHaveText([
+    "Messenger",
+    "Everyone in the chat",
+    "Messenger groups and Teams",
+    "People and On-call",
+  ]);
+  await expect(support.getByTestId("mention-support-telegram").getByRole("cell")).toHaveText([
+    "None",
+    "None",
+    "Linked people",
+  ]);
+  // The Buttons preview follows the tick boxes of "Own for this Destination".
+  const firing = page.getByTestId("button-set-preview-firing");
+  await expect(firing).toContainText("Resolve");
+  await page.getByLabel("Own for this Destination").check();
+  await page.getByTestId("button-set-item-resolve").uncheck();
+  await expect(firing).not.toContainText("Resolve");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByTestId("destination-status")).toHaveText("Saved.");
+  const checker = await adminApi();
+  try {
+    const stored = await checker.call<{
+      mention_entries: { target: { kind: string }; events: string[] }[];
+      buttons: { source: string };
+    }>("GET", `/api/v1/destinations/${destinationId}`);
+    expect(stored.mention_entries.map((e) => e.target.kind)).toEqual(["on_call_of_team"]);
+    expect(stored.mention_entries[0]?.events).toHaveLength(7);
+    expect(stored.buttons.source).toBe("own");
+  } finally {
+    await checker.dispose();
+  }
+  await shot(page, "telegram-destination-mentions");
 
   // 7. "Check" → the four Telegram checks and the members of the discussion group, all ok → "Check passed".
   await page.getByRole("button", { name: "Check", exact: true }).click();
@@ -356,11 +423,29 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(
     page.getByTestId("telegram-fields").getByLabel("Канал", { exact: true }),
   ).toHaveAttribute("placeholder", "@username или id чата");
-  await expect(
-    page.getByLabel("Новая группа алертов", { exact: true }),
-  ).toHaveAccessibleDescription(
-    "В Telegram нет упоминания всего чата и групп: упоминаются только выбранные пользователи — через их привязанные аккаунты Telegram.",
+  await expect(page.getByTestId("mention-entry-target")).toHaveText(
+    `Дежурный команды ${MENTION_TEAM}`,
   );
+  await page.getByRole("button", { name: "Добавить", exact: true }).click();
+  for (const id of ["everyone-channel", "group", "team", "teams-from-label"]) {
+    await expect(
+      page.getByTestId(`mention-option-${id}`).getByTestId("mention-option-reason"),
+    ).toHaveText("В Telegram нет упоминания всех и групп");
+  }
+  await expect(
+    page.getByTestId("mention-support").getByRole("heading", { name: /Поддержка мессенджерами/ }),
+  ).toBeVisible();
+  await expect(page.getByTestId("mention-support-telegram").getByRole("cell")).toHaveText([
+    "Нет",
+    "Нет",
+    "Привязанные люди",
+  ]);
+  // The Buttons preview follows the own set of the Destination: no "Закрыть".
+  await expect(page.getByLabel("Свои для этого места доставки")).toBeChecked();
+  await expect(page.getByTestId("button-set-preview-firing")).not.toContainText("Закрыть");
+  await page.getByTestId("button-set-item-resolve").check();
+  await expect(page.getByTestId("button-set-preview-firing")).toContainText("Закрыть");
+  await page.getByTestId("button-set-item-resolve").uncheck();
   await page.getByRole("button", { name: "Проверить", exact: true }).click();
   await expect(page.getByTestId("destination-check-summary")).toHaveText("Проверка пройдена");
   await expect(page.getByTestId("destination-check-item")).toHaveText([
