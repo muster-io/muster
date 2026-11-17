@@ -81,6 +81,15 @@
 5. [How calls are made]({{page "messengers/notification-gateways.md#how-calls-are-made"}}), [Acknowledging from a call]({{page "messengers/notification-gateways.md#acknowledging-from-a-call"}}) and [Broken gateways]({{page "messengers/notification-gateways.md#broken-gateways"}}), with the [runbook]({{page "operations/runbooks/MusterNotificationGatewayBroken.md"}}).
 6. Finished when [`muster bridge check`]({{page "messengers/write-a-bridge.md#muster-bridge-check"}}) with `--contact` passes against the gateway and the profile of a person shows their contact as confirmed.
 
+### Mention the right people
+
+1. [Whom a message mentions]({{page "concepts/mentions.md"}}): {{quote "docs/concepts/mentions.md" "A Destination without entries mentions nobody."}} Add [entries]({{page "concepts/mentions.md#mention-entries"}}) per Loud event, as in [the example of infra-critical]({{page "concepts/mentions.md#an-example-infra-critical"}}).
+2. [What each messenger supports]({{page "concepts/mentions.md#what-each-messenger-supports"}}): {{quote "docs/concepts/mentions.md" "Slack offers only `<!channel>` and `<!here>`, and no `everyone`"}}, and a Telegram Destination mentions people only ([Telegram]({{page "concepts/mentions.md#telegram"}})).
+3. [Teams and the On-call]({{page "concepts/mentions.md#teams-and-the-on-call"}}) and [Team mentions]({{page "concepts/teams.md#team-mentions"}}): {{quote "docs/concepts/mentions.md" "Muster never mentions the On-call instead."}} To reach the On-call, add the entry "On-call of a Team" or "On-call of the Team from the label".
+4. [Undelivered Mentions]({{page "concepts/mentions.md#undelivered-mentions"}}): a person without a linked account is left out, and Muster names them in the Timeline and in the warnings of the Destination.
+5. [Upgrading from 0.1]({{page "concepts/mentions.md#upgrading-from-01"}}): the 0.1 settings become entries with the same effect.
+6. Finished when the Destination page shows no warning for the people you expect to be mentioned, and a new Alert Group of the Team mentions its On-call ([Whom a message mentions]({{page "concepts/mentions.md#teams-and-the-on-call"}})).
+
 ### Automate through the API
 
 1. [API]({{page "reference/api.md"}}): the conventions of the API and its tokens. {{quote "docs/reference/api.md" "Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token."}} [Sign-in]({{page "sign-in/index.md#ways-to-sign-in"}}) describes both.

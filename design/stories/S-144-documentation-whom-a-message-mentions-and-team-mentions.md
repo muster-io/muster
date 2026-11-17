@@ -10,6 +10,7 @@ files_touched:
   - docs/concepts/mentions.md
   - docs/concepts/teams.md
   - docs/concepts/loud-and-quiet.md
+  - docs/concepts/statuses-and-commands.md
   - docs/configure/messages-and-templates.md
   - docs/messengers/mattermost.md
   - docs/messengers/slack.md

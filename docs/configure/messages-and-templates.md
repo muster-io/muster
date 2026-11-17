@@ -243,10 +243,9 @@ Muster".
 
 ## Whom a message mentions
 
-Each Destination has a list of Mention entries, each a target and the Loud events it applies to
-(`destination.mentions`); its **Mentions** section edits those that 0.1 offered: everyone in the chat, chosen
-Muster users, or messenger groups, for six kinds of Loud event. [Whom a message mentions](../concepts/mentions.md)
-describes every entry, what each Destination type takes, and why a user needs an Account link to be mentioned.
+Each Destination has a list of Mention entries, each a target and the Loud events it applies to; its **Mentions**
+section edits them. [Whom a message mentions](../concepts/mentions.md) describes every entry, what each Destination
+type takes, Team mentions, and why a person needs an Account link to be mentioned.
 
 In a template, `{{ mention "all" }}`, `{{ mention "channel" }}`, `{{ mention "here" }}`, `{{ mention "owner" }}` and
 `{{ mention "group" "oncall" }}` write a trusted Mention that Muster renders for the messenger. A literal `@all` written

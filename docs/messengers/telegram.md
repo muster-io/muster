@@ -105,7 +105,8 @@ A Telegram Destination is the channel only: Muster finds its discussion group.
     - once those pass, `getChatMember` in the discussion group for each person of the Teams that name the Destination
       with a Telegram Account link, the item **Members of the discussion group**, which always passes and names the
       people outside the group, whom a Mention in a Thread does not notify
-      ([Unreachable On-calls](../concepts/schedules.md#unreachable-on-calls)). A new Destination has no Team yet, so
+      ([Unreachable On-calls](../concepts/schedules.md#unreachable-on-calls)); a person who left the group shows as
+      outside only some time later, about a minute (F-128). A new Destination has no Team yet, so
       its save asks about nobody.
 
     A Destination that fails the check is not saved, and the check says what to fix:
@@ -165,6 +166,14 @@ For the people on call:
   replies under it.
 - Only members of the discussion group are notified about the replies in a Thread — even a reply that mentions them.
   Someone who only subscribed to the channel sees the Root messages, but not what happens to them later.
+- Muting the discussion group does not hide a Mention from an ordinary member: a Mention in a comment rang a member who
+  had muted the group, on the desktop and on the phone (F-129). The creator of the group, who is anonymous in it, was
+  not rung by a Mention in a group they had muted, so a person who created the discussion group or is anonymous in it
+  should not mute it. The Destination check cannot see that.
+
+Telegram mentions only people, by a link to their account; a Destination's
+[Mention entries](../concepts/mentions.md#telegram) offer a person and "On-call of a Team", and no group, Team or
+everyone in the chat. A person whom an entry names without a Telegram Account link is left out of the message.
 
 ## Known limitation: Quiet Root messages ring the group
 
