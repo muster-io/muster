@@ -257,9 +257,12 @@ In Telegram the reply reads "Step 1: Ivan, you are needed" with Ivan as a link t
 member of the discussion group: the creator of the group, anonymous in it, who muted it is not rung. A bridge without
 `native_mentions` shows a linked person's marker as their plain name, which rings nobody, so the Page is not delivered
 to them through that Destination: when no other Destination of the chain reaches them, it records
-`page_not_delivered` with `not_delivered`. An outgoing webhook takes every person of the Page as data, linked or not,
-and the Team of a step "Page the whole Team" by its slug and name; the template mode gives them to the "reply in
-thread" request as `.Mentions`, with `.Event` `paged` ([Template mode](../outgoing-webhooks/templates.md#mentions)).
+`page_not_delivered` with `not_delivered`. The same holds for a person whose Mention a bridge's reply leaves out
+because its line of Mentions keeps only the whole Mentions that fit half of the bridge's body limit
+([Undelivered Mentions](mentions.md#undelivered-mentions)): the reply does not reach them and they do not become an
+Assignee. An outgoing webhook takes every person of the Page as data, linked or not, and the Team of a step "Page the
+whole Team" by its slug and name; the template mode gives them to the "reply in thread" request as `.Mentions`, with
+`.Event` `paged` ([Template mode](../outgoing-webhooks/templates.md#mentions)).
 One whose "reply in thread" request was removed after the Page was queued sends nothing, and that reply ends Not
 delivered.
 
@@ -304,7 +307,8 @@ A Page that reaches its person nowhere records the Quiet `page_not_delivered` wi
   chain and no Destination, whose chains start when the Alert Group is created;
 - `no_account_link`: the person has no Account link in the Identity space of any of the chain's Destinations;
 - `not_delivered`: every Thread reply that would mention them ended Not delivered, was withheld while its
-  Destination was [Broken](broken-destinations.md), or was never sent because its Root message — a first Publication,
+  Destination was [Broken](broken-destinations.md), was sent through a bridge with their Mention left out for length,
+  or was never sent because its Root message — a first Publication,
   or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
   the Destination recovers.
 
