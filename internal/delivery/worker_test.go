@@ -1251,6 +1251,9 @@ func (f *fakeDB) RecordReplySent(_ context.Context, arg dbgen.RecordReplySentPar
 	if r := f.reply(arg.ID); r.owner == arg.Owner {
 		r.state, r.sentAt, r.messageID, r.owner, r.until = "sent", at(arg.Now), strOf(arg.MessageID), "", time.Time{}
 		r.buttonKeyID = strOf(arg.ButtonKeyID)
+		if arg.PagedUserIds != nil {
+			r.pagedUsers = arg.PagedUserIds
+		}
 		return 1, nil
 	}
 	return 0, nil

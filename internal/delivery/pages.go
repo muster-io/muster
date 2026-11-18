@@ -21,9 +21,11 @@ import (
 // paged_user_ids, decided when it was queued — or the Team mention or the token of a page_team step; a person without
 // such a link is named in a line of the reply instead. The outcome of the replies goes back to the dispatcher
 // (groups.SettlePage, PageReached and PageNotDelivered): a delivered reply that mentions a person delivers the Page to
-// them, and once every reply of the Page ended — sent, Not delivered or withheld, as after a Broken Destination whose
-// replies are dropped at its recovery (C-11.FR-19) — those it reached nowhere are not delivered. Each reply settles
-// its Page once its outcome committed, and every round settles the Pages whose replies all ended without it.
+// them — not one whose Mention line left them out for length (C-12.FR-11): its delivery records only the others in
+// paged_user_ids (reached) — and once every reply of the Page ended — sent, Not delivered or withheld, as after a
+// Broken Destination whose replies are dropped at its recovery (C-11.FR-19) — those it reached nowhere are not
+// delivered. Each reply settles its Page once its outcome committed, and every round settles the Pages whose replies
+// all ended without it.
 
 // PageSettler records the outcome of the replies of a Page through the dispatcher, locking its Alert Group first:
 // (*groups.Service).SettlePage.
@@ -33,19 +35,21 @@ type PageSettler interface {
 
 // pageReply is what the reply of a Page says and whom it mentions in the Destination d: its PageInput, and its
 // targets — the people it mentions by their Account links, or the Team mention or the token of a page_team step; in
-// an outgoing webhook, whose "reply in thread" request carries them as data, every person and the Team itself.
+// an outgoing webhook, whose "reply in thread" request carries them as data, every person and the Team itself; and
+// the public ids of the Page's people by users.id.
 func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org int64, row dbgen.GetLeasedReplyRow,
-	d Destination) (*messages.PageInput, []mentions.Target, error) {
+	d Destination) (*messages.PageInput, []mentions.Target, map[int64]string, error) {
 	p, err := q.GetPageReply(ctx, dbgen.GetPageReplyParams{OrgID: org, ID: row.PageID.Int64})
 	if err != nil {
-		return nil, nil, fmt.Errorf("read the page of the thread reply: %w", err)
+		return nil, nil, nil, fmt.Errorf("read the page of the thread reply: %w", err)
 	}
 	space := mentions.IdentitySpace(d.Type, d.Connection)
 	users, err := q.ListPageReplyUsers(ctx, dbgen.ListPageReplyUsersParams{OrgID: org, PageID: row.PageID.Int64,
 		IdentitySpace: space})
 	if err != nil {
-		return nil, nil, fmt.Errorf("read the people of the page of the thread reply: %w", err)
+		return nil, nil, nil, fmt.Errorf("read the people of the page of the thread reply: %w", err)
 	}
+	ids := make(map[int64]string, len(users))
 	in := &messages.PageInput{Step: int(p.StepNumber), Messenger: d.Type, Source: row.PageSource.String,
 		ChainTeam: p.ChainTeamName, Importance: p.Importance, AgainSeconds: int(p.AgainSeconds), Again: p.Again,
 		Team: p.TeamName, Everyone: p.Everyone != ""}
@@ -54,6 +58,7 @@ func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org in
 	}
 	var targets []mentions.Target
 	for _, u := range users {
+		ids[u.ID] = u.PublicID
 		// The reply renders what the Page decided when it was queued, never the Connection's info of now: a person
 		// the queue found linked through a bridge whose stored info did not declare native_mentions — or had none
 		// yet — is not among the people the reply reaches (paged_user_ids), but is still named by their marker,
@@ -82,14 +87,35 @@ func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org in
 	case p.TeamID.Valid && w.TeamMentions != nil && d.Connection != nil:
 		m, ok, err := w.TeamMentions.ForConnection(ctx, tx, p.TeamID.Int64, *d.Connection)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read the team mention of the page: %w", err)
+			return nil, nil, nil, fmt.Errorf("read the team mention of the page: %w", err)
 		}
 		if ok {
 			targets = append(targets, mentions.Target{Kind: mentions.TargetGroup, Group: m.Group, GroupID: m.GroupID})
 		}
 	}
 	in.Mentioned = len(targets) > 0
-	return in, targets, nil
+	return in, targets, ids, nil
+}
+
+// reached are the people a Page's reply that was sent with its Mention line leaving out the people whose public ids
+// are leftOut mentions (C-12.FR-11): its paged_user_ids without those, which its delivery records in their place, so
+// that settlePage does not count them reached and, unless another reply of the Page mentioned them, the dispatcher
+// records them not delivered once every reply ended (C-32.FR-10, FR-12). It is nil, keeping paged_user_ids, when the
+// reply is no Page's or left out none of them.
+func (a replyAttempt) reached(leftOut []string) []int64 {
+	if !a.row.PageID.Valid || len(leftOut) == 0 {
+		return nil
+	}
+	out := make([]int64, 0, len(a.row.PagedUserIds))
+	for _, id := range a.row.PagedUserIds {
+		if p, ok := a.paged[id]; !ok || !slices.Contains(leftOut, p) {
+			out = append(out, id)
+		}
+	}
+	if len(out) == len(a.row.PagedUserIds) {
+		return nil
+	}
+	return out
 }
 
 // settlePage reports the outcome of the replies of the Page id of the Alert Group groupID so far (groups.PageOutcome):

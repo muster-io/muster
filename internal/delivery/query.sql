@@ -884,12 +884,14 @@ WHERE ds.org_id = @org_id AND ds.id = locked.id
 RETURNING ds.public_id;
 
 -- RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
--- buttons (a Reminder's), for the presses on them.
+-- buttons (a Reminder's), for the presses on them. The reply of a Page whose Mention line left out some of its people
+-- for length (C-12.FR-11) mentions only @paged_user_ids, which replace those decided when it was queued; null keeps
+-- them.
 -- name: RecordReplySent :execrows
 UPDATE thread_replies
 SET state = 'sent', sent_at = @now::timestamptz, message_id = sqlc.narg('message_id')::text,
     button_key_id = sqlc.narg('button_key_id')::text, last_error_class = NULL, last_error = NULL, lease_owner = NULL,
-    lease_until = NULL
+    lease_until = NULL, paged_user_ids = coalesce(sqlc.narg('paged_user_ids')::bigint[], paged_user_ids)
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- RecordReplyRetry records an outcome of a Thread reply that is retried at @at; a Transient error is @counted against
@@ -2336,7 +2338,8 @@ LEFT JOIN account_links al ON al.org_id = pu.org_id AND al.user_id = pu.user_id
 WHERE pu.org_id = @org_id AND pu.page_id = @page_id
 ORDER BY u.id;
 
--- ListPageReplies lists the Thread replies of a Page with their state and the people each mentions.
+-- ListPageReplies lists the Thread replies of a Page with their state and the people each mentions: for a sent one,
+-- those its Mention line did not leave out for length.
 -- name: ListPageReplies :many
 SELECT state, coalesce(paged_user_ids, '{}')::bigint[] AS paged_user_ids
 FROM thread_replies
