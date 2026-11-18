@@ -1924,6 +1924,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#calls-through-a-notification-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Calls through a Notification gateway
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#undelivered-pages" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3272,6 +3283,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#calls-through-a-notification-gateway" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Calls through a Notification gateway
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#undelivered-pages" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3332,8 +3354,10 @@ wait, send to an outgoing webhook and repeat. Routes and Teams name their chains
 <p>Chains run on Alert Groups at the points described under <a href="#when-chains-run">When chains run</a>: their steps follow one
 another with their waits and repeats, and a step is skipped where it cannot be made. A webhook step sends its event
 to its outgoing webhook (<a href="#webhook-steps">Webhook steps</a>). A step that Pages people or a Team writes a Mention in the
-Threads of its chain's own Destinations (<a href="#where-chains-page">Where chains Page</a>); the calls through a Notification
-gateway follow in a later version. Where no chain runs, the ack timeout of a Route keeps working as before.</p>
+Threads of its chain's own Destinations (<a href="#where-chains-page">Where chains Page</a>); a step that calls through a
+Notification gateway, and the call actions of the Notification rules, call the person's confirmed contact
+(<a href="#calls-through-a-notification-gateway">Calls through a Notification gateway</a>). Where no chain runs, the ack timeout
+of a Route keeps working as before.</p>
 <h2 id="what-an-escalation-chain-is">What an Escalation chain is<a class="headerlink" href="#what-an-escalation-chain-is" title="Permanent link">&para;</a></h2>
 <p>An Escalation chain has:</p>
 <ul>
@@ -3523,8 +3547,10 @@ step that Pages the On-call of a Schedule with a gap now, and each person a step
 disabled since the step was saved are skipped too. Each skip records the Quiet lifecycle event
 <code>escalation_step_skipped</code> in the Timeline, of the kind <code>escalation</code>, with the chain, the step and the reason —
 <code>outside_working_hours</code>, <code>severity</code>, <code>schedule_gap</code>, <code>viewer</code> or <code>disabled</code>, for a webhook step
-<code>destination_deleted</code> or <code>webhook_events_required</code> (<a href="#webhook-steps">Webhook steps</a>), and for a step "Page the whole
-Team" that none of its chain's Destinations can mention <code>no_mention_possible</code> (<a href="#where-chains-page">Where chains Page</a>)
+<code>destination_deleted</code> or <code>webhook_events_required</code> (<a href="#webhook-steps">Webhook steps</a>), for a step "Page the whole
+Team" that none of its chain's Destinations can mention <code>no_mention_possible</code> (<a href="#where-chains-page">Where chains Page</a>),
+and for a call step whose gateway was deleted <code>gateway_deleted</code>, or for a person it would call without a confirmed
+contact there <code>no_confirmed_contact</code> (<a href="#calls-through-a-notification-gateway">Calls through a Notification gateway</a>)
 — and the chain goes on with its
 next step at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
 steps 3 to the repeat three times in all, then goes on. Outgoing webhooks in the mode events receive
@@ -3638,7 +3664,7 @@ delivered: @petr has no linked Mattermost account" instead, which mentions nobod
 </tr>
 <tr>
 <td>Notification gateway</td>
-<td>a call to the confirmed contact, from a later version</td>
+<td>a call to the confirmed contact</td>
 <td>the gateway reaches them, whatever the messengers do</td>
 </tr>
 </tbody>
@@ -3659,6 +3685,31 @@ delivered.</p>
 <p>Whether a Mention in a Thread pushes a notification to a phone is still to be verified for Mattermost and Slack.
 Until it is, rely on a call through a Notification gateway for Pages at night.</p>
 </div>
+<h2 id="calls-through-a-notification-gateway">Calls through a Notification gateway<a class="headerlink" href="#calls-through-a-notification-gateway" title="Permanent link">&para;</a></h2>
+<p>A step "Call through a Notification gateway" (<code>call</code>) calls the On-call of its Schedule at that moment, or each person
+it names who may still be Paged, through its gateway; a person whose <a href="../notification-rules/">Notification rule</a> has a
+call action is called the same way when a step Pages them normally or importantly. Each call is a Page of its step,
+of one person: it records the Quiet lifecycle event <code>paged</code> in the Timeline, of the kind <code>escalation</code>, naming the
+person and the gateway in <code>gateway</code>, and writes nothing in any Thread — the Thread reply of the same step, when there
+is one, already names the person. The call goes to the person's confirmed contact at the gateway
+(<a href="../../messengers/notification-gateways/">Notification gateways</a>), through the queue of calls: the first call to a
+person through a gateway goes at once, and the Pages that come due while a call to them waits, is being retried or
+within <code>gateway.combine_window</code> after the previous one ended go together in the next call, one call about all of
+their Alert Groups.</p>
+<p>Calls depend on no Root message and on no messenger: they keep working while a messenger is down or a Destination is
+<a href="../broken-destinations/">Broken</a>, and a Route with a chain and no Destination starts its chain when the Alert Group is
+created, so that its call steps still call. Right before its first attempt, a call drops the Alert Groups on which the
+chain or the rule that Paged has stopped — acknowledged, snoozed, resolved or started over —, and a call left without
+any is not sent; a chain that started over and Paged again keeps its Alert Group in the call. Once every Alert Group
+of a call being retried has stopped, its retries end.</p>
+<p>A call that the gateway accepted reaches the person: they become an Assignee of the chain, as by a delivered Mention
+(<a href="#assignees">Assignees</a>). A call that ends Not delivered — refused, an answer Muster cannot classify, the retry
+budget used up, a gateway Broken or deleted, or a contact removed before it went — records <code>page_not_delivered</code> with
+the chain, the step, the person, the gateway and the reason, and leaves the Assignees as they were; the chain and
+the rules go on either way. A call step whose gateway was deleted, or is no Notification gateway any more, is skipped
+with <code>gateway_deleted</code>; a person it would call who has no confirmed contact there is skipped with
+<code>no_confirmed_contact</code>, and the step with them when none is left. Calls count in <code>muster_pages_total</code> with the <code>kind</code>
+<code>call</code>, and "How it went" lists them as Pages of the kind <code>call</code> with their <code>gateway</code>.</p>
 <h2 id="undelivered-pages">Undelivered Pages<a class="headerlink" href="#undelivered-pages" title="Permanent link">&para;</a></h2>
 <p>A Page that reaches its person nowhere records the Quiet <code>page_not_delivered</code> with the person and the reason:</p>
 <ul>
@@ -3670,13 +3721,17 @@ Until it is, rely on a call through a Notification gateway for Pages at night.</
   or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
   the Destination recovers.</li>
 </ul>
+<p>A call through a Notification gateway that ends Not delivered records it too, with the reason of the call
+(<a href="#calls-through-a-notification-gateway">Calls through a Notification gateway</a>).</p>
 <p>A Page counts in <code>muster_pages_total{chain,kind,outcome}</code> once it ended: <code>delivered</code> once a delivered reply mentioned
-one of its people — for a Team or everyone in the chat, once one of its replies was delivered — and <code>not_delivered</code>
-otherwise; a Page whose chain was deleted before it ended is not counted (<a href="../../reference/metrics/">Metrics</a>).</p>
+one of its people — for a Team or everyone in the chat, once one of its replies was delivered — or, for a call, once
+the gateway accepted it, and <code>not_delivered</code> otherwise; a Page whose chain was deleted before it ended, and a call not
+made because its chain or rule stopped first, are not counted (<a href="../../reference/metrics/">Metrics</a>).</p>
 <h2 id="assignees">Assignees<a class="headerlink" href="#assignees" title="Permanent link">&para;</a></h2>
 <p>Until someone acknowledges, an Alert Group shows its <strong>Assignees</strong>: for each chain started on it, running or run out,
-the people its latest step Paging people by name — the On-call of a Schedule or chosen people — reached, each with the
-owning Team of that chain. A person is reached once a delivered Thread reply mentions them, as the table of
+the people its latest step Paging people by name — the On-call of a Schedule, chosen people or a call through a
+Notification gateway — reached, each with the owning Team of that chain. A person is reached once a delivered Thread
+reply mentions them, or a call to them that the gateway accepted, as the table of
 <a href="#how-a-page-reaches-a-person">How a Page reaches a person</a> says for each messenger — a bridge's reply that names them
 by the plain name reaches nobody; a person a Page did not reach (see <a href="#undelivered-pages">Undelivered Pages</a>) never
 becomes an Assignee.</p>

@@ -2589,6 +2589,30 @@ Organization's rules change. "Reset to the Organization's rules" brings back "As
 Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described with the
 Escalation chains.
 
+## Calls in rules
+
+When an [Escalation step](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md) Pages a person normally or importantly, their rule of that name runs:
+its Mentions are Thread replies in the chain's Threads, and each call action is a call through its gateway to their
+confirmed contact there, a Page of the same step. In the state "Call" with the default rules, an important Page
+Mentions the person and calls them at once, then Mentions them again 5 minutes later unless someone acknowledged
+meanwhile; a normal Page only Mentions them. The call records the Quiet `paged` in the Timeline, naming the person
+and the gateway, and writes nothing in the Thread.
+
+A call action whose gateway was deleted, or that finds the person without a confirmed contact there — such as one
+removed after they chose "Call" —, is not made: the Timeline records `escalation_step_skipped` for the step with the
+person and the reason, `gateway_deleted` or `no_confirmed_contact`, and the person still gets the Mentions of the
+rule. The rule goes on with its next action.
+
+The calls of rules and of call steps go through one queue per person and gateway: the first call goes at once, and
+the Pages that come due while a call to the person waits, is being retried, or within `gateway.combine_window` after
+the previous call ended join the next call, which goes once that window has passed, as one call about all of their
+Alert Groups. Mentions are never combined. A call drops, before its first attempt, the Alert Groups on which the
+rule run that called stopped — its Alert Group acknowledged, snoozed or resolved, or its chain stopped or started
+over —, and is not sent when none is left. A call the gateway accepted makes the person an Assignee of the chain;
+one that ends Not delivered records `page_not_delivered` and lets the chain and the rules go on
+([Calls through a Notification gateway](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#calls-through-a-notification-gateway)). When a rule
+comes due late, as after Muster was down, its overdue Mentions are made as one, and each overdue call is still made.
+
 <!-- Source: https://muster-io.github.io/muster/latest/concepts/escalation-chains.md -->
 # Escalation chains
 
@@ -2600,8 +2624,10 @@ wait, send to an outgoing webhook and repeat. Routes and Teams name their chains
 Chains run on Alert Groups at the points described under [When chains run](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#when-chains-run): their steps follow one
 another with their waits and repeats, and a step is skipped where it cannot be made. A webhook step sends its event
 to its outgoing webhook ([Webhook steps](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#webhook-steps)). A step that Pages people or a Team writes a Mention in the
-Threads of its chain's own Destinations ([Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page)); the calls through a Notification
-gateway follow in a later version. Where no chain runs, the ack timeout of a Route keeps working as before.
+Threads of its chain's own Destinations ([Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page)); a step that calls through a
+Notification gateway, and the call actions of the Notification rules, call the person's confirmed contact
+([Calls through a Notification gateway](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#calls-through-a-notification-gateway)). Where no chain runs, the ack timeout
+of a Route keeps working as before.
 
 ## What an Escalation chain is
 
@@ -2744,8 +2770,10 @@ step that Pages the On-call of a Schedule with a gap now, and each person a step
 disabled since the step was saved are skipped too. Each skip records the Quiet lifecycle event
 `escalation_step_skipped` in the Timeline, of the kind `escalation`, with the chain, the step and the reason —
 `outside_working_hours`, `severity`, `schedule_gap`, `viewer` or `disabled`, for a webhook step
-`destination_deleted` or `webhook_events_required` ([Webhook steps](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#webhook-steps)), and for a step "Page the whole
-Team" that none of its chain's Destinations can mention `no_mention_possible` ([Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page))
+`destination_deleted` or `webhook_events_required` ([Webhook steps](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#webhook-steps)), for a step "Page the whole
+Team" that none of its chain's Destinations can mention `no_mention_possible` ([Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page)),
+and for a call step whose gateway was deleted `gateway_deleted`, or for a person it would call without a confirmed
+contact there `no_confirmed_contact` ([Calls through a Notification gateway](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#calls-through-a-notification-gateway))
 — and the chain goes on with its
 next step at once. A wait delays the next step by its length on the clock of Muster, and "Repeat from step 3, up to 2 times" makes
 steps 3 to the repeat three times in all, then goes on. Outgoing webhooks in the mode events receive
@@ -2837,7 +2865,7 @@ delivered: @petr has no linked Mattermost account" instead, which mentions nobod
 | Bridge | a Thread reply with a Mention marker | they have an Account link for the Connection and the bridge declares `native_mentions` |
 | Outgoing webhook, events mode | the event `paged`, with the people as `mentions` data, when the Page replies in another Destination of the chain | the receiver acts on it |
 | Outgoing webhook, template mode | the "reply in thread" request, when it has one | the receiver acts on it |
-| Notification gateway | a call to the confirmed contact, from a later version | the gateway reaches them, whatever the messengers do |
+| Notification gateway | a call to the confirmed contact | the gateway reaches them, whatever the messengers do |
 
 In Telegram the reply reads "Step 1: Ivan, you are needed" with Ivan as a link that mentions him, and in a bridge
 "Step 1: [@Ivan](muster-mention:m1), you are needed" with his entry in the envelope's `mentions`
@@ -2855,6 +2883,35 @@ delivered.
     Whether a Mention in a Thread pushes a notification to a phone is still to be verified for Mattermost and Slack.
     Until it is, rely on a call through a Notification gateway for Pages at night.
 
+## Calls through a Notification gateway
+
+A step "Call through a Notification gateway" (`call`) calls the On-call of its Schedule at that moment, or each person
+it names who may still be Paged, through its gateway; a person whose [Notification rule](https://muster-io.github.io/muster/latest/concepts/notification-rules.md) has a
+call action is called the same way when a step Pages them normally or importantly. Each call is a Page of its step,
+of one person: it records the Quiet lifecycle event `paged` in the Timeline, of the kind `escalation`, naming the
+person and the gateway in `gateway`, and writes nothing in any Thread — the Thread reply of the same step, when there
+is one, already names the person. The call goes to the person's confirmed contact at the gateway
+([Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md)), through the queue of calls: the first call to a
+person through a gateway goes at once, and the Pages that come due while a call to them waits, is being retried or
+within `gateway.combine_window` after the previous one ended go together in the next call, one call about all of
+their Alert Groups.
+
+Calls depend on no Root message and on no messenger: they keep working while a messenger is down or a Destination is
+[Broken](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md), and a Route with a chain and no Destination starts its chain when the Alert Group is
+created, so that its call steps still call. Right before its first attempt, a call drops the Alert Groups on which the
+chain or the rule that Paged has stopped — acknowledged, snoozed, resolved or started over —, and a call left without
+any is not sent; a chain that started over and Paged again keeps its Alert Group in the call. Once every Alert Group
+of a call being retried has stopped, its retries end.
+
+A call that the gateway accepted reaches the person: they become an Assignee of the chain, as by a delivered Mention
+([Assignees](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#assignees)). A call that ends Not delivered — refused, an answer Muster cannot classify, the retry
+budget used up, a gateway Broken or deleted, or a contact removed before it went — records `page_not_delivered` with
+the chain, the step, the person, the gateway and the reason, and leaves the Assignees as they were; the chain and
+the rules go on either way. A call step whose gateway was deleted, or is no Notification gateway any more, is skipped
+with `gateway_deleted`; a person it would call who has no confirmed contact there is skipped with
+`no_confirmed_contact`, and the step with them when none is left. Calls count in `muster_pages_total` with the `kind`
+`call`, and "How it went" lists them as Pages of the kind `call` with their `gateway`.
+
 ## Undelivered Pages
 
 A Page that reaches its person nowhere records the Quiet `page_not_delivered` with the person and the reason:
@@ -2867,15 +2924,20 @@ A Page that reaches its person nowhere records the Quiet `page_not_delivered` wi
   or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
   the Destination recovers.
 
+A call through a Notification gateway that ends Not delivered records it too, with the reason of the call
+([Calls through a Notification gateway](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#calls-through-a-notification-gateway)).
+
 A Page counts in `muster_pages_total{chain,kind,outcome}` once it ended: `delivered` once a delivered reply mentioned
-one of its people — for a Team or everyone in the chat, once one of its replies was delivered — and `not_delivered`
-otherwise; a Page whose chain was deleted before it ended is not counted ([Metrics](https://muster-io.github.io/muster/latest/reference/metrics.md)).
+one of its people — for a Team or everyone in the chat, once one of its replies was delivered — or, for a call, once
+the gateway accepted it, and `not_delivered` otherwise; a Page whose chain was deleted before it ended, and a call not
+made because its chain or rule stopped first, are not counted ([Metrics](https://muster-io.github.io/muster/latest/reference/metrics.md)).
 
 ## Assignees
 
 Until someone acknowledges, an Alert Group shows its **Assignees**: for each chain started on it, running or run out,
-the people its latest step Paging people by name — the On-call of a Schedule or chosen people — reached, each with the
-owning Team of that chain. A person is reached once a delivered Thread reply mentions them, as the table of
+the people its latest step Paging people by name — the On-call of a Schedule, chosen people or a call through a
+Notification gateway — reached, each with the owning Team of that chain. A person is reached once a delivered Thread
+reply mentions them, or a call to them that the gateway accepted, as the table of
 [How a Page reaches a person](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#how-a-page-reaches-a-person) says for each messenger — a bridge's reply that names them
 by the plain name reaches nobody; a person a Page did not reach (see [Undelivered Pages](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#undelivered-pages)) never
 becomes an Assignee.

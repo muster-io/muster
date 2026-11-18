@@ -88,3 +88,27 @@ Organization's rules change. "Reset to the Organization's rules" brings back "As
 
 Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described with the
 Escalation chains.
+
+## Calls in rules
+
+When an [Escalation step](escalation-chains.md) Pages a person normally or importantly, their rule of that name runs:
+its Mentions are Thread replies in the chain's Threads, and each call action is a call through its gateway to their
+confirmed contact there, a Page of the same step. In the state "Call" with the default rules, an important Page
+Mentions the person and calls them at once, then Mentions them again 5 minutes later unless someone acknowledged
+meanwhile; a normal Page only Mentions them. The call records the Quiet `paged` in the Timeline, naming the person
+and the gateway, and writes nothing in the Thread.
+
+A call action whose gateway was deleted, or that finds the person without a confirmed contact there — such as one
+removed after they chose "Call" —, is not made: the Timeline records `escalation_step_skipped` for the step with the
+person and the reason, `gateway_deleted` or `no_confirmed_contact`, and the person still gets the Mentions of the
+rule. The rule goes on with its next action.
+
+The calls of rules and of call steps go through one queue per person and gateway: the first call goes at once, and
+the Pages that come due while a call to the person waits, is being retried, or within `gateway.combine_window` after
+the previous call ended join the next call, which goes once that window has passed, as one call about all of their
+Alert Groups. Mentions are never combined. A call drops, before its first attempt, the Alert Groups on which the
+rule run that called stopped — its Alert Group acknowledged, snoozed or resolved, or its chain stopped or started
+over —, and is not sent when none is left. A call the gateway accepted makes the person an Assignee of the chain;
+one that ends Not delivered records `page_not_delivered` and lets the chain and the rules go on
+([Calls through a Notification gateway](escalation-chains.md#calls-through-a-notification-gateway)). When a rule
+comes due late, as after Muster was down, its overdue Mentions are made as one, and each overdue call is still made.
