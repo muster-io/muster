@@ -270,9 +270,10 @@ A Page that reaches its person nowhere records the Quiet `page_not_delivered` wi
 - `no_root_message`: none of the chain's Destinations has the Alert Group's Root message — such as a Route with a
   chain and no Destination, whose chains start when the Alert Group is created;
 - `no_account_link`: the person has no Account link in the Identity space of any of the chain's Destinations;
-- `not_delivered`: every Thread reply that would mention them ended Not delivered, or was withheld while its
-  Destination was [Broken](broken-destinations.md); a reply withheld while Broken is not sent after the Destination
-  recovers.
+- `not_delivered`: every Thread reply that would mention them ended Not delivered, was withheld while its
+  Destination was [Broken](broken-destinations.md), or was never sent because its Root message — a first Publication,
+  or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
+  the Destination recovers.
 
 A Page counts in `muster_pages_total{chain,kind,outcome}` once it ended: `delivered` once a delivered reply mentioned
 one of its people — for a Team or everyone in the chat, once one of its replies was delivered — and `not_delivered`

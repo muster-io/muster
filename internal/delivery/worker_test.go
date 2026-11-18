@@ -445,14 +445,16 @@ func (f *fakeDB) EnsureDelivery(_ context.Context, arg dbgen.EnsureDeliveryParam
 			}
 			d.entries = entries
 			return dbgen.EnsureDeliveryRow{ID: d.id, DesiredVersion: d.version, DesiredHash: d.hash,
-				ThreadBatchUntil: tz(d.batchUntil), State: d.state, HeldByStormID: heldOf(d)}, nil
+				ThreadBatchUntil: tz(d.batchUntil), State: d.state, HeldByStormID: heldOf(d),
+				Unpublished: d.publishedAt == nil}, nil
 		}
 	}
 	d := &fakeDelivery{id: f.id(), dest: arg.DestinationID, group: arg.AlertGroupID.Int64, state: "pending",
 		urgent: arg.Urgent, loud: arg.PublicationLoud, next: arg.Now, threadState: "none", updated: arg.Now,
 		heldBy: arg.HeldByStormID.Int64, entries: arg.Entries}
 	f.deliveries = append(f.deliveries, d)
-	return dbgen.EnsureDeliveryRow{ID: d.id, State: d.state, HeldByStormID: heldOf(d), Inserted: true}, nil
+	return dbgen.EnsureDeliveryRow{ID: d.id, State: d.state, HeldByStormID: heldOf(d), Inserted: true,
+		Unpublished: true}, nil
 }
 
 // heldOf is held_by_storm_id of a delivery.
@@ -1583,6 +1585,22 @@ func (f *fakeDB) DropPendingReplies(_ context.Context, arg dbgen.DropPendingRepl
 		}
 	}
 	return nil
+}
+
+func (f *fakeDB) DropPageReplies(_ context.Context, arg dbgen.DropPageRepliesParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("DropPageReplies"); err != nil {
+		return nil, err
+	}
+	pages := []int64{}
+	for _, r := range f.replies {
+		if r.delivery == arg.DeliveryID && r.page != 0 && (r.state == "pending" || r.state == "collecting") {
+			r.state, r.owner, r.until = "dropped", "", time.Time{}
+			pages = append(pages, r.page)
+		}
+	}
+	return pages, nil
 }
 
 func (f *fakeDB) SettleResolvedPublication(_ context.Context, arg dbgen.SettleResolvedPublicationParams) error {
