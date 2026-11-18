@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
 )
 
@@ -38,9 +39,14 @@ type keyedGateway struct {
 	texts map[string]string
 	fail  []delivery.Outcome
 	sent  []string
+	// during runs while a call is made, between its preparation and its end.
+	during func()
 }
 
 func (g *keyedGateway) Notify(_ context.Context, c delivery.Call, n delivery.Notification) delivery.Outcome {
+	if g.during != nil {
+		g.during()
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.calls == nil {
@@ -180,6 +186,15 @@ func (e *callEnv) count(t *testing.T, sql string, args ...any) int {
 		t.Fatalf("%s: %v", sql, err)
 	}
 	return n
+}
+
+func (e *callEnv) text(t *testing.T, sql string, args ...any) string {
+	t.Helper()
+	var s string
+	if err := e.d.Pool.QueryRow(t.Context(), sql, args...).Scan(&s); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	return s
 }
 
 // group creates a firing Alert Group titled title of severity.
@@ -399,7 +414,7 @@ func TestIntegrationTwoSenders(t *testing.T) {
 		if err != nil || len(rows) != 1 {
 			t.Fatal(rows, err)
 		}
-		c, _, err := a.prepare(t.Context(), rows[0])
+		c, err := a.prepare(t.Context(), rows[0])
 		if err != nil || c == nil {
 			t.Fatal(c, err)
 		}
@@ -461,7 +476,7 @@ func TestNotDeliveredAgainstPageLockOrder(t *testing.T) {
 				if err != nil || len(rows) != 1 {
 					t.Fatal(rows, err)
 				}
-				c, _, err := s.prepare(ctx, rows[0])
+				c, err := s.prepare(ctx, rows[0])
 				if err != nil || c == nil {
 					t.Fatal(c, err)
 				}
@@ -566,6 +581,314 @@ func TestIntegrationCallRetention(t *testing.T) {
 		}
 		if got := e.count(t, `SELECT count(*) FROM gateway_calls`); got != 3 {
 			t.Errorf("%d calls left, want the one about both, the one Not delivered and the waiting one", got)
+		}
+	})
+}
+
+// run starts a run of a chain on the Alert Group group, in the current start of its chains, which it opens.
+func (e *callEnv) run(t *testing.T, group int64, name string) int64 {
+	t.Helper()
+	e.exec(t, `UPDATE alert_groups SET chain_generation = 1 WHERE id = $1`, group)
+	return e.id(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, sources, steps, state,
+		generation, started_at)
+		VALUES ($1, $2, $3, $4, '[{"kind":"route"}]', '[]', 'running', 1, $5) RETURNING id`, e.orgID,
+		fmt.Sprintf("ER00000000%04d", group), group, name, c0)
+}
+
+// callStep makes the step of the run on the Alert Group group a call of the User user through the gateway, through
+// the dispatcher, as escalation does: the Page of the kind call, then its call with the stop check of the run.
+func (e *callEnv) callStep(t *testing.T, group, run int64, step int, user int64) {
+	t.Helper()
+	var after func(context.Context)
+	if err := pgx.BeginFunc(t.Context(), e.d.Pool, func(tx pgx.Tx) error {
+		var err error
+		after, err = e.groups.ChainStep(t.Context(), tx, group, func(context.Context, *groups.Group) (
+			groups.ChainProgress, error) {
+			return groups.ChainProgress{Changed: true, Pages: []groups.StepPage{{ChainEntry: groups.ChainEntry{Run: run,
+				Step: step}, People: []int64{user}, RunStepSeq: step, Call: &groups.StepCall{
+				Gateway: groups.PageGateway{ID: e.gw, PublicID: "CN0000000000G1", Name: "Example Gateway"},
+				Queue: func(ctx context.Context, tx groups.DBTX, page int64) (int64, func(context.Context), error) {
+					return e.calls.Queue(ctx, tx, PageCall{UserID: user, GatewayID: e.gw, AlertGroupID: group,
+						Stop: StopChainRun, Run: run, Page: page})
+				}}}}}, nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after(t.Context())
+}
+
+// TestIntegrationCallPages is C-32.FR-3, FR-10, FR-12, C-30.FR-4 and FR-7 on PostgreSQL: a call step writes the Page
+// of the kind call and the Quiet paged naming the person and the gateway, and queues the call with the stop check of
+// its run, combined with the call that waits for the person; right before the first attempt the call drops the Alert
+// Group whose run started over, though it still fires, and is about the other; the accepted call makes the person an
+// Assignee of its chain, recording assignees_changed, and delivers its Page, while the Page dropped ends without a
+// record; a call that ends Not delivered records page_not_delivered with the chain, the step, the person, the gateway
+// and the reason and leaves the Assignees as they were; a call being retried ends its retries once its run stopped. No
+// Alert Group here has a Destination or a Root message.
+func TestIntegrationCallPages(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, srv dbtest.Server) {
+		e := setupCalls(t, srv, 2)
+		s := e.sender("r1", e.gateway)
+		p1, p2 := e.users[0], e.users[1]
+		g1, g2 := e.group(t, "Checkout", "critical"), e.group(t, "Disk", "warning")
+		r1, r2 := e.run(t, g1, "payments"), e.run(t, g2, "devops")
+		e.callStep(t, g1, r1, 3, p1)
+		e.callStep(t, g2, r2, 1, p1)
+		if n := e.count(t, `SELECT count(*) FROM pages p JOIN page_users u ON u.page_id = p.id
+			WHERE p.kind = 'call' AND p.state = 'pending' AND p.gateway_connection_id = $1 AND u.user_id = $2
+			AND p.gateway_call_id = (SELECT id FROM gateway_calls WHERE state = 'waiting')`, e.gw, p1); n != 2 {
+			t.Fatalf("%d pages of calls joined the waiting call", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM gateway_call_items i JOIN pages p ON p.id = i.page_id
+			WHERE i.escalation_run_id = p.escalation_run_id AND i.notification_rule_run_id IS NULL`); n != 2 {
+			t.Errorf("%d items with their page and run", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE kind = 'escalation' AND event = 'paged'
+			AND loudness = 'quiet' AND mentions = '{}' AND paged_user_ids = ARRAY[$1]::bigint[]
+			AND gateway_connection_id = $2`, p1, e.gw); n != 2 {
+			t.Errorf("%d entries of paged by a call", n)
+		}
+		// The devops chain started over: its Alert Group is dropped, though it still fires.
+		e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = $2, stop_command = 'started_over'
+			WHERE id = $1`, r2, c0)
+		e.round(t, s)
+		if got := e.gateway.sentTexts(); len(got) != 1 || !strings.Contains(got[0], "#1 Checkout, critical") ||
+			strings.Contains(got[0], "Disk") {
+			t.Fatalf("the call %q", got)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_assignees WHERE alert_group_id = $1
+			AND escalation_run_id = $2 AND user_id = $3 AND step_number = 3`, g1, r1, p1); n != 1 {
+			t.Errorf("%d assignees by the accepted call", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+			AND event = 'assignees_changed'`, g1); n != 1 {
+			t.Errorf("%d assignees_changed", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pages p JOIN page_users u ON u.page_id = p.id
+			WHERE p.alert_group_id = $1 AND p.state = 'delivered' AND u.outcome = 'delivered'`, g1); n != 1 {
+			t.Errorf("%d delivered pages", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pages WHERE alert_group_id = $1 AND state = 'not_delivered'
+			AND reason IS NULL`, g2); n != 1 || e.count(t, `SELECT count(*) FROM timeline_entries
+			WHERE alert_group_id = $1 AND event IN ('page_not_delivered', 'assignees_changed')`, g2) != 0 {
+			t.Errorf("the dropped page: %d", n)
+		}
+
+		// Step 4 calls p2, and the gateway refuses it: page_not_delivered with the chain and the step.
+		e.business.Advance(2 * CombineWindow)
+		e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeUnknown, Status: 400, Error: "Bad number"}}
+		e.callStep(t, g1, r1, 4, p2)
+		e.round(t, s)
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+			AND event = 'page_not_delivered' AND escalation_run_id = $2 AND step_number = 4 AND reason = 'call_refused'
+			AND gateway_connection_id = $3 AND paged_user_ids = ARRAY[$4]::bigint[]`, g1, r1, e.gw, p2); n != 1 {
+			t.Errorf("%d page_not_delivered of the call", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pages p JOIN page_users u ON u.page_id = p.id
+			WHERE p.alert_group_id = $1 AND p.state = 'not_delivered' AND p.reason = 'call_refused'
+			AND u.reason = 'call_refused'`, g1); n != 1 {
+			t.Errorf("%d pages not delivered", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_assignees WHERE alert_group_id = $1 AND user_id = $2`,
+			g1, p1); n != 1 || e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+			AND event = 'assignees_changed'`, g1) != 1 {
+			t.Error("a call not delivered changed the assignees")
+		}
+
+		// A call being retried ends its retries once its run stopped.
+		e.business.Advance(2 * CombineWindow)
+		e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeTransient}}
+		e.callStep(t, g1, r1, 5, p1)
+		e.round(t, s)
+		e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = $2, stop_command = 'snooze' WHERE id = $1`,
+			r1, e.business.Now())
+		e.business.Advance(delivery.TransientFirstStep)
+		e.round(t, s)
+		if n := e.count(t, `SELECT count(*) FROM gateway_calls WHERE state = 'dropped' AND attempts = 1`); n != 1 {
+			t.Errorf("%d calls whose retries ended", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pages WHERE alert_group_id = $1 AND step_number = 5
+			AND state = 'not_delivered' AND reason IS NULL`, g1); n != 1 {
+			t.Errorf("the page of the call whose retries ended: %d", n)
+		}
+		if len(e.gateway.sentTexts()) != 1 {
+			t.Errorf("sent %q", e.gateway.sentTexts())
+		}
+
+		// A chain that started over and Pages again keeps its Alert Group in the call: the item takes the stop check
+		// of the latest Page, and only that Page is settled; the Page of the run that started over ends without a
+		// reason and records nothing — accepted, and Not delivered.
+		for i, fail := range []bool{false, true} {
+			e.business.Advance(2 * CombineWindow)
+			g3 := e.group(t, fmt.Sprintf("Queue%d", i), "warning")
+			r3 := e.run(t, g3, "search")
+			e.callStep(t, g3, r3, 1, p2)
+			e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = $2, stop_command = 'started_over'
+				WHERE id = $1`, r3, e.business.Now())
+			e.exec(t, `UPDATE alert_groups SET chain_generation = 2 WHERE id = $1`, g3)
+			r3b := e.id(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, sources, steps,
+				state, generation, started_at)
+				VALUES ($1, $2, $3, 'search', '[{"kind":"route"}]', '[]', 'running', 2, $4) RETURNING id`,
+				e.orgID, fmt.Sprintf("ER00000000R%03d", 3+i), g3, e.business.Now())
+			e.callStep(t, g3, r3b, 1, p2)
+			sent := len(e.gateway.sentTexts())
+			if fail {
+				e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeUnknown, Status: 400, Error: "Bad number"}}
+			}
+			e.round(t, s)
+			if got := e.gateway.sentTexts(); !fail && (len(got) != sent+1 || !strings.Contains(got[sent], "Queue0")) {
+				t.Errorf("the call of the chain that started over %q", got)
+			}
+			outcome := "delivered"
+			if fail {
+				outcome = "not_delivered"
+			}
+			if got := e.text(t, `SELECT string_agg(escalation_run_id || ':' || state || ':' || coalesce(reason, '-'), ','
+				ORDER BY id) FROM pages WHERE alert_group_id = $1`, g3); got != fmt.Sprintf("%d:not_delivered:-,%d:%s:%s",
+				r3, r3b, outcome, map[bool]string{false: "-", true: "call_refused"}[fail]) {
+				t.Errorf("fail %t: the pages %s", fail, got)
+			}
+			if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+				AND event = 'page_not_delivered' AND escalation_run_id = $2`, g3, r3b); fail && n != 1 {
+				t.Errorf("%d page_not_delivered of the run that called", n)
+			}
+			if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+				AND event = 'page_not_delivered' AND escalation_run_id = $2`, g3, r3); n != 0 {
+				t.Errorf("%d page_not_delivered of the run that started over", n)
+			}
+		}
+
+		// A call about two Alert Groups, one acknowledged during its retries: the retry is accepted, and both Pages
+		// were called about and are delivered, as the first attempt was made before the acknowledgement.
+		e.business.Advance(2 * CombineWindow)
+		ga, gb := e.group(t, "Retried", "warning"), e.group(t, "Kept", "warning")
+		ra, rb := e.run(t, ga, "late"), e.run(t, gb, "kept")
+		e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeTransient}}
+		e.callStep(t, ga, ra, 1, p1)
+		e.callStep(t, gb, rb, 1, p1)
+		e.round(t, s)
+		e.business.Advance(time.Second)
+		e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = $2, stop_command = 'acknowledge'
+			WHERE id = $1`, ra, e.business.Now())
+		e.business.Advance(delivery.TransientFirstStep)
+		e.round(t, s)
+		if got := e.gateway.sentTexts(); !strings.Contains(got[len(got)-1], "Retried") ||
+			!strings.Contains(got[len(got)-1], "Kept") {
+			t.Errorf("the retried call %q", got)
+		}
+		if got := e.text(t, `SELECT string_agg(state || ':' || coalesce(reason, '-'), ',' ORDER BY alert_group_id)
+			FROM pages WHERE alert_group_id IN ($1, $2)`, ga, gb); got != "delivered:-,delivered:-" {
+			t.Errorf("the pages of the retried call %s", got)
+		}
+
+		// A call accepted at its first attempt, whose run is acknowledged while the gateway rings: its Page was called
+		// about, and is delivered and counted.
+		e.business.Advance(2 * CombineWindow)
+		gc := e.group(t, "Ringing", "warning")
+		rc := e.run(t, gc, "ringing")
+		e.exec(t, `INSERT INTO escalation_chains (org_id, public_id, name, created_at, updated_at)
+			VALUES ($1, 'EC0000000000RG', 'ringing', $2, $2)`, e.orgID, c0)
+		e.exec(t, `UPDATE escalation_runs SET chain_id = (SELECT id FROM escalation_chains
+			WHERE public_id = 'EC0000000000RG') WHERE id = $1`, rc)
+		e.callStep(t, gc, rc, 1, p1)
+		counted := metrics.Pages.With("EC0000000000RG", groups.PageKindCall, groups.PageDelivered)
+		before := counted.Get()
+		e.gateway.during = func() {
+			e.business.Advance(10 * time.Second)
+			e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = $2, stop_command = 'acknowledge'
+				WHERE id = $1`, rc, e.business.Now())
+		}
+		e.round(t, s)
+		e.gateway.during = nil
+		if got := e.text(t, `SELECT state || ':' || coalesce(reason, '-') FROM pages WHERE alert_group_id = $1`, gc); got !=
+			"delivered:-" {
+			t.Errorf("the page of the call acknowledged while it rang %s", got)
+		}
+		if n := counted.Get() - before; n != 1 {
+			t.Errorf("%d calls counted", n)
+		}
+	})
+}
+
+// TestIntegrationCallStops is C-30.FR-4 on PostgreSQL for the stop checks of the items: right before the first
+// attempt, the Alert Group of a call action whose rule run stopped is dropped though it still fires, and the call is
+// about the other; a later Page of the hook of muster dev, without a run or a Page, keeps the stop check of the
+// item, so that the Alert Group is still dropped once its run stops; a call step after a start-over takes the stop
+// check of its run without the stopped rule run of the call action before it, and its Alert Group goes; and a contact
+// not confirmed is no contact the target may call.
+func TestIntegrationCallStops(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, srv dbtest.Server) {
+		e := setupCalls(t, srv, 2)
+		s := e.sender("r1", e.gateway)
+		p1 := e.users[0]
+		g1, g2, g3 := e.group(t, "Rule", "warning"), e.group(t, "Step", "warning"), e.group(t, "Hook", "warning")
+		r1, r2, r3 := e.run(t, g1, "payments"), e.run(t, g2, "devops"), e.run(t, g3, "search")
+		rule := e.id(t, `INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number,
+			user_id, importance, actions, state, started_at)
+			VALUES ($1, $2, $3, 1, $4, 'important', '[]', 'running', $5) RETURNING id`, e.orgID, g1, r1, p1, c0)
+		queue := func(p PageCall) {
+			t.Helper()
+			if err := pgx.BeginFunc(t.Context(), e.d.Pool, func(tx pgx.Tx) error {
+				_, _, err := e.calls.Queue(t.Context(), tx, p)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		queue(PageCall{UserID: p1, GatewayID: e.gw, AlertGroupID: g1, Stop: StopRuleRun, Run: r1, RuleRun: rule})
+		e.callStep(t, g2, r2, 1, p1)
+		e.callStep(t, g3, r3, 1, p1)
+		queue(PageCall{UserID: p1, GatewayID: e.gw, AlertGroupID: g3, Stop: StopNotFiring})
+		if n := e.count(t, `SELECT count(*) FROM gateway_call_items WHERE alert_group_id = $1 AND escalation_run_id = $2
+			AND page_id IS NOT NULL`, g3, r3); n != 1 {
+			t.Errorf("the Page of the hook overwrote the stop check: %d", n)
+		}
+		// A call action of a rule, whose chain then starts over and whose new run calls by a step: the item takes the
+		// stop check of the step, without the rule run, which stopped with the start-over.
+		g4 := e.group(t, "Restarted", "warning")
+		r4 := e.run(t, g4, "restarted")
+		rule4 := e.id(t, `INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number,
+			user_id, importance, actions, state, started_at)
+			VALUES ($1, $2, $3, 1, $4, 'important', '[]', 'running', $5) RETURNING id`, e.orgID, g4, r4, p1, c0)
+		queue(PageCall{UserID: p1, GatewayID: e.gw, AlertGroupID: g4, Stop: StopRuleRun, Run: r4, RuleRun: rule4})
+		e.exec(t, `UPDATE notification_rule_runs SET state = 'stopped', ended_at = $2 WHERE id = $1`, rule4, c0)
+		e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = $2, stop_command = 'started_over'
+			WHERE id = $1`, r4, c0)
+		e.exec(t, `UPDATE alert_groups SET chain_generation = 2 WHERE id = $1`, g4)
+		r4b := e.id(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, sources, steps,
+			state, generation, started_at)
+			VALUES ($1, 'ER00000000R004', $2, 'restarted', '[{"kind":"route"}]', '[]', 'running', 2, $3) RETURNING id`,
+			e.orgID, g4, c0)
+		e.callStep(t, g4, r4b, 1, p1)
+		if n := e.count(t, `SELECT count(*) FROM gateway_call_items WHERE alert_group_id = $1 AND escalation_run_id = $2
+			AND notification_rule_run_id IS NULL`, g4, r4b); n != 1 {
+			t.Errorf("the call step did not take the stop check: %d", n)
+		}
+		e.exec(t, `UPDATE notification_rule_runs SET state = 'stopped', ended_at = $2 WHERE id = $1`, rule, c0)
+		e.exec(t, `UPDATE escalation_runs SET state = 'stopped', ended_at = $2, stop_command = 'started_over'
+			WHERE id = $1`, r3, c0)
+		e.round(t, s)
+		if got := e.gateway.sentTexts(); len(got) != 1 || !strings.Contains(got[0], "Step") ||
+			!strings.Contains(got[0], "Restarted") || strings.Contains(got[0], "Rule") ||
+			strings.Contains(got[0], "Hook") {
+			t.Fatalf("the call %q", got)
+		}
+		if n := e.count(t, `SELECT count(*) FROM gateway_call_items WHERE alert_group_id IN ($1, $2)
+			AND dropped_at IS NOT NULL`, g1, g3); n != 2 {
+			t.Errorf("%d items dropped", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE id IN ($1, $2) AND status = 'firing'`, g1, g3); n != 2 {
+			t.Errorf("%d dropped alert groups still fire", n)
+		}
+
+		// A contact not confirmed is no contact to call.
+		p2 := e.users[1]
+		e.exec(t, `UPDATE gateway_contacts SET confirmed_at = NULL WHERE user_id = $1`, p2)
+		target, err := e.calls.Target(t.Context(), e.d.Pool, e.gw, "", []int64{p1, p2})
+		if err != nil || !target.Live || !slices.Equal(target.Callable, []int64{p1}) {
+			t.Errorf("the target %+v, %v", target, err)
 		}
 	})
 }

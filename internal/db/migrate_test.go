@@ -2759,18 +2759,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (50)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (51)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":50`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":51`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":50`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":51`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2786,10 +2786,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (50)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (51)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":50`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":51`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -5185,6 +5185,136 @@ func TestIntegrationPages(t *testing.T) {
 			t.Errorf("after down: %d CHECKs of 0047 and 0001", got)
 		}
 		if err := e.mm.Migrate(49); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationGatewayPages runs 0051 over a database at 50 with an Alert Group, a run of a chain, a rule run, a
+// Page by Mention, a Notification gateway and a waiting call about the Alert Group: up adds the stop check and the
+// Page of an item and the gateway and the call of a Page, every constraint validated, and the reasons of a call to
+// pages and page_users; a Page of the kind call needs its gateway and a Page by Mention has none; the run and the rule
+// run of an item turn null with their deletion, an item goes with its Page, and a Page loses the call that is
+// pruned; down removes all of it, the Pages of calls included, and up runs again.
+func TestIntegrationGatewayPages(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 50)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000GP', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', true, 900,
+				false, 60, 60, false, '2026-11-18', '2026-11-18'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000GP', 1, id, '{alertname}', '{}', sha256('g'), 't', '{}', '{}', '{}', 'firing',
+				'critical', false, '2026-11-18', '2026-11-18'
+			FROM routes`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000PE', 'petr', 'Petr', 'responder', 'local', 'active', '2026-11-18', '2026-11-18'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds,
+			bridge_info, created_at, updated_at)
+			SELECT id, 'CN0000000000GW', 'bridge', 'gw', 'http://gw', 'poll', '\x00', 'k1', '2026-11-18', 1, 1,
+				'{"roles":["gateway"]}', '2026-11-18', '2026-11-18' FROM organizations`)
+		e.exec(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, sources, steps, state,
+			generation, started_at)
+			SELECT org_id, 'ER0000000000GP', id, 'payments', '[{"kind":"route"}]', '[]', 'running', 1, '2026-11-18'
+			FROM alert_groups`)
+		e.exec(t, `INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number, user_id,
+			importance, actions, state, started_at)
+			SELECT r.org_id, r.alert_group_id, r.id, 3, u.id, 'important', '[]', 'running', '2026-11-18'
+			FROM escalation_runs r, users u`)
+		e.exec(t, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id, step_number, kind, importance, state,
+			created_at)
+			SELECT org_id, alert_group_id, id, 1, 'mention', 'normal', 'pending', '2026-11-18' FROM escalation_runs`)
+		e.exec(t, `INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id, state, not_before,
+			next_attempt_at, created_at)
+			SELECT c.org_id, 'CA0000000000GP', c.id, u.id, 'waiting', '2026-11-18', '2026-11-18', '2026-11-18'
+			FROM connections c, users u`)
+		e.exec(t, `INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at)
+			SELECT g.org_id, g.id, a.id, '2026-11-18' FROM gateway_calls g, alert_groups a`)
+		e.step(t, 1)
+		if got := e.constraints(t, []string{"gateway_call_items", "pages", "page_users"}, ""); strings.Contains(got,
+			":false") || !strings.Contains(got, "pages.pages_gateway_check:true") ||
+			!strings.Contains(got, "pages.pages_reason_v2_check:true") ||
+			!strings.Contains(got, "page_users.page_users_reason_v2_check:true") ||
+			strings.Contains(got, "pages.pages_reason_check:") ||
+			!strings.Contains(got, "gateway_call_items.gateway_call_items_page_id_fkey:true") {
+			t.Errorf("constraints %s", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname IN ('gateway_call_items_run_idx',
+			'gateway_call_items_rule_run_idx', 'gateway_call_items_page_idx', 'pages_gateway_call_idx')`); got != 4 {
+			t.Errorf("%d indexes", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM gateway_call_items WHERE escalation_run_id IS NULL
+			AND notification_rule_run_id IS NULL AND page_id IS NULL`); got != 1 {
+			t.Errorf("%d items of an earlier version without a stop check", got)
+		}
+		insertCall := `INSERT INTO pages (org_id, alert_group_id, escalation_run_id, notification_rule_run_id,
+			step_number, kind, importance, state, reason, created_at, ended_at, gateway_connection_id, gateway_call_id)
+			SELECT r.org_id, r.alert_group_id, r.id, NULL::bigint, 3, 'call', 'important', `
+		from := ` FROM escalation_runs r, connections c, gateway_calls g`
+		e.exec(t, insertCall+`'pending', NULL, '2026-11-18', NULL, c.id, g.id`+from)
+		e.exec(t, insertCall+`'not_delivered', 'call_refused', '2026-11-18', '2026-11-18', c.id, g.id`+from)
+		e.exec(t, `INSERT INTO page_users (org_id, page_id, user_id, outcome, reason)
+			SELECT p.org_id, p.id, u.id, 'not_delivered', 'call_budget_used' FROM pages p, users u
+			WHERE p.reason = 'call_refused'`)
+		var pe *pgconn.PgError
+		for _, bad := range []string{insertCall + `'pending', NULL, '2026-11-18', NULL, NULL, g.id` + from,
+			`INSERT INTO pages (org_id, alert_group_id, step_number, kind, state, created_at, gateway_connection_id)
+				SELECT a.org_id, a.id, 1, 'mention', 'pending', '2026-11-18', c.id FROM alert_groups a, connections c`} {
+			if _, err := e.d.Pool.Exec(t.Context(), bad); !errors.As(err, &pe) || pe.ConstraintName != "pages_gateway_check" {
+				t.Errorf("a page without its gateway, or a mention with one: %v", err)
+			}
+		}
+		e.exec(t, `UPDATE gateway_call_items i SET escalation_run_id = r.id, notification_rule_run_id = rr.id,
+			page_id = p.id
+			FROM escalation_runs r, notification_rule_runs rr, pages p WHERE p.kind = 'call' AND p.state = 'pending'`)
+		e.exec(t, `DELETE FROM notification_rule_runs`)
+		if got := e.count(t, `SELECT count(*) FROM gateway_call_items WHERE notification_rule_run_id IS NULL
+			AND escalation_run_id IS NOT NULL AND page_id IS NOT NULL`); got != 1 {
+			t.Errorf("after the rule run's deletion: %d items with their run and page", got)
+		}
+		e.exec(t, `DELETE FROM pages WHERE kind = 'call' AND state = 'pending'`)
+		if got := e.count(t, `SELECT count(*) FROM gateway_call_items`); got != 0 {
+			t.Errorf("after the page's deletion: %d items", got)
+		}
+		e.exec(t, `UPDATE gateway_calls SET state = 'dropped', ended_at = '2026-11-18', next_attempt_at = NULL`)
+		e.exec(t, `DELETE FROM gateway_calls`)
+		if got := e.count(t, `SELECT count(*) FROM pages WHERE kind = 'call' AND gateway_call_id IS NULL`); got != 1 {
+			t.Errorf("after the call's pruning: %d pages without their call", got)
+		}
+		e.exec(t, `INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id, state, not_before,
+			next_attempt_at, created_at)
+			SELECT c.org_id, 'CA0000000000GQ', c.id, u.id, 'waiting', '2026-11-18', '2026-11-18', '2026-11-18'
+			FROM connections c, users u`)
+		e.exec(t, `INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at, escalation_run_id)
+			SELECT g.org_id, g.id, r.alert_group_id, '2026-11-18', r.id FROM gateway_calls g, escalation_runs r`)
+		e.exec(t, `DELETE FROM escalation_runs`)
+		if got := e.count(t, `SELECT count(*) FROM gateway_call_items WHERE escalation_run_id IS NULL`); got != 1 {
+			t.Errorf("after the run's deletion: %d items", got)
+		}
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE (table_name = 'gateway_call_items' AND column_name IN ('escalation_run_id', 'notification_rule_run_id',
+				'page_id'))
+			   OR (table_name = 'pages' AND column_name IN ('gateway_connection_id', 'gateway_call_id'))`) +
+			e.count(t, `SELECT count(*) FROM pages WHERE kind = 'call'`); got != 0 {
+			t.Errorf("after down: %d columns and call pages left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM gateway_call_items`); got != 1 {
+			t.Errorf("after down: %d items", got)
+		}
+		if got := e.constraints(t, []string{"pages", "page_users"}, ""); !strings.Contains(got,
+			"pages.pages_reason_check:true") || !strings.Contains(got, "page_users.page_users_reason_check:true") ||
+			strings.Contains(got, "v2") {
+			t.Errorf("constraints after down %s", got)
+		}
+		if err := e.mm.Migrate(51); err != nil {
 			t.Errorf("up again: %v", err)
 		}
 	})

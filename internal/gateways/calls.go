@@ -17,6 +17,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -36,13 +37,14 @@ import (
 // the call that ends before the call that waits behind it, which a later Page created — then gateway_call_items, then
 // the limiter buckets of the gateway's Connection. Page runs in its caller's transaction, which may hold Alert Groups
 // already, and takes the person's lock and the waiting call after them; so a caller that Pages takes every lock of
-// Alert Groups it needs before its first Page, never one after. The sender's claim takes gateway_calls rows alone,
+// Alert Groups it needs before its first Page, never one after, and Pages several people in the order of the gateway
+// and then the User. The sender's claim takes gateway_calls rows alone,
 // SKIP LOCKED. Its preparation takes the person's lock, then the call, its items and the buckets, never an Alert Group:
 // it reads their status unlocked, and an Alert Group acknowledged a moment later is answered by the gateway's
-// Acknowledge (S-173). The end of a call Not delivered records page_not_delivered on its Alert Groups through the
-// dispatcher first, which locks them, and only then takes the person's lock, the call and the call waiting behind
-// it, in the same transaction, so that page_not_delivered is recorded once with the end it belongs to; every other
-// end takes no Alert Group. Page and the end of a call rely on READ COMMITTED: each statement after the person's lock
+// Acknowledge (S-173). The end of a call — accepted, Not delivered or dropped — settles the Pages that joined it
+// through the dispatcher first, which locks their Alert Groups, and only then takes the person's lock, the call and
+// the call waiting behind it, in the same transaction, so that page_not_delivered and the Assignees are recorded once
+// with the end they belong to (groups.SettleCall). Page and the end of a call rely on READ COMMITTED: each statement after the person's lock
 // sees what the transaction that held it before committed, so Page's PreviousCall and LockWaitingCall, read after the
 // lock, see the end of the previous call, and the end's ReleaseWaitingCall sees the waiting call a Page created.
 // Explicit locks of gateway_calls are FOR NO KEY UPDATE, never FOR UPDATE, as
@@ -68,19 +70,23 @@ const (
 
 // StopCheck says when the chain or the rule that Paged has stopped on an Alert Group (C-30.FR-4): the sender drops
 // such an Alert Group from a call before its first attempt, and ends the retries of a call once every one of its Alert
-// Groups stopped. It is a name rather than a function, as any replica sends the call; until S-157 the only one is
-// StopNotFiring, which S-157 extends with the stops of chains and rules.
+// Groups stopped. It is a name rather than a function, as any replica sends the call: the item of the Alert Group keeps
+// the run and the rule run it names, and the sender reads them (ListCallGroups). Every stop check includes
+// StopNotFiring.
 type StopCheck string
 
-// StopNotFiring is the stop of this story: the Alert Group is no longer firing — acknowledged, snoozed or resolved.
-const StopNotFiring StopCheck = "not_firing"
+// The stop checks: the Alert Group is no longer firing — acknowledged, snoozed or resolved —, for the hook of muster
+// dev; or also the run of the chain of a call step stopped or is of an earlier start of its chains, as after a
+// start-over (StopChainRun, PageCall.Run); or also the rule run of a call action stopped (StopRuleRun, PageCall.Run
+// and PageCall.RuleRun). A run that ran out has not stopped: a call step that is the last step of its chain still
+// calls.
+const (
+	StopNotFiring StopCheck = "not_firing"
+	StopChainRun  StopCheck = "chain_run"
+	StopRuleRun   StopCheck = "rule_run"
+)
 
-// stopped reports whether an Alert Group in status stopped for c.
-func (c StopCheck) stopped(status string) bool {
-	return status != "firing"
-}
-
-// ErrUnknownStop is a Page with a StopCheck that this version does not know.
+// ErrUnknownStop is a Page with a StopCheck that this version does not know, or without the runs it names.
 var ErrUnknownStop = errors.New("unknown stop check")
 
 // ErrNoPage is a Page that names no User, no Notification gateway or no Alert Group of the Organization, or a deleted
@@ -88,12 +94,69 @@ var ErrUnknownStop = errors.New("unknown stop check")
 var ErrNoPage = errors.New("no such user, notification gateway or alert group")
 
 // PageCall is a Page through a Notification gateway: the User called, the gateway's Connection and the Alert Group
-// it is about, by internal id, and the StopCheck of the chain or the rule that Paged.
+// it is about, by internal id, the StopCheck of the chain or the rule that Paged with the run of the chain and the rule
+// run it names, and the pages row of the Page, 0 for the hook of muster dev.
 type PageCall struct {
 	UserID       int64
 	GatewayID    int64
 	AlertGroupID int64
 	Stop         StopCheck
+	Run          int64
+	RuleRun      int64
+	Page         int64
+}
+
+// check reports a StopCheck that is unknown or lacks the runs it names.
+func (p PageCall) check() error {
+	switch {
+	case p.Stop == StopNotFiring:
+	case p.Stop == StopChainRun && p.Run != 0:
+	case p.Stop == StopRuleRun && p.Run != 0 && p.RuleRun != 0:
+	default:
+		return fmt.Errorf("%w %q", ErrUnknownStop, p.Stop)
+	}
+	return nil
+}
+
+// CallTarget is what a Page through a Notification gateway may call (C-32.FR-14, C-31.FR-3): the gateway, Live while
+// it is not deleted and still declares the role gateway, and the people among those asked who have a confirmed
+// contact there, in id order.
+type CallTarget struct {
+	Gateway  groups.PageGateway
+	Live     bool
+	Callable []int64
+}
+
+// Target reads, in the transaction tx of its caller, the Notification gateway gatewayID — or, when it is 0, the one
+// whose public_id is gatewayPublicID, as a Notification rule names it — and those of users who have a confirmed
+// contact there.
+func (c *Calls) Target(ctx context.Context, tx DBTX, gatewayID int64, gatewayPublicID string, users []int64) (
+	CallTarget, error) {
+	q := c.queries(tx)
+	var gw dbgen.GetGatewayRow
+	var err error
+	if gatewayID != 0 {
+		var r dbgen.GetGatewayByIDRow
+		r, err = q.GetGatewayByID(ctx, dbgen.GetGatewayByIDParams{OrgID: c.orgID, ID: gatewayID})
+		gw = dbgen.GetGatewayRow(r)
+	} else {
+		gw, err = q.GetGateway(ctx, dbgen.GetGatewayParams{OrgID: c.orgID, PublicID: gatewayPublicID})
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CallTarget{}, nil
+	}
+	if err != nil {
+		return CallTarget{}, fmt.Errorf("read the notification gateway of a call: %w", err)
+	}
+	t := CallTarget{Gateway: groups.PageGateway{ID: gw.ID, PublicID: gw.PublicID, Name: gw.Name}, Live: true}
+	if len(users) == 0 {
+		return t, nil
+	}
+	if t.Callable, err = q.ListCallableUsers(ctx, dbgen.ListCallableUsersParams{OrgID: c.orgID, ConnectionID: gw.ID,
+		UserIds: users}); err != nil {
+		return CallTarget{}, fmt.Errorf("read the contacts at the notification gateway %s: %w", gw.PublicID, err)
+	}
+	return t, nil
 }
 
 // CallQueries are the queries of the calls; *dbgen.Queries implements them.
@@ -101,6 +164,8 @@ type CallQueries interface {
 	GetPage(ctx context.Context, arg dbgen.GetPageParams) (dbgen.GetPageRow, error)
 	GetPageGroupID(ctx context.Context, arg dbgen.GetPageGroupIDParams) (int64, error)
 	GetGateway(ctx context.Context, arg dbgen.GetGatewayParams) (dbgen.GetGatewayRow, error)
+	GetGatewayByID(ctx context.Context, arg dbgen.GetGatewayByIDParams) (dbgen.GetGatewayByIDRow, error)
+	ListCallableUsers(ctx context.Context, arg dbgen.ListCallableUsersParams) ([]int64, error)
 	GetUserByPublicID(ctx context.Context, arg dbgen.GetUserByPublicIDParams) (dbgen.GetUserByPublicIDRow, error)
 	LockCallPerson(ctx context.Context, arg dbgen.LockCallPersonParams) error
 	PreviousCall(ctx context.Context, arg dbgen.PreviousCallParams) (dbgen.PreviousCallRow, error)
@@ -176,23 +241,36 @@ func NewCalls(orgID int64, business clock.Clock, log *logging.Logger) *Calls {
 // person's lock first (calls.go, Lock order) and wakes the senders once tx commits, and returns what to log once tx
 // committed.
 func (c *Calls) Page(ctx context.Context, tx DBTX, p PageCall) (func(context.Context), error) {
-	if p.Stop != StopNotFiring {
-		return nil, fmt.Errorf("%w %q", ErrUnknownStop, p.Stop)
+	_, log, err := c.Queue(ctx, tx, p)
+	return log, err
+}
+
+// Queue is Page, which also returns the internal id of the call the Page joined or created: the Alert Group's item
+// keeps the Page p.Page and the stop check of p, its run and its rule run — those of the latest Page when the call is
+// about the Alert Group already, as when its chain started over and Paged again.
+func (c *Calls) Queue(ctx context.Context, tx DBTX, p PageCall) (int64, func(context.Context), error) {
+	log, id, err := c.queue(ctx, tx, p)
+	return id, log, err
+}
+
+func (c *Calls) queue(ctx context.Context, tx DBTX, p PageCall) (func(context.Context), int64, error) {
+	if err := p.check(); err != nil {
+		return nil, 0, err
 	}
 	q := c.queries(tx)
 	now := c.business.Now().UTC()
 	g, err := q.GetPage(ctx, dbgen.GetPageParams{OrgID: c.orgID, AlertGroupID: p.AlertGroupID,
 		ConnectionID: p.GatewayID, UserID: p.UserID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("a page of the alert group %d to the user %d through the gateway %d: %w",
+		return nil, 0, fmt.Errorf("a page of the alert group %d to the user %d through the gateway %d: %w",
 			p.AlertGroupID, p.UserID, p.GatewayID, ErrNoPage)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read the page: %w", err)
+		return nil, 0, fmt.Errorf("read the page: %w", err)
 	}
 	if err := q.LockCallPerson(ctx, dbgen.LockCallPersonParams{LockClass: db.GatewayCallLockClass, OrgID: c.orgID,
 		ConnectionID: p.GatewayID, UserID: p.UserID}); err != nil {
-		return nil, fmt.Errorf("lock the calls of the user: %w", err)
+		return nil, 0, fmt.Errorf("lock the calls of the user: %w", err)
 	}
 	w, err := q.LockWaitingCall(ctx, dbgen.LockWaitingCallParams{OrgID: c.orgID, ConnectionID: p.GatewayID,
 		UserID: p.UserID})
@@ -202,28 +280,29 @@ func (c *Calls) Page(ctx context.Context, tx DBTX, p PageCall) (func(context.Con
 	case joined:
 		if g.Critical {
 			if err := q.MarkCallCritical(ctx, dbgen.MarkCallCriticalParams{OrgID: c.orgID, ID: w.ID}); err != nil {
-				return nil, fmt.Errorf("make the call %s critical: %w", w.PublicID, err)
+				return nil, 0, fmt.Errorf("make the call %s critical: %w", w.PublicID, err)
 			}
 		}
 	case !errors.Is(err, pgx.ErrNoRows):
-		return nil, fmt.Errorf("read the waiting call of the user: %w", err)
+		return nil, 0, fmt.Errorf("read the waiting call of the user: %w", err)
 	default:
 		if notBefore, err = c.notBefore(ctx, q, p, now); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		w.PublicID = publicid.New(publicid.GatewayCall)
 		if w.ID, err = q.InsertWaitingCall(ctx, dbgen.InsertWaitingCallParams{OrgID: c.orgID, PublicID: w.PublicID,
 			ConnectionID: p.GatewayID, UserID: p.UserID, Critical: g.Critical, NotBefore: notBefore,
 			Now: now}); err != nil {
-			return nil, fmt.Errorf("queue the call: %w", err)
+			return nil, 0, fmt.Errorf("queue the call: %w", err)
 		}
 	}
 	if err := q.AddCallItem(ctx, dbgen.AddCallItemParams{OrgID: c.orgID, CallID: w.ID, AlertGroupID: p.AlertGroupID,
-		Now: now}); err != nil {
-		return nil, fmt.Errorf("add the alert group to the call %s: %w", w.PublicID, err)
+		Now: now, EscalationRunID: nonZero(p.Run), NotificationRuleRunID: nonZero(p.RuleRun),
+		PageID: nonZero(p.Page)}); err != nil {
+		return nil, 0, fmt.Errorf("add the alert group to the call %s: %w", w.PublicID, err)
 	}
 	if err := q.NotifyCalls(ctx, CallsChannel); err != nil {
-		return nil, fmt.Errorf("wake the gateway senders: %w", err)
+		return nil, 0, fmt.Errorf("wake the gateway senders: %w", err)
 	}
 	return func(ctx context.Context) {
 		at := ""
@@ -234,7 +313,12 @@ func (c *Calls) Page(ctx context.Context, tx DBTX, p PageCall) (func(context.Con
 			logging.F("connection", g.ConnectionPublicID), logging.F("user", g.UserPublicID),
 			logging.F("group", "#"+strconv.FormatInt(g.Number, 10)), logging.F("joined", joined),
 			logging.F("not_before", at))
-	}, nil
+	}, w.ID, nil
+}
+
+// nonZero is the id, null for 0.
+func nonZero(id int64) pgtype.Int8 {
+	return pgtype.Int8{Int64: id, Valid: id != 0}
 }
 
 // notBefore is when a new waiting call of p may go: now when the person had no call through the gateway that went,

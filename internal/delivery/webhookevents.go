@@ -127,11 +127,12 @@ func (s *Service) queueEvents(ctx context.Context, tx groups.DBTX, q queries, r 
 		}
 		return nil
 	}
-	// The Mentions of a paged are the same in every Destination: read once per event.
+	// The Mentions of a paged are the same in every Destination: read once per event. The Quiet paged of a call has
+	// none, as no Quiet event does.
 	paged := map[int][]mentions.Target{}
 	if len(dests) > 0 {
 		for i, e := range r.Events {
-			if e.Event == groups.EventPaged {
+			if e.Event == groups.EventPaged && e.Loudness == groups.Loud {
 				if paged[i], err = s.pagedTargets(ctx, q, e); err != nil {
 					return false, err
 				}

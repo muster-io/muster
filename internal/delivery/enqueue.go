@@ -57,7 +57,8 @@ type Row struct {
 // per variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those
 // it leaves, a Quiet Publication in those it joins, an update in those of both. destination_joined is a new Root message
 // in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update. paged is a Thread reply
-// only in the Destinations of its Page, those of its chain (C-32.FR-8, where.go). page_not_delivered and
+// only in the Destinations of its Page, those of its chain (C-32.FR-8, where.go); the paged of a call through a
+// Notification gateway shows nothing, as the gateway calls (C-32.FR-9). page_not_delivered and
 // escalation_step_skipped show nothing in a messenger (C-30.FR-7, C-32.FR-14): outgoing webhooks in events mode receive
 // them. escalation_webhook shows nothing in a messenger either, and goes only to the outgoing webhook Destination its
 // step names, whether or not the Alert Group is delivered there (C-32.FR-13, C-15.FR-2 revised): queueEvents.
@@ -88,6 +89,7 @@ var Table = []Row{
 	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventPaged, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionPaged}, false},
+	{groups.EventPaged, groups.VariantCall, FormNothing, groups.Quiet, nil, false},
 	{groups.EventPageNotDelivered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventEscalationStepSkipped, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventEscalationWebhook, groups.VariantAny, FormNothing, groups.Quiet, nil, false},

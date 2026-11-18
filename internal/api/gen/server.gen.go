@@ -1024,12 +1024,15 @@ func (e EscalationChainWarningKind) Valid() bool {
 
 // Defines values for EscalationRunPageKind.
 const (
+	EscalationRunPageKindCall    EscalationRunPageKind = "call"
 	EscalationRunPageKindMention EscalationRunPageKind = "mention"
 )
 
 // Valid indicates whether the value is a known member of the EscalationRunPageKind enum.
 func (e EscalationRunPageKind) Valid() bool {
 	switch e {
+	case EscalationRunPageKindCall:
+		return true
 	case EscalationRunPageKindMention:
 		return true
 	default:
@@ -1143,7 +1146,9 @@ func (e EscalationRunStopCommand) Valid() bool {
 const (
 	EscalationSkipReasonDestinationDeleted    EscalationSkipReason = "destination_deleted"
 	EscalationSkipReasonDisabled              EscalationSkipReason = "disabled"
+	EscalationSkipReasonGatewayDeleted        EscalationSkipReason = "gateway_deleted"
 	EscalationSkipReasonLessThannil           EscalationSkipReason = "<nil>"
+	EscalationSkipReasonNoConfirmedContact    EscalationSkipReason = "no_confirmed_contact"
 	EscalationSkipReasonNoMentionPossible     EscalationSkipReason = "no_mention_possible"
 	EscalationSkipReasonOutsideWorkingHours   EscalationSkipReason = "outside_working_hours"
 	EscalationSkipReasonScheduleGap           EscalationSkipReason = "schedule_gap"
@@ -1159,7 +1164,11 @@ func (e EscalationSkipReason) Valid() bool {
 		return true
 	case EscalationSkipReasonDisabled:
 		return true
+	case EscalationSkipReasonGatewayDeleted:
+		return true
 	case EscalationSkipReasonLessThannil:
+		return true
+	case EscalationSkipReasonNoConfirmedContact:
 		return true
 	case EscalationSkipReasonNoMentionPossible:
 		return true
@@ -6318,12 +6327,15 @@ type EscalationRunList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// EscalationRunPage A Page a step of a run made (C-32.FR-18): its kind, the people it names, or the Team or the word for everyone in the chat of a `page_team` step, and its outcome (C-32.FR-10): `pending` until every Thread reply of it ended, even after one reached someone; then `delivered` when one reached a person it names (or, for a Team or everyone in the chat, when one was delivered), else `not_delivered`. A Page that could reach nobody when it was made ends `not_delivered` at once. `reason`, only with `not_delivered`: for a Page of people that ended at once, the one reason all its people missed it for, such as `no_account_link`, null when they missed it for several; for one whose Thread replies ended without reaching anyone, `not_delivered`; null for a Page of a Team or of everyone in the chat.
+// EscalationRunPage A Page a step of a run made (C-32.FR-18): its kind, the people it names, or the Team or the word for everyone in the chat of a `page_team` step, the Notification gateway of a call, and its outcome (C-32.FR-10): `pending` until every Thread reply of it ended, even after one reached someone; then `delivered` when one reached a person it names (or, for a Team or everyone in the chat, when one was delivered), else `not_delivered`. A Page that could reach nobody when it was made ends `not_delivered` at once. A call is `pending` until it ends, `delivered` once the gateway accepted it, and `not_delivered` when it ended Not delivered, with its reason, or when it was not made because the chain or the rule that Paged stopped first, as on an acknowledgement, without one (C-30.FR-4). `reason`, only with `not_delivered`: for a Page of people that ended at once, the one reason all its people missed it for, such as `no_account_link`, null when they missed it for several; for one whose Thread replies ended without reaching anyone, `not_delivered`; for a call, why it ended Not delivered, such as `call_refused`; null for a Page of a Team or of everyone in the chat.
 type EscalationRunPage struct {
 	// Everyone The word for everyone in the chat that a `page_team` step wrote instead of a Team mention; null otherwise.
 	Everyone nullable.Nullable[PageEveryone] `json:"everyone"`
 
-	// Kind `mention`, a Page by Mention in the Threads of the chain's Destinations. Later versions add kinds (calls through a Notification gateway); clients show an unknown one as it is.
+	// Gateway The Notification gateway of a call, deleted ones included; null for a Page by Mention.
+	Gateway nullable.Nullable[EntityRef] `json:"gateway"`
+
+	// Kind `mention`, a Page by Mention in the Threads of the chain's Destinations; `call`, a call through a Notification gateway to the confirmed contact of its person (C-30.FR-4), from a step "Call through a Notification gateway" or a call action of a Notification rule. Later versions add kinds; clients show an unknown one as it is.
 	Kind    EscalationRunPageKind    `json:"kind"`
 	Outcome EscalationRunPageOutcome `json:"outcome"`
 
@@ -6337,7 +6349,7 @@ type EscalationRunPage struct {
 	Users []UserRef `json:"users"`
 }
 
-// EscalationRunPageKind `mention`, a Page by Mention in the Threads of the chain's Destinations. Later versions add kinds (calls through a Notification gateway); clients show an unknown one as it is.
+// EscalationRunPageKind `mention`, a Page by Mention in the Threads of the chain's Destinations; `call`, a call through a Notification gateway to the confirmed contact of its person (C-30.FR-4), from a step "Call through a Notification gateway" or a call action of a Notification rule. Later versions add kinds; clients show an unknown one as it is.
 type EscalationRunPageKind string
 
 // EscalationRunPageOutcome defines model for EscalationRunPage.Outcome.
@@ -6369,7 +6381,7 @@ type EscalationRunStep struct {
 	// Pages The Pages the step made, in the order they were made — its first Mentions, then the later Mentions of the Notification rules it started, which are Pages of the step that started them (C-31.FR-3); empty for a skipped step and for a step that Pages nobody, such as a wait.
 	Pages []EscalationRunPage `json:"pages"`
 
-	// Reason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`), or for a step "Call through a Notification gateway" or a call action of a Notification rule whose gateway was deleted or is no Notification gateway any more (`gateway_deleted`), or for a person it would call who has no confirmed contact there (`no_confirmed_contact`), with the person in `paged_users` (C-32.FR-14, C-30.FR-9, C-31.FR-3). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[EscalationSkipReason] `json:"reason"`
 }
 
@@ -6386,7 +6398,7 @@ type EscalationRunStop struct {
 // EscalationRunStopCommand defines model for EscalationRunStop.Command.
 type EscalationRunStopCommand string
 
-// EscalationSkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+// EscalationSkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`), or for a step "Call through a Notification gateway" or a call action of a Notification rule whose gateway was deleted or is no Notification gateway any more (`gateway_deleted`), or for a person it would call who has no confirmed contact there (`no_confirmed_contact`), with the person in `paged_users` (C-32.FR-14, C-30.FR-9, C-31.FR-3). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
 type EscalationSkipReason string
 
 // EscalationStep defines model for EscalationStep.
@@ -10525,7 +10537,7 @@ type TimelineEntryList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `paged` for a Page by Mention, with its people and `importance`, or the `team` or the word for `everyone` of a `page_team` step, `page_not_delivered` for a call through a Notification gateway or a Page by Mention that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
+// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `paged` for a Page by Mention, with its people and `importance`, or the `team` or the word for `everyone` of a `page_team` step, `paged` for a call through a Notification gateway, Quiet, with its person and its `gateway` (C-30.FR-4), `page_not_delivered` for a call through a Notification gateway or a Page by Mention that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
 type TimelineEscalationEntry struct {
 	// Actor Who caused the entry. `system` entries carry the reason in `reason`.
 	Actor TimelineActor `json:"actor"`
@@ -10568,7 +10580,7 @@ type TimelineEscalationEntry struct {
 	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered, was withheld while its Destination was Broken, or was never sent because its Root message ended Not delivered (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason,omitempty"`
 
-	// SkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+	// SkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`), or for a step "Call through a Notification gateway" or a call action of a Notification rule whose gateway was deleted or is no Notification gateway any more (`gateway_deleted`), or for a person it would call who has no confirmed contact there (`no_confirmed_contact`), with the person in `paged_users` (C-32.FR-14, C-30.FR-9, C-31.FR-3). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
 	SkipReason nullable.Nullable[EscalationSkipReason] `json:"skip_reason,omitempty"`
 
 	// Step The number of the step of the chain; null for an event of no chain.

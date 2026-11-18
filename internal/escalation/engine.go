@@ -242,7 +242,9 @@ func (w *walk) entry(st runStep) groups.ChainEntry {
 // Severity level its condition does not meet, outside the Working hours of its chain when limited to them, in a gap of
 // the Schedule it Pages; for the people it names, each who became a Viewer or was disabled since is skipped, and the
 // step with them when none is left. StepPages makes the step, its Pages after the skips of its people, or skips a
-// page_team step that none of its chain's Destinations can carry (no_mention_possible, C-32.FR-9).
+// page_team step that none of its chain's Destinations can carry (no_mention_possible, C-32.FR-9), and a call step
+// whose gateway was deleted (gateway_deleted) or none of whose people has a confirmed contact there
+// (no_confirmed_contact, each person skipped with it; calls.go).
 //
 // A firing that comes late, after downtime, Pages whom it Pages once, as overdue notices collapse (C-17.FR-7) and the
 // overdue Mentions of a rule run do (C-31.FR-3): a step that would Page only people, a Team or everyone that the
@@ -276,14 +278,18 @@ func (w *walk) page(ctx context.Context, st runStep, p *groups.ChainProgress) (h
 		// The step is recorded next, after every step of the run before it: its seq is one more (InsertRunStep).
 		made, err := w.r.pages.MakeStep(ctx, w.tx, w.g, w.ref(), StepRef{Seq: int(w.made) + 1, Number: st.Number,
 			Kind: st.Kind, Importance: st.Importance, ScheduleID: st.ScheduleID, Schedule: st.Schedule,
-			TeamID: st.TeamID, Everyone: st.Everyone, GatewayID: st.GatewayID}, people)
+			TeamID: st.TeamID, Everyone: st.Everyone, GatewayID: st.GatewayID, CallTarget: st.CallTarget}, people)
 		if err != nil {
 			return 0, err
 		}
 		if made.Skip != "" {
-			p.Skips = append(p.Skips, groups.StepSkip{ChainEntry: w.entry(st), Reason: made.Skip})
+			if len(made.Skips) == 0 {
+				made.Skips = []groups.StepSkip{{ChainEntry: w.entry(st), Reason: made.Skip}}
+			}
+			p.Skips = append(p.Skips, made.Skips...)
 			return 0, w.record(ctx, st, OutcomeSkipped, made.Skip)
 		}
+		p.Skips = append(p.Skips, made.Skips...)
 		for _, pg := range made.Pages {
 			pg.After, pg.Seq = len(p.Skips), w.seq
 			w.seq++

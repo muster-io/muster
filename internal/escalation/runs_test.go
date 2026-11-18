@@ -383,10 +383,13 @@ func (d *fakeDispatcher) ChainStep(ctx context.Context, _ groups.DBTX, groupID i
 // fakeOnCalls is the On-call of the Schedules: the person of each Schedule by public_id, a gap for none.
 type fakeOnCalls struct {
 	onCall map[string]int64
+	// asked are the times the On-call was asked about, in their order.
+	asked []time.Time
 }
 
-func (o *fakeOnCalls) OnCallAtIn(_ context.Context, _ mentions.DBTX, scheduleID string, _ time.Time) (
+func (o *fakeOnCalls) OnCallAtIn(_ context.Context, _ mentions.DBTX, scheduleID string, at time.Time) (
 	schedules.Segment, error) {
+	o.asked = append(o.asked, at)
 	id, ok := o.onCall[scheduleID]
 	if !ok {
 		return schedules.Segment{}, schedules.ErrNotFound
@@ -1035,5 +1038,83 @@ func TestRunsFailures(t *testing.T) {
 	e.q.fail["ListRunPages"] = errors.New("boom")
 	if _, err := e.runs.ChainRuns(t.Context(), e.q.chains[1].PublicID, nil, 10); err == nil {
 		t.Error("chain runs pages: no error")
+	}
+}
+
+// gatewayCall is a step "Call through a Notification gateway" of the people ids through the gateway testGateway, or of
+// the On-call of the Schedule schedule when it is not empty.
+func gatewayCall(schedule string, ids ...int64) dbgen.SnapshotStepsRow {
+	s := dbgen.SnapshotStepsRow{Kind: KindCall, CallTarget: pgtype.Text{String: CallPeople, Valid: true},
+		GatewayConnectionID: pgtype.Int8{Int64: testGateway, Valid: true}, UserIds: ids}
+	if schedule != "" {
+		s.CallTarget.String, s.UserIds = CallOnCall, nil
+		s.ScheduleID = pgtype.Int8{Int64: 11, Valid: true}
+		s.SchedulePublicID = pgtype.Text{String: schedule, Valid: true}
+	}
+	return s
+}
+
+// TestCallSteps is C-32.FR-3, FR-14 and C-30.FR-9 in the run of a chain: a call step calls the On-call or the people
+// it may still Page, those without a confirmed contact at its gateway skipped with no_confirmed_contact, the step with
+// them when none is left; a deleted gateway skips the step with gateway_deleted; a Viewer it names is skipped first,
+// as for any step; and the chain goes on with its next step at once, in the same firing.
+func TestCallSteps(t *testing.T) {
+	cases := []struct {
+		name    string
+		deleted bool
+		steps   []dbgen.SnapshotStepsRow
+		made    []string
+		skips   []string
+		calls   int
+	}{
+		{"the on-call and people", false, []dbgen.SnapshotStepsRow{gatewayCall(schedMain),
+			gatewayCall("", 21, 22, 23), page(schedMain)},
+			[]string{"1 made", "2 made", "3 made"}, []string{"2 viewer vic", "2 no_confirmed_contact"}, 2},
+		{"nobody with a contact", false, []dbgen.SnapshotStepsRow{gatewayCall("", 22), page(schedMain)},
+			[]string{"1 skipped no_confirmed_contact", "2 made"}, []string{"1 no_confirmed_contact"}, 0},
+		{"a deleted gateway", true, []dbgen.SnapshotStepsRow{gatewayCall("", 21), gatewayCall(schedMain),
+			page(schedMain)},
+			[]string{"1 skipped gateway_deleted", "2 skipped gateway_deleted", "3 made"},
+			[]string{"1 gateway_deleted", "2 gateway_deleted"}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newRunsEnv(t)
+			calls := &fakeGatewayCalls{contacts: []int64{21}, deleted: c.deleted}
+			e.runs.pages = NewPages(PagesConfig{OnCalls: e.onCalls, Calls: calls, Rules: &fakeRuleRuns{},
+				Business: e.clock})
+			e.chain(1, "payments", false, slices.Clone(c.steps)...)
+			e.source(1, 0, ConditionAny)
+			e.start(t, groups.ChainStart{All: true})
+			e.fire(t, e.q.runs[0].id)
+			if got := e.made(); !slices.Equal(got, c.made) {
+				t.Errorf("steps %v, want %v", got, c.made)
+			}
+			if got := e.skips(); !slices.Equal(got, c.skips) {
+				t.Errorf("skips %v, want %v", got, c.skips)
+			}
+			// Each person skipped for want of a contact is named by id, ivan (22) here, the step with them too.
+			for _, p := range e.groups.progress {
+				for _, sk := range p.Skips {
+					if sk.Reason == groups.SkipNoConfirmedContact && (sk.Person == nil || sk.Person.ID != 22) {
+						t.Errorf("a skip for want of a contact %+v", sk)
+					}
+				}
+			}
+			n := 0
+			for _, p := range e.groups.progress {
+				for _, pg := range p.Pages {
+					if pg.Call != nil {
+						n++
+						if len(pg.People) != 1 || pg.People[0] != 21 || pg.Run != e.q.runs[0].id {
+							t.Errorf("a call %+v", pg)
+						}
+					}
+				}
+			}
+			if n != c.calls || e.q.runs[0].state != RunRanOut {
+				t.Errorf("%d calls, run %s", n, e.q.runs[0].state)
+			}
+		})
 	}
 }

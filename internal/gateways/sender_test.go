@@ -58,9 +58,14 @@ type notifier struct {
 	mu       sync.Mutex
 	sent     []sent
 	outcomes []delivery.Outcome
+	// during runs while a call is made, as what happens between its preparation and its end.
+	during func()
 }
 
 func (g *notifier) Notify(_ context.Context, c delivery.Call, n delivery.Notification) delivery.Outcome {
+	if g.during != nil {
+		g.during()
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.sent = append(g.sent, sent{call: c, n: n})
@@ -111,12 +116,16 @@ func (l *limiter) HoldConnection(_ context.Context, _ DBTX, _, _ int64, until ti
 	return l.err
 }
 
-// pages records page_not_delivered as the dispatcher would.
+// pages records how calls ended, as the dispatcher would settle their Pages: every outcome, and the page_not_delivered
+// of a call Not delivered on its Alert Groups, whose recording ran counts once committed.
 type pages struct {
-	mu    sync.Mutex
-	pages []recordedPage
-	err   error
-	ran   int
+	mu       sync.Mutex
+	outcomes []groups.CallOutcome
+	pages    []recordedPage
+	err      error
+	ran      int
+	// hook runs before an outcome is settled, as another transaction would commit meanwhile.
+	hook func()
 }
 
 type recordedPage struct {
@@ -124,14 +133,22 @@ type recordedPage struct {
 	page groups.Page
 }
 
-func (p *pages) PageNotDelivered(_ context.Context, _ groups.DBTX, ids []int64, page groups.Page) (
-	func(context.Context), error) {
+func (p *pages) SettleCall(_ context.Context, _ groups.DBTX, o groups.CallOutcome) (func(context.Context), error) {
+	if p.hook != nil {
+		p.hook()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
 		return nil, p.err
 	}
-	p.pages = append(p.pages, recordedPage{ids: slices.Clone(ids), page: page})
+	p.outcomes = append(p.outcomes, o)
+	if o.Accepted || o.Reason == "" {
+		return nil, nil
+	}
+	gw := o.Gateway
+	p.pages = append(p.pages, recordedPage{ids: slices.Clone(o.Groups), page: groups.Page{
+		Users: []groups.PagedUser{o.User}, Gateway: &gw, Reason: o.Reason}})
 	return func(context.Context) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
@@ -608,7 +625,7 @@ func TestSenderLease(t *testing.T) {
 	e.page(t, 1, 10, 1)
 	e.gw.script(delivery.Outcome{Kind: delivery.OutcomeUnknown, Status: 400})
 	rows, _ = e.f.ClaimDueCalls(t.Context(), claimParams(e.s))
-	c, _, err := e.s.prepare(t.Context(), rows[0])
+	c, err := e.s.prepare(t.Context(), rows[0])
 	if err != nil || c == nil {
 		t.Fatal(c, err)
 	}
@@ -892,5 +909,168 @@ func TestCallPruner(t *testing.T) {
 	}
 	if NewCallPruner(nil).q == nil {
 		t.Error("NewCallPruner")
+	}
+}
+
+// pageOf queues the Page page of the Alert Group group to the User 1 through the gateway 10 with the stop check of
+// the run run, and of the rule run ruleRun when it is not 0.
+func (e *senderEnv) pageOf(t *testing.T, group, run, ruleRun, page int64) {
+	t.Helper()
+	p := PageCall{UserID: 1, GatewayID: 10, AlertGroupID: group, Stop: StopChainRun, Run: run, Page: page}
+	if ruleRun != 0 {
+		p.Stop, p.RuleRun = StopRuleRun, ruleRun
+	}
+	if _, _, err := e.q.Queue(t.Context(), nil, p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSenderStopChecks is C-30.FR-4 with the stop checks of chains and rules: right before its first attempt a call
+// drops the Alert Groups whose run of the chain, or rule run, that Paged stopped — though each is still firing — and
+// is about the others; a call being retried ends its retries once every one of its Alert Groups stopped by its own
+// check; and the end of each call settles its Pages: accepted with the Alert Groups it kept, dropped without any.
+func TestSenderStopChecks(t *testing.T) {
+	e := newSender(t)
+	e.pageOf(t, 1, 501, 0, 77)
+	e.pageOf(t, 2, 502, 71, 78)
+	e.pageOf(t, 3, 503, 0, 79)
+	e.f.stopped = map[int64]bool{501: true, 71: true}
+	e.round(t)
+	call := e.f.calls[0]
+	if e.gw.count() != 1 || call.state != CallAccepted ||
+		!slices.Equal(e.f.itemsOf(call.id), []string{"+Disk3", "-Disk1", "-Disk2"}) {
+		t.Fatalf("%d sent, %+v about %v", e.gw.count(), call, e.f.itemsOf(call.id))
+	}
+	if len(e.pages.outcomes) != 1 || !e.pages.outcomes[0].Accepted || e.pages.outcomes[0].Call != call.id ||
+		!slices.Equal(e.pages.outcomes[0].Groups, []int64{3}) || e.pages.outcomes[0].User.Login != "petr" ||
+		e.pages.outcomes[0].Gateway.PublicID != "CN00000000GW10" {
+		t.Errorf("settled %+v", e.pages.outcomes)
+	}
+	if i := slices.IndexFunc(e.f.items, func(i fakeItem) bool { return i.group == 3 }); e.f.items[i].page.Int64 != 79 ||
+		e.f.items[i].run.Int64 != 503 || e.f.items[i].ruleRun.Valid {
+		t.Errorf("the item %+v", e.f.items[i])
+	}
+
+	// A call being retried, whose rule run stops: its retries end, and its Pages are settled as dropped.
+	e = newSender(t)
+	e.gw.script(delivery.Outcome{Kind: delivery.OutcomeTransient})
+	e.pageOf(t, 1, 501, 71, 77)
+	e.round(t)
+	e.f.stopped = map[int64]bool{71: true}
+	e.advance(delivery.TransientFirstStep)
+	e.round(t)
+	if call := e.f.calls[0]; e.gw.count() != 1 || call.state != CallDropped || call.attempts != 1 {
+		t.Fatalf("after the rule run stopped: %d sent, %+v", e.gw.count(), call)
+	}
+	if len(e.pages.outcomes) != 1 || e.pages.outcomes[0].Accepted || e.pages.outcomes[0].Reason != "" ||
+		len(e.pages.outcomes[0].Groups) != 0 || e.pages.ran != 0 {
+		t.Errorf("settled %+v, ran %d", e.pages.outcomes, e.pages.ran)
+	}
+}
+
+// TestSenderFirstAttempt: the end of a call reports when its first attempt was made — the time of the preparation
+// that made it, also when the call ends later, and the stored time on a retry — so that a stop between the first
+// attempt and the end leaves its Pages made.
+func TestSenderFirstAttempt(t *testing.T) {
+	e := newSender(t)
+	e.pageOf(t, 1, 501, 0, 77)
+	e.gw.during = func() { e.advance(30 * time.Second) }
+	e.round(t)
+	if len(e.pages.outcomes) != 1 || !e.pages.outcomes[0].Accepted || !e.pages.outcomes[0].FirstAttempt.Equal(c0) {
+		t.Fatalf("accepted at its first attempt %+v", e.pages.outcomes)
+	}
+
+	e = newSender(t)
+	e.pageOf(t, 1, 501, 0, 77)
+	e.gw.script(delivery.Outcome{Kind: delivery.OutcomeTransient})
+	e.round(t)
+	e.advance(delivery.TransientFirstStep)
+	e.round(t)
+	if len(e.pages.outcomes) != 1 || !e.pages.outcomes[0].FirstAttempt.Equal(c0) {
+		t.Errorf("accepted at a retry %+v", e.pages.outcomes)
+	}
+}
+
+// TestSenderDropRace: a call found with every Alert Group stopped, one of which fires again before its end, is not
+// ended: it is due again at once, and the next round sends it.
+func TestSenderDropRace(t *testing.T) {
+	e := newSender(t)
+	e.pageOf(t, 1, 501, 0, 77)
+	e.f.stopped = map[int64]bool{501: true}
+	e.pages.hook = func() {
+		e.f.mu.Lock()
+		e.f.stopped = nil
+		e.f.mu.Unlock()
+	}
+	e.round(t)
+	if call := e.f.calls[0]; e.gw.count() != 0 || call.state != CallWaiting || call.owner != "" ||
+		!call.nextAttempt.Time.Equal(c0) {
+		t.Fatalf("after the race: %d sent, %+v", e.gw.count(), call)
+	}
+	e.round(t)
+	if call := e.f.calls[0]; e.gw.count() != 1 || call.state != CallAccepted {
+		t.Fatalf("%d sent, %+v, the log:\n%s", e.gw.count(), call, e.log)
+	}
+	if strings.Contains(e.log.String(), `"event":"gateway_call_dropped"`) {
+		t.Errorf("dropped:\n%s", e.log)
+	}
+
+	// Its lease lost meanwhile, a drop changes nothing.
+	e = newSender(t)
+	e.pageOf(t, 1, 501, 0, 77)
+	e.f.stopped = map[int64]bool{501: true}
+	e.pages.hook = func() {
+		e.f.mu.Lock()
+		e.f.calls[0].owner = "r2"
+		e.f.mu.Unlock()
+	}
+	e.round(t)
+	if call := e.f.calls[0]; call.state != CallWaiting || strings.Contains(e.log.String(), "gateway_call_dropped") {
+		t.Errorf("a lost lease: %+v", call)
+	}
+
+	// A failing reschedule after the race is logged.
+	e = newSender(t)
+	e.pageOf(t, 1, 501, 0, 77)
+	e.f.stopped = map[int64]bool{501: true}
+	e.pages.hook = func() {
+		e.f.mu.Lock()
+		e.f.stopped = nil
+		e.f.fail["RescheduleCall"] = errors.New("boom")
+		e.f.mu.Unlock()
+	}
+	e.round(t)
+	if !strings.Contains(e.log.String(), `"event":"gateway_call_failed"`) {
+		t.Errorf("the log:\n%s", e.log)
+	}
+}
+
+// TestSenderSettleFailures: a failing settle of the Pages fails the end of an accepted or a dropped call, which a
+// later round makes again; a failing read of the call fails a drop.
+func TestSenderSettleFailures(t *testing.T) {
+	boom := errors.New("boom")
+	for _, c := range []string{"accepted", "dropped", "GetLeasedCall", "ListCallGroups", "EndCall"} {
+		t.Run(c, func(t *testing.T) {
+			e := newSender(t)
+			e.pageOf(t, 1, 501, 0, 77)
+			switch c {
+			case "accepted":
+				e.pages.err = boom
+			case "dropped":
+				e.f.stopped = map[int64]bool{501: true}
+				e.pages.err = boom
+			default:
+				e.f.stopped = map[int64]bool{501: true}
+				e.pages.hook = func() {
+					e.f.mu.Lock()
+					e.f.fail[c] = boom
+					e.f.mu.Unlock()
+				}
+			}
+			e.round(t)
+			if !strings.Contains(e.log.String(), `"event":"gateway_call_failed"`) || e.f.calls[0].ended.Valid {
+				t.Errorf("%+v, the log:\n%s", e.f.calls[0], e.log)
+			}
+		})
 	}
 }

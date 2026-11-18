@@ -224,6 +224,13 @@ func TestLifecycleEventTable(t *testing.T) {
 				return h.chainStep(t, ChainProgress{Pages: []StepPage{{ChainEntry: ChainEntry{Run: runID, Step: 1},
 					People: []int64{owner}, Importance: "normal"}}})
 			}},
+		{"paged by a call", want{EventPaged, KindEscalation, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				h.people()
+				q := &fakeQueue{call: 501}
+				return h.chainStep(t, ChainProgress{Pages: []StepPage{{ChainEntry: ChainEntry{Run: runID, Step: 1},
+					People: []int64{owner}, Call: &StepCall{Gateway: PageGateway{ID: gatewayID}, Queue: q.queue}}}})
+			}},
 		{"escalation step skipped", want{EventEscalationStepSkipped, KindEscalation, Quiet, nil},
 			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
 				return h.chainStep(t, ChainProgress{Skips: []StepSkip{{ChainEntry: ChainEntry{Run: runID, Step: 3},
@@ -1281,16 +1288,18 @@ func TestDestinationJoined(t *testing.T) {
 	})
 }
 
-// callPage is a call through the Notification gateway gatewayID to the User owner.
-func callPage(reason string) Page {
-	return Page{Users: []PagedUser{{ID: owner, PublicID: "SRAAAAAAAAAAA9", Name: "Alice", Login: "alice"}},
-		Gateway: &PageGateway{ID: gatewayID, PublicID: "CN00000000GW01", Name: "Gateway"}, Reason: reason}
+// callOutcome is a call 999 through the Notification gateway gatewayID to the User owner about the Alert Groups ids,
+// without Pages, as the hook of muster dev queues it, that ended Not delivered with reason.
+func callOutcome(ids []int64, reason string) CallOutcome {
+	return CallOutcome{Call: 999, Reason: reason, Groups: ids,
+		User:    PagedUser{ID: owner, PublicID: "SRAAAAAAAAAAA9", Name: "Alice", Login: "alice"},
+		Gateway: PageGateway{ID: gatewayID, PublicID: "CN00000000GW01", Name: "Gateway"}}
 }
 
 // pageNotDelivered records page_not_delivered of a call on the Alert Groups ids and runs what it returns.
 func (h *harness) pageNotDelivered(t *testing.T, ids []int64, reason string) {
 	t.Helper()
-	after, err := h.svc.PageNotDelivered(t.Context(), nil, ids, callPage(reason))
+	after, err := h.svc.SettleCall(t.Context(), nil, callOutcome(ids, reason))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1302,7 +1311,7 @@ func (h *harness) pageNotDelivered(t *testing.T, ids []int64, reason string) {
 // of its Alert Groups in id order, whatever their status, with the person in paged_user_ids, the gateway and the
 // reason, without changing a status; the re-render step gets the event with its Page, for outgoing webhooks; the
 // Timeline reads the person and the gateway back. An Alert Group that no longer exists is skipped; an unknown reason,
-// a Page that names nobody and a failed lock are refused.
+// a call that names nobody and a failed lock are refused.
 func TestPageNotDelivered(t *testing.T) {
 	h := newHarness(t)
 	var renderings []Rendering
@@ -1355,19 +1364,21 @@ func TestPageNotDelivered(t *testing.T) {
 	}
 	delete(h.db.fail, "ListTimelineGateways")
 
-	for _, p := range []Page{{Users: callPage("").Users, Reason: "rang_out"}, {Reason: PageCallRefused}} {
-		if _, err := h.svc.PageNotDelivered(t.Context(), nil, []int64{ga.ID}, p); err == nil {
-			t.Errorf("%+v was recorded", p)
+	nobody := callOutcome([]int64{ga.ID}, PageCallRefused)
+	nobody.User = PagedUser{}
+	for _, o := range []CallOutcome{callOutcome([]int64{ga.ID}, "rang_out"), nobody} {
+		if _, err := h.svc.SettleCall(t.Context(), nil, o); err == nil {
+			t.Errorf("%+v was recorded", o)
 		}
 	}
 	h.db.fail["LockGroups"] = errBoom
-	if _, err := h.svc.PageNotDelivered(t.Context(), nil, []int64{ga.ID}, callPage(PageCallRefused)); !errors.Is(err,
+	if _, err := h.svc.SettleCall(t.Context(), nil, callOutcome([]int64{ga.ID}, PageCallRefused)); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed lock: %v", err)
 	}
 	delete(h.db.fail, "LockGroups")
 	h.svc.SetRerender(func(context.Context, DBTX, Rendering) error { return errBoom })
-	if _, err := h.svc.PageNotDelivered(t.Context(), nil, []int64{ga.ID}, callPage(PageCallRefused)); !errors.Is(err,
+	if _, err := h.svc.SettleCall(t.Context(), nil, callOutcome([]int64{ga.ID}, PageCallRefused)); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed re-render: %v", err)
 	}

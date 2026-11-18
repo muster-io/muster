@@ -1528,11 +1528,12 @@ func (q *Queries) InsertNote(ctx context.Context, arg InsertNoteParams) error {
 const insertPage = `-- name: InsertPage :one
 INSERT INTO pages (org_id, alert_group_id, escalation_run_id, notification_rule_run_id, step_number, kind, team_id,
                    everyone, importance, schedule_id, chain_team_id, again_seconds, again, state, reason, created_at,
-                   ended_at, run_step_seq)
+                   ended_at, run_step_seq, gateway_connection_id)
 VALUES ($1, $2, $3, $4,
-        $5, 'mention', $6, $7, $8,
-        $9, $10, $11, $12, $13,
-        $14, $15, $16, $17)
+        $5, $6, $7, $8, $9,
+        $10, $11, $12, $13, $14,
+        $15, $16, $17, $18,
+        $19)
 RETURNING id
 `
 
@@ -1542,6 +1543,7 @@ type InsertPageParams struct {
 	EscalationRunID       pgtype.Int8
 	NotificationRuleRunID pgtype.Int8
 	StepNumber            int32
+	Kind                  string
 	TeamID                pgtype.Int8
 	Everyone              pgtype.Text
 	Importance            pgtype.Text
@@ -1554,11 +1556,13 @@ type InsertPageParams struct {
 	Now                   time.Time
 	EndedAt               pgtype.Timestamptz
 	RunStepSeq            pgtype.Int4
+	GatewayConnectionID   pgtype.Int8
 }
 
-// InsertPage writes a Page by Mention of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18):
-// pending until its Thread replies end, or ended at once, as not_delivered for no_root_message; the first Mentions of
-// a step carry the seq of its run step.
+// InsertPage writes a Page of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18): by Mention,
+// pending until its Thread replies end, or ended at once, as not_delivered for no_root_message; or a call through the
+// Notification gateway gateway_connection_id, pending until its call ends. The first Mentions of a step and the calls
+// of a call step carry the seq of its run step.
 func (q *Queries) InsertPage(ctx context.Context, arg InsertPageParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertPage,
 		arg.OrgID,
@@ -1566,6 +1570,7 @@ func (q *Queries) InsertPage(ctx context.Context, arg InsertPageParams) (int64, 
 		arg.EscalationRunID,
 		arg.NotificationRuleRunID,
 		arg.StepNumber,
+		arg.Kind,
 		arg.TeamID,
 		arg.Everyone,
 		arg.Importance,
@@ -1578,6 +1583,7 @@ func (q *Queries) InsertPage(ctx context.Context, arg InsertPageParams) (int64, 
 		arg.Now,
 		arg.EndedAt,
 		arg.RunStepSeq,
+		arg.GatewayConnectionID,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -1954,6 +1960,44 @@ func (q *Queries) ListAlertTeams(ctx context.Context, arg ListAlertTeamsParams) 
 			&i.Rule,
 			&i.Matcher,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCallPages = `-- name: ListCallPages :many
+SELECT id, alert_group_id
+FROM pages
+WHERE org_id = $1 AND gateway_call_id = $2 AND state = 'pending'
+ORDER BY id
+`
+
+type ListCallPagesParams struct {
+	OrgID         int64
+	GatewayCallID pgtype.Int8
+}
+
+type ListCallPagesRow struct {
+	ID           int64
+	AlertGroupID int64
+}
+
+// ListCallPages lists the pending Pages that joined the call gateway_call_id, with their Alert Groups, in id order.
+func (q *Queries) ListCallPages(ctx context.Context, arg ListCallPagesParams) ([]ListCallPagesRow, error) {
+	rows, err := q.db.Query(ctx, listCallPages, arg.OrgID, arg.GatewayCallID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCallPagesRow{}
+	for rows.Next() {
+		var i ListCallPagesRow
+		if err := rows.Scan(&i.ID, &i.AlertGroupID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -5672,11 +5716,16 @@ func (q *Queries) LockOpenGroupUpdate(ctx context.Context, arg LockOpenGroupUpda
 }
 
 const lockPage = `-- name: LockPage :one
-SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
+SELECT p.id, p.alert_group_id, p.kind, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
        coalesce(p.importance, '')::text AS importance,
        p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
        coalesce(r.chain_name, '')::text AS chain_name, coalesce(r.state, '')::text AS run_state, r.owning_team_id,
-       coalesce(rr.run_step_seq, p.run_step_seq) AS run_step_seq
+       coalesce(rr.run_step_seq, p.run_step_seq) AS run_step_seq,
+       coalesce(rr.state, '')::text AS rule_run_state,
+       r.ended_at AS run_ended_at, rr.ended_at AS rule_run_ended_at,
+       coalesce((SELECT min(n.started_at) FROM escalation_runs n
+                 WHERE n.org_id = r.org_id AND n.alert_group_id = r.alert_group_id
+                   AND n.generation > r.generation), '9999-12-31 00:00:00+00')::timestamptz AS run_superseded_at
 FROM pages p
 LEFT JOIN escalation_runs r ON r.org_id = p.org_id AND r.id = p.escalation_run_id
 LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
@@ -5694,6 +5743,7 @@ type LockPageParams struct {
 type LockPageRow struct {
 	ID              int64
 	AlertGroupID    int64
+	Kind            string
 	State           string
 	StepNumber      int32
 	Team            bool
@@ -5705,19 +5755,26 @@ type LockPageRow struct {
 	RunState        string
 	OwningTeamID    pgtype.Int8
 	RunStepSeq      pgtype.Int4
+	RuleRunState    string
+	RunEndedAt      pgtype.Timestamptz
+	RuleRunEndedAt  pgtype.Timestamptz
+	RunSupersededAt time.Time
 }
 
 // LockPage locks a Page whose outcome its Thread replies settle, after its Alert Group, with the run, the chain and the
 // step that made it, the importance of a Page of people, empty for none, the state and the owning Team of the run,
 // which its Assignees take, and run_step_seq, the run step whose Page it is (C-32.FR-12): that of the rule run of a
 // later Mention of a rule, which the step that started it made, else the Page's own; null for a Page or a rule run
-// written before migration 0050.
+// written before migration 0050. The state of the rule run, when the run and the rule run ended and when a later
+// start of the chains superseded the run — the start of its first run — tell whether the chain or the rule of a call
+// stopped before the call's first attempt; empty, null and 9999-12-31 for none.
 func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow, error) {
 	row := q.db.QueryRow(ctx, lockPage, arg.OrgID, arg.ID, arg.AlertGroupID)
 	var i LockPageRow
 	err := row.Scan(
 		&i.ID,
 		&i.AlertGroupID,
+		&i.Kind,
 		&i.State,
 		&i.StepNumber,
 		&i.Team,
@@ -5729,6 +5786,10 @@ func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow
 		&i.RunState,
 		&i.OwningTeamID,
 		&i.RunStepSeq,
+		&i.RuleRunState,
+		&i.RunEndedAt,
+		&i.RuleRunEndedAt,
+		&i.RunSupersededAt,
 	)
 	return i, err
 }
@@ -5876,6 +5937,41 @@ type LockTeamEvaluationParams struct {
 func (q *Queries) LockTeamEvaluation(ctx context.Context, arg LockTeamEvaluationParams) error {
 	_, err := q.db.Exec(ctx, lockTeamEvaluation, arg.LockClass, arg.OrgID)
 	return err
+}
+
+const missCallPageUsers = `-- name: MissCallPageUsers :many
+UPDATE page_users
+SET outcome = 'not_delivered', reason = $1
+WHERE org_id = $2 AND page_id = $3 AND outcome = 'pending'
+RETURNING user_id
+`
+
+type MissCallPageUsersParams struct {
+	Reason pgtype.Text
+	OrgID  int64
+	PageID int64
+}
+
+// MissCallPageUsers marks not_delivered, with the reason of its call, the person of a Page of the kind call still
+// pending once the call ended Not delivered.
+func (q *Queries) MissCallPageUsers(ctx context.Context, arg MissCallPageUsersParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, missCallPageUsers, arg.Reason, arg.OrgID, arg.PageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const missPageUsers = `-- name: MissPageUsers :many
@@ -6375,6 +6471,25 @@ type SetChainGenerationParams struct {
 // for, after the dispatcher saved it.
 func (q *Queries) SetChainGeneration(ctx context.Context, arg SetChainGenerationParams) error {
 	_, err := q.db.Exec(ctx, setChainGeneration, arg.ChainGeneration, arg.OrgID, arg.ID)
+	return err
+}
+
+const setPageCall = `-- name: SetPageCall :exec
+UPDATE pages
+SET gateway_call_id = $1
+WHERE org_id = $2 AND id = $3 AND kind = 'call'
+`
+
+type SetPageCallParams struct {
+	GatewayCallID pgtype.Int8
+	OrgID         int64
+	ID            int64
+}
+
+// SetPageCall records the call through a Notification gateway that a Page of the kind call joined, whose end settles
+// it.
+func (q *Queries) SetPageCall(ctx context.Context, arg SetPageCallParams) error {
+	_, err := q.db.Exec(ctx, setPageCall, arg.GatewayCallID, arg.OrgID, arg.ID)
 	return err
 }
 

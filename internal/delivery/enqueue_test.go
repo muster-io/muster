@@ -36,11 +36,11 @@ var person = groups.Actor{Kind: audit.ActorUser, Transport: audit.TransportUI}
 // C-09.FR-22 and C-10.FR-15, with the same loudness and Mentions, resolved split by who resolved; the six rows of
 // C-17.FR-11, the two of C-25 — team_joined, a Root message update, and unknown_team_value, nothing (C-11.FR-20
 // revised) — the three of destination_joined of C-26, a new Root message, page_not_delivered of C-30, paged of C-32,
-// a Thread reply in the Threads of its chain, escalation_step_skipped and escalation_webhook of C-32, nothing in a
-// messenger, and assignees_changed of C-32, a Root message update, complete the 42; a Loud event is always a new
-// message and an edit is always Quiet (C-11.FR-7).
+// a Thread reply in the Threads of its chain, and paged by a call through a Notification gateway, escalation_step_skipped
+// and escalation_webhook of C-32, nothing in a messenger, and assignees_changed of C-32, a Root message update,
+// complete the 43; a Loud event is always a new message and an edit is always Quiet (C-11.FR-7).
 func TestTableMatchesLifecycleEvents(t *testing.T) {
-	if len(delivery.Table) != 42 {
+	if len(delivery.Table) != 43 {
 		t.Errorf("%d rows", len(delivery.Table))
 	}
 	seen := map[string]bool{}

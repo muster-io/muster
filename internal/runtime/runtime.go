@@ -1060,12 +1060,14 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// The dispatcher starts and stops the runs of the Escalation chains in its transaction, and each step of a run is a
 	// system transition of the dispatcher (C-32.FR-5, ADR-0016). A step Pages people by runs of their Notification
 	// rules and a Team by its Team mention, in the Threads of its chain's Destinations, which delivery finds and fans
-	// the paged events out into (C-32.FR-8, C-31.FR-3); the calls follow with S-157.
+	// the paged events out into (C-32.FR-8, C-31.FR-3). A call step and the call actions of the rules queue calls
+	// through Notification gateways, which the gateway sender makes with their stop checks (C-32.FR-3, C-30.FR-4).
 	p.ruleRuns = notificationrules.New(notificationrules.Config{OrgID: orgID,
 		Store: notificationrules.NewStore(p.db.AccountLinksDB()), Business: p.clocks.Business}).Runs(
 		notificationrules.RunsConfig{Business: p.clocks.Business, TimersChannel: groups.TimersChannel})
+	p.calls = gateways.NewCalls(orgID, p.clocks.Business, p.log)
 	p.pages = escalation.NewPages(escalation.PagesConfig{OnCalls: p.schedules, Rules: p.ruleRuns,
-		Targets: p.delivery, Business: p.clocks.Business})
+		Targets: p.delivery, Calls: p.calls, Business: p.clocks.Business})
 	p.groups.SetPageTargets(p.delivery)
 	p.chainRuns = p.chains.Runs(escalation.RunsConfig{DB: p.db.AccountLinksDB(), Groups: p.groups,
 		OnCalls: p.schedules, Pages: p.pages, Log: p.log})
@@ -1121,7 +1123,6 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// The contacts at Notification gateways are kept in the main pool, as the Account links are (C-30.FR-3).
 	p.gatewayContacts = gateways.New(gateways.Config{OrgID: orgID, Store: gateways.NewStore(p.db.AccountLinksDB()),
 		Audit: w, Business: p.clocks.Business, Log: p.log, Gateway: p.bridge, Path: interactive})
-	p.calls = gateways.NewCalls(orgID, p.clocks.Business, p.log)
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
 		_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload)

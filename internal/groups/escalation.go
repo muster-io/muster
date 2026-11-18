@@ -11,6 +11,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/live"
@@ -30,10 +32,13 @@ const EventEscalationStepSkipped Event = "escalation_step_skipped"
 // the run, the chain, the step and that Destination.
 const EventEscalationWebhook Event = "escalation_webhook"
 
-// The reasons of escalation_step_skipped (EscalationSkipReason); S-157 adds its own. A webhook step whose
-// Destination was deleted, or is no longer an outgoing webhook in the mode events or both, is skipped with
-// SkipDestinationDeleted or SkipWebhookEventsRequired; a page_team step that none of its chain's Destinations can
-// carry, such as one whose only Destination is a Telegram channel, with SkipNoMentionPossible (C-32.FR-9).
+// The reasons of escalation_step_skipped (EscalationSkipReason). A webhook step whose Destination was deleted, or is
+// no longer an outgoing webhook in the mode events or both, is skipped with SkipDestinationDeleted or
+// SkipWebhookEventsRequired; a page_team step that none of its chain's Destinations can carry, such as one whose only
+// Destination is a Telegram channel, with SkipNoMentionPossible (C-32.FR-9). A call step or a call action of a rule
+// whose Notification gateway was deleted, or is no Notification gateway any more, is skipped with
+// SkipGatewayDeleted, and for a person without a confirmed contact there with SkipNoConfirmedContact (C-32.FR-14,
+// C-30.FR-9, C-31.FR-3).
 const (
 	SkipOutsideWorkingHours   = "outside_working_hours"
 	SkipSeverity              = "severity"
@@ -43,11 +48,14 @@ const (
 	SkipDestinationDeleted    = "destination_deleted"
 	SkipWebhookEventsRequired = "webhook_events_required" //nolint:gosec // G101: a skip reason, not a credential
 	SkipNoMentionPossible     = "no_mention_possible"
+	SkipGatewayDeleted        = "gateway_deleted"
+	SkipNoConfirmedContact    = "no_confirmed_contact"
 )
 
 // SkipReasons are the reasons of escalation_step_skipped, a closed list.
 var SkipReasons = []string{SkipOutsideWorkingHours, SkipSeverity, SkipScheduleGap, SkipViewer, SkipDisabled,
-	SkipDestinationDeleted, SkipWebhookEventsRequired, SkipNoMentionPossible}
+	SkipDestinationDeleted, SkipWebhookEventsRequired, SkipNoMentionPossible, SkipGatewayDeleted,
+	SkipNoConfirmedContact}
 
 // The Commands that stop the runs of the chains of an Alert Group (stop_command), and started_over for a run that a
 // start-over found still running.
@@ -270,8 +278,9 @@ type ChainProgress struct {
 
 // chainSteps records, in the order of the steps, the Quiet escalation_step_skipped of each skip (C-32.FR-14), the
 // Quiet escalation_webhook of each step that sent to an outgoing webhook (C-32.FR-13) and the Pages by Mention with
-// their paged and page_not_delivered (C-32.FR-9, FR-10, pages.go), which ChainStep dispatches, whatever the status: a
-// system transition that changes no status. ended collects the Pages that ended at once.
+// their paged and page_not_delivered (C-32.FR-9, FR-10, pages.go) and the Pages by a call with their Quiet paged
+// (C-32.FR-3), which ChainStep dispatches, whatever the status: a system transition that changes no status. ended
+// collects the Pages that ended at once, calls the Pages whose calls ChainStep queues.
 type chainSteps struct {
 	skips    []StepSkip
 	webhooks []StepWebhook
@@ -280,6 +289,7 @@ type chainSteps struct {
 	orgID    int64
 	now      time.Time
 	ended    *[]pageEnd
+	calls    *[]queuedCall
 }
 
 func (chainSteps) precondition(*Group) error { return nil }
@@ -292,6 +302,17 @@ type stepItem struct {
 }
 
 func (t chainSteps) apply(ctx context.Context, q Queries, g *Group, c *change) error {
+	// A skip of a person named by id alone, as a call skips one without a contact, is named here.
+	var unnamed []int64
+	for _, s := range t.skips {
+		if s.Person != nil && s.Person.PublicID == "" {
+			unnamed = append(unnamed, s.Person.ID)
+		}
+	}
+	named, err := pagedUsers(ctx, q, t.orgID, unnamed)
+	if err != nil {
+		return err
+	}
 	next := 0
 	skipsTo := func(n int) {
 		for ; next < n && next < len(t.skips); next++ {
@@ -299,7 +320,12 @@ func (t chainSteps) apply(ctx context.Context, q Queries, g *Group, c *change) e
 			chain := s.ChainEntry
 			e := entry{Event: EventEscalationStepSkipped, Reason: s.Reason, Chain: &chain}
 			if s.Person != nil {
-				e.Page = &Page{Users: []PagedUser{*s.Person}, Reason: s.Reason}
+				person := *s.Person
+				if i := slices.IndexFunc(named, func(u PagedUser) bool { return u.ID == person.ID }); i >= 0 &&
+					person.PublicID == "" {
+					person = named[i]
+				}
+				e.Page = &Page{Users: []PagedUser{person}, Reason: s.Reason}
 			}
 			c.add(e)
 		}
@@ -319,6 +345,13 @@ func (t chainSteps) apply(ctx context.Context, q Queries, g *Group, c *change) e
 		if w := it.webhook; w != nil {
 			chain, dest := w.ChainEntry, w.Destination
 			c.add(entry{Event: EventEscalationWebhook, Chain: &chain, Destination: &dest})
+			continue
+		}
+		if it.page.Call != nil {
+			// A call depends on no Root message and no Destination (C-32.FR-10).
+			if err := t.call(ctx, q, g, *it.page, c); err != nil {
+				return err
+			}
 			continue
 		}
 		if t.targets == nil {
@@ -397,12 +430,17 @@ func (s *Service) ChainStep(ctx context.Context, tx DBTX, groupID int64,
 		if len(pg.People) == 0 && !pg.teamPage() {
 			return nil, fmt.Errorf("a page of step %d names nobody", pg.Step)
 		}
+		if pg.Call != nil && (len(pg.People) != 1 || pg.Call.Queue == nil || pg.Call.Gateway.ID == 0) {
+			return nil, fmt.Errorf("a call of step %d names %d people, or no gateway", pg.Step, len(pg.People))
+		}
 	}
 	var after committed
+	var calls []queuedCall
 	if len(p.Skips) > 0 || len(p.Webhooks) > 0 || len(p.Pages) > 0 {
 		var ended []pageEnd
 		if err := s.d.dispatch(ctx, q, g, System, chainSteps{skips: p.Skips, webhooks: p.Webhooks, pages: p.Pages,
-			targets: s.d.pages, orgID: s.orgID, now: s.clock.Now().UTC(), ended: &ended}, &after); err != nil {
+			targets: s.d.pages, orgID: s.orgID, now: s.clock.Now().UTC(), ended: &ended, calls: &calls},
+			&after); err != nil {
 			return nil, err
 		}
 		countPages(&after, ended)
@@ -411,6 +449,24 @@ func (s *Service) ChainStep(ctx context.Context, tx DBTX, groupID int64,
 		err := s.d.dispatch(ctx, q, g, System, chainsRanOut{chains: s.d.chains, tx: tx}, &after)
 		if err != nil && !errors.Is(err, errNotDue) {
 			return nil, err
+		}
+	}
+	// The calls are queued last, after every lock of an Alert Group the dispatches took, and by gateway and person, so
+	// that two steps calling the same people take their locks in one order (gateways, Lock order).
+	slices.SortStableFunc(calls, func(a, b queuedCall) int {
+		return cmp.Or(cmp.Compare(a.gateway, b.gateway), cmp.Compare(a.user, b.user))
+	})
+	for _, qc := range calls {
+		call, log, err := qc.queue(ctx, tx, qc.page)
+		if err != nil {
+			return nil, fmt.Errorf("queue the call of page %d on alert group #%d: %w", qc.page, g.Number, err)
+		}
+		if err := q.SetPageCall(ctx, dbgen.SetPageCallParams{OrgID: s.orgID, ID: qc.page,
+			GatewayCallID: pgtype.Int8{Int64: call, Valid: true}}); err != nil {
+			return nil, fmt.Errorf("record the call of page %d on alert group #%d: %w", qc.page, g.Number, err)
+		}
+		if log != nil {
+			after.add(log)
 		}
 	}
 	if p.Changed {

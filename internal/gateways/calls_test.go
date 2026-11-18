@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 )
 
@@ -43,6 +44,8 @@ type fakeCalls struct {
 	// broken is the Broken state of the gateways by id, and recovered when their last one ended (broken_test.go).
 	broken    map[int64]*fakeBroken
 	recovered map[int64]time.Time
+	// stopped are the runs of chains and the rule runs that stopped, by id, which stop the items that name them.
+	stopped map[int64]bool
 }
 
 type fakeCall struct {
@@ -65,9 +68,10 @@ type fakeCall struct {
 }
 
 type fakeItem struct {
-	call, group int64
-	queued      time.Time
-	dropped     pgtype.Timestamptz
+	call, group        int64
+	queued             time.Time
+	dropped            pgtype.Timestamptz
+	run, ruleRun, page pgtype.Int8
 }
 
 type fakeGroup struct {
@@ -182,6 +186,34 @@ func (f *fakeCalls) GetGateway(_ context.Context, a dbgen.GetGatewayParams) (dbg
 	return dbgen.GetGatewayRow{}, pgx.ErrNoRows
 }
 
+func (f *fakeCalls) GetGatewayByID(_ context.Context, a dbgen.GetGatewayByIDParams) (dbgen.GetGatewayByIDRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.err("GetGatewayByID"); err != nil {
+		return dbgen.GetGatewayByIDRow{}, err
+	}
+	if g, ok := f.gateways[a.ID]; ok && g.gateway {
+		return dbgen.GetGatewayByIDRow{ID: a.ID, PublicID: g.publicID, Name: g.name}, nil
+	}
+	return dbgen.GetGatewayByIDRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeCalls) ListCallableUsers(_ context.Context, a dbgen.ListCallableUsersParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.err("ListCallableUsers"); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, u := range a.UserIds {
+		if _, ok := f.contacts[[2]int64{u, a.ConnectionID}]; ok {
+			out = append(out, u)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (f *fakeCalls) GetUserByPublicID(_ context.Context, a dbgen.GetUserByPublicIDParams) (
 	dbgen.GetUserByPublicIDRow, error) {
 	f.mu.Lock()
@@ -274,9 +306,17 @@ func (f *fakeCalls) AddCallItem(_ context.Context, a dbgen.AddCallItemParams) er
 	i := slices.IndexFunc(f.items, func(i fakeItem) bool { return i.call == a.CallID && i.group == a.AlertGroupID })
 	switch {
 	case i < 0:
-		f.items = append(f.items, fakeItem{call: a.CallID, group: a.AlertGroupID, queued: a.Now})
+		f.items = append(f.items, fakeItem{call: a.CallID, group: a.AlertGroupID, queued: a.Now,
+			run: a.EscalationRunID, ruleRun: a.NotificationRuleRunID, page: a.PageID})
+		return nil
 	case f.items[i].dropped.Valid:
 		f.items[i].dropped, f.items[i].queued = pgtype.Timestamptz{}, a.Now
+	}
+	if a.EscalationRunID.Valid {
+		f.items[i].run, f.items[i].ruleRun = a.EscalationRunID, a.NotificationRuleRunID
+	}
+	if a.PageID.Valid {
+		f.items[i].page = a.PageID
 	}
 	return nil
 }
@@ -337,8 +377,9 @@ func (f *fakeCalls) GetLeasedCall(_ context.Context, a dbgen.GetLeasedCallParams
 	gw, u := f.gateways[c.conn], f.users[c.user]
 	row := dbgen.GetLeasedCallRow{ID: c.id, PublicID: c.publicID, ConnectionID: c.conn, UserID: c.user,
 		State: c.state, Critical: c.critical, Language: c.language, Text: c.text, Attempts: c.attempts,
-		FirstFailedAt: c.firstFailed, ActionData: c.actionData, ConnectionPublicID: gw.publicID,
-		ConnectionName: gw.name, UserPublicID: u.publicID, UserName: u.name, UserLogin: u.login,
+		FirstFailedAt: c.firstFailed, FirstAttemptAt: c.firstAttempt, ActionData: c.actionData,
+		ConnectionPublicID: gw.publicID,
+		ConnectionName:     gw.name, UserPublicID: u.publicID, UserName: u.name, UserLogin: u.login,
 		UserLanguage: u.language, Gateway: gw.gateway, GatewayBroken: f.broken[c.conn] != nil ||
 			(c.nextAttempt.Valid && c.nextAttempt.Time.Before(f.recovered[c.conn]))}
 	for _, k := range f.contacts {
@@ -359,8 +400,10 @@ func (f *fakeCalls) ListCallGroups(_ context.Context, a dbgen.ListCallGroupsPara
 	out := []dbgen.ListCallGroupsRow{}
 	for _, i := range f.items {
 		if g, ok := f.groups[i.group]; ok && i.call == a.CallID && !i.dropped.Valid {
+			stopped := g.status != "firing" || (i.run.Valid && f.stopped[i.run.Int64]) ||
+				(i.ruleRun.Valid && f.stopped[i.ruleRun.Int64])
 			out = append(out, dbgen.ListCallGroupsRow{ID: i.group, PublicID: g.publicID, Number: g.number,
-				Title: g.title, SeverityLevel: g.severity, Status: g.status})
+				Title: g.title, SeverityLevel: g.severity, Status: g.status, Stopped: stopped})
 		}
 	}
 	slices.SortFunc(out, func(x, y dbgen.ListCallGroupsRow) int { return cmp.Compare(x.Number, y.Number) })
@@ -720,5 +763,85 @@ func TestDevPage(t *testing.T) {
 	f.fail["AddCallItem"] = boom
 	if err := c.DevPage(t.Context(), f, "SR0000000000P1", "CN00000000GW10", []string{g1}); !errors.Is(err, boom) {
 		t.Errorf("a failed page: %v", err)
+	}
+}
+
+// TestQueueStopChecks: the Page of a call step names the run of its chain, that of a call action also its rule run,
+// and the item keeps them with the Page, the stop check its Page passed; Queue returns the call the Page joined; a
+// stop check without the runs it names is refused.
+func TestQueueStopChecks(t *testing.T) {
+	c, f, _ := queue()
+	id, log, err := c.Queue(t.Context(), nil, PageCall{UserID: 1, GatewayID: 10, AlertGroupID: 1, Stop: StopChainRun,
+		Run: 501, Page: 77})
+	if err != nil || id != f.calls[0].id || log == nil {
+		t.Fatalf("Queue = %d, %v", id, err)
+	}
+	joined, _, err := c.Queue(t.Context(), nil, PageCall{UserID: 1, GatewayID: 10, AlertGroupID: 2, Stop: StopRuleRun,
+		Run: 502, RuleRun: 71, Page: 78})
+	if err != nil || joined != id || len(f.calls) != 1 {
+		t.Fatalf("joined %d, %v", joined, err)
+	}
+	if i := f.items[0]; i.run.Int64 != 501 || i.ruleRun.Valid || i.page.Int64 != 77 {
+		t.Errorf("the item of a call step %+v", i)
+	}
+	if i := f.items[1]; i.run.Int64 != 502 || i.ruleRun.Int64 != 71 || i.page.Int64 != 78 {
+		t.Errorf("the item of a call action %+v", i)
+	}
+	// A later Page of the hook keeps the Page and the stop check of the item; a later call step takes its own, without
+	// the rule run of the call action before it.
+	if _, _, err := c.Queue(t.Context(), nil, PageCall{UserID: 1, GatewayID: 10, AlertGroupID: 2,
+		Stop: StopNotFiring}); err != nil {
+		t.Fatal(err)
+	}
+	if i := f.items[1]; i.run.Int64 != 502 || i.ruleRun.Int64 != 71 || i.page.Int64 != 78 {
+		t.Errorf("the item after a Page of the hook %+v", i)
+	}
+	if _, _, err := c.Queue(t.Context(), nil, PageCall{UserID: 1, GatewayID: 10, AlertGroupID: 2,
+		Stop: StopChainRun, Run: 503, Page: 79}); err != nil {
+		t.Fatal(err)
+	}
+	if i := f.items[1]; i.run.Int64 != 503 || i.ruleRun.Valid || i.page.Int64 != 79 {
+		t.Errorf("the item after a later call step %+v", i)
+	}
+	for _, p := range []PageCall{{Stop: StopChainRun}, {Stop: StopRuleRun, Run: 501}, {Stop: StopRuleRun, RuleRun: 71}} {
+		p.UserID, p.GatewayID, p.AlertGroupID = 1, 10, 3
+		if _, _, err := c.Queue(t.Context(), nil, p); !errors.Is(err, ErrUnknownStop) {
+			t.Errorf("%+v: %v", p, err)
+		}
+	}
+}
+
+// TestCallTarget is C-32.FR-14 and C-30.FR-9: the gateway of a call step by id, or of a call action by public_id, is
+// live while it is not deleted and declares the role gateway, with the people who have a confirmed contact there; a
+// Bridge Connection for messages only, or one that is gone, is not; a failed read fails it.
+func TestCallTarget(t *testing.T) {
+	c, f, _ := queue()
+	tg, err := c.Target(t.Context(), nil, 10, "", []int64{1, 2, 3})
+	if err != nil || !tg.Live || tg.Gateway != (groups.PageGateway{ID: 10, PublicID: "CN00000000GW10", Name: "Gateway"}) ||
+		!slices.Equal(tg.Callable, []int64{1, 2}) {
+		t.Errorf("by id %+v %v", tg, err)
+	}
+	tg, err = c.Target(t.Context(), nil, 0, "CN00000000GW11", []int64{1, 2})
+	if err != nil || !tg.Live || tg.Gateway.ID != 11 || !slices.Equal(tg.Callable, []int64{1}) {
+		t.Errorf("by public_id %+v %v", tg, err)
+	}
+	if tg, err := c.Target(t.Context(), nil, 11, "", nil); err != nil || !tg.Live || len(tg.Callable) != 0 {
+		t.Errorf("nobody asked %+v %v", tg, err)
+	}
+	for _, args := range []struct {
+		id     int64
+		public string
+	}{{12, ""}, {99, ""}, {0, "CN00000000BR12"}, {0, "CN00000000NONE"}} {
+		if tg, err := c.Target(t.Context(), nil, args.id, args.public, []int64{1}); err != nil || tg.Live {
+			t.Errorf("%+v: %+v %v", args, tg, err)
+		}
+	}
+	boom := errors.New("boom")
+	for _, q := range []string{"GetGatewayByID", "ListCallableUsers"} {
+		f.fail[q] = boom
+		if _, err := c.Target(t.Context(), nil, 10, "", []int64{1}); !errors.Is(err, boom) {
+			t.Errorf("%s: %v", q, err)
+		}
+		delete(f.fail, q)
 	}
 }

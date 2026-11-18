@@ -134,8 +134,8 @@ type OnCalls interface {
 }
 
 // StepPages makes what a step that Pages does — a Page of the On-call, of chosen people or of a whole Team, a call —
-// once the run decided to make it, with the people it may Page (pages.go; calls from S-157), and stops the runs of
-// the Notification rules of the runs that stop or start over (C-31.FR-3). A webhook step does not reach it: the run
+// once the run decided to make it, with the people it may Page (pages.go, calls.go), and stops the runs of the
+// Notification rules of the runs that stop or start over (C-31.FR-3). A webhook step does not reach it: the run
 // records its escalation_webhook itself (webhook.go).
 type StepPages interface {
 	MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, run RunRef, step StepRef, people []int64) (
@@ -143,9 +143,11 @@ type StepPages interface {
 	StopRules(ctx context.Context, tx groups.DBTX, groupID int64, at time.Time) error
 }
 
-// StepMade is what StepPages made of a step: its Pages by Mention, or the reason to skip it.
+// StepMade is what StepPages made of a step: its Pages, by Mention and by a call, and the skips of the people it
+// could not call (C-32.FR-14, C-31.FR-3); or the reason to skip it, which those skips stand for when it has any.
 type StepMade struct {
 	Pages []groups.StepPage
+	Skips []groups.StepSkip
 	Skip  string
 }
 
@@ -180,6 +182,7 @@ type StepRef struct {
 	TeamID     int64
 	Everyone   string
 	GatewayID  int64
+	CallTarget string
 }
 
 // Runs holds the runs of the Organization's Escalation chains and implements groups.ChainRuns. Its zero value runs
@@ -632,12 +635,14 @@ type RunStepView struct {
 }
 
 // RunPageView is a Page a step of a run made (EscalationRunPage): its kind, the people it names, or the Team or the
-// word for everyone in the chat of a page_team step, and its outcome with the reason it was not delivered.
+// word for everyone in the chat of a page_team step, the Notification gateway of a call, and its outcome with the
+// reason it was not delivered.
 type RunPageView struct {
 	Kind     string
 	Users    []UserRef
 	Team     *TeamRef
 	Everyone string
+	Gateway  *GatewayRef
 	Outcome  string
 	Reason   string
 }
@@ -715,9 +720,9 @@ func (r *Runs) ChainRuns(ctx context.Context, publicID string, after *RunPositio
 	return page, nil
 }
 
-// runPages reads the Pages by Mention of the runs ids, those whose steps are shown, in one query, and gives each to the
-// step of its run that made it (C-32.FR-18): the run step its seq names — for a later Mention of a Notification rule,
-// that of the step that started the rule, so a step lists all the Pages it led to. A Page or a rule run written before
+// runPages reads the Pages of the runs ids — by Mention and by a call —, those whose steps are shown, in one query, and
+// gives each to the step of its run that made it (C-32.FR-18): the run step its seq names — for a later Mention or a
+// call action of a Notification rule, that of the step that started the rule, so a step lists all the Pages it led to. A Page or a rule run written before
 // migration 0050 has no seq: its Page goes to the latest step of its number the run made at or before the step that
 // made it — the Page's own time, or for a later Mention the start of its rule run, so that a repeat of the step since
 // does not take it —, else to the latest step of its number the run made; one the run made no step of its number for
@@ -786,6 +791,9 @@ func pageOf(row dbgen.ListRunPagesRow) RunPageView {
 	if row.TeamPublicID.Valid {
 		p.Team = &TeamRef{PublicID: row.TeamPublicID.String, Name: row.TeamName.String, Slug: row.TeamSlug.String,
 			Deleted: row.TeamDeleted}
+	}
+	if row.GatewayPublicID.Valid {
+		p.Gateway = &GatewayRef{PublicID: row.GatewayPublicID.String, Name: row.GatewayName.String}
 	}
 	return p
 }
