@@ -14,7 +14,11 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   INGEST_URL,
   adminApi,
+  createChain,
+  createRoutingRoute,
   dropRouting,
+  removeChains,
+  teamIdOf,
   expectNoHorizontalScroll,
   fam,
   notify,
@@ -731,6 +735,156 @@ test("the Route form gives each Destination a Severity condition and delivers to
     await context.close();
   } finally {
     await dropRouting(PREFIX);
+  }
+  expect(csp).toEqual([]);
+});
+
+const CHAINS_PREFIX = "rtc";
+const NO_DESTINATION =
+  "Only a Notification gateway can reach anyone from this Escalation chain: the Route has no Destination.";
+
+test("the Route form names Escalation chains with their conditions, warns of a Route without a Destination, and the list shows the chains", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const seed = await seedRouting(CHAINS_PREFIX);
+  const critical = seed.destination("infra-critical");
+  const notice = seed.destination("infra-notice");
+  const route = `Infrastructure-${CHAINS_PREFIX}`;
+  const chain = `${CHAINS_PREFIX}-devops`;
+  const admin = await adminApi();
+  try {
+    const team = await teamIdOf(admin, seed.slugs.pay);
+    const chainId = await createChain(admin, chain, team, [{ kind: "page_team" }]);
+    await createRoutingRoute(seed, route, {
+      entries: [
+        { destination_id: critical.id, severity_condition: "critical" },
+        { destination_id: notice.id, severity_condition: "below_critical" },
+      ],
+      deliverToTeams: false,
+      groupKey: ["alertname", "system"],
+    });
+    await signInAdmin(page);
+    await page.goto("/routes");
+    await expect(routeRow(page, route).getByTestId("route-chains-summary")).toHaveText(
+      "Escalation chains: none",
+    );
+    await routeRow(page, route).getByRole("link", { name: route, exact: true }).click();
+
+    // "Escalation chains" sits in the section of the Minimum severity, with its hint and "Learn more".
+    const section = page.getByTestId("route-chains");
+    await expect(section).toContainText("Escalation chains");
+    await expect(section).toContainText(
+      "Pages only in the Threads of the Route's Destinations. The Teams from the label Page with their own chains.",
+    );
+    await expect(
+      section.getByRole("link", {
+        name: "Learn more: Naming chains on Routes and Teams (opens in a new tab)",
+      }),
+    ).toHaveAttribute("href", /\/concepts\/escalation-chains\/#naming-chains-on-routes-and-teams$/);
+    await expect(page.getByTestId("route-chains-none")).toHaveText(
+      "The Route names no Escalation chain.",
+    );
+
+    // Name the chain with any severity: with the Destinations in place there is no warning.
+    await section.getByLabel("Add Escalation chain").selectOption({ label: chain });
+    const condition = page.getByTestId(`route-chain-condition-${chainId}`);
+    await expect(condition).toHaveValue("any");
+    await expect(condition.locator("option")).toHaveText([
+      "Any severity",
+      "Severity = critical",
+      "Severity < critical",
+    ]);
+    await expect(page.getByTestId("route-chains-warning")).toHaveCount(0);
+
+    // Remove both Destinations, with "Also to the Teams from the label" off: the Route reaches nobody by a Mention.
+    await expect(page.getByTestId("route-deliver-to-teams")).not.toBeChecked();
+    await page.getByRole("button", { name: `Remove ${critical.name}`, exact: true }).click();
+    await page.getByRole("button", { name: `Remove ${notice.name}`, exact: true }).click();
+    await expect(page.getByTestId("route-chains-warning")).toHaveText(NO_DESTINATION);
+    await shot(page, "route-chains-warning");
+
+    // Name a Destination: the warning is gone.
+    await page.getByLabel("Add a Destination").selectOption(notice.id);
+    await expect(page.getByTestId("route-chains-warning")).toHaveCount(0);
+
+    // Save: the condition goes with the chain, and the list shows the chain.
+    await condition.selectOption("critical");
+    const request = page.waitForRequest(
+      (r) => r.url().includes("/api/v1/routes/") && r.method() === "PUT",
+    );
+    await page.getByRole("button", { name: "Save" }).click();
+    expect((await request).postDataJSON()).toMatchObject({
+      chain_entries: [{ chain_id: chainId, severity_condition: "critical" }],
+    });
+    await expect(page).toHaveURL(/\/routes$/);
+    await expect(routeRow(page, route).getByTestId("route-chains-summary")).toHaveText(
+      `Escalation chains: ${chain} (critical)`,
+    );
+    await routeRow(page, route).getByRole("link", { name: route, exact: true }).click();
+    await expect(page.getByTestId(`route-chain-condition-${chainId}`)).toHaveValue("critical");
+
+    // The chain page lists the Route in "Run for".
+    await page.goto(`/escalation-chains/${chainId}`);
+    await expect(page.getByTestId("chain-run-for")).toContainText(
+      `Route ${route}: Severity = critical`,
+    );
+
+    // Russian at 360 px.
+    const directory = await admin.call<{ items: { login?: string }[] }>(
+      "GET",
+      `/api/v1/user-directory?q=${encodeURIComponent(RU_ADMIN)}`,
+    );
+    if (!directory.items.some((u) => u.login === RU_ADMIN)) {
+      const { token } = await admin.createUser(RU_ADMIN, "admin");
+      await admin.call("POST", "/api/v1/password-setups", { token, password: RU_PASSWORD });
+    }
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, RU_ADMIN, RU_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/routes");
+    await expect(routeRow(ru, route).getByTestId("route-chains-summary")).toHaveText(
+      `Цепочки эскалации: ${chain} (critical)`,
+    );
+    await expectNoHorizontalScroll(ru);
+    await routeRow(ru, route).getByRole("link", { name: route, exact: true }).click();
+    const ruSection = ru.getByTestId("route-chains");
+    await expect(ruSection).toContainText("Цепочки эскалации");
+    await expect(ruSection).toContainText(
+      "Зовёт только в тредах мест доставки маршрута. Команды из метки зовут своими цепочками.",
+    );
+    // With both Destinations removed the warning reads in Russian too.
+    await ru.getByRole("button", { name: `Убрать ${notice.name}`, exact: true }).click();
+    await expect(ru.getByTestId("route-chains-warning")).toHaveText(
+      "Только шлюз оповещений может до кого-то дозвониться из этой цепочки: у маршрута нет места доставки.",
+    );
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "route-chains-ru-360");
+    expect(ruCsp).toEqual([]);
+    await context.close();
+  } finally {
+    await admin.dispose();
+    const cleaner = await adminApi();
+    try {
+      const left = await cleaner.call<{
+        items: { id: string; matchers: { value: string }[] }[];
+      }>("GET", "/api/v1/routes");
+      for (const r of left.items.filter((x) =>
+        x.matchers.some((m) => m.value.startsWith(`infra-${CHAINS_PREFIX}-`)),
+      )) {
+        await cleaner.call("POST", `/api/v1/routes/${r.id}/move-open-alert-groups`);
+        await cleaner.call("DELETE", `/api/v1/routes/${r.id}`);
+      }
+      await removeChains(cleaner, `${CHAINS_PREFIX}-`);
+    } finally {
+      await cleaner.dispose();
+    }
+    await dropRouting(CHAINS_PREFIX);
   }
   expect(csp).toEqual([]);
 });

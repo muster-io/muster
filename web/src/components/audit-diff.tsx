@@ -96,6 +96,8 @@ function routeField(t: TFunction, pointer: string): string | undefined {
     case "/destination_ids":
     case "/destination_entries":
       return t("audit.fields.destinations");
+    case "/chain_entries":
+      return t("audit.fields.chainEntries");
     case "/deliver_to_teams":
       return t("audit.fields.deliverToTeams");
     case "/run_team_chains":
@@ -293,6 +295,8 @@ function teamField(t: TFunction, pointer: string): string | undefined {
       return t("teams.rules.matchersField");
     case "/destination_entries":
       return t("teams.destinations.title");
+    case "/chain_entries":
+      return t("audit.fields.chainEntries");
     case "/team_mentions":
       return t("teams.mentions.title");
     default:
@@ -313,6 +317,23 @@ function scheduleField(t: TFunction, pointer: string): string | undefined {
       return t("audit.fields.scheduleGapAlert");
     case "/time_zone":
       return t("schedule.fields.timeZone");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of an Escalation chain (escalation_chain.*); a step is a line of /steps. */
+function escalationChainField(t: TFunction, pointer: string): string | undefined {
+  if (pointer === "/steps" || pointer.startsWith("/steps/")) {
+    return t("escalation.steps.title");
+  }
+  switch (pointer) {
+    case "/name":
+      return t("escalation.form.name");
+    case "/description":
+      return t("escalation.form.description");
+    case "/owning_team_id":
+      return t("escalation.form.owner");
     default:
       return undefined;
   }
@@ -436,6 +457,9 @@ export function fieldLabel(
       break;
     case "schedule":
       label = scheduleField(t, pointer);
+      break;
+    case "escalation_chain":
+      label = escalationChainField(t, pointer);
       break;
     case "gateway_contact":
       label = gatewayContactField(t, pointer);

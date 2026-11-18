@@ -1597,3 +1597,133 @@ export async function seedMentions(prefix: string): Promise<{
     await admin.dispose();
   }
 }
+
+/** The six Loud events of a Destination's Mentions, none of them mentioning anyone. */
+export const NO_MENTIONS = Object.fromEntries(
+  ["new_alert_group", "new_alerts", "reopen", "ack_timeout", "snooze_ended", "rise_to_urgent"].map(
+    (k) => [k, { everyone: "none", user_ids: [], groups: [] }],
+  ),
+);
+
+/** Creates an Escalation chain with the steps, owned by the Team (none for the Organization), and returns its id. */
+export async function createChain(
+  admin: Api,
+  name: string,
+  owningTeamId: string | null,
+  steps: unknown[],
+): Promise<string> {
+  const created = await admin.call<{ id: string }>("POST", "/api/v1/escalation-chains", {
+    name,
+    owning_team_id: owningTeamId,
+    steps,
+  });
+  return created.id;
+}
+
+/** Replaces the Escalation chains of the Team with the slug, as the Team page saves them. */
+export async function setTeamChains(
+  admin: Api,
+  slug: string,
+  entries: { chain_id: string; severity_condition?: string }[],
+): Promise<void> {
+  const list = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  const id = list.items.find((t) => t.slug === slug)?.id;
+  expect(id, `the Team ${slug}`).toBeDefined();
+  const team = await admin.call<{ name: string; description: string; etag: string }>(
+    "GET",
+    `/api/v1/teams/${id}`,
+  );
+  await admin.call(
+    "PUT",
+    `/api/v1/teams/${id}`,
+    {
+      name: team.name,
+      slug,
+      description: team.description,
+      own_working_hours: false,
+      chain_entries: entries,
+    },
+    { "If-Match": team.etag },
+  );
+}
+
+/**
+ * Deletes the Escalation chains whose names start with prefix, whatever an earlier run left: the Teams that name one
+ * stop naming it first. The Routes that name them must be deleted before.
+ */
+export async function removeChains(admin: Api, prefix: string): Promise<void> {
+  const list = await admin.call<{
+    items: {
+      id: string;
+      name: string;
+      etag: string;
+      referrers: { teams: { team: { slug: string } }[] };
+    }[];
+  }>("GET", "/api/v1/escalation-chains?limit=500");
+  for (const chain of list.items.filter((c) => c.name.startsWith(prefix))) {
+    for (const { team } of chain.referrers.teams) {
+      await setTeamChains(admin, team.slug, []);
+    }
+    await admin.call("DELETE", `/api/v1/escalation-chains/${chain.id}`, undefined, {
+      "If-Match": chain.etag,
+    });
+  }
+}
+
+/** Deletes the Schedules of the Teams with these slugs, so that the Teams can be deleted. */
+export async function removeSchedulesOf(admin: Api, slugs: string[]): Promise<void> {
+  const teams = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  for (const team of teams.items.filter((t) => slugs.includes(t.slug))) {
+    const schedules = await admin.call<{ items: { id: string }[] }>(
+      "GET",
+      `/api/v1/schedules?team=${team.id}`,
+    );
+    for (const s of schedules.items) {
+      await admin.call("DELETE", `/api/v1/schedules/${s.id}`);
+    }
+  }
+}
+
+/** Creates the Schedule "name" of the Team with the person on a weekly Rotation layer, and returns its id. */
+export async function createSchedule(
+  admin: Api,
+  teamId: string,
+  name: string,
+  userId: string,
+): Promise<string> {
+  const start = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const created = await admin.call<{ id: string }>("POST", "/api/v1/schedules", {
+    team_id: teamId,
+    name,
+    time_zone: "UTC",
+    rotation_layers: [
+      {
+        name: "Week",
+        user_ids: [userId],
+        shift_length: "week",
+        handover_time: "10:00",
+        handover_day: "monday",
+        start_date: start,
+        limits: null,
+      },
+    ],
+  });
+  return created.id;
+}
+
+/** The id of the Team with the slug. */
+export async function teamIdOf(admin: Api, slug: string): Promise<string> {
+  const list = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  const id = list.items.find((t) => t.slug === slug)?.id;
+  expect(id, `the Team ${slug}`).toBeDefined();
+  return id ?? "";
+}

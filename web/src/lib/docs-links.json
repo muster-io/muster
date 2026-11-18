@@ -1,6 +1,7 @@
 {
   "field.bridge_events": "messengers/bridge.md#create-the-connection",
   "field.buttons": "concepts/statuses-and-commands.md#button-sets",
+  "field.chain_steps": "concepts/escalation-chains.md#steps",
   "field.deliver_to_teams": "concepts/routing-to-teams.md#also-to-the-teams-from-the-label",
   "field.gap_alert": "concepts/schedules.md#gaps-and-the-internal-alert",
   "field.gateway_contact": "messengers/notification-gateways.md#contact-for-calls-and-sms",
@@ -26,6 +27,7 @@
   "field.overrides": "concepts/schedules.md#overrides",
   "field.permissions": "configure/api-tokens.md#two-kinds-of-token",
   "field.proxy": "messengers/proxies.md#where-you-set-a-proxy",
+  "field.route_chains": "concepts/escalation-chains.md#naming-chains-on-routes-and-teams",
   "field.route_profile": "concepts/routes-and-group-keys.md#route-profiles",
   "field.severity_condition": "concepts/routing-to-teams.md#severity-conditions",
   "field.slack_event_mode": "messengers/slack.md#socket-mode-or-http",
@@ -102,6 +104,7 @@
   "page.destination.webhook_events": "outgoing-webhooks/events.md",
   "page.destination.webhook_template": "outgoing-webhooks/templates.md",
   "page.destinations": "messengers/index.md#what-each-destination-type-can-do",
+  "page.escalation_chain": "concepts/escalation-chains.md",
   "page.integrations": "integrations/alertmanager.md",
   "page.link_rules": "configure/messages-and-templates.md#add-a-link-rule",
   "page.lookup_tables": "configure/messages-and-templates.md#add-a-lookup-table",

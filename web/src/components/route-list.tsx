@@ -23,6 +23,7 @@ import {
 import type { Route, RouteList as RouteListModel, RouteOrder } from "../api/gen/model";
 import { type Tagged, apiFetchTagged, isApiError, isStale, problemText } from "../lib/api";
 import { matcherText } from "./matcher-builder";
+import { chainRowsOf } from "./route-chains";
 import { entriesOf, severityConditionShort } from "./route-destinations";
 import { minimumSeverityName } from "./route-severity-and-owner";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -109,6 +110,22 @@ export function destinationsText(t: TFunction, route: Route): string {
     return teams === "" ? t("routes.list.noDestinations") : teams;
   }
   return teams === "" ? parts.join(", ") : `${parts.join(", ")} ${teams}`;
+}
+
+/**
+ * A Route's Escalation chains by name with their conditions, "devops, payments (critical)": no condition is shown for
+ * any severity; a Route that names none says so.
+ */
+export function chainsText(t: TFunction, route: Route): string {
+  const names = new Map(route.chains.map((c) => [c.id, c.name]));
+  const parts = chainRowsOf(route)
+    .map((entry) => ({
+      name: names.get(entry.chain_id) ?? entry.chain_id,
+      condition: severityConditionShort(t, entry.severity_condition),
+    }))
+    .toSorted((a, b) => a.name.localeCompare(b.name))
+    .map(({ name, condition }) => (condition === "" ? name : `${name} (${condition})`));
+  return parts.length === 0 ? t("routes.list.noChains") : parts.join(", ");
 }
 
 function RouteRow({
@@ -251,6 +268,10 @@ function RouteRow({
         <p className="text-sm text-muted-foreground" data-testid="route-destinations-summary">
           <span>{t("routes.list.destinations")}: </span>
           <span className="text-foreground">{destinationsText(t, route)}</span>
+        </p>
+        <p className="text-sm text-muted-foreground" data-testid="route-chains-summary">
+          <span>{t("routes.list.chains")}: </span>
+          <span className="text-foreground">{chainsText(t, route)}</span>
         </p>
         <p className="text-sm text-muted-foreground" data-testid="route-open-count">
           {t("routes.list.openAlertGroups", { count: route.open_alert_group_count })}
