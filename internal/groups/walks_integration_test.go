@@ -343,6 +343,170 @@ func TestIntegrationEvaluatedWalkTakesGrace(t *testing.T) {
 	})
 }
 
+// TestIntegrationWalksReadPendingDeliveries is #642 for the walks of a change of configuration on PostgreSQL: behind a
+// history of resolved Alert Groups whose deliveries ended, the plan of a batch of each walk, custom and generic, reads
+// the branch of the resolved Alert Groups whose final edit waits from deliveries_alert_group_pending_idx — the pending
+// deliveries in the order of their Alert Group, from the cursor on — and looks up the Alert Group of each by its
+// primary key alone; it reads neither deliveries_alert_group_key, every delivery ever made, nor the whole table, nor
+// alert_groups_pkey from the cursor.
+func TestIntegrationWalksReadPendingDeliveries(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			if _, err := e.d.Pool.Exec(ctx, sql, args...); err != nil {
+				t.Fatalf("%s: %v", sql, err)
+			}
+		}
+		id := func(sql string, args ...any) int64 {
+			t.Helper()
+			var out int64
+			if err := e.d.Pool.QueryRow(ctx, sql, args...).Scan(&out); err != nil {
+				t.Fatalf("%s: %v", sql, err)
+			}
+			return out
+		}
+		route := e.route(t, "one", "one", "alertname").ID
+		conn := id(`INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds,
+			created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAA1', 'mattermost', 'bot', 'https://mm.example.org',
+			'\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, e.orgID, t0)
+		dest := id(`INSERT INTO destinations (org_id, public_id, type, name, connection_id, mattermost_team_id,
+			mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			VALUES ($1, 'DSAAAAAAAAAAA1', 'mattermost', 'd1', $2, 'team', 'd1', '{}', 1000, 1, 'healthy', $3, $3)
+			RETURNING id`, e.orgID, conn, t0)
+		team := id(`INSERT INTO teams (org_id, public_id, name, slug, own_working_hours, created_at, updated_at)
+			VALUES ($1, 'TM0000000000T1', 'one', 'one', false, $2, $2) RETURNING id`, e.orgID, t0)
+		user := e.userID(t)
+		sa := id(`INSERT INTO service_accounts (org_id, public_id, name, role, status, created_at, updated_at)
+			VALUES ($1, 'SAAAAAAAAAAAF1', 'robot', 'responder', 'active', $2, $2) RETURNING id`, e.orgID, t0)
+
+		// The history: 3,000 Alert Groups the User resolved, in the Team, whose final edit went out; then two that
+		// wait for it, one the User resolved and one the Service account resolved, and one that fires.
+		exec(`INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			resolved_at, resolved_by_kind, resolved_by_user_id, created_at, last_changed_at)
+			SELECT $1, 'AG' || lpad(upper(to_hex(n)), 12, '0'), n, $2, '{alertname}', '{}',
+			       sha256(convert_to('history' || n, 'UTF8')), 'history', '{}', '{}', $3, 'resolved', 'warning', false,
+			       $4, 'user', $5, $4, $4
+			FROM generate_series(1001, 4000) n`, e.orgID, route, []int64{e.intID}, t0, user)
+		exec(`UPDATE alert_groups SET status = 'firing', resolved_at = NULL, resolved_by_kind = NULL,
+			resolved_by_user_id = NULL WHERE org_id = $1 AND number = 4000`, e.orgID)
+		exec(`UPDATE alert_groups SET resolved_by_user_id = NULL, resolved_by_service_account_id = $2
+			WHERE org_id = $1 AND number = 3999`, e.orgID, sa)
+		exec(`INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule, joined_at)
+			SELECT org_id, id, $2, 'label', $3 FROM alert_groups WHERE org_id = $1`, e.orgID, team, t0)
+		exec(`INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, next_attempt_at, created_at,
+			updated_at)
+			SELECT org_id, $2, id, CASE WHEN number >= 3998 THEN 'pending' ELSE 'delivered' END, $3, $3, $3
+			FROM alert_groups WHERE org_id = $1`, e.orgID, dest, t0)
+		exec(`ANALYZE alert_groups`)
+		exec(`ANALYZE alert_group_teams`)
+		exec(`ANALYZE deliveries`)
+
+		userID, saID := pgtype.Int8{Int64: user, Valid: true}, pgtype.Int8{Int64: sa, Valid: true}
+		org := e.orgID
+		pc, err := e.d.Pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pc.Release()
+		defer func() { _, _ = pc.Exec(ctx, "RESET plan_cache_mode") }()
+		for _, w := range []struct {
+			name string
+			call func(q *dbgen.Queries)
+		}{
+			{"ListOpenGroupsOfDestinationAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListOpenGroupsOfDestinationAfter(ctx, dbgen.ListOpenGroupsOfDestinationAfterParams{OrgID: org,
+					DestinationID: dest, AfterID: 0, Lim: 50})
+			}},
+			{"ListOpenGroupsFollowingOrganizationAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListOpenGroupsFollowingOrganizationAfter(ctx,
+					dbgen.ListOpenGroupsFollowingOrganizationAfterParams{OrgID: org, AfterID: 0, Lim: 50})
+			}},
+			{"ListOpenGroupsOfTeamAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListOpenGroupsOfTeamAfter(ctx, dbgen.ListOpenGroupsOfTeamAfterParams{OrgID: org, TeamID: team,
+					AfterID: 0, Lim: 50})
+			}},
+			{"ListOpenGroupsOfRouteAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListOpenGroupsOfRouteAfter(ctx, dbgen.ListOpenGroupsOfRouteAfterParams{OrgID: org,
+					RouteID: route, AfterID: 0, Lim: 50})
+			}},
+			{"ListOpenGroupsAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListOpenGroupsAfter(ctx, dbgen.ListOpenGroupsAfterParams{OrgID: org, AfterID: 0, Lim: 50})
+			}},
+			{"ListOpenGroupsOfUserAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListOpenGroupsOfUserAfter(ctx, dbgen.ListOpenGroupsOfUserAfterParams{OrgID: org,
+					UserID: userID, AfterID: 0, Lim: 50})
+			}},
+			{"ListOpenGroupsOfServiceAccountAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListOpenGroupsOfServiceAccountAfter(ctx, dbgen.ListOpenGroupsOfServiceAccountAfterParams{
+					OrgID: org, ServiceAccountID: saID, AfterID: 0, Lim: 50})
+			}},
+			{"ListEvaluatedGroupsAfter", func(q *dbgen.Queries) {
+				_, _ = q.ListEvaluatedGroupsAfter(ctx, dbgen.ListEvaluatedGroupsAfterParams{OrgID: org, AfterID: 0,
+					Lim: 50})
+			}},
+		} {
+			// The plan of a batch from the cursor 0, as the session prepares the statement, custom and generic.
+			c := &captured{}
+			w.call(dbgen.New(c))
+			args := make([]string, len(c.args))
+			for i, a := range c.args {
+				switch v := a.(type) {
+				case pgtype.Int8:
+					args[i] = fmt.Sprint(v.Int64)
+				default:
+					args[i] = fmt.Sprint(v)
+				}
+			}
+			if _, err := pc.Exec(ctx, "PREPARE walk AS "+c.sql); err != nil {
+				t.Fatalf("%s: prepare: %v", w.name, err)
+			}
+			for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
+				if _, err := pc.Exec(ctx, "SET plan_cache_mode = "+mode); err != nil {
+					t.Fatal(err)
+				}
+				rows, err := pc.Query(ctx, "EXPLAIN (COSTS OFF) EXECUTE walk("+strings.Join(args, ", ")+")")
+				if err != nil {
+					t.Fatalf("%s %s: explain: %v", w.name, mode, err)
+				}
+				lines, err := pgx.CollectRows(rows, pgx.RowTo[string])
+				if err != nil {
+					t.Fatalf("%s %s: explain: %v", w.name, mode, err)
+				}
+				// Only the branch of the resolved Alert Groups reads deliveries as p; the scan starts at the cursor, and
+				// the Alert Group of each pending delivery is looked up by its primary key alone, not walked from the
+				// cursor.
+				var scans []string
+				cond, lookup := "", false
+				for i, l := range lines {
+					if strings.TrimSpace(l) == "Index Cond: (id = p.alert_group_id)" {
+						lookup = true
+					}
+					if strings.HasSuffix(l, " on deliveries p") {
+						scans = append(scans, strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), "->")))
+						if i+1 < len(lines) && strings.Contains(lines[i+1], "Index Cond:") {
+							cond = strings.TrimSpace(lines[i+1])
+						}
+					}
+				}
+				const want = "using deliveries_alert_group_pending_idx on deliveries p"
+				if len(scans) != 1 || !strings.HasSuffix(scans[0], want) || !strings.Contains(cond, "(org_id = ") ||
+					!strings.Contains(cond, "(alert_group_id > ") || !lookup {
+					t.Errorf("%s %s: the pending branch reads %q (%s, lookup by id %v), not "+
+						"deliveries_alert_group_pending_idx from the cursor and each Alert Group by id\n%s", w.name, mode,
+						scans, cond, lookup, strings.Join(lines, "\n"))
+				}
+			}
+			if _, err := pc.Exec(ctx, "DEALLOCATE walk"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+}
+
 // TestIntegrationUserWalkTakesAssignees is #628, C-12.FR-12 and C-32.FR-12 for the walk of a User on PostgreSQL:
 // besides the Alert Groups the User owns, snoozed or resolved, it lists the firing ones the User is an Assignee of —
 // once, also when two chains made them one — and leaves out a firing one without them among its Assignees and one

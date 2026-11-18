@@ -131,10 +131,14 @@
   FR-19, C-31.FR-3, S-155),
   [`0052_thread_replies_page_pending_index`](../../internal/db/migrations/0052_thread_replies_page_pending_index.up.sql)
   (`thread_replies_page_pending_idx`, the Page replies still to be sent that the delivery worker drops in Broken
-  Destinations, C-32.FR-10) and
+  Destinations, C-32.FR-10),
   [`0053_alert_groups_evaluated_index`](../../internal/db/migrations/0053_alert_groups_evaluated_index.up.sql)
   (`alert_groups_evaluated_idx`, the open Alert Groups and those in their Grace period that each batch of the
-  evaluation of the Teams lists by id, C-25.FR-13), in
+  evaluation of the Teams lists by id, C-25.FR-13) and
+  [`0054_deliveries_alert_group_pending_index`](../../internal/db/migrations/0054_deliveries_alert_group_pending_index.up.sql)
+  (`deliveries_alert_group_pending_idx`, the pending deliveries of Alert Groups by Alert Group, from which each batch of
+  the walks of a change of configuration lists the resolved Alert Groups whose final edit waits, C-12.FR-12,
+  C-26.FR-9), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1596,7 +1600,11 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   The claim index `deliveries_due_v2_idx` `(org_id, urgent DESC, configuration_only, next_attempt_at) WHERE state =
   'pending'` (migration 0038, which replaced `deliveries_due_idx` without `configuration_only`) serves the four
   claims of due deliveries, one per urgency and mark, each a range read in `next_attempt_at` order; the per-
-  Destination pending index gives queue depth and the oldest waiting delivery for the Broken probe; `message_id` and
+  Destination pending index gives queue depth and the oldest waiting delivery for the Broken probe;
+  `deliveries_alert_group_pending_idx` `(org_id, alert_group_id) WHERE state = 'pending' AND alert_group_id IS NOT
+  NULL` (migration 0054) gives the walks of a change of configuration the resolved Alert Groups whose final edit
+  waits, by Alert Group after the cursor, without reading `deliveries_alert_group_key`, which keeps every delivery ever
+  made, from the cursor (`ListOpenGroups…After`, `ListEvaluatedGroupsAfter`); `message_id` and
   `thread_anchor_id` indexes resolve incoming Telegram updates and button presses to their delivery;
   `actual_button_key_id` answers "does an open Root message still depend on this key" on the Keyring page;
   `deliveries_superseded_idx` finds the delivery of an older Bridge Root message.
@@ -2428,9 +2436,13 @@ Every walk also takes the resolved Alert Groups of its scope whose final edit st
 delivery — in its Destination for `destination_buttons` and `destination_connection`, in a Destination that follows
 the Organization for `organization_buttons`; for `user_name` and `account_links` those its User resolved
 (`resolved_by_user_id`), for `service_account_name` those its Service account resolved — so that the final edit shows
-the change. Each batch lists them in a second branch of a `UNION`, from the pending deliveries through the partial
-index `deliveries_due_v2_idx` and then the Alert Groups by id, each branch ordered by id and limited to the batch, so
-that the branch of the open Alert Groups keeps its own plan. Delivery renders such an Alert Group only in the
+the change. Each batch lists them in a second branch of a `UNION`, from the pending deliveries after the cursor in the
+order of their Alert Group through the partial index `deliveries_alert_group_pending_idx` (migration 0054), looking
+up the Alert Group of each by its primary key in a `LATERAL` subquery with `LIMIT 1`, each branch ordered by id and
+limited to the batch, so that the branch of the open Alert Groups keeps its own plan. The cursor is on the delivery
+(`p.alert_group_id > @after_id`), so that the index scan starts there under custom and generic plans alike; as a plain
+join, PostgreSQL merged the pending deliveries with `alert_groups_pkey` walked from the cursor, every resolved Alert
+Group up to the first one whose final edit waits. Delivery renders such an Alert Group only in the
 Destinations where its delivery is still `pending`, checked again under the delivery's lock, Quietly and keeping the
 final edit's place in the claims: a final edit that went out is not sent again, a delivery `not_delivered`,
 `withheld`, `deleted_in_messenger` or `retired` is not revived, no Destination is added, and the Timeline records
