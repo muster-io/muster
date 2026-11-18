@@ -360,13 +360,13 @@ func (s *Service) writeOwner(ctx context.Context, q TxQueries, id int64, d Desti
 	return nil
 }
 
-// ChannelCheck is the Destination check of a Mattermost channel through the Connection Connection (public_id): of the
-// saved Destination Destination (its id) when it exists, so that its limiter applies, else of the Connection alone.
+// ChannelCheck is the Destination check of a Mattermost channel through the Connection Connection (public_id), limited
+// by that Connection alone, whether or not the Destination exists: its requests post nothing, and the Destination's
+// limiter counts sends and edits (C-13.FR-2).
 type ChannelCheck struct {
-	Connection  string
-	Destination *int64
-	TeamID      string
-	ChannelID   string
+	Connection string
+	TeamID     string
+	ChannelID  string
 }
 
 // ChannelChecked is the result of a ChannelCheck: the id of the Connection and the check.
@@ -406,12 +406,12 @@ type TelegramChecker interface {
 	CheckTelegramChannel(ctx context.Context, c TelegramChannelCheck) (TelegramChannelChecked, error)
 }
 
-// BridgeChannelCheck is the Destination check of a Bridge channel through the Connection Connection (public_id): of the
-// saved Destination Destination (its id) when it exists, so that its limiter applies, else of the Connection alone.
+// BridgeChannelCheck is the Destination check of a Bridge channel through the Connection Connection (public_id),
+// limited by that Connection alone, whether or not the Destination exists: its request posts nothing, and the
+// Destination's limiter counts sends and edits (C-22.FR-3).
 type BridgeChannelCheck struct {
-	Connection  string
-	Destination *int64
-	ChannelID   string
+	Connection string
+	ChannelID  string
 }
 
 // BridgeChannelChecked is the result of a BridgeChannelCheck: the id of the Connection and the check.
@@ -431,12 +431,12 @@ type BridgeChecker interface {
 	GatewayOnly(ctx context.Context, connection string) (bool, error)
 }
 
-// SlackChannelCheck is the Destination check of a Slack channel through the Connection Connection (public_id): of the
-// saved Destination Destination (its id) when it exists, so that its limiter applies, else of the Connection alone.
+// SlackChannelCheck is the Destination check of a Slack channel through the Connection Connection (public_id), limited
+// by that Connection alone, whether or not the Destination exists: its request posts nothing, and the Destination's
+// limiter counts sends and edits (C-24.FR-3).
 type SlackChannelCheck struct {
-	Connection  string
-	Destination *int64
-	ChannelID   string
+	Connection string
+	ChannelID  string
 }
 
 // SlackChannelChecked is the result of a SlackChannelCheck: the id of the Connection and the check.
@@ -1024,8 +1024,8 @@ func unknownTelegramConnection() *FieldError {
 func (s *Service) check(ctx context.Context, in Input, destinationID *int64) (ChannelChecked, error) {
 	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	m := in.Mattermost
-	res, err := s.writer.Mattermost.CheckChannel(ctx, ChannelCheck{Connection: m.Connection, Destination: destinationID,
-		TeamID: m.TeamID, ChannelID: m.ChannelID})
+	res, err := s.writer.Mattermost.CheckChannel(ctx, ChannelCheck{Connection: m.Connection, TeamID: m.TeamID,
+		ChannelID: m.ChannelID})
 	if errors.Is(err, ErrUnknownConnection) {
 		return ChannelChecked{}, unknownConnection()
 	}
@@ -1147,7 +1147,7 @@ func created(d Destination, err error) (Destination, error) {
 
 // Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3,
 // C-24.FR-3); a non-nil version must be its current one (If-Match). Saving runs the Destination check as Create does,
-// limited by the Destination (a Telegram Destination's by its Connection alone); a passing check of a Broken Destination
+// limited by the Destination's Connection alone, since a check posts nothing; a passing check of a Broken Destination
 // ends its Broken state (C-13.FR-10, C-14.FR-14). An update that changes nothing writes nothing.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Destination,
 	error) {
@@ -1274,11 +1274,11 @@ type CheckResult struct {
 }
 
 // Check runs the Destination check of the Destination publicID from checkDestination (C-13.FR-10, C-14.FR-14,
-// C-22.FR-3, C-24.FR-3) on the interactive path, limited by the Destination (a Telegram Destination's by its
-// Connection alone): each check with its result. A passing check of a Broken Destination ends its Broken state. A
-// Bridge or Slack Destination's check keeps no channel name it reads: a save does. A Telegram Destination's check that
-// passes keeps what its step discussion_group_members saw of the people of its Teams and of those its chains Page
-// (C-27.FR-8), with them in the item's AbsentUsers.
+// C-22.FR-3, C-24.FR-3) on the interactive path, limited by its Connection alone, since a check posts nothing: each
+// check with its result. A passing check of a Broken Destination ends its Broken state. A Bridge or Slack
+// Destination's check keeps no channel name it reads: a save does. A Telegram Destination's check that passes keeps
+// what its step discussion_group_members saw of the people of its Teams and of those its chains Page (C-27.FR-8), with
+// them in the item's AbsentUsers.
 // A type without a Destination check here is a *FieldError check_not_supported. Its requests are recorded as the kind
 // destination_check with the Destination under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
@@ -1290,7 +1290,7 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 	var out CheckResult
 	switch {
 	case d.Type == TypeMattermost && d.Connection != nil:
-		res, err := s.writer.Mattermost.CheckChannel(ctx, ChannelCheck{Connection: *d.Connection, Destination: &d.ID,
+		res, err := s.writer.Mattermost.CheckChannel(ctx, ChannelCheck{Connection: *d.Connection,
 			TeamID: deref(d.MattermostTeamID), ChannelID: deref(d.MattermostChannelID)})
 		if err != nil {
 			return CheckResult{}, err
@@ -1336,7 +1336,7 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 		}
 	case d.Type == TypeBridge && d.Connection != nil:
 		res, err := s.writer.Bridge.CheckBridgeChannel(ctx, BridgeChannelCheck{Connection: *d.Connection,
-			Destination: &d.ID, ChannelID: deref(d.BridgeChannelID)})
+			ChannelID: deref(d.BridgeChannelID)})
 		if err != nil {
 			return CheckResult{}, err
 		}
@@ -1345,7 +1345,7 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 			Message: c.Message, Code: c.Code}}}
 	case d.Type == TypeSlack && d.Connection != nil:
 		res, err := s.writer.Slack.CheckSlackChannel(ctx, SlackChannelCheck{Connection: *d.Connection,
-			Destination: &d.ID, ChannelID: deref(d.SlackChannelID)})
+			ChannelID: deref(d.SlackChannelID)})
 		if err != nil {
 			return CheckResult{}, err
 		}
@@ -1808,7 +1808,7 @@ func (s *Service) checkBridge(ctx context.Context, in Input, destinationID *int6
 	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	b := in.Bridge
 	res, err := s.writer.Bridge.CheckBridgeChannel(ctx, BridgeChannelCheck{Connection: b.Connection,
-		Destination: destinationID, ChannelID: b.ChannelID})
+		ChannelID: b.ChannelID})
 	if errors.Is(err, ErrUnknownConnection) {
 		return BridgeChannelChecked{}, unknownBridgeConnection()
 	}
@@ -1876,9 +1876,9 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 }
 
 // updateBridge replaces the configured fields of the Bridge Destination before, already validated, once its
-// Destination check passed, limited by the Destination, and keeps the channel's name the check read; a passing check
-// of a Broken Destination ends its Broken state. An update that changes nothing, and whose check read the same name,
-// writes nothing.
+// Destination check passed, through its Connection, and keeps the channel's name the check read; a passing check of a
+// Broken Destination ends its Broken state. An update that changes nothing, and whose check read the same name, writes
+// nothing.
 func (s *Service) updateBridge(ctx context.Context, r Requester, before Destination, in Input) (Destination, error) {
 	checked, err := s.checkBridge(ctx, in, &before.ID)
 	if err != nil {
@@ -2007,7 +2007,7 @@ func (s *Service) checkSlack(ctx context.Context, in Input, destinationID *int64
 	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	sl := in.Slack
 	res, err := s.writer.Slack.CheckSlackChannel(ctx, SlackChannelCheck{Connection: sl.Connection,
-		Destination: destinationID, ChannelID: sl.ChannelID})
+		ChannelID: sl.ChannelID})
 	if errors.Is(err, ErrUnknownConnection) {
 		return SlackChannelChecked{}, unknownSlackConnection()
 	}
@@ -2076,7 +2076,7 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 }
 
 // updateSlack replaces the configured fields of the Slack Destination before, already validated, once its Destination
-// check passed, limited by the Destination, and keeps the channel's name the check read; a passing check of a Broken
+// check passed, through its Connection, and keeps the channel's name the check read; a passing check of a Broken
 // Destination ends its Broken state. An update that changes nothing, and whose check read the same name, writes
 // nothing.
 func (s *Service) updateSlack(ctx context.Context, r Requester, before Destination, in Input) (Destination, error) {

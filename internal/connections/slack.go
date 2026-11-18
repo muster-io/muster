@@ -470,9 +470,11 @@ func slackSecretsCreated(c Connection) []audit.Change {
 
 // CheckSlackChannel runs the Destination check of a Slack Destination being saved or checked, for the Destination
 // write path (C-24.FR-3): conversations.info through the Slack Connection that the check names, on the interactive
-// path, limited by the Destination when it exists and by the Connection otherwise, with a client built for the check.
-// The text of bot_not_in_channel names the bot by the name the Connection's last passing check stored, and by none
-// before one. A Connection that is missing, deleted or not a Slack Connection is destinations.ErrUnknownConnection.
+// path, with a client built for the check. conversations.info posts nothing to the channel, so only the Connection's
+// limiter limits it: the Destination's bucket is for the sends and edits in its channel, which a check must neither
+// starve nor wait for. The text of bot_not_in_channel names the bot by the name the Connection's last passing check
+// stored, and by none before one. A Connection that is missing, deleted or not a Slack Connection is
+// destinations.ErrUnknownConnection.
 func (s *Service) CheckSlackChannel(ctx context.Context, in destinations.SlackChannelCheck) (
 	destinations.SlackChannelChecked, error) {
 	row, err := s.row(ctx, s.cfg.Store, in.Connection)
@@ -487,13 +489,8 @@ func (s *Service) CheckSlackChannel(ctx context.Context, in destinations.SlackCh
 		return destinations.SlackChannelChecked{}, err
 	}
 	conn := row.ID
-	subject := delivery.Subject{Connection: &conn}
-	if in.Destination != nil {
-		subject = delivery.Subject{Destination: &delivery.Destination{ID: *in.Destination, Type: TypeSlack,
-			Connection: &conn}}
-	}
-	res, err := slack.CheckChannel(ctx, c, slack.Interactive(s.cfg.Interactive, subject), in.ChannelID,
-		row.BotUsername.String)
+	res, err := slack.CheckChannel(ctx, c, slack.Interactive(s.cfg.Interactive, delivery.Subject{Connection: &conn}),
+		in.ChannelID, row.BotUsername.String)
 	if err != nil {
 		return destinations.SlackChannelChecked{}, err
 	}

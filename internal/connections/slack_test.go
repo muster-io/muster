@@ -580,19 +580,19 @@ func TestSlackChannelsDoctorAndDelete(t *testing.T) {
 }
 
 // TestCheckSlackChannel is C-24.FR-3 and AC-4 for the Destination write path: conversations.info through the Slack
-// Connection the check names, on the interactive path, limited by the Destination once it exists and by the Connection
-// before; the text of bot_not_in_channel names the bot by the name the Connection's last check stored, and by none
-// before one, with no extra request; a missing, deleted or other type of Connection is ErrUnknownConnection; no limiter
-// token in time is a *delivery.LimitedError; a secret that cannot be opened fails the check without showing it.
+// Connection the check names, on the interactive path, limited by the Connection alone, since it posts nothing; the
+// text of bot_not_in_channel names the bot by the name the Connection's last check stored, and by none before one, with
+// no extra request; a missing, deleted or other type of Connection is ErrUnknownConnection; no limiter token in time is
+// a *delivery.LimitedError; a secret that cannot be opened fails the check without showing it.
 func TestCheckSlackChannel(t *testing.T) {
 	e, f := newSlackEnv(t)
 	ctx := t.Context()
 	c := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
-	check := func(channel string, destination *int64) (destinations.SlackChannelChecked, error) {
+	check := func(channel string) (destinations.SlackChannelChecked, error) {
 		return e.svc.CheckSlackChannel(ctx, destinations.SlackChannelCheck{Connection: strings.ToLower(c.PublicID),
-			Destination: destination, ChannelID: channel})
+			ChannelID: channel})
 	}
-	res, err := check(fakeslack.ChannelOther, nil)
+	res, err := check(fakeslack.ChannelOther)
 	if err != nil || res.ConnectionID != c.ID || res.Check.OK() || res.Check.Code != slack.CodeBotNotInChannel ||
 		res.Check.Message != "Invite the bot to the channel." {
 		t.Fatalf("a Connection never checked = %+v, %v", res, err)
@@ -608,16 +608,15 @@ func TestCheckSlackChannel(t *testing.T) {
 	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
-	res, err = check(fakeslack.ChannelOther, new(int64(5)))
+	res, err = check(fakeslack.ChannelOther)
 	if err != nil || res.Check.Message != "Invite the bot to the channel: /invite @muster-dev-bot" {
 		t.Errorf("a checked Connection = %+v, %v", res, err)
 	}
-	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination == nil || s.Destination.ID != 5 ||
-		s.Destination.Type != connections.TypeSlack || s.Destination.Connection == nil ||
-		*s.Destination.Connection != c.ID {
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination != nil || s.NoLimiter || s.Connection == nil ||
+		*s.Connection != c.ID {
 		t.Errorf("subject %+v", s)
 	}
-	if res, err := check(fakeslack.ChannelAlerts, nil); err != nil || !res.Check.OK() || res.Check.Name != "alerts" {
+	if res, err := check(fakeslack.ChannelAlerts); err != nil || !res.Check.OK() || res.Check.Name != "alerts" {
 		t.Errorf("a member = %+v, %v", res, err)
 	}
 	cfg := fakeslack.DefaultConfig()
@@ -625,7 +624,7 @@ func TestCheckSlackChannel(t *testing.T) {
 	if err := f.SetConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := check(fakeslack.ChannelAlerts, nil); err != nil || res.Check.Code != slack.CodeMissingScope ||
+	if res, err := check(fakeslack.ChannelAlerts); err != nil || res.Check.Code != slack.CodeMissingScope ||
 		!slices.Equal(res.Check.MissingScopes, []string{"channels:read"}) {
 		t.Errorf("a missing scope = %+v, %v", res, err)
 	}
@@ -640,25 +639,25 @@ func TestCheckSlackChannel(t *testing.T) {
 		}
 	}
 	e.path.limited = true
-	if _, err := check(fakeslack.ChannelAlerts, nil); !isLimited(err) {
+	if _, err := check(fakeslack.ChannelAlerts); !isLimited(err) {
 		t.Errorf("limited = %v", err)
 	}
 	e.path.limited = false
 	e.store.fail["GetConnection"] = errors.New("down")
-	if _, err := check(fakeslack.ChannelAlerts, nil); err == nil || errors.Is(err, destinations.ErrUnknownConnection) {
+	if _, err := check(fakeslack.ChannelAlerts); err == nil || errors.Is(err, destinations.ErrUnknownConnection) {
 		t.Errorf("a failed read = %v", err)
 	}
 	delete(e.store.fail, "GetConnection")
 	row := &e.store.rows[c.ID].row
 	v := row.BotTokenCiphertext
 	row.BotTokenCiphertext = []byte("garbage")
-	if _, err := check(fakeslack.ChannelAlerts, nil); err == nil || slices.ContainsFunc(slackSecrets,
+	if _, err := check(fakeslack.ChannelAlerts); err == nil || slices.ContainsFunc(slackSecrets,
 		func(s string) bool { return strings.Contains(err.Error(), s) }) {
 		t.Errorf("an unreadable token = %v", err)
 	}
 	row.BotTokenCiphertext = v
 	e.store.rows[c.ID].deleted = true
-	if _, err := check(fakeslack.ChannelAlerts, nil); !errors.Is(err, destinations.ErrUnknownConnection) {
+	if _, err := check(fakeslack.ChannelAlerts); !errors.Is(err, destinations.ErrUnknownConnection) {
 		t.Errorf("a deleted Connection = %v", err)
 	}
 }
