@@ -67,13 +67,14 @@ type filterParams struct {
 	resolveReason         *gen.ResolveReason
 	label                 *[]string
 	owner                 *string
+	assignee              *string
 	team                  *string
 	firstAcknowledgedBy   *string
 	snoozedNoEnd, problem *bool
 	unclaimed             *bool
 	from, to              *time.Time
 	q                     *string
-	// me is the caller, whom owner=me, team=mine and first_acknowledged_by=me name.
+	// me is the caller, whom owner=me, assignee=me, team=mine and first_acknowledged_by=me name.
 	me audit.Actor
 }
 
@@ -83,6 +84,9 @@ func filterOf(p filterParams) (groups.Filter, error) {
 		DeliveryProblem: p.problem, Unclaimed: p.unclaimed, Me: p.me}
 	if p.owner != nil {
 		f.Owner = *p.owner
+	}
+	if p.assignee != nil {
+		f.Assignee = *p.assignee
 	}
 	if p.team != nil {
 		f.Team = *p.team
@@ -134,8 +138,8 @@ func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsReq
 	}
 	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
 		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
-		label: p.Label, owner: p.Owner, team: p.Team, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
-		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: c.Actor})
+		label: p.Label, owner: p.Owner, assignee: p.Assignee, team: p.Team, snoozedNoEnd: p.SnoozedNoEnd,
+		problem: p.DeliveryProblem, unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: c.Actor})
 	if err != nil {
 		return nil, err
 	}
@@ -196,8 +200,8 @@ func (s *Server) GetAlertGroupCounts(ctx context.Context, req gen.GetAlertGroupC
 	}
 	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
 		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
-		label: p.Label, owner: p.Owner, team: p.Team, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
-		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: me.Actor})
+		label: p.Label, owner: p.Owner, assignee: p.Assignee, team: p.Team, snoozedNoEnd: p.SnoozedNoEnd,
+		problem: p.DeliveryProblem, unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: me.Actor})
 	if err != nil {
 		return nil, err
 	}
@@ -389,6 +393,7 @@ func alertGroupOf(v groups.View, c groups.Caller, chains []escalation.GroupChain
 		Links: linksOf(v.Links), DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
 		Owner: userRefOf(v.Owner), DeliveryProblem: v.DeliveryProblem, Unclaimed: v.Unclaimed,
 		Teams: alertGroupTeamsOf(v.Teams), EscalationChains: alertGroupChainsOf(chains),
+		Assignees: assigneesOf(v.Assignees),
 	}
 	if v.NextNotice != nil {
 		out.NextNotice = &gen.NextNotice{Kind: gen.NextNoticeKind(v.NextNotice.Kind), At: v.NextNotice.At}
@@ -771,6 +776,10 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 			v.Destination = &gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
 				Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
 		}
+		if e.Event == string(groups.EventAssigneesChanged) {
+			assignees := assigneesOf(e.Assignees)
+			v.Assignees = &assignees
+		}
 		err = out.FromTimelineEscalationEntry(v)
 	default:
 		v := gen.TimelineSystemEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineSystemEntryKindSystem, Actor: actor,
@@ -902,6 +911,29 @@ func alertGroupTeamsOf(ts []groups.GroupTeam) []gen.AlertGroupTeam {
 	for i, t := range ts {
 		m := teamMembershipOf(t.TeamMembership)
 		out[i] = gen.AlertGroupTeam{Team: m.Team, Rule: m.Rule, Matcher: m.Matcher, JoinedAt: t.JoinedAt}
+	}
+	return out
+}
+
+// assigneesOf is the API form of Assignees, each with the owning Team of their chain and the chain, null for none.
+func assigneesOf(list []groups.Assignee) []gen.Assignee {
+	out := make([]gen.Assignee, len(list))
+	for i, a := range list {
+		v := gen.Assignee{User: *userRefOf(&a.User), Since: a.Since}
+		v.Team.SetNull()
+		if t := a.Team; t != nil {
+			v.Team.Set(gen.TeamRef{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Deleted: t.Deleted})
+		}
+		v.Chain.SetNull()
+		if c := a.Chain; c != nil {
+			ref := gen.EscalationChainRef{Id: c.PublicID, Name: c.Name}
+			ref.OwningTeam.SetNull()
+			if t := c.OwningTeam; t != nil {
+				ref.OwningTeam.Set(gen.TeamRef{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Deleted: t.Deleted})
+			}
+			v.Chain.Set(ref)
+		}
+		out[i] = v
 	}
 	return out
 }

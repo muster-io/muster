@@ -117,6 +117,16 @@ type AlertGroup struct {
 	URL           string     `json:"url"`
 	// Teams are the Teams of the Alert Group in the order they joined (C-25.FR-6), a deleted one by its name.
 	Teams []Team `json:"teams"`
+	// Assignees are its Assignees with the owning Teams of their chains (C-32.FR-12), none once acknowledged, snoozed
+	// or resolved; the Owner is named without a Team (P-89).
+	Assignees []Assignee `json:"assignees"`
+}
+
+// Assignee is an Assignee of the Alert Group (WebhookAssignee): the User, and the owning Team of their chain, null for
+// none.
+type Assignee struct {
+	User User  `json:"user"`
+	Team *Team `json:"team"`
 }
 
 // Team is a Team of the Alert Group (WebhookTeam).
@@ -145,13 +155,14 @@ type bodyQueries interface {
 		dbgen.GetBodyServiceAccountRow, error)
 	ListBodyAlerts(ctx context.Context, arg dbgen.ListBodyAlertsParams) ([]dbgen.ListBodyAlertsRow, error)
 	ListBodyTeams(ctx context.Context, arg dbgen.ListBodyTeamsParams) ([]dbgen.ListBodyTeamsRow, error)
+	ListBodyAssignees(ctx context.Context, arg dbgen.ListBodyAssigneesParams) ([]dbgen.ListBodyAssigneesRow, error)
 }
 
 var _ delivery.EventBodies = (*Service)(nil)
 
 // EventBodies reads, through the transaction tx of a change, the Alert Group of in as its events carry it — its state
-// after the change, its Owner, its Route, its Teams and its Alerts — and the actor of the change, and returns the
-// function that renders the body of each of its events (C-15.FR-2).
+// after the change, its Owner, its Route, its Teams, its Assignees and its Alerts — and the actor of the change, and
+// returns the function that renders the body of each of its events (C-15.FR-2).
 func (s *Service) EventBodies(ctx context.Context, tx groups.DBTX, in delivery.EventSource) (delivery.BodyFunc,
 	error) {
 	return s.eventBodies(ctx, dbgen.New(tx), in)
@@ -179,6 +190,17 @@ func (s *Service) eventBodies(ctx context.Context, q bodyQueries, in delivery.Ev
 	ag.Teams = make([]Team, len(teams))
 	for i, t := range teams {
 		ag.Teams[i] = Team{ID: t.PublicID, Name: t.Name, Slug: t.Slug}
+	}
+	assignees, err := q.ListBodyAssignees(ctx, dbgen.ListBodyAssigneesParams{OrgID: s.orgID, AlertGroupID: g.ID})
+	if err != nil {
+		return nil, fmt.Errorf("read the assignees of alert group #%d: %w", g.Number, err)
+	}
+	ag.Assignees = make([]Assignee, len(assignees))
+	for i, a := range assignees {
+		ag.Assignees[i] = Assignee{User: User{ID: a.PublicID, Name: a.Name, Login: a.Login}}
+		if a.TeamPublicID != "" {
+			ag.Assignees[i].Team = &Team{ID: a.TeamPublicID, Name: a.TeamName, Slug: a.TeamSlug}
+		}
 	}
 	rows, err := q.ListBodyAlerts(ctx, dbgen.ListBodyAlertsParams{OrgID: s.orgID, AlertGroupID: g.ID})
 	if err != nil {

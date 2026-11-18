@@ -5,16 +5,15 @@ package messages
 
 import (
 	"slices"
-
-	"github.com/muster-io/muster/internal/templates"
 )
 
 // MessageLayout is the content of a Root message as structured, plain-text data (C-29.FR-1, FR-8): the MessageLayout of
 // the API and the `layout` of the Bridge protocol. It has the number and the title apart, the status by its key and
 // word, the fields, the summary and the description, the key labels with their values — "2 values" where they differ
 // — the Alerts by their distinguishing label with the total, the notices with the footer as their last line, the
-// people and the links. The people are the Owner while the Alert Group is acknowledged, whose footer is then no
-// notice, and the Assignees, which come with the Escalation chains (C-32.FR-12); each names a person by their Muster
+// people and the links. The people are the Owner while the Alert Group is acknowledged, named without a Team (P-89),
+// whose footer is then no notice but for "Escalation chains stopped", and before an acknowledgement the Assignees with
+// the owning Team of their chain (C-32.FR-12), whose footer is no notice either; each names a person by their Muster
 // display name, and the Bridge adapter adds the reference to their Mention entry.
 type MessageLayout struct {
 	Number      int64
@@ -39,9 +38,11 @@ type LayoutAlerts struct {
 	Total  int64
 }
 
-// LayoutPerson is a person of a MessageLayout by their Muster display name, made safe.
+// LayoutPerson is a person of a MessageLayout by their Muster display name and, for an Assignee, the name of the owning
+// Team of their chain, empty for none, both made safe.
 type LayoutPerson struct {
 	Name string
+	Team string
 }
 
 // HasLayout reports whether the content of the Root message m is wholly Muster's compact default, which a MessageLayout
@@ -55,9 +56,10 @@ func HasLayout(m Message) bool {
 }
 
 // LayoutOf is the MessageLayout of the Root message m, its values as neutral text, from the fields the adapters lay
-// out: a message shortened for a limit has the layout of what is left. The footer names its user by their Muster
-// display name, also in a message whose footer an adapter chose (WithFooterIn); with an Owner, the footer of the
-// acknowledgement is the Owner.
+// out: a message shortened for a limit has the layout of what is left. The footer names its people by their Muster
+// display names, also in a message whose footer an adapter chose (WithFooterIn); with an Owner, the footer of the
+// acknowledgement is the Owner, and "Escalation chains stopped" a line of the notices when it stopped chains; with
+// Assignees, the footer before an acknowledgement is the Assignees, who are never cut.
 func LayoutOf(m Message) MessageLayout {
 	out := MessageLayout{Status: m.Colour, StatusWord: m.StatusWord, Fields: slices.Clone(m.Fields),
 		Summary: m.Summary, Description: m.Description, Notices: slices.Clone(m.Notices), Links: slices.Clone(m.Links)}
@@ -72,10 +74,18 @@ func LayoutOf(m Message) MessageLayout {
 	}
 	if m.Owner != "" && m.Colour == ColourAcknowledged {
 		out.Owner = &LayoutPerson{Name: m.Owner}
+		if m.ChainsStopped {
+			out.Notices = append(out.Notices, T(m.Language, "footer.chainsStopped", nil))
+		}
 		return out
 	}
-	f := m.WithFooterIn("", nil)
-	if footer := templates.ReplaceTokens(f.Footer, func(templates.Token) string { return f.FooterName }); footer != "" {
+	if len(m.Assignees) > 0 && m.Colour == ColourFiring {
+		for _, a := range m.Assignees {
+			out.Assignees = append(out.Assignees, LayoutPerson(a))
+		}
+		return out
+	}
+	if footer := m.WithFooterIn("", nil).FooterNamed(); footer != "" {
 		out.Notices = append(out.Notices, footer)
 	}
 	return out

@@ -199,7 +199,10 @@ func (s *Service) SetPageTargets(t PageTargets) {
 // and "Chain of the Team"; the people, each by the first Mention their rule makes at that moment, or the Team or the
 // token of a page_team step; the importance of the step; the Schedule of a page_on_call step; the wait until the next
 // Mention of the rule, 0 for none; whether it is a later Mention of a rule and that rule run. After and Seq are its
-// place among the skips and the webhooks of the same ChainProgress, which keep the order of the steps.
+// place among the skips and the webhooks of the same ChainProgress, which keep the order of the steps. RunStepSeq is
+// the seq of the run step that made the first Mentions of a step, 0 for a later Mention of a rule, whose rule run
+// carries the seq of the step that started it: the order of the steps of a run, by which the Assignees change
+// (C-32.FR-12).
 type StepPage struct {
 	ChainEntry
 	Sources      []PageSource
@@ -214,6 +217,7 @@ type StepPage struct {
 	RuleRun      int64
 	After        int
 	Seq          int
+	RunStepSeq   int
 }
 
 // teamPage reports whether the Page is of a page_team step: a Team or everyone in the chat.
@@ -364,7 +368,8 @@ func (t chainSteps) page(ctx context.Context, q Queries, g *Group, p StepPage, c
 		Importance: nonEmpty(p.Importance), ScheduleID: pgtype.Int8{Int64: p.Schedule, Valid: p.Schedule != 0},
 		ChainTeamID:  pgtype.Int8{Int64: p.chainTeam(), Valid: p.chainTeam() != 0},
 		AgainSeconds: pgtype.Int4{Int32: int32(p.AgainSeconds), Valid: p.AgainSeconds > 0}, //nolint:gosec // G115: at most an hour
-		Again:        p.Again, State: PagePending, Now: t.now}
+		Again:        p.Again, State: PagePending, Now: t.now,
+		RunStepSeq: pgtype.Int4{Int32: int32(p.RunStepSeq), Valid: p.RunStepSeq > 0}} //nolint:gosec // G115: at most MaxStepsPerRun
 	outcome := ""
 	if !pending {
 		outcome = PageNotDelivered
@@ -418,9 +423,10 @@ type PageOutcome struct {
 }
 
 // pageSettled is the system transition of PageReached and PageNotDelivered: the people a delivered reply mentioned
-// are reached; once every reply ended, the people still pending are not delivered, recording page_not_delivered with
-// not_delivered, and the Page ends, delivered when it reached someone or, for a page_team step, when a reply was
-// delivered. A Page that ended already changes nothing, so a second report of the same replies records nothing.
+// are reached, which makes them Assignees of the Page's run (reachAssignees, C-32.FR-12); once every reply ended, the
+// people still pending are not delivered, recording page_not_delivered with not_delivered, and the Page ends,
+// delivered when it reached someone or, for a page_team step, when a reply was delivered. A Page that ended already
+// changes nothing, so a second report of the same replies records nothing.
 type pageSettled struct {
 	o     PageOutcome
 	orgID int64
@@ -442,9 +448,13 @@ func (t pageSettled) apply(ctx context.Context, q Queries, g *Group, c *change) 
 		return nil
 	}
 	if len(t.o.Reached) > 0 {
-		if _, err := q.ReachPageUsers(ctx, dbgen.ReachPageUsersParams{OrgID: t.orgID, PageID: p.ID,
-			UserIds: t.o.Reached}); err != nil {
+		reached, err := q.ReachPageUsers(ctx, dbgen.ReachPageUsersParams{OrgID: t.orgID, PageID: p.ID,
+			UserIds: t.o.Reached})
+		if err != nil {
 			return fmt.Errorf("record whom page %d reached: %w", p.ID, err)
+		}
+		if err := reachAssignees(ctx, q, t.orgID, g, p, reached, t.now, c); err != nil {
+			return err
 		}
 	}
 	if !t.o.Ended {

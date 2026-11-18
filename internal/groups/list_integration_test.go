@@ -8,6 +8,7 @@ package groups_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/groups/dbgen"
@@ -729,4 +731,252 @@ func explain(t *testing.T, e *env, c *captured) string {
 		t.Fatalf("explain: %v", err)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// TestIntegrationAssignees is C-32.FR-12, FR-18, AC-6 and AC-10 on PostgreSQL: a delivered reply of a Page makes its
+// person an Assignee of the run with the owning Team of its chain, read by getAlertGroup and with the Timeline entry
+// of assignees_changed; a later step's Page replaces them by its run step, also in the same firing at the same time,
+// and so does the later Mention of a step whose rule waits first, while a late reply and an earlier step's rule
+// change nothing; listAlertGroups with assignee selects the open Alert Groups
+// of that User — me, a public_id — and refuses me for a Service account; a run that ran out keeps them; the
+// acknowledgement clears them in its transaction, and the Alert Group leaves the list.
+func TestIntegrationAssignees(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		e.route(t, "db", "db", "alertname")
+		e.process(t, gk, alert("firing", "2026-10-07T11:00:00Z", "alertname", "DiskFull", "team", "db", "pod", "a"))
+		g := e.groupOf(t, "a")
+		// A second firing Alert Group, without Assignees, which the filter leaves out.
+		e.process(t, `{}:{alertname=\"DiskSlow\"}`, alert("firing", "2026-10-07T11:00:00Z", "alertname", "DiskSlow",
+			"team", "db", "pod", "b"))
+		other := e.groupOf(t, "b")
+		if other == g {
+			t.Fatal("one alert group for both alerts")
+		}
+		ivan, petr := e.user(t, "SR0000000000JV", "ivan"), e.user(t, "SR0000000000PE", "petr")
+		var group, team, run int64
+		if err := e.d.Pool.QueryRow(ctx, `SELECT id FROM alert_groups WHERE public_id = $1`, g).Scan(&group); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			VALUES ($1, 'TM0000000000DV', 'DevOps', 'devops', $2, $2) RETURNING id`, e.orgID, t0).Scan(&team); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name,
+			owning_team_id, sources, steps, state, generation, started_at)
+			VALUES ($1, 'ER0000000000AS', $2, 'devops', $3, '[{"kind":"route"}]', '[]', 'running', 1, $4) RETURNING id`,
+			e.orgID, group, team, t0).Scan(&run); err != nil {
+			t.Fatal(err)
+		}
+		// Every step is made by one firing at one time, without a wait between them, its run step's seq its number;
+		// a rule run's later Mention names its rule run instead.
+		page := func(step int, rule any, people ...int64) int64 {
+			t.Helper()
+			var id int64
+			if err := e.d.Pool.QueryRow(ctx, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id,
+				notification_rule_run_id, step_number, kind, importance, again, state, created_at, run_step_seq)
+				VALUES ($1, $2, $3, $4, $5, 'mention', 'normal', $4::bigint IS NOT NULL, 'pending', $6,
+					CASE WHEN $4::bigint IS NULL THEN $5::int END) RETURNING id`,
+				e.orgID, group, run, rule, step, t0).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			for _, u := range people {
+				if _, err := e.d.Pool.Exec(ctx, `INSERT INTO page_users (org_id, page_id, user_id, outcome)
+					VALUES ($1, $2, $3, 'pending')`, e.orgID, id, u); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return id
+		}
+		settle := func(o groups.PageOutcome) {
+			t.Helper()
+			e.clock.Advance(time.Minute)
+			var done func(context.Context)
+			if err := pgx.BeginFunc(ctx, e.d.Pool, func(tx pgx.Tx) error {
+				var err error
+				done, err = e.groups.SettlePage(ctx, tx, group, o)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if done != nil {
+				done(ctx)
+			}
+		}
+		assignees := func() []string {
+			t.Helper()
+			v, err := e.groups.Get(ctx, g)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, a := range v.Assignees {
+				s := a.User.Login
+				if a.Team != nil {
+					s += "/" + a.Team.Slug
+				}
+				out = append(out, s)
+			}
+			return out
+		}
+		listed := func(assignee string, me audit.Actor) (bool, error) {
+			t.Helper()
+			p, err := e.groups.List(ctx, groups.ListRequest{Filter: groups.Filter{Assignee: assignee, Me: me},
+				Limit: 50})
+			if slices.ContainsFunc(p.Groups, func(v groups.View) bool { return v.PublicID == other }) && assignee != "" {
+				t.Errorf("the filter %q has the alert group without assignees", assignee)
+			}
+			return slices.ContainsFunc(p.Groups, func(v groups.View) bool { return v.PublicID == g }), err
+		}
+		// counted is the count of every status with the filter assignee=me for the User.
+		counted := func(me audit.Actor) int64 {
+			t.Helper()
+			c, err := e.groups.Counts(ctx, groups.Filter{Assignee: groups.OwnerMe, Me: me})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return c.All
+		}
+		ivanMe := audit.User(ivan, "SR0000000000JV")
+
+		// ruleRun starts a rule run of the step for the person, with the step's run step, before every Page of the
+		// firing, as the step starts it.
+		ruleRun := func(step int, user int64) int64 {
+			t.Helper()
+			var id int64
+			if err := e.d.Pool.QueryRow(ctx, `INSERT INTO notification_rule_runs (org_id, alert_group_id,
+				escalation_run_id, step_number, user_id, importance, actions, state, started_at, run_step_seq)
+				VALUES ($1, $2, $3, $4, $5, 'normal', '[]', 'running', $6, $4) RETURNING id`, e.orgID, group, run, step,
+				user, t0.Add(-time.Millisecond)).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		step1 := page(1, nil, ivan, petr)
+		rule1 := ruleRun(1, ivan)
+		settle(groups.PageOutcome{Page: step1, Reached: []int64{ivan}})
+		if got := assignees(); !slices.Equal(got, []string{"ivan/devops"}) {
+			t.Fatalf("after the first reply %v", got)
+		}
+		for name, c := range map[string]struct {
+			assignee string
+			me       audit.Actor
+			want     bool
+		}{
+			"me": {groups.OwnerMe, ivanMe, true}, "a public_id": {"SR0000000000JV", audit.User(petr, "x"), true},
+			"another user": {"SR0000000000PE", ivanMe, false}, "none": {"", ivanMe, true},
+		} {
+			if got, err := listed(c.assignee, c.me); err != nil || got != c.want {
+				t.Errorf("%s: listed %v, %v", name, got, err)
+			}
+		}
+		if n := counted(ivanMe); n != 1 {
+			t.Errorf("counts with assignee=me: %d, want the one alert group of ivan", n)
+		}
+		var fe *groups.FieldError
+		if _, err := listed(groups.OwnerMe, audit.ServiceAccount(5, "SA")); !errors.As(err, &fe) ||
+			fe.Pointer != "/query/assignee" || fe.Code != groups.CodeUnsupported {
+			t.Errorf("me for a service account: %v", err)
+		}
+		var plan string
+		if err := e.d.Pool.QueryRow(ctx, `EXPLAIN SELECT 1 FROM alert_group_assignees
+			WHERE org_id = $1 AND user_id = $2 AND alert_group_id = $3`, e.orgID, ivan, group).Scan(&plan); err != nil ||
+			plan == "" {
+			t.Errorf("plan %q %v", plan, err)
+		}
+
+		// Step 2 reaches petr: he replaces ivan, keeping the run's Team.
+		step2 := page(2, nil, petr)
+		rule2 := ruleRun(2, ivan)
+		settle(groups.PageOutcome{Page: step2, Reached: []int64{petr}})
+		if got := assignees(); !slices.Equal(got, []string{"petr/devops"}) {
+			t.Fatalf("after a later step %v", got)
+		}
+		// A late reply of step 1 and a later Mention of ivan's rule of step 1 change nothing: step 2 replaced them.
+		settle(groups.PageOutcome{Page: step1, Reached: []int64{ivan, petr}, Ended: true, Delivered: true})
+		again1 := page(1, rule1, ivan)
+		settle(groups.PageOutcome{Page: again1, Reached: []int64{ivan}})
+		if got := assignees(); !slices.Equal(got, []string{"petr/devops"}) {
+			t.Errorf("after a late reply and an earlier step's rule %v", got)
+		}
+		// A later Mention of ivan's rule of step 2 adds him.
+		again2 := page(2, rule2, ivan)
+		settle(groups.PageOutcome{Page: again2, Reached: []int64{ivan}})
+		if got := assignees(); !slices.Equal(got, []string{"petr/devops", "ivan/devops"}) {
+			t.Errorf("after step 2's rule %v", got)
+		}
+		// Step 3's rule waits before its first Mention, so the step makes no first Mentions: the later Mention, by the
+		// run step that started the rule run, replaces step 2's Assignees.
+		rule3 := ruleRun(3, ivan)
+		again3 := page(3, rule3, ivan)
+		settle(groups.PageOutcome{Page: again3, Reached: []int64{ivan}})
+		if got := assignees(); !slices.Equal(got, []string{"ivan/devops"}) {
+			t.Errorf("after step 3's rule %v", got)
+		}
+		// The run ran out: its Assignees stay, and the list still has the Alert Group for ivan.
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE escalation_runs SET state = 'ran_out', ended_at = $2 WHERE id = $1`,
+			run, t0); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := listed(groups.OwnerMe, ivanMe); err != nil || !got || !slices.Equal(assignees(),
+			[]string{"ivan/devops"}) {
+			t.Errorf("a run that ran out: %v %v %v", got, err, assignees())
+		}
+		var entries []string
+		rows, err := e.d.Pool.Query(ctx, `SELECT coalesce(assignees::text, 'null') FROM timeline_entries
+			WHERE alert_group_id = $1 AND event = 'assignees_changed' ORDER BY event_seq`, group)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || len(entries) != 4 || !strings.Contains(entries[0], fmt.Sprintf(`"user_id": %d`, ivan)) ||
+			!strings.Contains(entries[1], fmt.Sprintf(`"team_id": %d`, team)) ||
+			strings.Count(entries[2], `"user_id"`) != 2 || strings.Count(entries[3], `"user_id"`) != 1 {
+			t.Errorf("timeline %q %v", entries, err)
+		}
+
+		perms := []auth.Permission{groups.PermissionAcknowledge}
+		if _, err := e.groups.Acknowledge(ctx, groups.Caller{Actor: audit.User(petr, "SR0000000000PE"),
+			Transport: audit.TransportUI, Permissions: perms}, g); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_assignees`); n != 0 {
+			t.Errorf("%d assignees after the acknowledgement", n)
+		}
+		if got, err := listed(groups.OwnerMe, ivanMe); err != nil || got || counted(ivanMe) != 0 {
+			t.Errorf("acknowledged and still listed: %v %v", got, err)
+		}
+		// A row that a replica without migration 0050 left on the acknowledged Alert Group shows nowhere: only a firing
+		// Alert Group has Assignees.
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO alert_group_assignees (org_id, alert_group_id, escalation_run_id,
+			step_number, user_id, since) VALUES ($1, $2, $3, 1, $4, $5)`, e.orgID, group, run, ivan, t0); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := listed(groups.OwnerMe, ivanMe); err != nil || got || counted(ivanMe) != 0 ||
+			len(assignees()) != 0 {
+			t.Errorf("a leftover row: listed %v %v, counted %d, assignees %v", got, err, counted(ivanMe), assignees())
+		}
+		if _, err := e.d.Pool.Exec(ctx, `DELETE FROM alert_group_assignees`); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+			AND event = 'assignees_changed' AND assignees = '[]'::jsonb`, group); n != 1 {
+			t.Errorf("%d assignees_changed that cleared them", n)
+		}
+		tl, err := e.groups.Timeline(ctx, g, groups.TimelineFilter{Kinds: []groups.Kind{groups.KindEscalation},
+			Ascending: true, Limit: 50})
+		var changes []groups.TimelineEntry
+		for _, x := range tl.Entries {
+			if x.Event == string(groups.EventAssigneesChanged) {
+				changes = append(changes, x)
+			}
+		}
+		if err != nil || len(changes) != 5 || len(changes[0].Assignees) != 1 ||
+			changes[0].Assignees[0].User.Login != "ivan" || changes[1].Assignees[0].Team == nil ||
+			changes[1].Assignees[0].User.Login != "petr" || len(changes[2].Assignees) != 2 ||
+			len(changes[3].Assignees) != 1 || len(changes[4].Assignees) != 0 {
+			t.Errorf("timeline %+v %v", changes, err)
+		}
+	})
 }

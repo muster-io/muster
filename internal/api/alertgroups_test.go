@@ -1086,3 +1086,67 @@ func TestTimelineMentionNotDeliveredAPI(t *testing.T) {
 		t.Errorf("publication %s, %v", raw, err)
 	}
 }
+
+// TestAssigneeFilterAPI is C-32.FR-18 and C-09.FR-13 for the parameter assignee: listAlertGroups and
+// getAlertGroupCounts pass it, me included, with the caller; a FieldError of the filter, as me from a Service account,
+// answers 422 at /query/assignee.
+func TestAssigneeFilterAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?assignee=me", ""); a.status != http.StatusOK ||
+		fg.lists[0].Assignee != groups.OwnerMe || fg.lists[0].Me.Kind != audit.ActorUser {
+		t.Errorf("list = %d %+v", a.status, fg.lists)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts?assignee=SR0000000000JV", ""); a.status !=
+		http.StatusOK || fg.counts[0].Assignee != "SR0000000000JV" {
+		t.Errorf("counts = %d %+v", a.status, fg.counts)
+	}
+	fg.err = &groups.FieldError{Pointer: "/query/assignee", Code: groups.CodeUnsupported, Detail: "x"}
+	for _, path := range []string{"/api/v1/alert-groups?assignee=me", "/api/v1/alert-group-counts?assignee=me"} {
+		if a := x.as(t, serviceToken, http.MethodGet, path, ""); a.status != http.StatusUnprocessableEntity ||
+			!strings.Contains(string(a.body), `"pointer":"/query/assignee"`) {
+			t.Errorf("%s by a service account = %d %s", path, a.status, a.body)
+		}
+	}
+}
+
+// TestAssigneesAPI is C-32.FR-18 for the API forms: an Alert Group reads its Assignees with their User, the owning
+// Team of the chain and the chain, null for none, and none as an empty list; assignees_changed reads the Assignees
+// after it, an empty list once cleared, and no other escalation entry carries them.
+func TestAssigneesAPI(t *testing.T) {
+	devops := &groups.TeamRef{PublicID: "TM0000000000DV", Name: "DevOps", Slug: "devops"}
+	list := []groups.Assignee{{User: groups.ActorRef{Kind: "user", PublicID: "SRAAAAAAAAAAIV", Name: "Ivan",
+		Login: "ivan"}, Team: devops, Chain: &groups.ChainRef{PublicID: "ECAAAAAAAAAADV", Name: "devops",
+		OwningTeam: devops}, Since: t0}, {User: groups.ActorRef{Kind: "user", PublicID: "SRAAAAAAAAAAPE",
+		Name: "Petr"}, Since: t0}}
+	raw, _ := json.Marshal(alertGroupOf(groups.View{Assignees: list}, groups.Caller{}, nil).Assignees)
+	want := `[{"chain":{"id":"ECAAAAAAAAAADV","name":"devops","owning_team":{"deleted":false,"id":"TM0000000000DV",` +
+		`"name":"DevOps","slug":"devops"}},"since":"` + t0.Format(time.RFC3339) + `","team":{"deleted":false,` +
+		`"id":"TM0000000000DV","name":"DevOps","slug":"devops"},"user":{"deactivated":false,"id":"SRAAAAAAAAAAIV",` +
+		`"login":"ivan","name":"Ivan"}},{"chain":null,"since":"` + t0.Format(time.RFC3339) + `","team":null,` +
+		`"user":{"deactivated":false,"id":"SRAAAAAAAAAAPE","name":"Petr"}}]`
+	if string(raw) != want {
+		t.Errorf("assignees %s\nwant %s", raw, want)
+	}
+	if raw, _ := json.Marshal(alertGroupOf(groups.View{}, groups.Caller{}, nil).Assignees); string(raw) != "[]" {
+		t.Errorf("none %s", raw)
+	}
+	system := groups.TimelineActor{Kind: "system", Transport: "system"}
+	for _, c := range []struct {
+		event     groups.Event
+		assignees []groups.Assignee
+		want      string
+	}{
+		{groups.EventAssigneesChanged, list[1:], `"assignees":[{"chain":null`},
+		{groups.EventAssigneesChanged, nil, `"assignees":[]`},
+		{groups.EventPaged, nil, ""},
+	} {
+		v, err := timelineEntryOf(groups.TimelineEntry{PublicID: "TEAAAAAAAAAAA6", At: t0, Kind: groups.KindEscalation,
+			Event: string(c.event), Loudness: groups.Quiet, Mentions: []string{}, Actor: system,
+			Assignees: c.assignees})
+		raw, _ := json.Marshal(v)
+		if err != nil || (c.want != "" && !strings.Contains(string(raw), c.want)) ||
+			(c.want == "" && strings.Contains(string(raw), `"assignees"`)) {
+			t.Errorf("%s: %s, %v", c.event, raw, err)
+		}
+	}
+}

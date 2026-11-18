@@ -488,6 +488,84 @@ func TestFooterMentions(t *testing.T) {
 	}
 }
 
+// TestAssigneesFooter is C-29.FR-1 item 7, C-32.AC-13, C-12.FR-12 and C-12.FR-3 for the Assignees: before an
+// acknowledgement item 7 is "Assignees: @ivan (devops), @petr (payments)", each a Mention in an identity space where
+// they have an Account link and their name elsewhere, in English and Russian; after an acknowledgement that stopped
+// running chains it reads "Acknowledged by @ivan · Escalation chains stopped", the Owner without a Team (P-89), and
+// as in L1 otherwise; without Assignees a firing Alert Group has no item 7.
+func TestAssigneesFooter(t *testing.T) {
+	r := newRenderer(t)
+	ivan := map[string]mentions.User{"mattermost:3": {Name: "Ivan", Username: "ivan.mm"},
+		"telegram": {Name: "Ivan", ExternalID: "7101"}}
+	petr := map[string]mentions.User{"mattermost:3": {Name: "Petr_*", Username: "petr.mm"}}
+	src := source("firing", 1)
+	src.Assignees = []SourceAssignee{{ID: 1, Name: "Ivan", Team: "devops", Links: ivan},
+		{ID: 2, Name: "Petr_*", Team: "payments", Links: petr}, {ID: 3, Name: "Dora"}}
+	m := r.Root(src, MarkupMarkdown).Message
+	if m.Footer != "Assignees: Ivan (devops), Petr_* (payments), Dora" || len(m.Footers) != 2 ||
+		len(m.FooterPeople["telegram"]) != 3 || m.FooterPeople["telegram"][1].Name != "" || m.Assignees != nil {
+		t.Fatalf("footers %q %v %v %v", m.Footer, m.Footers, m.FooterPeople, m.Assignees)
+	}
+	mention := func(u mentions.User) string { return "<@" + u.Username + u.ExternalID + ">" }
+	mm := m.WithFooterIn("mattermost:3", mention)
+	if got := mm.FooterText(EscapeMarkdown); got != "Assignees: <@ivan.mm> (devops), <@petr.mm> (payments), Dora" ||
+		mm.FooterPeople != nil {
+		t.Errorf("mattermost %q", got)
+	}
+	if got := m.WithFooterIn("telegram", mention).FooterText(EscapeMarkdown); got !=
+		`Assignees: <@7101> (devops), Petr\_\* (payments), Dora` {
+		t.Errorf("telegram %q", got)
+	}
+	if got := m.WithFooterIn("slack:5", mention).FooterText(EscapeMarkdown); got !=
+		`Assignees: Ivan (devops), Petr\_\* (payments), Dora` {
+		t.Errorf("unlinked %q", got)
+	}
+	if n := mm.FooterNamed(); n != "Assignees: Ivan (devops), Petr_* (payments), Dora" {
+		t.Errorf("named %q", n)
+	}
+	// Only that identity space's people make the hash of its Desired state.
+	if only := m.OnlyFooterIn("telegram"); len(only.FooterPeople) != 1 || len(only.Footers) != 1 {
+		t.Errorf("only %+v", only)
+	}
+	// Shortening names them all by their display names before it cuts.
+	if short, _ := Shorten(Message{Footer: mm.Footer, FooterMention: mm.FooterMention, FooterName: mm.FooterName},
+		45, MarkupMarkdown); short.FooterMention != "" || !strings.HasPrefix(short.Footer, "Assignees: Ivan (devops)") {
+		t.Errorf("shortened %+v", short)
+	}
+	// CommonMark carries them for a bridge's layout.
+	if cm := r.Root(src, MarkupCommonMark).Message; len(cm.Assignees) != 3 || cm.Assignees[0] != (Person{Name: "Ivan",
+		Team: "devops"}) || cm.Assignees[2] != (Person{Name: "Dora"}) {
+		t.Errorf("commonmark %+v", cm.Assignees)
+	}
+	ru := *src
+	ru.Route.Language = "ru"
+	if f := r.Root(&ru, MarkupPlain).Message.Footer; f != "Назначены: Ivan (devops), Petr_* (payments), Dora" {
+		t.Errorf("ru %q", f)
+	}
+	if none := r.Root(source("firing", 1), MarkupMarkdown).Message; none.Footer != "" || none.Footers != nil {
+		t.Errorf("no assignees %+v", none)
+	}
+	ack := source("acknowledged", 1)
+	ack.Owner, ack.ChainsStopped, ack.FooterUsers = "Ivan", true, ivan
+	am := r.Root(ack, MarkupMarkdown).Message
+	if got := am.WithFooterIn("mattermost:3", mention).FooterText(EscapeMarkdown); got !=
+		"Acknowledged by <@ivan.mm> · Escalation chains stopped" {
+		t.Errorf("acknowledged %q", got)
+	}
+	ru = *ack
+	ru.Route.Language = "ru"
+	if f := r.Root(&ru, MarkupPlain).Message.Footer; f != "Подтвердил(а): Ivan · Цепочки эскалации остановлены" {
+		t.Errorf("ru acknowledged %q", f)
+	}
+	if cm := r.Root(ack, MarkupCommonMark).Message; !cm.ChainsStopped || cm.Owner != "Ivan" {
+		t.Errorf("commonmark acknowledged %+v", cm)
+	}
+	ack.ChainsStopped = false
+	if f := r.Root(ack, MarkupMarkdown).Message.Footer; f != "Acknowledged by Ivan" {
+		t.Errorf("without chains %q", f)
+	}
+}
+
 // TestNaturalOrder sorts runs of digits as numbers.
 func TestNaturalOrder(t *testing.T) {
 	got := []string{"p10", "p2", "p1", "a", "p02", "b9", "b10", "", "p1x"}

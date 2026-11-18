@@ -280,7 +280,7 @@ INSERT INTO timeline_entries (
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
     period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
     paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, page_everyone,
-    page_importance
+    page_importance, assignees
 )
 VALUES (
     @org_id, @public_id, @alert_group_id, @at, @kind, sqlc.narg('event'), sqlc.narg('event_seq'),
@@ -293,7 +293,7 @@ VALUES (
     sqlc.narg('team_id'), sqlc.narg('team_rule'), sqlc.narg('team_matcher'), sqlc.narg('team_value'),
     sqlc.narg('destination_id'), sqlc.narg('paged_user_ids')::bigint[], sqlc.narg('gateway_connection_id'),
     sqlc.narg('escalation_run_id'), sqlc.narg('escalation_chain_id'), sqlc.narg('step_number'),
-    sqlc.narg('page_everyone'), sqlc.narg('page_importance')
+    sqlc.narg('page_everyone'), sqlc.narg('page_importance'), sqlc.narg('assignees')::jsonb
 );
 
 -- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
@@ -526,7 +526,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -541,7 +541,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -609,7 +609,10 @@ WHERE org_id = @org_id AND deleted_at IS NULL;
 -- with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 -- and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
 -- these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
--- @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null. The Delivery problem
+-- @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null; @assignee the firing
+-- ones where that User is an Assignee (C-32.FR-18), through alert_group_assignees_user_idx — only a firing Alert Group
+-- has Assignees, and the rows a replica without migration 0050 left after an acknowledgement never show. The Delivery
+-- problem
 -- (C-13.FR-12) and the next notice (C-17.FR-9) are derived as in GetGroup; @unclaimed selects the Unclaimed Alert Groups
 -- or the others (C-09.FR-13).
 
@@ -661,6 +664,12 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('assignee')::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = sqlc.narg('assignee')::bigint
+                         AND ga.alert_group_id = g.id)))
   AND (NOT @team_set::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
@@ -726,6 +735,12 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('assignee')::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = sqlc.narg('assignee')::bigint
+                         AND ga.alert_group_id = g.id)))
   AND (NOT @team_set::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
@@ -791,6 +806,12 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('assignee')::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = sqlc.narg('assignee')::bigint
+                         AND ga.alert_group_id = g.id)))
   AND (NOT @team_set::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
@@ -856,6 +877,12 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('assignee')::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = sqlc.narg('assignee')::bigint
+                         AND ga.alert_group_id = g.id)))
   AND (NOT @team_set::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
@@ -901,6 +928,12 @@ WHERE g.org_id = @org_id
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('assignee')::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = sqlc.narg('assignee')::bigint
+                         AND ga.alert_group_id = g.id)))
   AND (NOT @team_set::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
@@ -1620,15 +1653,16 @@ FROM connections
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
 
 -- InsertPage writes a Page by Mention of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18):
--- pending until its Thread replies end, or ended at once, as not_delivered for no_root_message.
+-- pending until its Thread replies end, or ended at once, as not_delivered for no_root_message; the first Mentions of
+-- a step carry the seq of its run step.
 -- name: InsertPage :one
 INSERT INTO pages (org_id, alert_group_id, escalation_run_id, notification_rule_run_id, step_number, kind, team_id,
                    everyone, importance, schedule_id, chain_team_id, again_seconds, again, state, reason, created_at,
-                   ended_at)
+                   ended_at, run_step_seq)
 VALUES (@org_id, @alert_group_id, sqlc.narg('escalation_run_id'), sqlc.narg('notification_rule_run_id'),
         @step_number, 'mention', sqlc.narg('team_id'), sqlc.narg('everyone'), sqlc.narg('importance'),
         sqlc.narg('schedule_id'), sqlc.narg('chain_team_id'), sqlc.narg('again_seconds'), @again, @state,
-        sqlc.narg('reason'), @now, sqlc.narg('ended_at'))
+        sqlc.narg('reason'), @now, sqlc.narg('ended_at'), sqlc.narg('run_step_seq'))
 RETURNING id;
 
 -- InsertPageUser writes a person a Page names with their outcome and its reason.
@@ -1637,15 +1671,20 @@ INSERT INTO page_users (org_id, page_id, user_id, outcome, reason)
 VALUES (@org_id, @page_id, @user_id, @outcome, sqlc.narg('reason'));
 
 -- LockPage locks a Page whose outcome its Thread replies settle, after its Alert Group, with the run, the chain and the
--- step that made it, and the importance of a Page of people, empty for none.
+-- step that made it, the importance of a Page of people, empty for none, the state and the owning Team of the run,
+-- which its Assignees take, and run_step_seq, the run step whose Page it is (C-32.FR-12): that of the rule run of a
+-- later Mention of a rule, which the step that started it made, else the Page's own; null for a Page or a rule run
+-- written before migration 0050.
 -- name: LockPage :one
 SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
        coalesce(p.importance, '')::text AS importance,
        p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
-       coalesce(r.chain_name, '')::text AS chain_name
+       coalesce(r.chain_name, '')::text AS chain_name, coalesce(r.state, '')::text AS run_state, r.owning_team_id,
+       coalesce(rr.run_step_seq, p.run_step_seq) AS run_step_seq
 FROM pages p
 LEFT JOIN escalation_runs r ON r.org_id = p.org_id AND r.id = p.escalation_run_id
 LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+LEFT JOIN notification_rule_runs rr ON rr.org_id = p.org_id AND rr.id = p.notification_rule_run_id
 WHERE p.org_id = @org_id AND p.id = @id AND p.alert_group_id = @alert_group_id
 FOR NO KEY UPDATE OF p;
 
@@ -1675,3 +1714,44 @@ WHERE org_id = @org_id AND page_id = @page_id;
 UPDATE pages
 SET state = @state, reason = sqlc.narg('reason'), ended_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND state = 'pending';
+
+-- The Assignees of Alert Groups (C-32.FR-12, schema.md §4.9): per run of a chain, the people its latest step Paging
+-- people by name reached; only the dispatcher writes them, and only while the Alert Group is firing.
+
+-- ListRunAssignees lists the Assignees of a run with the run step that made them.
+-- name: ListRunAssignees :many
+SELECT user_id, run_step_seq
+FROM alert_group_assignees
+WHERE org_id = @org_id AND alert_group_id = @alert_group_id AND escalation_run_id = @escalation_run_id
+ORDER BY user_id;
+
+-- UpsertAssignee makes a person an Assignee of a run, or moves an Assignee to the step that reached them again,
+-- keeping since when they are one.
+-- name: UpsertAssignee :exec
+INSERT INTO alert_group_assignees (org_id, alert_group_id, escalation_run_id, step_number, run_step_seq, user_id,
+                                   team_id, since)
+VALUES (@org_id, @alert_group_id, @escalation_run_id, @step_number, sqlc.narg('run_step_seq'), @user_id,
+        sqlc.narg('team_id'), @since)
+ON CONFLICT (alert_group_id, escalation_run_id, user_id)
+DO UPDATE SET step_number = EXCLUDED.step_number, run_step_seq = EXCLUDED.run_step_seq;
+
+-- DeleteRunAssigneesExcept removes the Assignees of a run other than @keep, whom a later step replaces.
+-- name: DeleteRunAssigneesExcept :execrows
+DELETE FROM alert_group_assignees
+WHERE org_id = @org_id AND alert_group_id = @alert_group_id AND escalation_run_id = @escalation_run_id
+  AND NOT (user_id = ANY(@keep::bigint[]));
+
+-- DeleteGroupAssignees removes every Assignee of an Alert Group: Acknowledge, Snooze and Resolve clear them.
+-- name: DeleteGroupAssignees :execrows
+DELETE FROM alert_group_assignees
+WHERE org_id = @org_id AND alert_group_id = @alert_group_id;
+
+-- ListGroupAssignees lists the Assignees of the firing ones of Alert Groups by internal ids, by chain in the order the
+-- runs started, then in the order they became Assignees: only a firing Alert Group has Assignees, and the rows a
+-- replica without migration 0050 left after an acknowledgement never show.
+-- name: ListGroupAssignees :many
+SELECT a.alert_group_id, a.escalation_run_id, a.user_id, a.team_id, a.since
+FROM alert_group_assignees a
+JOIN alert_groups g ON g.org_id = a.org_id AND g.id = a.alert_group_id AND g.status = 'firing'
+WHERE a.org_id = @org_id AND a.alert_group_id = ANY(@alert_group_ids::bigint[])
+ORDER BY a.alert_group_id, a.escalation_run_id, a.since, a.user_id;

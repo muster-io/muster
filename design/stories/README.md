@@ -626,7 +626,7 @@ show the links.
 | [S-177](S-177-pages-in-telegram-through-bridges-and-to-outgoing-webhooks.md) | C-32 | Pages by Mention in Telegram, through Bridges and to outgoing webhooks (BE) | be | S-155 |
 | [S-178](S-178-the-pages-of-chain-runs-and-of-the-timeline-in-the-api.md) | C-32 | The Pages of the runs of Escalation chains and of the Timeline in the API, and paged in the Timeline of the SPA (BE) | be | S-155 |
 | [S-172](S-172-warnings-about-on-calls-whom-the-destinations-of-their-chains-cannot-mention.md) | C-27 | Warnings about On-calls whom the Destinations of their chains cannot mention, with the Telegram discussion group check for them (BE) | be | S-155, S-177 |
-| [S-168](S-168-assignees-in-the-root-message-and-the-layout-the-owners-team-and-the-assignee-filter.md) | C-32 | Assignees — the people the chains Paged last — in the Root message and the layout, the Owner's Team, and the Assignee filter (BE) | be | S-126, S-155 |
+| [S-168](S-168-assignees-in-the-root-message-and-the-layout-the-owners-team-and-the-assignee-filter.md) | C-32 | Assignees — the people the chains Paged last — in the Root message and the layout, and the Assignee filter (BE) | be | S-126, S-155 |
 | [S-156](S-156-the-step-send-to-an-outgoing-webhook-and-escalation-webhook.md) | C-32 | The step "Send to an outgoing webhook" and the event escalation_webhook (BE) | be | S-169 |
 | [S-157](S-157-pages-through-a-notification-gateway-from-escalation-steps-and-notification-rules.md) | C-32 | Pages through a Notification gateway from Escalation steps and Notification rules, queued as calls (BE) | be | S-149, S-156, S-168, S-173, S-178 |
 | [S-158](S-158-the-chain-page-with-how-it-went-and-the-chains-on-the-route-form-and-the-team-page.md) | C-32 | The Escalation chain page with its steps and "How it went", and the chains on the Route form and the Team page (FE) | fe | S-123, S-150, S-157, S-178 |
@@ -664,7 +664,7 @@ and S-147, which need only S-145. S-169 was split from S-154: S-154 keeps the ch
 naming them on Routes and Teams and the refusals that protect them — and S-169 takes their lifecycle on Alert Groups,
 with the ack timeout, Unclaimed, waits, repeats and skipped steps; it follows S-154. S-168 was split from S-155: S-155
 keeps the Pages by Mention, the runs of Notification rules and undelivered Pages, and S-168 takes the Assignees, item 7
-of the Root message and `layout`, the Owner's Team and the Assignee filter; it follows S-155, and S-157 and S-159 depend
+of the Root message and `layout`, the Owner named without a Team and the Assignee filter; it follows S-155, and S-157 and S-159 depend
 on it. The runs of Notification rules, which the first plan gave S-152, moved to S-155 (Mentions) and S-157 (calls),
 because a run only Pages people once Escalation steps Page them; S-152 keeps the rules, their defaults and their states.
 S-172 was split from S-155 by the review of the contracts, when the Telegram discussion group check had to cover the

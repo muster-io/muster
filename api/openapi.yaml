@@ -4510,6 +4510,7 @@ paths:
       - $ref: '#/components/parameters/AgReopened'
       - $ref: '#/components/parameters/LabelMatchers'
       - $ref: '#/components/parameters/AgOwner'
+      - $ref: '#/components/parameters/AgAssignee'
       - $ref: '#/components/parameters/AgTeam'
       - $ref: '#/components/parameters/AgSnoozedNoEnd'
       - $ref: '#/components/parameters/AgDeliveryProblem'
@@ -4559,6 +4560,7 @@ paths:
       - $ref: '#/components/parameters/AgReopened'
       - $ref: '#/components/parameters/LabelMatchers'
       - $ref: '#/components/parameters/AgOwner'
+      - $ref: '#/components/parameters/AgAssignee'
       - $ref: '#/components/parameters/AgTeam'
       - $ref: '#/components/parameters/AgSnoozedNoEnd'
       - $ref: '#/components/parameters/AgDeliveryProblem'
@@ -9391,6 +9393,14 @@ components:
       in: query
       description: A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups
         nobody owns, resolved ones included.
+      schema:
+        type: string
+    AgAssignee:
+      name: assignee
+      in: query
+      description: Only the open Alert Groups where this User is an Assignee (C-32.FR-12, FR-18), by the User's
+        `public_id`, deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token).
+        An Alert Group leaves it once acknowledged, snoozed or resolved. An id that names no User is `422` `unknown_id`.
       schema:
         type: string
     AgTeam:
@@ -14254,17 +14264,17 @@ components:
         notices:
           type: array
           description: The notices that apply, then the footer as a line, except the footer of an acknowledgement
-            that `owner` names.
+            that `owner` names, of which only "Escalation chains stopped" is a line, and the Assignees.
           items:
             type: string
         assignees:
           type: array
-          description: The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page
-            people.
+          description: The Assignees with the owning Teams of their chains, before an acknowledgement; empty until
+            Escalation chains Page people, and in a preview.
           items:
             $ref: '#/components/schemas/MessageLayoutPerson'
         owner:
-          description: Who acknowledged the Alert Group, with their Team, while it is acknowledged, in the layout of
+          description: Who acknowledged the Alert Group, without a Team, while it is acknowledged, in the layout of
             the markup `commonmark` that bridges receive; null otherwise, while the footer names them.
           oneOf:
           - $ref: '#/components/schemas/MessageLayoutPerson'
@@ -14820,6 +14830,7 @@ components:
       - allowed_commands
       - teams
       - escalation_chains
+      - assignees
       properties:
         id:
           $ref: '#/components/schemas/PublicId'
@@ -14931,6 +14942,40 @@ components:
             here, `ran_out` or `stopped`, until the chains start over. Changes arrive as the `alert-group` hint.'
           items:
             $ref: '#/components/schemas/AlertGroupChain'
+        assignees:
+          type: array
+          description: 'The Assignees of the Alert Group (C-32.FR-12): for each chain started on it, running or run out,
+            the people its latest step Paging people by name reached, each with the owning Team of the chain; in the
+            order they became Assignees, by chain. Empty before the chains reach anyone and once acknowledged, snoozed or
+            resolved. Changes arrive as the `alert-group` hint.'
+          items:
+            $ref: '#/components/schemas/Assignee'
+    Assignee:
+      type: object
+      description: A person the Escalation chain `chain` Paged last and reached (C-32.FR-12), with the owning Team of the
+        chain, since when.
+      required:
+      - user
+      - team
+      - chain
+      - since
+      properties:
+        user:
+          $ref: '#/components/schemas/UserRef'
+        team:
+          description: The owning Team of the chain when its run started; null when none owns it.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+        chain:
+          description: The chain, null once it was deleted.
+          oneOf:
+          - $ref: '#/components/schemas/EscalationChainRef'
+          - type: 'null'
+        since:
+          type: string
+          format: date-time
+          description: When the person became an Assignee of the chain, on the business clock.
     AlertGroupChain:
       type: object
       description: A run of an Escalation chain on an Alert Group, of the current start of its chains.
@@ -15454,6 +15499,7 @@ components:
       - page_not_delivered
       - escalation_step_skipped
       - escalation_webhook
+      - assignees_changed
       x-event-kinds:
         status:
         - created
@@ -15493,6 +15539,7 @@ components:
         - page_not_delivered
         - escalation_step_skipped
         - escalation_webhook
+        - assignees_changed
     Loudness:
       type: string
       enum:
@@ -15859,8 +15906,9 @@ components:
     TimelineEscalationEntry:
       description: An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a
         Notification gateway that ended Not delivered, `escalation_step_skipped` for a step of a chain that was
-        skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, or
-        `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`.
+        skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person,
+        `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or
+        `assignees_changed`, with the Assignees after the change in `assignees`.
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'
       - $ref: '#/components/schemas/TimelineLifecycleFields'
@@ -15906,6 +15954,12 @@ components:
           destination:
             description: The outgoing webhook Destination the step sent to, for `escalation_webhook`.
             $ref: '#/components/schemas/DestinationRef'
+          assignees:
+            type: array
+            description: The Assignees after the change, for `assignees_changed`; empty once Acknowledge, Snooze or
+              Resolve cleared them.
+            items:
+              $ref: '#/components/schemas/Assignee'
     TimelineEntry:
       description: One Timeline entry; `kind` selects the variant.
       oneOf:
@@ -20599,6 +20653,7 @@ components:
       - page_not_delivered
       - escalation_step_skipped
       - escalation_webhook
+      - assignees_changed
       - test
     WebhookMentionTarget:
       type: object
@@ -20688,6 +20743,7 @@ components:
       - started_at
       - url
       - teams
+      - assignees
       properties:
         number:
           type: integer
@@ -20738,6 +20794,26 @@ components:
             name.
           items:
             $ref: '#/components/schemas/WebhookTeam'
+        assignees:
+          type: array
+          description: The Assignees of the Alert Group (C-32.FR-12), each with the owning Team of their chain; empty
+            once acknowledged, snoozed or resolved. The Owner is `owner`, named without a Team.
+          items:
+            $ref: '#/components/schemas/WebhookAssignee'
+    WebhookAssignee:
+      type: object
+      description: An Assignee as an outgoing webhook event names them, with the owning Team of their chain.
+      required:
+      - user
+      - team
+      properties:
+        user:
+          $ref: '#/components/schemas/WebhookUser'
+        team:
+          description: The owning Team of the chain; null when none owns it.
+          oneOf:
+          - $ref: '#/components/schemas/WebhookTeam'
+          - type: 'null'
     WebhookTeam:
       type: object
       description: A Team as an outgoing webhook event names it.

@@ -82,6 +82,9 @@ type Filter struct {
 	// FirstAcknowledgedBy is a User's public_id, or OwnerMe for the User Me: the Alert Groups whose first
 	// acknowledgement that User made (C-09.FR-27, FR-30); empty does not filter. Only the statistics read it.
 	FirstAcknowledgedBy string
+	// Assignee is a User's public_id, or OwnerMe for the User Me: the Alert Groups where that User is an Assignee
+	// (C-32.FR-18), which are open, as only a firing Alert Group has Assignees; empty does not filter.
+	Assignee string
 }
 
 // The values of Filter.Owner that name no User.
@@ -112,6 +115,7 @@ type query struct {
 	teamSet      bool
 	teamIDs      []int64
 	firstAckBy   pgtype.Int8
+	assignee     pgtype.Int8
 	// rowwise are the Matchers the database does not apply.
 	rowwise []matchers.Matcher
 }
@@ -174,6 +178,12 @@ func (s *Service) resolve(ctx context.Context, f Filter, now time.Time) (query, 
 	if f.FirstAcknowledgedBy != "" {
 		if q.firstAckBy, err = s.user(ctx, f.FirstAcknowledgedBy, f.Me, "/query/first_acknowledged_by",
 			"A Service account acknowledges no Alert Groups; name a user instead of me."); err != nil {
+			return q, err
+		}
+	}
+	if f.Assignee != "" {
+		if q.assignee, err = s.user(ctx, f.Assignee, f.Me, "/query/assignee",
+			"A Service account is never an Assignee; name a user instead of me."); err != nil {
 			return q, err
 		}
 	}

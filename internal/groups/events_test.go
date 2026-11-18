@@ -235,6 +235,21 @@ func TestLifecycleEventTable(t *testing.T) {
 					Step: 1}, Destination: JoinedDestination{ID: 77, PublicID: "DSAAAAAAAAAAOB", Name: "ops-bot",
 					Type: "webhook"}}}})
 			}},
+		{"assignees changed", want{EventAssigneesChanged, KindEscalation, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				h.people()
+				h.svc.SetPageTargets(&fakeTargets{targets: []PageTarget{{DestinationID: 11, Linked: []int64{owner}}}})
+				g := h.chainStep(t, ChainProgress{Pages: []StepPage{{ChainEntry: ChainEntry{Run: runID, Step: 1},
+					People: []int64{owner}, Importance: "normal"}}})
+				h.clock.Advance(time.Minute)
+				after, err := h.svc.SettlePage(t.Context(), nil, g.ID, PageOutcome{Page: h.db.pages.list[0].id,
+					Reached: []int64{owner}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				after(t.Context())
+				return g
+			}},
 		{"unclaimed when every chain ran out", want{EventUnclaimed, KindTimers, Quiet, nil},
 			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
 				return h.chainStep(t, ChainProgress{RanOut: true})

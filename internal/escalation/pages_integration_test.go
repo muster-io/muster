@@ -110,6 +110,14 @@ func TestIntegrationPages(t *testing.T) {
 			AND u.outcome = 'pending') = 2`, id, run); n != 1 {
 			t.Errorf("%d first pages", n)
 		}
+		// The first Page and both rule runs carry the seq of the run step of step 1, which orders the steps of the run
+		// for the Assignees (C-32.FR-12).
+		if n := e.count(t, `SELECT count(*) FROM escalation_run_steps s WHERE s.run_id = $1 AND s.number = 1
+			AND s.seq = (SELECT p.run_step_seq FROM pages p WHERE p.escalation_run_id = $1 AND p.step_number = 1)
+			AND (SELECT count(*) FROM notification_rule_runs r WHERE r.escalation_run_id = $1
+				AND r.run_step_seq = s.seq) = 2`, run); n != 1 {
+			t.Errorf("%d run steps carried by the page and the rule runs", n)
+		}
 		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1 AND event = 'paged'
 			AND kind = 'escalation' AND loudness = 'loud' AND mentions = '{paged}' AND cardinality(paged_user_ids) = 2
 			AND page_importance = 'important' AND escalation_run_id = $2 AND step_number = 1`, id, run); n != 1 {
@@ -256,6 +264,66 @@ func TestIntegrationPages(t *testing.T) {
 			if n := e.count(t, fmt.Sprintf(`SELECT count(*) FROM %s`, table)); n != 0 {
 				t.Errorf("%d %s left", n, table)
 			}
+		}
+	})
+}
+
+// TestIntegrationPageRunSteps is C-32.FR-12 on PostgreSQL for the run steps of Pages: across a wait, a second firing
+// and a repeat, the Page of each step's first Mentions and the rule runs the step starts carry the seq of the
+// escalation_run_steps row the step is recorded with — steps 1, 3 and 1 again as the seqs 1, 3 and 5.
+func TestIntegrationPageRunSteps(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setupRuns(t, s)
+		ctx := t.Context()
+		logger := logging.New(e.log, logging.LevelInfo)
+		rules := notificationrules.New(notificationrules.Config{OrgID: e.orgID,
+			Store: notificationrules.NewStore(e.d.Pool), Business: e.clock}).Runs(notificationrules.RunsConfig{
+			Business: e.clock, TimersChannel: groups.TimersChannel})
+		pages := escalation.NewPages(escalation.PagesConfig{OnCalls: e.schedules, Rules: rules, Targets: everywhere{},
+			Business: e.clock})
+		chains := escalation.New(escalation.Config{OrgID: e.orgID, Store: escalation.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logger, e.clock), Business: e.clock})
+		runs := chains.Runs(escalation.RunsConfig{DB: e.d.Pool, Groups: e.groups, OnCalls: e.schedules, Pages: pages,
+			Log: logger})
+		e.groups.SetChainRuns(runs)
+		e.groups.SetPageTargets(everywhere{})
+		petr := escalation.StepInput{Kind: escalation.KindPagePeople, UserIDs: &[]string{e.people["petr"]},
+			Importance: ptr("normal")}
+		looped, err := chains.Create(ctx, by, escalation.Input{Name: "looped", Steps: []escalation.StepInput{petr,
+			{Kind: escalation.KindWait, WaitSeconds: ptr(600)}, petr,
+			{Kind: escalation.KindRepeat, RepeatFrom: ptr(1), RepeatTimes: ptr(1)}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		route := e.newRoute(t, "looped", false, looped.PublicID)
+		id, _ := e.group(t, 1, route.ID)
+		if err := e.groups.MarkPublished(ctx, id, t0, true); err != nil {
+			t.Fatal(err)
+		}
+		var run int64
+		if err := e.d.Pool.QueryRow(ctx, `SELECT id FROM escalation_runs WHERE alert_group_id = $1`, id).Scan(
+			&run); err != nil {
+			t.Fatal(err)
+		}
+		fireRun(t, e, runs, run)
+		e.clock.Set(t0.Add(10 * time.Minute))
+		fireRun(t, e, runs, run)
+		var pairs string
+		if err := e.d.Pool.QueryRow(ctx, `SELECT string_agg(p.step_number || '@' || coalesce(p.run_step_seq::text, '-'),
+			' ' ORDER BY p.id) FROM pages p WHERE p.escalation_run_id = $1 AND p.notification_rule_run_id IS NULL`,
+			run).Scan(&pairs); err != nil || pairs != "1@1 3@3 1@5" {
+			t.Errorf("the run steps of the first Mentions %q %v", pairs, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pages p WHERE p.escalation_run_id = $1
+			AND p.notification_rule_run_id IS NULL AND NOT EXISTS (SELECT 1 FROM escalation_run_steps s
+			WHERE s.run_id = p.escalation_run_id AND s.seq = p.run_step_seq AND s.number = p.step_number)`,
+			run); n != 0 {
+			t.Errorf("%d pages whose run step is not their step's", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM notification_rule_runs r WHERE r.escalation_run_id = $1
+			AND EXISTS (SELECT 1 FROM escalation_run_steps s WHERE s.run_id = r.escalation_run_id
+			AND s.seq = r.run_step_seq AND s.number = r.step_number)`, run); n != 3 {
+			t.Errorf("%d rule runs with their step's run step, want 3", n)
 		}
 	})
 }

@@ -4,6 +4,7 @@
 package groups
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -32,9 +33,14 @@ type fakePageUser struct {
 	reason  string
 }
 
-// fakePages are the Pages of the fake database.
+// fakePages are the Pages of the fake database, with the state and the owning Team of their runs, "running" and none
+// by default, the run steps of the rule runs of their later Mentions, and the Assignees (assignees_test.go).
 type fakePages struct {
-	list []*fakePage
+	list        []*fakePage
+	runStates   map[int64]string
+	owningTeams map[int64]int64
+	ruleSeqs    map[int64]int32
+	assignees   []*fakeAssignee
 }
 
 func (p *fakePages) byID(id int64) *fakePage {
@@ -78,9 +84,21 @@ func (f *fakeDB) LockPage(_ context.Context, arg dbgen.LockPageParams) (dbgen.Lo
 	if p == nil || p.AlertGroupID != arg.AlertGroupID || arg.OrgID != orgID {
 		return dbgen.LockPageRow{}, pgx.ErrNoRows
 	}
+	state := cmp.Or(f.pages.runStates[p.EscalationRunID.Int64], "running")
+	team, ok := f.pages.owningTeams[p.EscalationRunID.Int64]
 	return dbgen.LockPageRow{ID: p.id, AlertGroupID: p.AlertGroupID, State: p.State, StepNumber: p.StepNumber,
 		Team: p.TeamID.Valid || p.Everyone.Valid, Importance: p.Importance.String, EscalationRunID: p.EscalationRunID,
-		ChainID: pgtype.Int8{Int64: 5, Valid: true}, ChainPublicID: "EC0000000000PA", ChainName: "payments"}, nil
+		ChainID: pgtype.Int8{Int64: 5, Valid: true}, ChainPublicID: "EC0000000000PA", ChainName: "payments",
+		RunState: state, OwningTeamID: pgtype.Int8{Int64: team, Valid: ok}, RunStepSeq: f.pages.runStep(p)}, nil
+}
+
+// runStep is the run step of the Page p, as LockPage reads it: that of the rule run of a later Mention of a rule, else
+// the Page's own.
+func (p *fakePages) runStep(page *fakePage) pgtype.Int4 {
+	if seq, ok := p.ruleSeqs[page.NotificationRuleRunID.Int64]; ok && page.NotificationRuleRunID.Valid {
+		return pgtype.Int4{Int32: seq, Valid: true}
+	}
+	return page.RunStepSeq
 }
 
 // pageUsers marks the people of the Page pending among ids, all when ids is nil, with the outcome, and returns them.
@@ -257,7 +275,8 @@ func TestPagePeople(t *testing.T) {
 	if p.State != PageDelivered || p.Reason.Valid {
 		t.Errorf("ended %+v", p)
 	}
-	if got := h.escalationEntries(g); len(got) != 2 {
+	// The delivered reply made alice an Assignee (assignees_test.go).
+	if got := h.escalationEntries(g); len(got) != 3 || got[2] != "assignees_changed/" {
 		t.Errorf("entries after the outcome %v", got)
 	}
 	if n := metrics.Pages.With("EC0000000000PA", "mention", "delivered").Get() - before; n != 1 {

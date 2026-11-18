@@ -6,6 +6,7 @@ import type { AlertGroupStatus } from './alertGroupStatus';
 import type { EntityRef } from './entityRef';
 import type { PublicId } from './publicId';
 import type { SeverityLevel } from './severityLevel';
+import type { WebhookAssignee } from './webhookAssignee';
 import type { WebhookTeam } from './webhookTeam';
 import type { WebhookUser } from './webhookUser';
 
@@ -36,4 +37,6 @@ export interface WebhookAlertGroup {
   url: string;
   /** The Teams of the Alert Group (C-25.FR-6), in the order they joined; a Team deleted since keeps its name. */
   teams: WebhookTeam[];
+  /** The Assignees of the Alert Group (C-32.FR-12), each with the owning Team of their chain; empty once acknowledged, snoozed or resolved. The Owner is `owner`, named without a Team. */
+  assignees: WebhookAssignee[];
 }

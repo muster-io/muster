@@ -71,12 +71,13 @@ DELETE FROM notification_rules
 WHERE org_id = @org_id AND user_id = @user_id;
 
 -- InsertRuleRun starts the run of a person's rule for a step that Paged them (C-31.FR-3), at its position and state
--- after the actions it made at once.
+-- after the actions it made at once, with the seq of the run step that started it, which its later Mentions belong to
+-- (C-32.FR-12).
 -- name: InsertRuleRun :one
 INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number, user_id, importance,
-                                    actions, position, state, started_at, ended_at)
+                                    actions, position, state, started_at, ended_at, run_step_seq)
 VALUES (@org_id, @alert_group_id, @escalation_run_id, @step_number, @user_id, @importance, @actions, @position, @state,
-        @now::timestamptz, sqlc.narg('ended_at'))
+        @now::timestamptz, sqlc.narg('ended_at'), sqlc.narg('run_step_seq'))
 RETURNING id;
 
 -- UpsertRuleTimer sets the timer of a rule run at the end of its wait, a new lease to claim. The subject is the rule

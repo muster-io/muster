@@ -288,13 +288,13 @@ func orNoLabels(m map[string]string) map[string]string {
 
 // body is the body of an events-mode request about the source of in: the event, its sequence, and test for the test
 // event. A test or preview event is Quiet and mentions nobody; its actor is the person who started the test. The
-// source names no Teams, so its teams are an empty list, as WebhookAlertGroup requires one.
+// source names no Teams and no Assignees, so its teams and assignees are empty lists, as WebhookAlertGroup requires.
 func (t *Tester) body(ctx context.Context, in delivery.TestInput, event string, seq int64, test bool) ([]byte, error) {
 	src := in.Source
 	ag := AlertGroup{Number: src.Number, ID: src.PublicID, Title: src.Title, Status: src.Status,
 		Route: RouteRef{ID: src.Route.PublicID, Name: src.Route.Name}, Urgent: src.Urgent,
 		SeverityLevel: src.SeverityLevel, StartedAt: src.StartedAt.UTC(), SnoozeUntil: utc(src.SnoozeUntil),
-		ReopenCount: src.ReopenCount, URL: t.Data.GroupURL(src.PublicID), Teams: []Team{}}
+		ReopenCount: src.ReopenCount, URL: t.Data.GroupURL(src.PublicID), Teams: []Team{}, Assignees: []Assignee{}}
 	if src.Summary != "" {
 		summary := src.Summary
 		ag.Summary = &summary

@@ -53,10 +53,12 @@ type Links interface {
 	RenderURL(ctx context.Context, db links.DBTX, source string, in links.Input) (string, error)
 }
 
-// Names are the user the footer of an Alert Group names, by the identity spaces where their Account link lets the
-// messenger mention them (C-12.FR-12), declared by their consumer; *mentions.Service implements them.
+// Names are the user the footer of an Alert Group names, and its Assignees by id, by the identity spaces where their
+// Account link lets the messenger mention them (C-12.FR-12, C-32.FR-12), declared by their consumer; *mentions.Service
+// implements them.
 type Names interface {
 	FooterUsers(ctx context.Context, db mentions.DBTX, groupID int64) (map[string]mentions.User, error)
+	AssigneeUsers(ctx context.Context, db mentions.DBTX, groupID int64) (map[int64]map[string]mentions.User, error)
 }
 
 // Renderer renders the messages of an Organization (C-12): Root messages, with a Route's templates or the default
@@ -85,6 +87,8 @@ type Renderer struct {
 type queries interface {
 	GetRenderGroup(ctx context.Context, arg dbgen.GetRenderGroupParams) (dbgen.GetRenderGroupRow, error)
 	ListRenderTeams(ctx context.Context, arg dbgen.ListRenderTeamsParams) ([]string, error)
+	ListRenderAssignees(ctx context.Context, arg dbgen.ListRenderAssigneesParams) ([]dbgen.ListRenderAssigneesRow,
+		error)
 	GetGroupIDByPublicID(ctx context.Context, arg dbgen.GetGroupIDByPublicIDParams) (int64, error)
 	ListRenderAlerts(ctx context.Context, arg dbgen.ListRenderAlertsParams) ([]dbgen.ListRenderAlertsRow, error)
 	ListAlertsByFingerprint(ctx context.Context, arg dbgen.ListAlertsByFingerprintParams) (
@@ -182,6 +186,20 @@ type Source struct {
 	Links       []links.Link
 	FooterUsers map[string]mentions.User
 	Buttons     *buttons.Set
+	// Assignees are its Assignees, whom item 7 names before an acknowledgement (C-29.FR-1, C-32.FR-12), and
+	// ChainsStopped whether its acknowledgement stopped running chains, which item 7 says after it.
+	Assignees     []SourceAssignee
+	ChainsStopped bool
+}
+
+// SourceAssignee is an Assignee of an Alert Group: the User by id and display name, the name of the owning Team of
+// their chain, empty for none, and the User by the identity spaces where their Account link lets the messenger mention
+// them.
+type SourceAssignee struct {
+	ID    int64
+	Name  string
+	Team  string
+	Links map[string]mentions.User
 }
 
 // RouteRef is the Route of an Alert Group as its messages use it: its templates — nil for the built-in one — the
@@ -246,7 +264,42 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 			return nil, err
 		}
 	}
+	if err := r.withAssignees(ctx, db, src); err != nil {
+		return nil, err
+	}
 	return src, nil
+}
+
+// withAssignees reads the Assignees of src through db while it is firing, each with their Account links, once per
+// person and Team.
+func (r *Renderer) withAssignees(ctx context.Context, db DBTX, src *Source) error {
+	if src.Status != ColourFiring {
+		return nil
+	}
+	rows, err := r.q(db).ListRenderAssignees(ctx, dbgen.ListRenderAssigneesParams{OrgID: r.orgID,
+		AlertGroupID: src.ID})
+	if err != nil {
+		return fmt.Errorf("read the assignees of alert group #%d: %w", src.Number, err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	var linked map[int64]map[string]mentions.User
+	if r.names != nil {
+		if linked, err = r.names.AssigneeUsers(ctx, db, src.ID); err != nil {
+			return err
+		}
+	}
+	for _, a := range rows {
+		if slices.ContainsFunc(src.Assignees, func(s SourceAssignee) bool {
+			return s.ID == a.UserID && s.Team == a.TeamName
+		}) {
+			continue
+		}
+		src.Assignees = append(src.Assignees, SourceAssignee{ID: a.UserID, Name: a.Name, Team: a.TeamName,
+			Links: linked[a.UserID]})
+	}
+	return nil
 }
 
 // withLinks computes the links of src through db (C-12.FR-9).
@@ -282,6 +335,7 @@ func (r *Renderer) loadGroup(ctx context.Context, db DBTX, groupID int64) (*Sour
 		SnoozeUntil: timeOf(g.SnoozeUntil), SnoozeNoEnd: g.SnoozeNoEnd, Unclaimed: g.Unclaimed,
 		StartedAt: g.CreatedAt.UTC(), TimeZone: g.TimeZone, WorkdayStart: g.WorkdayStart, WeekStart: g.WeekStart,
 		InstanceLabels: g.InstanceLabels, Owner: g.OwnerName, SnoozedBy: g.SnoozedByName, ResolvedBy: g.ResolvedByName,
+		ChainsStopped: g.ChainsStopped,
 		Route: RouteRef{ID: g.RouteID, PublicID: g.RoutePublicID, Name: g.RouteName, Language: g.Language,
 			SnoozeDurations: g.SnoozeDurationsSeconds, RootMessage: textOf(g.TemplateRootMessage),
 			Line: textOf(g.TemplateLine), AckTimeoutNotice: textOf(g.TemplateAckTimeoutNotice),
@@ -335,7 +389,8 @@ type Rendered struct {
 // status word, fields, links, notices, footer and buttons around the body of the Route's root_message template or the
 // compact default content with the Route's line template; when a Route template fails, the Fallback template. In CommonMark and mrkdwn it also carries
 // the Route's Snooze durations, for a bridge's commands line and Slack's Snooze menu, and in CommonMark the Owner of an
-// acknowledged Alert Group, for the `owner` of a bridge's layout.
+// acknowledged Alert Group with whether its acknowledgement stopped chains, and the Assignees of a firing one, for the
+// `owner`, the notices and the `assignees` of a bridge's layout.
 func (r *Renderer) Root(src *Source, markup Markup) Rendered {
 	return r.root(src, markup, true)
 }
@@ -350,7 +405,12 @@ func (r *Renderer) root(src *Source, markup Markup, sign bool) Rendered {
 		m.SnoozeSeconds = slices.Clone(src.Route.SnoozeDurations)
 	}
 	if markup == MarkupCommonMark && src.Status == ColourAcknowledged {
-		m.Owner = Value(src.Owner)
+		m.Owner, m.ChainsStopped = Value(src.Owner), src.ChainsStopped
+	}
+	if markup == MarkupCommonMark && src.Status == ColourFiring {
+		for _, a := range src.Assignees {
+			m.Assignees = append(m.Assignees, Person{Name: Value(a.Name), Team: Value(a.Team)})
+		}
 	}
 	out := Rendered{KeyID: keyID}
 	if t := src.Route.RootMessage; t != nil {

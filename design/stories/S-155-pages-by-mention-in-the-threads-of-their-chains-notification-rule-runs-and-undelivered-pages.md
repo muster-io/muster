@@ -106,7 +106,7 @@ issue: 444
 
 **OUT**
 
-- Assignees, "Assignees: …" in the Root message and the layout, and the Owner's Team: S-168.
+- Assignees, "Assignees: …" in the Root message and the layout: S-168.
 - Calls — the `call` step and a rule's call actions, which this story's runs hand to the `CallPages` interface wired to
   nothing until S-157 — and the row "Notification gateway" of C-32.FR-11: S-157.
 - The chains' Destinations in the unreachable warnings of Schedules, with the Telegram discussion group check for

@@ -183,9 +183,9 @@ func (q *Queries) GetRulesUserByID(ctx context.Context, arg GetRulesUserByIDPara
 
 const insertRuleRun = `-- name: InsertRuleRun :one
 INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number, user_id, importance,
-                                    actions, position, state, started_at, ended_at)
+                                    actions, position, state, started_at, ended_at, run_step_seq)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-        $10::timestamptz, $11)
+        $10::timestamptz, $11, $12)
 RETURNING id
 `
 
@@ -201,10 +201,12 @@ type InsertRuleRunParams struct {
 	State           string
 	Now             time.Time
 	EndedAt         pgtype.Timestamptz
+	RunStepSeq      pgtype.Int4
 }
 
 // InsertRuleRun starts the run of a person's rule for a step that Paged them (C-31.FR-3), at its position and state
-// after the actions it made at once.
+// after the actions it made at once, with the seq of the run step that started it, which its later Mentions belong to
+// (C-32.FR-12).
 func (q *Queries) InsertRuleRun(ctx context.Context, arg InsertRuleRunParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertRuleRun,
 		arg.OrgID,
@@ -218,6 +220,7 @@ func (q *Queries) InsertRuleRun(ctx context.Context, arg InsertRuleRunParams) (i
 		arg.State,
 		arg.Now,
 		arg.EndedAt,
+		arg.RunStepSeq,
 	)
 	var id int64
 	err := row.Scan(&id)

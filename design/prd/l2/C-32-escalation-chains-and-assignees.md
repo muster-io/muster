@@ -141,9 +141,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   `assignees_changed`; Acknowledge, Snooze and Resolve clear them; they change only through system transitions of the
   dispatcher (ADR-0016), and nobody adds Assignees by hand — any Responder may acknowledge. The Root message names them
   before an acknowledgement (C-29.FR-1), as Mentions where their account is linked, and a new Quiet message with them
-  may notify them. The Owner is named with their Team too: the Teams the Owner is in among the Teams of the Alert Group,
-  the owning Team of its Route and the owning Teams of its chains, and none when there is no such Team (_provisional_,
-  P-89).
+  may notify them. The Owner is named without a Team (P-89).
 - **C-32.FR-13** A step "Send to an outgoing webhook" sends the event `escalation_webhook` — the Alert Group as in every
   event, the chain and the step — to the outgoing webhook Destination it names, whether or not the Alert Group is
   delivered there, and that Destination receives no other event of the Alert Group unless it is one of its Destinations.

@@ -31,7 +31,7 @@ files_touched:
   - web/e2e/home.spec.ts
   - web/e2e/phone-width.spec.ts
 acceptance:
-  - "[C-32.FR-18, C-32.AC-14, C-09.FR-11, C-09.FR-14] In a real browser the Alert Group page shows its running chains — each with its name, its current step and when its next step is due, or \"ran out\" or \"stopped\" — and its Assignees with their Teams, \"Assignees: @ivan (devops), @petr (payments)\", and after an acknowledgement \"Acknowledged by @ivan (devops) · Escalation chains stopped\"; at 360 CSS pixels wide the page has no horizontal scrolling; in English and in Russian (`alert-group-chains.test.tsx`, `alert-group-header.test.tsx`, `alert-group-page.spec.ts`, `phone-width.spec.ts`)."
+  - "[C-32.FR-18, C-32.AC-14, C-09.FR-11, C-09.FR-14] In a real browser the Alert Group page shows its running chains — each with its name, its current step and when its next step is due, or \"ran out\" or \"stopped\" — and its Assignees with their Teams, \"Assignees: @ivan (devops), @petr (payments)\", and after an acknowledgement \"Acknowledged by @ivan · Escalation chains stopped\", the Owner without a Team; at 360 CSS pixels wide the page has no horizontal scrolling; in English and in Russian (`alert-group-chains.test.tsx`, `alert-group-header.test.tsx`, `alert-group-page.spec.ts`, `phone-width.spec.ts`)."
   - "[C-32.FR-18, C-09.FR-14] The Timeline shows each Page — \"Step 1 · payments: Paged @petr, normal\", a call through \"Example Gateway\" —, each undelivered Page with its reason, each skipped step with its reason, the Assignees' changes and `escalation_webhook`, under the kind filter \"Escalation chains\", and an acknowledgement with the Transport `gateway` as \"from a call through Example Gateway\" (`timeline.test.tsx`)."
   - "[C-32.FR-18, C-09.FR-13] The Alert Group list gains the column Assignees and the filter Assignee — a User or \"me\" — kept in the URL; the filter returns the Alert Groups where that User is an Assignee; at 360 CSS pixels the list with the column and the filter has no horizontal scrolling of the page (NFR-15) (`alert-group-filters.test.tsx`, `alert-group-list.spec.ts`, `phone-width.spec.ts`)."
   - "[C-32.FR-18, C-32.AC-10] The Home page lists, under \"I am an Assignee\" with \"Alert Groups that an Escalation chain Paged you about. They leave this list once acknowledged.\", the Alert Groups where the signed-in User is an Assignee, with their status, Assignees, the chain and its step, and \"Acknowledge\" and \"Snooze…\"; acknowledging one removes it from the list; the section fits 360 CSS pixels (`i-am-an-assignee.test.tsx`, `home.spec.ts`)."
@@ -48,7 +48,7 @@ issue: 448
 **IN**
 
 - The Alert Group page: its running chains with the current step and the next one due, its Assignees with their Teams,
-  the Owner's Team, and the Timeline entries of Pages, undelivered Pages, skipped steps, Assignees and the Transport
+  the Owner without a Team, and the Timeline entries of Pages, undelivered Pages, skipped steps, Assignees and the Transport
   `gateway` — at 360 CSS pixels, as the list with its new column is (C-32.FR-18, NFR-15; C-09.FR-11, FR-14 revised).
 - The Alert Group list's column Assignees and filter Assignee (C-32.FR-18; C-09.FR-13 revised).
 - "I am an Assignee" on the Home page of S-136 (C-32.FR-18, L2.md §5.2).
@@ -59,11 +59,11 @@ issue: 448
 
 ## Contracts
 
-- **API used**: `getAlertGroup` (`escalation_chains`, `assignees`, `owner_teams`), `listAlertGroups` (`assignee`),
+- **API used**: `getAlertGroup` (`escalation_chains`, `assignees`), `listAlertGroups` (`assignee`),
   `getAlertGroupTimeline` (`kind=escalation`), `acknowledgeAlertGroup`, `snoozeAlertGroup`, `getMe`.
 - **Components**: `alert-group-chains.tsx` — the running chains of the page, linked to their chain pages;
-  `alert-group-header.tsx` — the Assignees or the Owner with their Teams; `timeline.tsx` — the entries of the kind
-  "Escalation chains", whose filter label S-148 added, the Transport `gateway`; `alert-group-table.tsx` and
+  `alert-group-header.tsx` — the Assignees with their Teams, or the Owner without a Team; `timeline.tsx` — the
+  entries of the kind "Escalation chains", whose filter label S-148 added, the Transport `gateway`; `alert-group-table.tsx` and
   `alert-group-filters.tsx` — the column and the filter, with `lib/alert-group-search.ts` keeping `assignee` in the URL;
   `i-am-an-assignee.tsx` — the section of the Home page, with the command buttons of S-033;
   `web/src/test/fixtures/alert-groups.ts` — builders with chains and Assignees for the tests.

@@ -489,6 +489,15 @@ func TestStepPagesInProgress(t *testing.T) {
 	if r := pages.runs[0]; r.ChainPublicID == "" || r.ChainName != "devops" || len(r.Sources) != 1 {
 		t.Errorf("run %+v", r)
 	}
+	// Each step that Pages carries the seq it is recorded with, one more than the run's steps before it, so that two
+	// steps of one firing are told apart (C-32.FR-12).
+	var seqs []int
+	for _, st := range pages.steps {
+		seqs = append(seqs, st.Seq)
+	}
+	if !slices.Equal(seqs, []int{1, 2, 3}) {
+		t.Errorf("run steps %v", seqs)
+	}
 	// The start stopped the rules of the Alert Group's earlier start; the stop of its runs stops them again, and so
 	// does a stop after the runs ended: a rule may still repeat after its chain's run ran out.
 	if err := e.runs.Stop(t.Context(), nil, e.g, groups.ChainStop{Command: groups.StopAcknowledge,
@@ -498,6 +507,21 @@ func TestStepPagesInProgress(t *testing.T) {
 	if err := e.runs.Stop(t.Context(), nil, e.g, groups.ChainStop{Command: groups.StopResolve,
 		At: e.clock.Now()}); err != nil || len(pages.stopped) != 3 {
 		t.Errorf("the rules after the runs stopped: %v %v", err, pages.stopped)
+	}
+	// A repeat makes step 1 again, with the seq after the repeat's own: 1, then 3.
+	er := newRunsEnv(t)
+	repeated := &recordingPages{}
+	er.runs.pages = repeated
+	er.chain(1, "devops", false, page(schedMain), repeat(1, 1))
+	er.source(1, 0, ConditionAny)
+	er.start(t, groups.ChainStart{All: true})
+	er.fire(t, er.q.runs[0].id)
+	var again []int
+	for _, st := range repeated.steps {
+		again = append(again, st.Seq)
+	}
+	if !slices.Equal(again, []int{1, 3}) {
+		t.Errorf("run steps across a repeat %v", again)
 	}
 	e2 := newRunsEnv(t)
 	failing := &recordingPages{}

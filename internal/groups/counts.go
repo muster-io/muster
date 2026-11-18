@@ -33,7 +33,7 @@ func (s *Service) Counts(ctx context.Context, f Filter) (Counts, error) {
 		IntegrationIds: q.integrations, Severities: q.severities, Urgent: q.urgent, ResolvedBy: q.resolvedBy,
 		ResolveReason: q.reason, Reopened: q.reopened, Contains: q.contains, Pattern: q.pattern, OwnerSet: q.ownerSet,
 		OwnerID: q.owner, SnoozedNoEnd: q.snoozedNoEnd, DeliveryProblem: q.problem, Unclaimed: q.unclaimed,
-		TeamSet: q.teamSet, TeamIds: q.teamIDs})
+		TeamSet: q.teamSet, TeamIds: q.teamIDs, Assignee: q.assignee})
 	if err != nil {
 		return Counts{}, fmt.Errorf("count the alert groups: %w", err)
 	}

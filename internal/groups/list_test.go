@@ -60,6 +60,7 @@ type fakeFilter struct {
 	snoozedNoEnd  pgtype.Bool
 	problem       pgtype.Bool
 	unclaimed     pgtype.Bool
+	assignee      pgtype.Int8
 }
 
 func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
@@ -106,6 +107,11 @@ func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
 		return false
 	}
 	if p.unclaimed.Valid && g.Unclaimed != p.unclaimed.Bool {
+		return false
+	}
+	if p.assignee.Valid && !slices.ContainsFunc(f.pages.assignees, func(a *fakeAssignee) bool {
+		return a.group == g.ID && a.user == p.assignee.Int64
+	}) {
 		return false
 	}
 	if p.contains != nil {
@@ -175,7 +181,7 @@ func (f *fakeDB) list(name string, p dbgen.ListGroupsStartedDescParams, changed,
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
 		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, statuses: p.Statuses, ownerSet: p.OwnerSet,
 		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
-		unclaimed: p.Unclaimed}
+		unclaimed: p.Unclaimed, assignee: p.Assignee}
 	key := func(g *dbgen.LockGroupsRow) time.Time {
 		if changed {
 			return g.LastChangedAt
@@ -258,7 +264,7 @@ func (f *fakeDB) CountGroups(_ context.Context, p dbgen.CountGroupsParams) ([]db
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
 		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, withoutStatus: true, ownerSet: p.OwnerSet,
 		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
-		unclaimed: p.Unclaimed}
+		unclaimed: p.Unclaimed, assignee: p.Assignee}
 	counts := map[[2]string]int64{}
 	for _, g := range f.groups {
 		if !f.matches(g, ff) {

@@ -6,6 +6,7 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,58 @@ var bodyTeams = map[int64][]dbgen.ListBodyTeamsRow{21: {
 
 func (f *fakeDB) ListBodyTeams(_ context.Context, arg dbgen.ListBodyTeamsParams) ([]dbgen.ListBodyTeamsRow, error) {
 	return bodyTeams[arg.AlertGroupID], f.fail["ListBodyTeams"]
+}
+
+// bodyAssignees are the Assignees of the Alert Groups of the tests by id: ivan of the chain of devops and petr of a
+// chain no Team owns for #412.
+var bodyAssignees = map[int64][]dbgen.ListBodyAssigneesRow{21: {
+	{PublicID: "SRAAAAAAAAAAIV", Name: "Ivan", Login: "ivan", TeamPublicID: "TM0000000000DV", TeamName: "DevOps",
+		TeamSlug: "devops"},
+	{PublicID: "SRAAAAAAAAAAPE", Name: "Petr", Login: "petr"},
+}}
+
+func (f *fakeDB) ListBodyAssignees(_ context.Context, arg dbgen.ListBodyAssigneesParams) (
+	[]dbgen.ListBodyAssigneesRow, error) {
+	return bodyAssignees[arg.AlertGroupID], f.fail["ListBodyAssignees"]
+}
+
+// TestBodyAssignees is C-15.FR-2 revised for L2 and C-32.FR-12: the alert_group of every event carries assignees —
+// each User with the owning Team of their chain, null for none — and an empty list without Assignees;
+// assignees_changed reaches events mode; a failing read fails the body.
+func TestBodyAssignees(t *testing.T) {
+	schema := eventSchema(t)
+	s, f := newService(t)
+	in := bodyFixture(f)
+	render, err := s.eventBodies(t.Context(), f, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: 3, Event: groups.EventAssigneesChanged},
+		OccurredAt: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil || schema.VisitJSON(v) != nil {
+		t.Fatalf("%v %v\n%s", err, schema.VisitJSON(v), raw)
+	}
+	var b Body
+	_ = json.Unmarshal(raw, &b)
+	a := b.AlertGroup.Assignees
+	if b.Event != "assignees_changed" || b.Notify || len(a) != 2 || a[0].User.Login != "ivan" || a[0].Team == nil ||
+		a[0].Team.Slug != "devops" || a[1].Team != nil || !strings.Contains(string(raw), `"team":null`) {
+		t.Errorf("assignees %s", raw)
+	}
+	in.Group.ID = 22
+	render, _ = s.eventBodies(t.Context(), f, in)
+	raw, _ = render(delivery.EventBody{Event: groups.Recorded{Seq: 4, Event: groups.EventCreated}, OccurredAt: t0})
+	if !strings.Contains(string(raw), `"assignees":[]`) {
+		t.Errorf("no assignees %s", raw)
+	}
+	f.fail["ListBodyAssignees"] = errBoom
+	if _, err := s.eventBodies(t.Context(), f, in); err == nil {
+		t.Error("a failing read")
+	}
 }
 
 // TestBodyTeams is C-15.FR-2 revised for L2 and C-09.FR-22: team_joined and unknown_team_value reach events mode one to

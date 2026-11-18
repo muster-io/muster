@@ -54,6 +54,8 @@
   "field.started": "Начало",
   "field.teams": "Команды",
   "footer.acknowledged": "Подтвердил(а): {user}",
+  "footer.assignees": "Назначены: {people}",
+  "footer.chainsStopped": "Цепочки эскалации остановлены",
   "footer.resolvedAutomatically": "Закрыта автоматически: {reason}",
   "footer.resolvedBy": "Закрыл(а): {user}",
   "footer.snoozed": "Отложил(а): {user}, до {time}",

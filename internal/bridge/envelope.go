@@ -35,8 +35,9 @@ import (
 // would show the marker's `@`, so there it names them by the link's display name (C-12.FR-12).
 // Template output keeps its trusted Mention tokens as text that notifies nobody. A Root message and a test message of
 // Muster's compact default content also carry `layout` (C-29.FR-8): the same content as plain-text data, shortened together with the body (C-29.FR-6),
-// with the Owner of an acknowledged Alert Group, who has the `ref` of their entry in `mentions` only where the message
-// carries their marker — a new message to a bridge with `native_mentions` — and null otherwise.
+// with the Owner of an acknowledged Alert Group, without a Team (P-89), and the Assignees of a firing one, each with the
+// owning Team of their chain (C-32.FR-12), each person with the `ref` of their entry in `mentions` only where the
+// message carries their marker — a new message to a bridge with `native_mentions` — and null otherwise.
 
 // MinBodyLength is the protocol's floor of limits.max_body_length, in code points: the body limit when info has none.
 const MinBodyLength = 500
@@ -122,25 +123,45 @@ func layoutOf(m, short messages.Message) gen.Layout {
 	if o := l.Owner; o != nil {
 		out.Owner = nullable.NewNullableWithValue(gen.LayoutPerson{Name: o.Name, Ref: nullable.NewNullNullable[string]()})
 	}
+	for _, a := range l.Assignees {
+		p := gen.LayoutPerson{Name: a.Name, Ref: nullable.NewNullNullable[string]()}
+		if a.Team != "" {
+			p.Team = &struct {
+				Name string `json:"name"`
+			}{Name: a.Team}
+		}
+		out.Assignees = append(out.Assignees, p)
+	}
 	for _, k := range l.Links {
 		out.Links = append(out.Links, gen.LayoutLink{Label: k.Text, Url: k.URL})
 	}
 	return out
 }
 
-// withOwnerRef gives the Owner of layout the reference ref, the entry of the footer's user in `mentions`, when list —
-// the Mentions the message carries — still has it (C-29.AC-6); a layout without an Owner and an empty ref stay as they
-// are.
-func withOwnerRef(layout *gen.Layout, ref string, list []gen.Mention) {
-	if layout == nil || ref == "" || !slices.ContainsFunc(list, func(m gen.Mention) bool { return m.Ref == ref }) {
+// withPeopleRefs gives the people of layout the references refs, the entries of the footer's people in `mentions` in
+// the order of the footer (C-29.AC-6, C-32.AC-13): the Owner the first, each Assignee their own, when list — the
+// Mentions the message carries — still has it; a layout without people and an empty ref stay as they are.
+func withPeopleRefs(layout *gen.Layout, refs []string, list []gen.Mention) {
+	if layout == nil {
 		return
 	}
-	o, err := layout.Owner.Get()
-	if err != nil {
-		return
+	carried := func(i int) (string, bool) {
+		if i >= len(refs) || refs[i] == "" {
+			return "", false
+		}
+		return refs[i], slices.ContainsFunc(list, func(m gen.Mention) bool { return m.Ref == refs[i] })
 	}
-	o.Ref = nullable.NewNullableWithValue(ref)
-	layout.Owner = nullable.NewNullableWithValue(o)
+	if o, err := layout.Owner.Get(); err == nil {
+		if ref, ok := carried(0); ok {
+			o.Ref = nullable.NewNullableWithValue(ref)
+			layout.Owner = nullable.NewNullableWithValue(o)
+		}
+	}
+	for i := range layout.Assignees {
+		if ref, ok := carried(i); ok {
+			layout.Assignees[i].Ref = nullable.NewNullableWithValue(ref)
+		}
+	}
 }
 
 // postInput is the envelope c posted with postMessage as a message of kind to channel, without Mentions; notify is a
@@ -321,25 +342,33 @@ func withFooterIn(m messages.Message, conn int64) messages.Message {
 }
 
 // withFooterMention is m, a new message for a bridge whose info is i, with the footer of the identity space of the
-// Bridge Connection conn and the Mentions list (C-12.FR-12, C-22.FR-16), and the ref of the footer user's entry: with
-// `native_mentions`, a user linked there is their marker, whose entry list gains unless it has one for the account;
-// otherwise withFooterIn names them, and the ref is empty.
+// Bridge Connection conn and the Mentions list (C-12.FR-12, C-22.FR-16), and the refs of the entries of the footer's
+// people in its order, empty for a person without one: with `native_mentions`, a person linked there is their marker,
+// whose entry list gains unless it has one for the account; otherwise withFooterIn names them, and there are no refs.
 func withFooterMention(m messages.Message, conn int64, i Info, list []gen.Mention) (messages.Message, []gen.Mention,
-	string) {
+	[]string) {
 	if c := i.Capabilities.NativeMentions; c == nil || !*c {
-		return withFooterIn(m, conn), list, ""
+		return withFooterIn(m, conn), list, nil
 	}
-	ref := ""
-	m = m.WithFooterIn(mentions.IdentitySpace(mentions.TypeBridge, &conn), func(u mentions.User) string {
+	space := mentions.IdentitySpace(mentions.TypeBridge, &conn)
+	people := m.FooterPeopleIn(space)
+	byAccount := map[string]string{}
+	m = m.WithFooterIn(space, func(u mentions.User) string {
 		if !markable(u) {
 			return footerName(u)
 		}
 		var s string
 		s, list = marker(gen.MentionKindUser, u.ExternalID, markerName(u), list)
-		ref = list[entryOf(list, gen.MentionKindUser, u.ExternalID)].Ref
+		byAccount[u.ExternalID] = list[entryOf(list, gen.MentionKindUser, u.ExternalID)].Ref
 		return s
 	})
-	return m, list, ref
+	refs := make([]string, len(people))
+	for n, p := range people {
+		if p.ExternalID != "" {
+			refs[n] = byAccount[p.ExternalID]
+		}
+	}
+	return m, list, refs
 }
 
 // marked are the Mentions of list whose marker body still carries: shortening may have cut the footer's (C-12.FR-11),

@@ -260,6 +260,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       without a Thread reply, as before — never claims the timers of rule runs, and stops no rule run when it
       acknowledges, snoozes or resolves an Alert Group, whose rule runs then stop at their next action, without making
       it; let the rollout finish before relying on Pages.
+    - Migration 0050 adds the [Assignees](../concepts/escalation-chains.md#assignees) of Alert Groups, the Assignees
+      after each change in the Timeline, and the run step of each Page and run of a Notification rule, none after the
+      upgrade: an Alert Group gets Assignees from the next delivered Page. It is expand only: a replica without it makes
+      no Assignee and never clears them when it acknowledges, snoozes or resolves an Alert Group — the reads show only
+      the Assignees of firing Alert Groups, so such rows never show — and its Pages and rule runs carry no run step, so
+      a reach by them only adds to a chain without Assignees; let the rollout finish before relying on Assignees.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -955,6 +961,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Going back below 0049 deletes the timers of rule runs and the Thread replies of Pages, and loses every Page with the
     people it named and every run of a Notification rule; the Timeline keeps its `paged` and `page_not_delivered`
     entries without the Team mention or token and the importance of a Page.
+
+    Going back below 0050 loses the Assignees and the run steps of the Pages and the runs of Notification rules; the
+    Timeline keeps its `assignees_changed` entries without the Assignees after each change.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

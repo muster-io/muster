@@ -276,6 +276,62 @@ func (q *Queries) ListBodyAlerts(ctx context.Context, arg ListBodyAlertsParams) 
 	return items, nil
 }
 
+const listBodyAssignees = `-- name: ListBodyAssignees :many
+SELECT u.public_id, u.name, u.login, coalesce(t.public_id, '')::text AS team_public_id,
+       coalesce(t.name, '')::text AS team_name, coalesce(t.slug, '')::text AS team_slug
+FROM alert_group_assignees a
+JOIN alert_groups g ON g.org_id = a.org_id AND g.id = a.alert_group_id AND g.status = 'firing'
+JOIN users u ON u.org_id = a.org_id AND u.id = a.user_id
+LEFT JOIN teams t ON t.org_id = a.org_id AND t.id = a.team_id
+WHERE a.org_id = $1 AND a.alert_group_id = $2
+ORDER BY a.escalation_run_id, a.since, a.user_id
+`
+
+type ListBodyAssigneesParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type ListBodyAssigneesRow struct {
+	PublicID     string
+	Name         string
+	Login        string
+	TeamPublicID string
+	TeamName     string
+	TeamSlug     string
+}
+
+// ListBodyAssignees lists the Assignees of an Alert Group as its events carry them (C-15.FR-2, C-32.FR-12): each User
+// with the owning Team of their chain, empty for none, by chain in the order the runs started, then in the order they
+// became Assignees; none for an Alert Group no longer firing, whose rows a replica without migration 0050 may have
+// left.
+func (q *Queries) ListBodyAssignees(ctx context.Context, arg ListBodyAssigneesParams) ([]ListBodyAssigneesRow, error) {
+	rows, err := q.db.Query(ctx, listBodyAssignees, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBodyAssigneesRow{}
+	for rows.Next() {
+		var i ListBodyAssigneesRow
+		if err := rows.Scan(
+			&i.PublicID,
+			&i.Name,
+			&i.Login,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.TeamSlug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBodyTeams = `-- name: ListBodyTeams :many
 SELECT t.public_id, t.name, t.slug
 FROM alert_group_teams gt

@@ -61,7 +61,7 @@ issue: 455
   `files_touched`: S-113 (`buttons`), S-115 (`owning_team`), S-121 (`teams`), S-140 (`mention_entries`), S-165
   (`mention_warnings`), S-139 (`usergroups_read`, `groups_read`). `alert-groups.ts` is extended the same way by S-118
   (`teams` on Alert Groups and Alerts), S-121 (`entries` on deliveries), S-169 (`escalation_chains`) and S-168
-  (`assignees`, `owner_teams`). Tests written from this story on build these reads only through the builders.
+  (`assignees`). Tests written from this story on build these reads only through the builders.
 - **Rule for new enum values**: a story that adds a value to an enum of the API lists every exhaustive switch over it
   in the SPA — a `switch` that ends in `unreachable`, or a `satisfies Record<…>` — with a minimal case and its texts,
   because `make generate` rewrites `web/src/api/gen/` and the TypeScript check fails on each one it misses; for

@@ -1007,9 +1007,63 @@ func TestLayoutOwnerRef(t *testing.T) {
 		t.Errorf("a body without the footer's marker: owner %v, mentions %s", o, list)
 	}
 	var none *gen.Layout
-	withOwnerRef(none, "m1", []gen.Mention{{Ref: "m1"}})
+	withPeopleRefs(none, []string{"m1"}, []gen.Mention{{Ref: "m1"}})
 	l := gen.Layout{Owner: nullable.NewNullNullable[gen.LayoutPerson]()}
-	if withOwnerRef(&l, "m1", []gen.Mention{{Ref: "m1"}}); !l.Owner.IsNull() {
+	if withPeopleRefs(&l, []string{"m1"}, []gen.Mention{{Ref: "m1"}}); !l.Owner.IsNull() {
 		t.Errorf("a layout without an Owner %+v", l.Owner)
+	}
+}
+
+// TestLayoutAssignees is C-29.FR-8, C-32.FR-12 and C-32.AC-13 for a bridge: before an acknowledgement the `layout`
+// names each Assignee with the owning Team of their chain in `team` and, in a new message to a bridge with
+// `native_mentions`, the `ref` of their entry in `mentions` where their account is linked through the Connection, null
+// otherwise and in an edit; the footer of the Assignees is no notice; after an acknowledgement that stopped chains the
+// Owner has no Team and "Escalation chains stopped" is the last notice.
+func TestLayoutAssignees(t *testing.T) {
+	m := compactMessage(t, messages.ColourFiring)
+	token := messages.FooterToken
+	m.Footer = "Assignees: Ivan (devops), Petr (payments), Dora"
+	m.Footers = map[string]string{"bridge:1": "Assignees: " + token(0) + " (devops), " + token(1) + " (payments), Dora"}
+	m.FooterPeople = map[string][]messages.FooterUser{"bridge:1": {{Name: "Ivan", ExternalID: "u-ivan",
+		DisplayName: "Ivan I."}, {Name: "Petr", ExternalID: "u-petr"}, {}}}
+	m.Assignees = []messages.Person{{Name: "Ivan", Team: "devops"}, {Name: "Petr", Team: "payments"}, {Name: "Dora"}}
+	native := infoOf(t, set("capabilities", "native_mentions", true))
+	withRefs, list, refs := withFooterMention(m, 1, native, []gen.Mention{})
+	c := content(withRefs, native, nil)
+	if !strings.Contains(c.Body, "Assignees: [@Ivan I.](muster-mention:m1) (devops), [@Petr](muster-mention:m2) "+
+		"(payments), Dora") || len(list) != 2 || !slices.Equal(refs, []string{"m1", "m2", ""}) {
+		t.Fatalf("body %q, mentions %+v, refs %v", c.Body, list, refs)
+	}
+	withPeopleRefs(c.Layout, refs, marked(list, c.Body))
+	a := c.Layout.Assignees
+	if len(a) != 3 || a[0].Name != "Ivan" || a[0].Team == nil || a[0].Team.Name != "devops" ||
+		a[0].Ref.MustGet() != "m1" || a[1].Ref.MustGet() != "m2" || !a[2].Ref.IsNull() || a[2].Team != nil ||
+		slices.ContainsFunc(c.Layout.Notices, func(n string) bool { return strings.HasPrefix(n, "Assignees") }) {
+		t.Errorf("assignees %+v, notices %v", a, c.Layout.Notices)
+	}
+	// A Mention the body no longer carries, as after a cut, leaves its Assignee without a ref.
+	cut := content(withRefs, native, nil)
+	withPeopleRefs(cut.Layout, refs, slices.DeleteFunc(slices.Clone(list), func(m gen.Mention) bool {
+		return m.Ref == "m2"
+	}))
+	if a := cut.Layout.Assignees; a[0].Ref.MustGet() != "m1" || !a[1].Ref.IsNull() {
+		t.Errorf("without m2 %+v", a)
+	}
+	// An edit, or a bridge without native_mentions, names them without refs.
+	if _, _, refs := withFooterMention(m, 1, infoOf(t, set("capabilities", "native_mentions", false)),
+		[]gen.Mention{}); refs != nil {
+		t.Errorf("without native_mentions %v", refs)
+	}
+	edit := content(withFooterIn(m, 1), native, nil)
+	if !strings.Contains(edit.Body, "Assignees: Ivan I. (devops), Petr (payments), Dora") ||
+		!edit.Layout.Assignees[0].Ref.IsNull() {
+		t.Errorf("an edit %q %+v", edit.Body, edit.Layout.Assignees)
+	}
+	ack := compactMessage(t, messages.ColourAcknowledged)
+	ack.ChainsStopped = true
+	l := content(withFooterIn(ack, 1), native, nil).Layout
+	o, err := l.Owner.Get()
+	if err != nil || o.Team != nil || len(l.Notices) == 0 || l.Notices[len(l.Notices)-1] != "Escalation chains stopped" {
+		t.Errorf("acknowledged %+v %v", o, l.Notices)
 	}
 }

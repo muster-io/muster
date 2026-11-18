@@ -671,6 +671,58 @@ func TestIntegrationConnectionChangeAlone(t *testing.T) {
 	})
 }
 
+// TestIntegrationChainsStopped is C-29.FR-1 item 7 and C-32.AC-2 for the read of a Root message on PostgreSQL: the
+// footer of an acknowledgement says "· Escalation chains stopped" only when the acknowledgement stopped a run of the
+// current start of the chains — not when every chain ran out before it, nor for a run an earlier start's
+// acknowledgement stopped — and the Owner has no Team.
+func TestIntegrationChainsStopped(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fire(t, "stopped", "Stopped/a")
+		gid := l.group(t, "Stopped")
+		if _, err := l.groups.Acknowledge(ctx, l.alice, gid); err != nil {
+			t.Fatal(err)
+		}
+		var id int64
+		if err := l.d.Pool.QueryRow(ctx, `UPDATE alert_groups SET chain_generation = 2 WHERE public_id = $1
+			RETURNING id`, gid).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		run := func(publicID string, generation int, state, stop string) {
+			t.Helper()
+			if _, err := l.d.Pool.Exec(ctx, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id,
+				chain_name, sources, steps, state, generation, started_at, ended_at, stop_command)
+				VALUES ($1, $2, $3, 'devops', '[{"kind":"route"}]', '[]', $4, $5, $6, $6, nullif($7, ''))`, l.orgID,
+				publicID, id, state, generation, t0, stop); err != nil {
+				t.Fatal(err)
+			}
+		}
+		footer := func() string {
+			t.Helper()
+			src, err := l.renderer.Load(ctx, l.d.Pool, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return l.renderer.Root(src, messages.MarkupMarkdown).Message.Footer
+		}
+		if f := footer(); strings.Contains(f, "Escalation chains stopped") {
+			t.Errorf("without runs: %q", f)
+		}
+		// Every chain of the current start ran out before the acknowledgement, and an earlier start's acknowledgement
+		// stopped its run: the acknowledgement stopped nothing.
+		run("ER0000000000R1", 2, "ran_out", "")
+		run("ER0000000000S1", 1, "stopped", "acknowledge")
+		if f := footer(); strings.Contains(f, "Escalation chains stopped") {
+			t.Errorf("every chain ran out: %q", f)
+		}
+		run("ER0000000000S2", 2, "stopped", "acknowledge")
+		if f := footer(); !strings.HasSuffix(f, " · Escalation chains stopped") || strings.Contains(f, "(") {
+			t.Errorf("a stopped chain: %q", f)
+		}
+	})
+}
+
 // footerOf is the footer of the first call, for an error message.
 func footerOf(calls []deliverytest.Call) string {
 	if len(calls) == 0 {

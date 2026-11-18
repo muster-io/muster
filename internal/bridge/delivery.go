@@ -206,9 +206,9 @@ func (a *Adapter) EditWindow(ctx context.Context, c delivery.Call) (time.Duratio
 }
 
 // Publish posts m as a Root message, or a Storm summary, with the Mentions of a Loud call — their line before its body
-// and their entries in `mentions` (C-22.FR-16) — and its footer in the Connection's identity space, whose user is a
-// marker for a bridge with `native_mentions`; the Owner in the layout of a Root message has the ref of that marker's
-// entry while the body carries it (C-29.AC-6). Its outcome names
+// and their entries in `mentions` (C-22.FR-16) — and its footer in the Connection's identity space, whose people are
+// markers for a bridge with `native_mentions`; the Owner and the Assignees in the layout of a Root message have the
+// refs of their markers' entries while the body carries them (C-29.AC-6, C-32.AC-13). Its outcome names
 // the message, its link when the bridge sent a safe one, the Thread the answer named and whether the answer was
 // replayed; a truncated body is delivered.
 func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
@@ -221,10 +221,10 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 		kind = gen.StormSummary
 	}
 	head, list := mentionsOf(c, i)
-	m, list, ref := withFooterMention(m, t.Conn.ID, i, list)
+	m, list, refs := withFooterMention(m, t.Conn.ID, i, list)
 	in := postInput(kind, t.ChannelID, content(m, i, head), c.Loudness == groups.Loud)
 	in.Mentions = marked(list, in.Body)
-	withOwnerRef(in.Layout, ref, in.Mentions)
+	withPeopleRefs(in.Layout, refs, in.Mentions)
 	out, r := t.Conn.Client.PostMessage(ctx, c.Class, c.Key, in)
 	o := r.Outcome()
 	if r.OK() {
