@@ -4,7 +4,7 @@
  */
 
 /**
- * Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16).
+ * Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).
  */
 export type MentionNotDeliveredReason = typeof MentionNotDeliveredReason[keyof typeof MentionNotDeliveredReason];
 
@@ -12,4 +12,5 @@ export type MentionNotDeliveredReason = typeof MentionNotDeliveredReason[keyof t
 export const MentionNotDeliveredReason = {
   no_account_link: 'no_account_link',
   bridge_cannot_mention_people: 'bridge_cannot_mention_people',
+  message_too_long: 'message_too_long',
 } as const;

@@ -62,6 +62,7 @@ type outcomeQueries interface {
 	ResetForRepublish(ctx context.Context, arg dbgen.ResetForRepublishParams) (int64, error)
 	MarkDeletedInMessenger(ctx context.Context, arg dbgen.MarkDeletedInMessengerParams) (int64, error)
 	DropPendingReplies(ctx context.Context, arg dbgen.DropPendingRepliesParams) error
+	DropPageReplies(ctx context.Context, arg dbgen.DropPageRepliesParams) ([]int64, error)
 	SettleResolvedPublication(ctx context.Context, arg dbgen.SettleResolvedPublicationParams) error
 	ReminderReached(ctx context.Context, arg dbgen.ReminderReachedParams) (bool, error)
 	RecordThreadRef(ctx context.Context, arg dbgen.RecordThreadRefParams) error
@@ -74,7 +75,7 @@ const (
 	repeatedPrefix = "unavailable after repeated failures: "
 )
 
-// after are the lines to log once the transaction that recorded them commits.
+// after are the lines to log, and the Pages to settle, once the transaction that recorded them commits.
 type after []func(ctx context.Context, log *logging.Logger)
 
 func (a *after) add(f func(ctx context.Context, log *logging.Logger)) { *a = append(*a, f) }
@@ -341,7 +342,8 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 				return false, err
 			}
 		}
-		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), a.resolved, now); err != nil {
+		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), a.resolved.LeftOut(out.LeftOut),
+			now); err != nil {
 			return false, err
 		}
 	}
@@ -442,7 +444,9 @@ func endClass(k OutcomeKind) string {
 }
 
 // notDelivered ends a delivery as Not delivered with the error, records the not_delivered delivery event and logs it
-// once the transaction commits (C-11.FR-10, AC-8, AC-13).
+// once the transaction commits (C-11.FR-10, AC-8, AC-13). A Publication of an Alert Group's Root message, a first one
+// or one made again after its deletion, that ends so drops the replies of Pages that wait for it, and their Pages are
+// settled once it committed (C-32.FR-10): a Page does not wait for the next change of the Alert Group.
 func (w *Worker) notDelivered(ctx context.Context, q queries, org int64, a attempt, out Outcome, now time.Time,
 	logs *after) (bool, error) {
 	text := failure(out, unknownText)
@@ -464,6 +468,21 @@ func (w *Worker) notDelivered(ctx context.Context, q queries, org int64, a attem
 		return false, err
 	}
 	logs.add(notDeliveredLine(a.destination.PublicID, a.row.AlertGroupPublicID, a.kind(), class))
+	if !a.publication || a.group() == nil {
+		return true, nil
+	}
+	pages, err := q.DropPageReplies(ctx, dbgen.DropPageRepliesParams{OrgID: org, DeliveryID: a.row.ID})
+	if err != nil {
+		return false, fmt.Errorf("drop the page replies of the root message not delivered: %w", err)
+	}
+	group := *a.group()
+	logs.add(func(ctx context.Context, log *logging.Logger) {
+		for _, id := range pages {
+			if err := w.settlePage(ctx, org, group, id); err != nil && ctx.Err() == nil {
+				log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", "page"), logging.F("error", err.Error()))
+			}
+		}
+	})
 	return true, nil
 }
 
@@ -620,7 +639,8 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		// Under the lease only, so that a reply another replica sends again records its Mentions once.
 		if n == 1 {
 			group := a.row.AlertGroupID
-			if err := recordMentions(ctx, q, org, a.destination, &group, nil, a.resolved, now); err != nil {
+			if err := recordMentions(ctx, q, org, a.destination, &group, nil, a.resolved.LeftOut(out.LeftOut),
+				now); err != nil {
 				return replyNotRecorded, err
 			}
 		}

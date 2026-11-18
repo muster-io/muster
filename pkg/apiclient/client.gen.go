@@ -1921,6 +1921,7 @@ func (e MentionName) Valid() bool {
 // Defines values for MentionNotDeliveredReason.
 const (
 	MentionNotDeliveredReasonBridgeCannotMentionPeople MentionNotDeliveredReason = "bridge_cannot_mention_people"
+	MentionNotDeliveredReasonMessageTooLong            MentionNotDeliveredReason = "message_too_long"
 	MentionNotDeliveredReasonNoAccountLink             MentionNotDeliveredReason = "no_account_link"
 )
 
@@ -1928,6 +1929,8 @@ const (
 func (e MentionNotDeliveredReason) Valid() bool {
 	switch e {
 	case MentionNotDeliveredReasonBridgeCannotMentionPeople:
+		return true
+	case MentionNotDeliveredReasonMessageTooLong:
 		return true
 	case MentionNotDeliveredReasonNoAccountLink:
 		return true
@@ -7269,7 +7272,7 @@ type MentionEvent string
 // MentionName A symbolic Mention that each Destination turns into real Mentions; `paged` is the people of a Page by their Account links, or the Team mention or token of a step "Page the whole Team" (C-32.FR-9).
 type MentionName string
 
-// MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16).
+// MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).
 type MentionNotDeliveredReason string
 
 // MentionResolution What an entry mentions now for one Team, or for no Team.
@@ -8135,7 +8138,7 @@ type OutgoingWebhookEventVersion int
 // PageImportance How a step Pages a person, which runs their Notification rule of that name (C-31.FR-3).
 type PageImportance string
 
-// PageNotDeliveredReason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered or was withheld while its Destination was Broken (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+// PageNotDeliveredReason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered, was withheld while its Destination was Broken, or was never sent because its Root message ended Not delivered (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 type PageNotDeliveredReason string
 
 // PasswordChange defines model for PasswordChange.
@@ -10440,7 +10443,7 @@ type TimelineEscalationEntry struct {
 	// PagedUsers The people the Page names.
 	PagedUsers []UserRef `json:"paged_users"`
 
-	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered or was withheld while its Destination was Broken (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered, was withheld while its Destination was Broken, or was never sent because its Root message ended Not delivered (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason,omitempty"`
 
 	// SkipReason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
@@ -10639,7 +10642,7 @@ type UndeliveredMention struct {
 	// Event A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).
 	Event MentionEvent `json:"event"`
 
-	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16).
+	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).
 	Reason MentionNotDeliveredReason `json:"reason"`
 
 	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.

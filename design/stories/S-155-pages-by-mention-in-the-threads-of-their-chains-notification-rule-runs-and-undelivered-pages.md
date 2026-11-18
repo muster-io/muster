@@ -314,9 +314,10 @@ with `kind='notification_rule_action'`), and `page_team` on a chain whose only D
   the owning Team the chain had when its run started (P-73), else the first Team that named the chain; never the
   chain's current owner (follow-up of S-169).
 - The Mentions a rule run misses while Muster was down are collapsed into one Page, as `notices_missed` collapses
-  overdue notices (follow-up of S-169); a chain whose own steps come due late after an outage still makes each step's
-  Page — a
-  separate issue.
+  overdue notices (follow-up of S-169). A chain whose own steps come due late after an outage Pages each person, Team
+  or everyone once in that firing: a step that would Page only whom the firing already Paged at an earlier due time
+  waits, from then, as long as it would have after those Pages on time, and the steps after it wait with it; calls
+  and webhooks are made each time (#594).
 - A reply that ended, sent or Not delivered, settles its Page in a transaction of its own after its outcome committed,
   so that the Alert Group is locked before the Page as every change of it does; a reply attempted again settles
   nothing. A crash between the two, or replies that end otherwise (dropped, withheld), leave the Page to the next round

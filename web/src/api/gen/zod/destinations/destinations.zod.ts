@@ -387,7 +387,7 @@ export const ListDestinationsResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -597,7 +597,7 @@ export const ListDestinationsResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -861,7 +861,7 @@ export const ListDestinationsResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -1081,7 +1081,7 @@ export const ListDestinationsResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -1290,7 +1290,7 @@ export const ListDestinationsResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -2161,7 +2161,7 @@ export const CreateDestinationResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -2371,7 +2371,7 @@ export const CreateDestinationResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -2635,7 +2635,7 @@ export const CreateDestinationResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -2855,7 +2855,7 @@ export const CreateDestinationResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -3064,7 +3064,7 @@ export const CreateDestinationResponse = zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -3484,7 +3484,7 @@ export const GetDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -3694,7 +3694,7 @@ export const GetDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -3958,7 +3958,7 @@ export const GetDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -4178,7 +4178,7 @@ export const GetDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -4387,7 +4387,7 @@ export const GetDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -5266,7 +5266,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -5476,7 +5476,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -5740,7 +5740,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -5960,7 +5960,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
@@ -6169,7 +6169,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
 }).describe('The entry as it is on the Destination now.'),
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people']).describe('The reason of the latest "Mention not delivered".'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
 }).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({

@@ -1155,3 +1155,36 @@ func TestResolveUndelivered(t *testing.T) {
 		t.Errorf("the entry of the undelivered mention = %+v", e)
 	}
 }
+
+// TestResultLeftOut is C-28.FR-3 and C-12.FR-11 (#591): a Mentioned person names their public id, and a person whose
+// Mention the delivered message left out for its length is, for each entry that named them, Undelivered with
+// message_too_long after those already undelivered; the others stay Mentioned, and the resolution itself is unchanged.
+func TestResultLeftOut(t *testing.T) {
+	f := resolveFake()
+	f.users[0].links["bridge:5"], f.users[0].externals["bridge:5"] = "alice@example.org", "u-alice"
+	native := f.conns[5]
+	native.NativeMentions = true
+	f.conns[5] = native
+	s, _, _ := wired(f)
+	conn := int64(5)
+	got, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 50, DestinationType: TypeBridge,
+		ConnectionID: &conn, AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	if err != nil || len(got.Mentioned) != 1 || got.Mentioned[0].PublicID != alice {
+		t.Fatalf("resolve = %+v, %v", got, err)
+	}
+	r := Result{Undelivered: []Undelivered{{UserID: 2, Reason: ReasonNoAccountLink}},
+		Mentioned: []Mentioned{got.Mentioned[0], {UserID: 3, PublicID: "SRAAAAAAAAAAA3"},
+			{UserID: 1, PublicID: alice, Entry: EntryRef{ID: 9, Position: 4}, Event: KindReopen}}}
+	left := r.LeftOut([]string{alice, "SRAAAAAAAAAAA9"})
+	if p := people(left); p != "undelivered 2/0//no_account_link,undelivered 1/2/new_alert_group/message_too_long,"+
+		"undelivered 1/4/reopen/message_too_long,mentioned 3/0/" {
+		t.Errorf("left out = %q", p)
+	}
+	if p := people(r); p != "undelivered 2/0//no_account_link,mentioned 1/2/new_alert_group,mentioned 3/0/,"+
+		"mentioned 1/4/reopen" {
+		t.Errorf("the resolution changed: %q", p)
+	}
+	if p := people(r.LeftOut(nil)); p != people(r) {
+		t.Errorf("nobody left out = %q", p)
+	}
+}

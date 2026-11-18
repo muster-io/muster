@@ -449,7 +449,37 @@ func TestEscalationRuns(t *testing.T) {
 	e.notify("e4", "first notification")
 	g4 := e.groupOf("e4a")
 	r.waitSummary("the critical alert group's chains", g4, "devops/2/running", "payments/2/running")
-	advance(t, rep, 3600)
+	// Late by 50 minutes, the firing of payments Pages petr, the On-call of both its Schedules, once at step 3 and
+	// waits the 15 minutes of step 4 from now before step 5 Pages him again; each later step comes at the end of its
+	// wait.
+	jumped := advance(t, rep, 3600).Now
+	r.waitSummary("payments waits before Paging petr again", g4, "devops/-/ran_out", "payments/4/running")
+	payments := func() (*time.Time, string) {
+		cs, _ := r.chains(g4)
+		for _, c := range cs {
+			if c.ChainName == "payments" {
+				return c.NextStepAt, c.State
+			}
+		}
+		return nil, ""
+	}
+	// The development clock goes on with real time: the firing came between the jump and now; the database keeps
+	// microseconds.
+	if next, _ := payments(); next == nil || next.Before(jumped.Add(899*time.Second)) ||
+		next.After(readClock(t, rep).Now.Add(900*time.Second)) {
+		t.Errorf("payments' next step at %v, want 15 minutes after the firing at %v", next, jumped)
+	}
+	for range 10 {
+		next, state := payments()
+		if state != "running" || next == nil {
+			break
+		}
+		advance(t, rep, int(next.Sub(readClock(t, rep).Now).Seconds())+1)
+		eventually(t, "the next step of payments", func() bool {
+			n, s := payments()
+			return s != "running" || n == nil || !n.Equal(*next)
+		})
+	}
 	r.waitSummary("both ran out", g4, "devops/-/ran_out", "payments/-/ran_out")
 	var last chainRun
 	for _, x := range r.chainRuns(cp) {

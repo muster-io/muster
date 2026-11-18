@@ -33,9 +33,10 @@ import (
 // step "Send to an outgoing webhook" is also skipped when its Destination was deleted or takes no events any more, and
 // is made by recording escalation_webhook (webhook.go).
 // Skips and Pages go on at once; a wait sets the timer at the end of the wait, from the deadline the step was due, on
-// the business clock, and a wait that is already over by then goes on; a repeat goes back to its step until it did so
-// its times. After the last step the run has run out, which ChainsRanOut checks for the whole start. It returns what
-// to run once tx committed.
+// the business clock, and a wait that is already over by then goes on, except before a step that would Page again only
+// whom this late firing already Paged, which waits from now as long as it would have after them (walk.page); a repeat
+// goes back to its step until it did so its times. After the last step the run has run out, which ChainsRanOut checks
+// for the whole start. It returns what to run once tx committed.
 func (r *Runs) FireStep(ctx context.Context, tx DBTX, runID int64, deadline time.Time) (func(context.Context), error) {
 	q := r.queries(tx)
 	groupID, err := q.GetRunGroup(ctx, dbgen.GetRunGroupParams{OrgID: r.s.orgID, ID: runID})
@@ -128,6 +129,15 @@ type walk struct {
 	capped bool
 	// seq numbers the webhooks and the Pages of the firing, which keep the order of their steps.
 	seq int
+	// pagedAt are whom the firing Paged, each at the time its step was due (walk.page).
+	pagedAt map[target]time.Time
+}
+
+// target is whom a step Pages: a person, or a Team or everyone in the chat by their mention.
+type target struct {
+	user     int64
+	team     int64
+	everyone string
 }
 
 // MaxStepsPerFiring bounds the steps one firing makes. Repeats nested without a wait between them make many passes
@@ -198,8 +208,12 @@ func (w *walk) walk(ctx context.Context) (groups.ChainProgress, error) {
 			}
 			idx++
 		default:
-			if err := w.page(ctx, st, &p); err != nil {
+			hold, err := w.page(ctx, st, &p)
+			if err != nil {
 				return p, err
+			}
+			if hold > 0 {
+				return p, w.wait(ctx, idx, repeats, w.now.Add(hold))
 			}
 			idx++
 		}
@@ -229,22 +243,34 @@ func (w *walk) entry(st runStep) groups.ChainEntry {
 // the Schedule it Pages; for the people it names, each who became a Viewer or was disabled since is skipped, and the
 // step with them when none is left. StepPages makes the step, its Pages after the skips of its people, or skips a
 // page_team step that none of its chain's Destinations can carry (no_mention_possible, C-32.FR-9).
-func (w *walk) page(ctx context.Context, st runStep, p *groups.ChainProgress) error {
-	reason, err := w.skipReason(ctx, st)
+//
+// A firing that comes late, after downtime, Pages whom it Pages once, as overdue notices collapse (C-17.FR-7) and the
+// overdue Mentions of a rule run do (C-31.FR-3): a step that would Page only people, a Team or everyone that the
+// firing already Paged at an earlier due time is not made yet, and hold is how long the run waits at it, from now:
+// the spacing those Pages would have had on time, the shortest of them. A call step Pages nobody here and is made
+// each time.
+func (w *walk) page(ctx context.Context, st runStep, p *groups.ChainProgress) (hold time.Duration, err error) {
+	reason, onCall, err := w.skipReason(ctx, st)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if reason != "" {
 		p.Skips = append(p.Skips, groups.StepSkip{ChainEntry: w.entry(st), Reason: reason})
-		return w.record(ctx, st, OutcomeSkipped, reason)
+		return 0, w.record(ctx, st, OutcomeSkipped, reason)
 	}
 	people, skips, err := w.people(ctx, st)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	targets := targetsOf(st, people, onCall)
+	if w.r.pages != nil {
+		if hold = w.holdFor(targets); hold > 0 {
+			return hold, nil
+		}
 	}
 	p.Skips = append(p.Skips, skips...)
 	if len(st.UserIDs) > 0 && len(people) == 0 {
-		return w.record(ctx, st, OutcomeSkipped, skips[0].Reason)
+		return 0, w.record(ctx, st, OutcomeSkipped, skips[0].Reason)
 	}
 	if w.r.pages != nil {
 		// The step is recorded next, after every step of the run before it: its seq is one more (InsertRunStep).
@@ -252,19 +278,62 @@ func (w *walk) page(ctx context.Context, st runStep, p *groups.ChainProgress) er
 			Kind: st.Kind, Importance: st.Importance, ScheduleID: st.ScheduleID, Schedule: st.Schedule,
 			TeamID: st.TeamID, Everyone: st.Everyone, GatewayID: st.GatewayID}, people)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if made.Skip != "" {
 			p.Skips = append(p.Skips, groups.StepSkip{ChainEntry: w.entry(st), Reason: made.Skip})
-			return w.record(ctx, st, OutcomeSkipped, made.Skip)
+			return 0, w.record(ctx, st, OutcomeSkipped, made.Skip)
 		}
 		for _, pg := range made.Pages {
 			pg.After, pg.Seq = len(p.Skips), w.seq
 			w.seq++
 			p.Pages = append(p.Pages, pg)
 		}
+		if w.pagedAt == nil {
+			w.pagedAt = map[target]time.Time{}
+		}
+		for _, t := range targets {
+			w.pagedAt[t] = w.at
+		}
 	}
-	return w.record(ctx, st, OutcomeMade, "")
+	return 0, w.record(ctx, st, OutcomeMade, "")
+}
+
+// targetsOf is whom a step Pages: the On-call of its Schedule, the people it may still Page, or its Team or everyone
+// by their mention; none for a call.
+func targetsOf(st runStep, people []int64, onCall int64) []target {
+	switch st.Kind {
+	case KindPageOnCall:
+		if onCall == 0 {
+			return nil
+		}
+		return []target{{user: onCall}}
+	case KindPagePeople:
+		out := make([]target, len(people))
+		for i, id := range people {
+			out[i] = target{user: id}
+		}
+		return out
+	case KindPageTeam:
+		return []target{{team: st.TeamID, everyone: st.Everyone}}
+	}
+	return nil
+}
+
+// holdFor is how long a step of the targets waits in this firing: when the firing Paged each of them at a due time
+// before the step's, the shortest time between those Pages and the step, as it would have been on time; 0 otherwise.
+func (w *walk) holdFor(targets []target) time.Duration {
+	var hold time.Duration
+	for _, t := range targets {
+		at, ok := w.pagedAt[t]
+		if !ok || !at.Before(w.at) {
+			return 0
+		}
+		if gap := w.at.Sub(at); hold == 0 || gap < hold {
+			hold = gap
+		}
+	}
+	return hold
 }
 
 // ref names the run for StepPages: its chain, its owning Team when it started and its sources.
@@ -280,32 +349,34 @@ func (w *walk) ref() RunRef {
 	return ref
 }
 
-// skipReason is why a step that Pages or sends is skipped as a whole, empty when it is not.
-func (w *walk) skipReason(ctx context.Context, st runStep) (string, error) {
+// skipReason is why a step that Pages or sends is skipped as a whole, empty when it is not, and the On-call of its
+// Schedule when it has one.
+func (w *walk) skipReason(ctx context.Context, st runStep) (string, int64, error) {
 	if !routing.SeverityCondition(st.Condition).Meets(string(w.g.Severity)) {
-		return groups.SkipSeverity, nil
+		return groups.SkipSeverity, 0, nil
 	}
 	if st.WorkingHoursOnly {
 		wh, err := w.workingHours(ctx)
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		if !wh.Contains(w.now) {
-			return groups.SkipOutsideWorkingHours, nil
+			return groups.SkipOutsideWorkingHours, 0, nil
 		}
 	}
 	if st.Schedule != "" && w.r.onCalls != nil {
 		seg, err := w.r.onCalls.OnCallAtIn(ctx, w.tx, st.Schedule, w.now)
 		switch {
 		case errors.Is(err, schedules.ErrNotFound):
-			return groups.SkipScheduleGap, nil
+			return groups.SkipScheduleGap, 0, nil
 		case err != nil:
-			return "", fmt.Errorf("read the on-call of schedule %s: %w", st.Schedule, err)
+			return "", 0, fmt.Errorf("read the on-call of schedule %s: %w", st.Schedule, err)
 		case seg.User == nil:
-			return groups.SkipScheduleGap, nil
+			return groups.SkipScheduleGap, 0, nil
 		}
+		return "", seg.User.ID, nil
 	}
-	return "", nil
+	return "", 0, nil
 }
 
 // workingHours are the Working hours of the run's chain, read once per firing: those of the owning Team the chain had

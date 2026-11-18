@@ -28,7 +28,7 @@ import (
 
 // webhook makes or skips a webhook step st: the skip or the webhook to record, one of them.
 func (w *walk) webhook(ctx context.Context, st runStep) (*groups.StepSkip, *groups.StepWebhook, error) {
-	reason, err := w.skipReason(ctx, st)
+	reason, _, err := w.skipReason(ctx, st)
 	if err != nil {
 		return nil, nil, err
 	}

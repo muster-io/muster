@@ -581,6 +581,212 @@ func TestPageStaysOpenUntilEveryReplyEnded(t *testing.T) {
 	}
 }
 
+// TestPageRootNotDelivered is C-32.FR-10 for a Page whose reply waits for its Root message (#603): the Root message
+// is deleted, its republication ends Not delivered, and the Page reply that waited for it is never sent; it ends, and
+// the Page is settled ended and not delivered in the round that recorded the republication, while the other replies
+// of the delivery keep waiting for a later Publication (C-11.FR-10).
+func TestPageRootNotDelivered(t *testing.T) {
+	e, s := pageEnv(t)
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged, Loudness: groups.Quiet},
+		pagedEvent(3, pageID, groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute,
+			Linked: []int64{ivanID}}))
+	d := e.only(t)
+	other := &fakeReply{id: 5000, delivery: d.id, group: groupID, dest: destMM, event: "reminder", state: "pending",
+		next: e.business.Now(), loudness: "quiet"}
+	e.db.replies = append(e.db.replies, other)
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeGone, "post not found"))
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeGone, "channel not found"))
+	e.round(t)
+	if d.state != "pending" || !d.republished || d.publishedAt != nil {
+		t.Fatalf("not reset for the republication: %+v", d)
+	}
+	if len(s.outcomes) != 0 {
+		t.Fatalf("settled before the republication ended: %+v", s.outcomes)
+	}
+	// The round lists no Pages to settle, so only the republication that ended can settle its Page.
+	e.db.fail["ListEndedPages"] = errors.New("boom")
+	_, _ = e.w.Round(t.Context())
+	delete(e.db.fail, "ListEndedPages")
+	if d.state != "not_delivered" || e.rec.Count(deliverytest.MethodPublish) != 1 {
+		t.Fatalf("republication %+v, %s", d, callMethods(e.rec.Calls()))
+	}
+	if len(s.outcomes) != 1 || s.outcomes[0].Page != pageID || !s.outcomes[0].Ended || s.outcomes[0].Delivered ||
+		len(s.outcomes[0].Reached) != 0 || e.db.pageDB.state[pageID] != "ended" {
+		t.Errorf("page outcomes %+v, state %s", s.outcomes, e.db.pageDB.state[pageID])
+	}
+	for _, r := range e.db.replies {
+		if r.page == pageID && (r.state == "pending" || r.state == "collecting") {
+			t.Errorf("page reply still waits: %+v", r)
+		}
+	}
+	if other.state != "pending" {
+		t.Errorf("the other reply of the delivery %s, want it waiting for a later publication", other.state)
+	}
+	e.business.Advance(time.Hour)
+	e.rounds(t)
+	if e.rec.Count(deliverytest.MethodReply) != 0 || len(s.outcomes) != 1 {
+		t.Errorf("after the rounds: %s, outcomes %+v", callMethods(e.rec.Calls()), s.outcomes)
+	}
+}
+
+// pendingPageEnv is pageEnv whose Alert Group's first Publication is still to be made.
+func pendingPageEnv(t *testing.T) (*env, *fakeSettler, *fakeDelivery) {
+	t.Helper()
+	e, d := pending(t)
+	e.db.pageDB.init()
+	e.db.pageDB.links = []dbgen.ListPageLinksRow{{UserID: ivanID, IdentitySpace: "mattermost:" + strconv.Itoa(connID)}}
+	s := &fakeSettler{db: e.db}
+	e.w.Pages, e.w.TeamMentions = s, fakeTeamMentions{}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business,
+		Renderer: stubRenderer{}, TeamMentions: fakeTeamMentions{}})
+	return e, s, d
+}
+
+// TestPageFirstPublicationNotDelivered is C-32.FR-10 for a Page queued while the first Publication of its Alert Group
+// was still to be made: the Publication ends Not delivered, the Page reply is never sent, and the Page is settled
+// ended and not delivered in that round.
+func TestPageFirstPublicationNotDelivered(t *testing.T) {
+	e, s, d := pendingPageEnv(t)
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, pagedEvent(2, pageID,
+		groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute, Linked: []int64{ivanID}}))
+	if len(e.db.replies) != 1 || e.db.replies[0].state != "pending" {
+		t.Fatalf("page reply %+v", e.db.replies)
+	}
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeGone, "channel not found"))
+	e.round(t)
+	if d.state != "not_delivered" || e.db.replies[0].state != "dropped" || e.rec.Count(deliverytest.MethodReply) != 0 {
+		t.Fatalf("delivery %s, reply %s, calls %s", d.state, e.db.replies[0].state, callMethods(e.rec.Calls()))
+	}
+	if len(s.outcomes) != 1 || !s.outcomes[0].Ended || s.outcomes[0].Delivered || len(s.outcomes[0].Reached) != 0 {
+		t.Errorf("outcomes %+v", s.outcomes)
+	}
+}
+
+// TestPageEditNotDelivered is C-32.FR-10 and C-11.FR-10: an edit of a published Root message that ends Not delivered
+// leaves the Root message in place, so the Page reply waiting under it is still sent and its Page delivered.
+func TestPageEditNotDelivered(t *testing.T) {
+	e, s := pageEnv(t)
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged, Loudness: groups.Quiet},
+		pagedEvent(3, pageID, groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute,
+			Linked: []int64{ivanID}}))
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeUnknown, "HTTP 400"))
+	e.round(t)
+	if d := e.only(t); d.state != "not_delivered" || d.publishedAt == nil {
+		t.Fatalf("edit %+v", d)
+	}
+	e.rounds(t)
+	if e.rec.Count(deliverytest.MethodReply) != 1 || len(s.outcomes) != 1 || !s.outcomes[0].Delivered ||
+		!slices.Equal(s.outcomes[0].Reached, []int64{ivanID}) {
+		t.Errorf("calls %s, outcomes %+v", callMethods(e.rec.Calls()), s.outcomes)
+	}
+}
+
+// TestPageQueuedAfterRootNotDelivered is C-32.FR-10 for a Page whose Destination had a pending Publication when its
+// targets were chosen, which ended Not delivered before the reply was queued (#603): the reply is queued dropped, and
+// the round settles the Page as not delivered.
+func TestPageQueuedAfterRootNotDelivered(t *testing.T) {
+	e, s, d := pendingPageEnv(t)
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	// The worker records the Publication Not delivered between ListPageRoots and EnsureDelivery.
+	e.db.before["EnsureDelivery"] = func() { d.state = "not_delivered" }
+	paged := pagedEvent(2, pageID, groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute,
+		Linked: []int64{ivanID}})
+	e.db.fail["InsertThreadReply"] = errors.New("boom")
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring, "a"),
+		Actor: groups.System, Events: []groups.Recorded{paged}}); err == nil || len(e.db.replies) != 0 {
+		t.Fatalf("a failing drop of the page reply: %v, %d replies", err, len(e.db.replies))
+	}
+	delete(e.db.fail, "InsertThreadReply")
+	// The same rendering carries a reply of no Page, which waits for a later Publication (C-11.FR-10).
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, paged, reminder(3))
+	if d.state != "not_delivered" {
+		t.Fatalf("the rendering restarted the delivery: %s", d.state)
+	}
+	var page, other *fakeReply
+	for _, r := range e.db.replies {
+		if r.page == pageID {
+			page = r
+		} else {
+			other = r
+		}
+	}
+	if len(e.db.replies) != 2 || page == nil || other == nil || page.state != "dropped" || other.state != "pending" {
+		t.Fatalf("%d replies, the page reply %+v, the other %+v, want the page reply dropped and the other pending",
+			len(e.db.replies), page, other)
+	}
+	e.round(t)
+	if len(s.outcomes) != 1 || !s.outcomes[0].Ended || s.outcomes[0].Delivered ||
+		e.db.pageDB.state[pageID] != "ended" {
+		t.Errorf("outcomes %+v, page %s", s.outcomes, e.db.pageDB.state[pageID])
+	}
+}
+
+// TestPageQueuedAfterEditNotDelivered is C-32.FR-10 and C-11.FR-10: a Page queued while the last edit of a published
+// Root message ended Not delivered replies under that Root message, which is still there: the reply is queued pending,
+// sent, and the Page delivered.
+func TestPageQueuedAfterEditNotDelivered(t *testing.T) {
+	e, s := pageEnv(t)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeUnknown, "HTTP 400"))
+	e.round(t)
+	d := e.only(t)
+	if d.state != "not_delivered" || d.publishedAt == nil {
+		t.Fatalf("edit %+v", d)
+	}
+	// The Page is recorded once the edit ended, as the dispatcher records it with its reply.
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, pagedEvent(3, pageID,
+		groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute, Linked: []int64{ivanID}}))
+	if d.state != "not_delivered" {
+		t.Fatalf("the paged rendering restarted the delivery: %s", d.state)
+	}
+	var page *fakeReply
+	for _, r := range e.db.replies {
+		if r.page == pageID {
+			page = r
+		}
+	}
+	if page == nil || page.state != "pending" {
+		t.Fatalf("page reply %+v, want it pending", page)
+	}
+	e.rounds(t)
+	if page.state != "sent" || len(s.outcomes) != 1 || !s.outcomes[0].Delivered ||
+		!slices.Equal(s.outcomes[0].Reached, []int64{ivanID}) {
+		t.Errorf("page reply %s, outcomes %+v", page.state, s.outcomes)
+	}
+}
+
+// TestPageRootNotDeliveredSettleFails: a Page whose settle fails once its Root message ended Not delivered is logged,
+// and the next round settles it, as its reply ended.
+func TestPageRootNotDeliveredSettleFails(t *testing.T) {
+	e, s := pageEnv(t)
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged, Loudness: groups.Quiet},
+		pagedEvent(3, pageID, groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute,
+			Linked: []int64{ivanID}}))
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeGone, "post not found"))
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeGone, "channel not found"))
+	e.round(t)
+	s.failPages = []int64{pageID}
+	e.round(t)
+	if d := e.only(t); d.state != "not_delivered" || e.db.pageDB.state[pageID] != "pending" ||
+		!strings.Contains(e.log.String(), "settle page 900") {
+		t.Fatalf("delivery %s, page %s, log %s", d.state, e.db.pageDB.state[pageID], e.log.String())
+	}
+	s.failPages = nil
+	e.round(t)
+	if e.db.pageDB.state[pageID] != "ended" || len(s.outcomes) != 1 || s.outcomes[0].Delivered {
+		t.Errorf("page %s, outcomes %+v", e.db.pageDB.state[pageID], s.outcomes)
+	}
+}
+
 // TestPageTargets is C-32.FR-8, C-32.AC-1 and AC-16 through the queries: a Route's chain Pages in the Route's
 // Destinations with the Root message, a Team's chain in the Team's and, without one of them with a Root message, in
 // the Route's; a Team whose only Destination with the Root message is a Telegram channel Pages there; a chain of both

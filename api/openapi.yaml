@@ -15897,9 +15897,10 @@ components:
         was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent
         (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain''s Destinations has the Alert Group''s
         Root message (`no_root_message`), the person has no Account link in the Identity space of any of them
-        (`no_account_link`), or every Thread reply that would mention them ended Not delivered or was withheld while
-        its Destination was Broken (`not_delivered`). Null for the other events of the kind. Later versions add
-        reasons; clients show an unknown one as it is.'
+        (`no_account_link`), or every Thread reply that would mention them ended Not delivered, was withheld while
+        its Destination was Broken, or was never sent because its Root message ended Not delivered
+        (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown
+        one as it is.'
       enum:
       - call_refused
       - call_unknown
@@ -18223,10 +18224,13 @@ components:
         (C-28.FR-3): they have no Account link in the Identity space of the Destination''s Connection, so the message
         left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has
         read none yet — so the message named them by the plain name, which notifies nobody
-        (`bridge_cannot_mention_people`, C-22.FR-16).'
+        (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps
+        only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`,
+        C-12.FR-11).'
       enum:
       - no_account_link
       - bridge_cannot_mention_people
+      - message_too_long
     MentionEntryRef:
       type: object
       description: The Mention entry that named a person, as on the Destination — its position in the Destination's
