@@ -557,7 +557,7 @@ func (s *Service) OnCall(ctx context.Context, scheduleID string, from, to *time.
 		return Result{}, err
 	}
 	res.Warnings = append(res.Warnings, gapWarnings(res)...)
-	if err := s.withReach(ctx, s.store, sc.Team.ID, &res); err != nil {
+	if err := s.withReach(ctx, s.store, sc, &res); err != nil {
 		return Result{}, err
 	}
 	return res, nil

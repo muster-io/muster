@@ -244,15 +244,16 @@ func sameSource(a, b *Source) bool {
 	return *a == *b
 }
 
-// unreachableWarnings are the warnings unreachable of the Result of a Schedule of the Team team (C-27.FR-8): for each
-// segment with a person, in order, one for each Destination of the Team that a Mention of the person cannot reach.
-func unreachableWarnings(res Result, team int64, r reach) []Warning {
+// unreachableWarnings are the warnings unreachable of the Result of the Schedule schedule (C-27.FR-8): for each
+// segment with a person, in order, one for each Destination of the Schedule's reach that a Mention of the person
+// cannot reach.
+func unreachableWarnings(res Result, schedule int64, r reach) []Warning {
 	var out []Warning
 	for _, seg := range res.Segments {
 		if seg.User == nil {
 			continue
 		}
-		for _, u := range r.unreachable(team, seg.User.ID) {
+		for _, u := range r.unreachable(schedule, seg.User.ID) {
 			w := Warning{Kind: WarningUnreachable, User: *seg.User, Start: seg.Start, End: seg.End, Unreachable: &u}
 			if seg.Source != nil {
 				switch seg.Source.Kind {

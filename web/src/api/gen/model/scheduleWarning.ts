@@ -28,7 +28,7 @@ export interface ScheduleWarning {
      * @nullable
      */
   end: string | null;
-  /** The Destination of the Team that a Mention of the person cannot reach; null for another kind. */
+  /** The Destination of the Team, or of an Escalation chain that Pages the Schedule — of a Route or a Team that names the chain —, that a Mention of the person cannot reach; null for another kind. */
   destination: DestinationRef | null;
   /** The messenger of `destination` — the type of its Connection, or `webhook` for an outgoing webhook; null for another kind. */
   messenger: DestinationType | null;

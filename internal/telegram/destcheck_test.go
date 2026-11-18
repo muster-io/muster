@@ -287,6 +287,50 @@ func TestDestinationCheckGroupPeople(t *testing.T) {
 	}
 }
 
+// TestDestinationCheckChainPagedPeople is the step discussion_group_members of C-27.FR-8 for the people whom a chain
+// Paging in the Destination can Page through a Schedule (C-32.FR-8), listed after those of its Teams: each person is
+// asked once — ann, of a Team and of a chain's Schedule, at her first place —, and the answers are read as for the
+// Teams' people: bob, of a chain only and never in the group (400 PARTICIPANT_ID_INVALID, F-128), and cat, who left,
+// are outside it, dan, kicked, too, eve, a member, is in it, and fay, whose call fails with another error, is unknown.
+func TestDestinationCheckChainPagedPeople(t *testing.T) {
+	f := startFake(t)
+	c := newClient(t, Settings{BaseURL: f.URL(), Token: testToken})
+	const ann, bob, cat, dan, eve, fay = 1, 2, 3, 4, 5, 6
+	for tg, m := range map[int64]faketelegram.Member{301: {Status: faketelegram.StatusMember},
+		303: {Status: faketelegram.StatusLeft}, 304: {Status: faketelegram.StatusKicked},
+		305: {Status: faketelegram.StatusMember},
+		306: {ErrorCode: 400, Description: "Bad Request: user not found"}} {
+		if err := f.SetMember(faketelegram.GroupID, tg, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	teams := []GroupPerson{{UserID: ann, TelegramID: 301}, {UserID: cat, TelegramID: 303}}
+	chains := []GroupPerson{{UserID: ann, TelegramID: 301}, {UserID: bob, TelegramID: 302},
+		{UserID: dan, TelegramID: 304}, {UserID: eve, TelegramID: 305}, {UserID: fay, TelegramID: 306},
+		{UserID: cat, TelegramID: 303}}
+	res, err := CheckDestination(t.Context(), c, probe, "@muster_alerts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ResetRequests()
+	res = CheckGroupPeople(t.Context(), c, probe, res, append(slices.Clone(teams), chains...))
+	absent, unknown, ok := res.GroupPeople()
+	if !res.OK() || !ok || !slices.Equal(absent, []int64{cat, bob, dan}) || !slices.Equal(unknown, []int64{fay}) {
+		t.Fatalf("absent %v, unknown %v, ok %v", absent, unknown, ok)
+	}
+	want := []int64{301, 303, 302, 304, 305, 306}
+	reqs := f.Requests()
+	if len(reqs) != len(want) {
+		t.Fatalf("%d requests, want one per person", len(reqs))
+	}
+	for i, r := range reqs {
+		if !strings.HasSuffix(r.Path, "/getChatMember") || !strings.Contains(r.Body, `-1001000000002`) ||
+			!strings.Contains(r.Body, fmt.Sprintf(`"user_id":%d`, want[i])) {
+			t.Errorf("request %d = %s %s, want the user %d", i, r.Path, r.Body, want[i])
+		}
+	}
+}
+
 // TestDestinationCheckGroupPeopleEdges: a check that failed runs no step; no people make a step with nobody absent and
 // no request; a runner that refuses a request — no limiter token — and a deadline that passes leave the people not
 // asked yet unknown, and the step passes.

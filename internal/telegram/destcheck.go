@@ -22,7 +22,8 @@ const (
 	StepBotRightsChannel = "bot_rights_channel"
 	StepBotRightsGroup   = "bot_rights_group"
 	// StepDiscussionGroupMembers follows the others on save, on "Check" and in muster doctor, never in the Broken
-	// probe: which people of the Destination's Teams are outside its discussion group (C-27.FR-8).
+	// probe: which people of the Destination's Teams, and on save and on "Check" those whom a chain Paging in it can
+	// Page through a Schedule, are outside its discussion group (C-27.FR-8).
 	StepDiscussionGroupMembers = "discussion_group_members"
 )
 
@@ -273,7 +274,9 @@ func isAnswered(r Result) bool {
 }
 
 // CheckGroupPeople adds to a Destination check that passed its step discussion_group_members (C-27.FR-8):
-// getChatMember of the discussion group for each of the people, one after the other through run. Those it
+// getChatMember of the discussion group for each of the people — those of the Teams that name the Destination and
+// those whom a chain Paging in it can Page through a Schedule (C-32.FR-8) — once per person, one after the other
+// through run. Those it
 // answers left or kicked, restricted and not a member, or 400 PARTICIPANT_ID_INVALID — a subscriber of the channel who
 // was never in the group (F-128) — are outside it; creator, administrator and member are in it, an anonymous admin
 // included, and so is restricted with is_member. Any other answer or failure leaves that person unknown, and once run
@@ -288,6 +291,7 @@ func CheckGroupPeople(ctx context.Context, c *Client, run Runner, check Destinat
 	}
 	group := strconv.FormatInt(check.GroupID, 10)
 	absent, unknown := []int64{}, []int64{}
+	people = once(people)
 	for i, p := range people {
 		if ctx.Err() != nil {
 			unknown = appendIDs(unknown, people[i:])
@@ -313,6 +317,20 @@ func CheckGroupPeople(ctx context.Context, c *Client, run Runner, check Destinat
 	check.Steps = append(check.Steps, DestinationStep{Name: StepDiscussionGroupMembers, OK: true, Absent: absent,
 		Unknown: unknown})
 	return check
+}
+
+// once are the people, each User once, at their first place: a person of a Team that names the Destination whom a
+// chain Paging in it can also Page is asked about once.
+func once(people []GroupPerson) []GroupPerson {
+	seen := make(map[int64]bool, len(people))
+	out := make([]GroupPerson, 0, len(people))
+	for _, p := range people {
+		if !seen[p.UserID] {
+			seen[p.UserID] = true
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func appendIDs(ids []int64, people []GroupPerson) []int64 {

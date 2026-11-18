@@ -3923,7 +3923,9 @@ paths:
         about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and
         Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut
         to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each
-        Destination of the Schedule''s Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The
+        Destination of the Schedule''s Team, and each Destination of a Route or a Team that names an Escalation chain
+        with a `page_on_call` step on the Schedule, that a Mention of the person cannot reach, each once, with the
+        reason (C-27.FR-8, C-32.FR-8). The
         period is from `from` to `to`, by default the business clock''s now and
         `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at
         `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it,
@@ -4211,7 +4213,8 @@ paths:
       description: '"On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the
         On-call of its main Schedule at the business clock''s now with the Rotation layer that decides it, until when,
         and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the
-        Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has
+        Team, and of the Escalation chains that Page the main Schedule, that a Mention of the On-call cannot reach
+        (C-27.FR-8, FR-9); a Team without a main Schedule has
         `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.'
       x-permission: schedules:read
       x-listener: app
@@ -13782,7 +13785,8 @@ components:
           - 'null'
           format: date-time
         destination:
-          description: The Destination of the Team that a Mention of the person cannot reach; null for another kind.
+          description: The Destination of the Team, or of an Escalation chain that Pages the Schedule — of a Route or
+            a Team that names the chain —, that a Mention of the person cannot reach; null for another kind.
           oneOf:
           - $ref: '#/components/schemas/DestinationRef'
           - type: 'null'
@@ -13804,7 +13808,8 @@ components:
             considered. Left out for another kind.
     ReachReason:
       type: string
-      description: 'Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link`
+      description: 'Why a Mention of an On-call cannot reach a Destination of their Team, or of an Escalation chain
+        that Pages their Schedule (C-27.FR-8): `no_account_link`
         — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or
         Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare
         `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing
@@ -13817,7 +13822,8 @@ components:
       - not_in_discussion_group
     OnCallReach:
       type: object
-      description: A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).
+      description: A Destination of the Team, or of an Escalation chain that Pages its main Schedule, that a Mention of
+        its On-call cannot reach, with why (C-27.FR-8).
       required:
       - destination
       - messenger
@@ -13931,8 +13937,10 @@ components:
           - type: 'null'
         unreachable:
           type: array
-          description: The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by
-            the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them.
+          description: The Destinations of the Team, and of the Routes and Teams that name an Escalation chain with a
+            `page_on_call` step on the main Schedule, that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9),
+            each once, by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches
+            them.
           items:
             $ref: '#/components/schemas/OnCallReach'
     OnCallNext:
@@ -19372,9 +19380,11 @@ components:
             says to make the bot an admin there). Bridge: `channel`, the bridge''s `checkChannel` — whether the bot can
             post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is
             not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which
-            always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with
-            a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside
-            (C-27.FR-8).'
+            always passes, reads with `getChatMember` whether each person with a Telegram Account link of the Teams
+            that name the Destination, and each one whom an Escalation chain Paging in it can Page through a Schedule
+            — in a Rotation layer of a Schedule that a `page_on_call` step of the chain names, or with an Override of
+            it that has not ended —, is in the discussion group, once per person, and names in `absent_users` those it
+            saw outside (C-27.FR-8).'
           enum:
           - token
           - bot_in_channel

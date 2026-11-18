@@ -121,6 +121,11 @@ func (f *fakeWriter) ListTelegramGroupPeople(context.Context, dbgen.ListTelegram
 	return nil, errBoom
 }
 
+func (f *fakeWriter) ListChainPagedTelegramPeople(context.Context, dbgen.ListChainPagedTelegramPeopleParams) (
+	[]dbgen.ListChainPagedTelegramPeopleRow, error) {
+	return nil, errBoom
+}
+
 func (f *fakeWriter) SetTelegramAbsences(context.Context, dbgen.SetTelegramAbsencesParams) error {
 	return errBoom
 }
@@ -153,7 +158,11 @@ type saveWriter struct {
 	woken   []string
 	// tgPeople are the people of the Teams of a Telegram Destination, by its id, and tgSeen what its checks recorded.
 	tgPeople map[int64][]dbgen.ListTelegramGroupPeopleRow
-	tgSeen   []dbgen.SetTelegramAbsencesParams
+	// tgPaged are the people whom a chain Paging in a Telegram Destination can Page, by its id, and tgPagedAt the
+	// times of their reads.
+	tgPaged   map[int64][]dbgen.ListChainPagedTelegramPeopleRow
+	tgPagedAt []time.Time
+	tgSeen    []dbgen.SetTelegramAbsencesParams
 	// tx counts the transactions; tgSeenTx and tgWriteTx are the transactions of the records of tgSeen and of the
 	// Telegram inserts and updates.
 	tx        int
@@ -170,6 +179,18 @@ func (w *saveWriter) ListTelegramGroupPeople(_ context.Context, arg dbgen.ListTe
 		return nil, nil
 	}
 	return w.tgPeople[arg.DestinationID], nil
+}
+
+func (w *saveWriter) ListChainPagedTelegramPeople(_ context.Context, arg dbgen.ListChainPagedTelegramPeopleParams) (
+	[]dbgen.ListChainPagedTelegramPeopleRow, error) {
+	if err := w.fail["ListChainPagedTelegramPeople"]; err != nil {
+		return nil, err
+	}
+	if arg.OrgID != 1 {
+		return nil, nil
+	}
+	w.tgPagedAt = append(w.tgPagedAt, arg.Now)
+	return w.tgPaged[arg.DestinationID], nil
 }
 
 func (w *saveWriter) SetTelegramAbsences(_ context.Context, arg dbgen.SetTelegramAbsencesParams) error {
@@ -1803,6 +1824,51 @@ func TestTelegramGroupPeople(t *testing.T) {
 	w.fail["SetTelegramAbsences"] = errBoom
 	if _, err := s.Create(ctx, saver, telegramInput("newer", "@muster_alerts")); !errors.Is(err, errBoom) {
 		t.Errorf("SetTelegramAbsences fails the creation: %v", err)
+	}
+}
+
+// TestTelegramChainPagedPeople is the step discussion_group_members of C-27.FR-8 for the chains (C-32.FR-8): "Check"
+// gives the check, after the people of the Destination's Teams, those whom a chain Paging in it can Page through a
+// Schedule, read at the business clock's now — alice, of both, in both lists, which telegram.CheckGroupPeople asks
+// about once; a link whose Telegram user id is not a number left out — and names and records bob, of a Team, and
+// aaron, of a chain only, whom it saw outside the discussion group, the item by name whatever the case and the order
+// it asked in. A failure to read them fails the check.
+func TestTelegramChainPagedPeople(t *testing.T) {
+	s, store, w, _, _ := newSaver(t)
+	tg := s.writer.Telegram.(*fakeTelegram)
+	tg.members, tg.outside = true, []int64{9002, 9004}
+	ctx := t.Context()
+	store.rows[1].TelegramChannelID = txt("@muster_alerts")
+	store.rows[1].TelegramDiscussionChatID.Int64 = -1001000000002
+	w.tgPeople = map[int64][]dbgen.ListTelegramGroupPeopleRow{2: {
+		{ID: 11, PublicID: "SRAAAAAAAAAAA1", Name: "Alice", Login: "alice", ExternalID: "9001"},
+		{ID: 12, PublicID: "SRAAAAAAAAAAA2", Name: "Bob", Login: "bob", ExternalID: "9002"}}}
+	w.tgPaged = map[int64][]dbgen.ListChainPagedTelegramPeopleRow{2: {
+		{ID: 11, PublicID: "SRAAAAAAAAAAA1", Name: "Alice", Login: "alice", ExternalID: "9001"},
+		{ID: 14, PublicID: "SRAAAAAAAAAAA4", Name: "aaron", Login: "aaron", ExternalID: "9004"},
+		{ID: 15, PublicID: "SRAAAAAAAAAAA5", Name: "Eve", Login: "eve", ExternalID: "y"}}}
+	res, err := s.Check(ctx, "DSAAAAAAAAAAA2")
+	if err != nil || !res.OK || len(res.Items) != 5 {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	if it := res.Items[4]; it.Name != telegram.StepDiscussionGroupMembers || !it.OK ||
+		!slices.Equal(it.AbsentUsers, []UserRef{{PublicID: "SRAAAAAAAAAAA4", Name: "aaron", Login: "aaron"},
+			{PublicID: "SRAAAAAAAAAAA2", Name: "Bob", Login: "bob"}}) {
+		t.Errorf("item = %+v", it)
+	}
+	if c := tg.calls[len(tg.calls)-1]; !slices.Equal(c.People, []telegram.GroupPerson{{UserID: 11, TelegramID: 9001},
+		{UserID: 12, TelegramID: 9002}, {UserID: 11, TelegramID: 9001}, {UserID: 14, TelegramID: 9004}}) {
+		t.Errorf("people given = %+v", c.People)
+	}
+	if len(w.tgPagedAt) != 1 || !w.tgPagedAt[0].Equal(t0) {
+		t.Errorf("the chains' people read at %v, want %v", w.tgPagedAt, t0)
+	}
+	if len(w.tgSeen) != 1 || !slices.Equal(w.tgSeen[0].AbsentUserIds, []int64{12, 14}) {
+		t.Errorf("recorded %+v", w.tgSeen)
+	}
+	w.fail["ListChainPagedTelegramPeople"] = errBoom
+	if _, err := s.Check(ctx, "DSAAAAAAAAAAA2"); !errors.Is(err, errBoom) {
+		t.Errorf("ListChainPagedTelegramPeople fails the check: %v", err)
 	}
 }
 

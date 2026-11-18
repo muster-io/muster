@@ -4,7 +4,7 @@
  */
 
 /**
- * Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
+ * Why a Mention of an On-call cannot reach a Destination of their Team, or of an Escalation chain that Pages their Schedule (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
  */
 export type ReachReason = typeof ReachReason[keyof typeof ReachReason];
 

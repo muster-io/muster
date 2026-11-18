@@ -5,6 +5,7 @@ package destinations
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -384,7 +385,8 @@ type MattermostChecker interface {
 // TelegramChannelCheck is the Destination check of a Telegram channel through the Connection Connection (public_id),
 // limited by that Connection alone, whether or not the Destination exists: its requests post nothing, and the
 // Destination's limiter counts sends and edits (C-14.FR-2). People are those whose membership of the discussion group
-// its step discussion_group_members reads (C-27.FR-8), none before the Destination exists, since no Team names it yet.
+// its step discussion_group_members reads (C-27.FR-8), none before the Destination exists, since no Team or Route
+// names it yet.
 type TelegramChannelCheck struct {
 	Connection string
 	ChannelID  string
@@ -491,6 +493,8 @@ type writeQueries interface {
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	ListTelegramGroupPeople(ctx context.Context, arg dbgen.ListTelegramGroupPeopleParams) (
 		[]dbgen.ListTelegramGroupPeopleRow, error)
+	ListChainPagedTelegramPeople(ctx context.Context, arg dbgen.ListChainPagedTelegramPeopleParams) (
+		[]dbgen.ListChainPagedTelegramPeopleRow, error)
 	SetTelegramAbsences(ctx context.Context, arg dbgen.SetTelegramAbsencesParams) error
 }
 
@@ -1273,8 +1277,8 @@ type CheckResult struct {
 // C-22.FR-3, C-24.FR-3) on the interactive path, limited by the Destination (a Telegram Destination's by its
 // Connection alone): each check with its result. A passing check of a Broken Destination ends its Broken state. A
 // Bridge or Slack Destination's check keeps no channel name it reads: a save does. A Telegram Destination's check that
-// passes keeps what its step discussion_group_members saw of the people of its Teams (C-27.FR-8), with them in the
-// item's AbsentUsers.
+// passes keeps what its step discussion_group_members saw of the people of its Teams and of those its chains Page
+// (C-27.FR-8), with them in the item's AbsentUsers.
 // A type without a Destination check here is a *FieldError check_not_supported. Its requests are recorded as the kind
 // destination_check with the Destination under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
@@ -1478,10 +1482,12 @@ func (s *Service) checkTelegram(ctx context.Context, in Input, destinationID *in
 	return TelegramChannelChecked{}, failed
 }
 
-// telegramGroupPeople reads the people of the Teams that name the Destination id, with a Telegram Account link, whose
-// membership of its discussion group its check reads (C-27.FR-8), by name, with their references by User id; none for
-// a Destination not created yet. A link whose Telegram user id is not a number names nobody Telegram knows, and is
-// left out.
+// telegramGroupPeople reads the people with a Telegram Account link whose membership of the discussion group of the
+// Destination id its check reads (C-27.FR-8), with their references by User id: those of the Teams that name it, by
+// name, then those whom a chain Paging in it can Page through a Schedule (C-32.FR-8), by name; none for a Destination
+// not created yet. A person of both is in both lists, and the check asks about them once, at the first
+// (telegram.CheckGroupPeople). A link whose Telegram user id is not a number names nobody Telegram knows, and is left
+// out.
 func (s *Service) telegramGroupPeople(ctx context.Context, id *int64) ([]telegram.GroupPerson, map[int64]UserRef,
 	error) {
 	refs := map[int64]UserRef{}
@@ -1489,13 +1495,21 @@ func (s *Service) telegramGroupPeople(ctx context.Context, id *int64) ([]telegra
 		return nil, refs, nil
 	}
 	var rows []dbgen.ListTelegramGroupPeopleRow
+	var paged []dbgen.ListChainPagedTelegramPeopleRow
 	if err := s.writer.Writer.InTx(ctx, func(q TxQueries) error {
 		var err error
-		rows, err = q.ListTelegramGroupPeople(ctx, dbgen.ListTelegramGroupPeopleParams{OrgID: s.orgID,
-			DestinationID: *id})
+		if rows, err = q.ListTelegramGroupPeople(ctx, dbgen.ListTelegramGroupPeopleParams{OrgID: s.orgID,
+			DestinationID: *id}); err != nil {
+			return err
+		}
+		paged, err = q.ListChainPagedTelegramPeople(ctx, dbgen.ListChainPagedTelegramPeopleParams{OrgID: s.orgID,
+			DestinationID: *id, Now: s.writer.Business.Now().UTC()})
 		return err
 	}); err != nil {
-		return nil, nil, fmt.Errorf("list the people of the teams of destination %d: %w", *id, err)
+		return nil, nil, fmt.Errorf("list the people of the teams and the chains of destination %d: %w", *id, err)
+	}
+	for _, r := range paged {
+		rows = append(rows, dbgen.ListTelegramGroupPeopleRow(r))
 	}
 	var out []telegram.GroupPerson
 	for _, r := range rows {
@@ -1509,13 +1523,25 @@ func (s *Service) telegramGroupPeople(ctx context.Context, id *int64) ([]telegra
 	return out, refs, nil
 }
 
-// absentUsers are the references of the Users ids, in their order, which is by name.
+// absentUsers are the references of the Users ids by name, ignoring case, then by id: the check asks the people of
+// the Teams first and those of the chains after them, each by name.
 func absentUsers(ids []int64, refs map[int64]UserRef) []UserRef {
-	out := make([]UserRef, 0, len(ids))
+	type absent struct {
+		id  int64
+		ref UserRef
+	}
+	list := make([]absent, 0, len(ids))
 	for _, id := range ids {
 		if r, ok := refs[id]; ok {
-			out = append(out, r)
+			list = append(list, absent{id, r})
 		}
+	}
+	slices.SortFunc(list, func(a, b absent) int {
+		return cmp.Or(cmp.Compare(strings.ToLower(a.ref.Name), strings.ToLower(b.ref.Name)), cmp.Compare(a.id, b.id))
+	})
+	out := make([]UserRef, len(list))
+	for i, a := range list {
+		out[i] = a.ref
 	}
 	return out
 }

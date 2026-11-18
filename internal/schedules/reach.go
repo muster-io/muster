@@ -4,9 +4,11 @@
 package schedules
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/muster-io/muster/internal/mentions"
@@ -14,10 +16,10 @@ import (
 )
 
 // WarningUnreachable is the kind of the warning of a segment in which a Mention of its On-call cannot reach a
-// Destination of their Team (C-27.FR-8).
+// Destination of their Team, or one in whose Threads a chain that Pages the Schedule writes (C-27.FR-8).
 const WarningUnreachable = "unreachable"
 
-// The reasons a Mention of an On-call cannot reach a Destination of their Team (ReachReason, C-27.FR-8).
+// The reasons a Mention of an On-call cannot reach a Destination (ReachReason, C-27.FR-8).
 const (
 	ReachNoAccountLink          = "no_account_link"
 	ReachBridgeNoNativeMentions = "bridge_no_native_mentions"
@@ -51,10 +53,10 @@ type Unreachable struct {
 	GatewayReaches bool
 }
 
-// teamDestination is a Destination of a Team with what decides whether a Mention of a person reaches it: its
-// Connection, the mode of an outgoing webhook and whether its template replies in the Thread, whether the info a
-// Bridge's Connection last read declares native_mentions, and the Users the last check of a Telegram Destination saw
-// outside its discussion group.
+// teamDestination is a Destination of the reach of a Schedule — of its Team, or of a Route or a Team whose chain
+// Pages the Schedule — with what decides whether a Mention of a person reaches it: its Connection, the mode of an
+// outgoing webhook and whether its template replies in the Thread, whether the info a Bridge's Connection last read
+// declares native_mentions, and the Users the last check of a Telegram Destination saw outside its discussion group.
 type teamDestination struct {
 	DestinationRef
 	Connection     *int64
@@ -95,19 +97,20 @@ func reachReason(d teamDestination, user int64, spaces map[string]bool) string {
 	return ""
 }
 
-// reach is what the reach of the people of some Teams reads: the Destinations of each Team, by Team id, and the
-// Identity spaces in which each person has an Account link, by User id.
+// reach is what the reach of the people of some Schedules reads: the Destinations of the reach of each Schedule, by
+// Schedule id, the Identity spaces in which each person has an Account link and who has a confirmed contact at a
+// Notification gateway, by User id.
 type reach struct {
-	teams   map[int64][]teamDestination
-	spaces  map[int64]map[string]bool
-	gateway map[int64]bool
+	schedules map[int64][]teamDestination
+	spaces    map[int64]map[string]bool
+	gateway   map[int64]bool
 }
 
-// unreachable are the Destinations of the Team team that a Mention of the person user cannot reach, in the order of
-// the Team's Destinations, by name; none for a Team without Destinations.
-func (r reach) unreachable(team, user int64) []Unreachable {
+// unreachable are the Destinations of the reach of the Schedule schedule that a Mention of the person user cannot
+// reach, by name; none for a Schedule without Destinations.
+func (r reach) unreachable(schedule, user int64) []Unreachable {
 	out := []Unreachable{}
-	for _, d := range r.teams[team] {
+	for _, d := range r.schedules[schedule] {
 		if reason := reachReason(d, user, r.spaces[user]); reason != "" {
 			out = append(out, Unreachable{Destination: d.DestinationRef, Messenger: d.Type, Reason: reason,
 				GatewayReaches: r.gateway[user]})
@@ -116,36 +119,81 @@ func (r reach) unreachable(team, user int64) []Unreachable {
 	return out
 }
 
-// readReach reads the reach of the people users in the Teams teams (C-27.FR-8): the Destinations of each Team, which
-// are the Team's part of the reach rule of C-26.FR-1 whatever their conditions, since an On-call is warned about every
-// Destination of their Team, the person's Account links and who has a confirmed contact at a Notification gateway. It
-// only reads.
-func (s *Service) readReach(ctx context.Context, q Queries, teams, users map[int64]bool) (reach, error) {
-	out := reach{teams: map[int64][]teamDestination{}, spaces: map[int64]map[string]bool{}, gateway: map[int64]bool{}}
-	if len(teams) == 0 || len(users) == 0 {
+// reachDestination is the teamDestination of a row of ListTeamReach, or of ListChainReach as one.
+func reachDestination(r dbgen.ListTeamReachRow) teamDestination {
+	d := teamDestination{DestinationRef: DestinationRef{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Type: r.Type,
+		Health: r.Health}, WebhookMode: r.WebhookMode, ReplyInThread: r.ReplyInThread,
+		NativeMentions: r.NativeMentions, Absent: r.TelegramAbsentUserIds}
+	if r.BrokenSince.Valid {
+		at := r.BrokenSince.Time
+		d.BrokenSince = &at
+	}
+	if r.BrokenReason.Valid {
+		reason := r.BrokenReason.String
+		d.BrokenReason = &reason
+	}
+	if r.ConnectionID.Valid {
+		id := r.ConnectionID.Int64
+		d.Connection = &id
+	}
+	return d
+}
+
+// byName orders Destinations by name, ignoring case, then by id.
+func byName(a, b teamDestination) int {
+	return cmp.Or(cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), cmp.Compare(a.ID, b.ID))
+}
+
+// readReach reads the reach of the people users in the Schedules schedules, each with its Team by Schedule id
+// (C-27.FR-8): the Destinations of the reach of each Schedule — those of its Team, which are the Team's part of the
+// reach rule of C-26.FR-1 whatever their conditions, since an On-call is warned about every Destination of their Team,
+// and those in whose Threads the chains that Page the Schedule write, of the Routes and the Teams that name them
+// (C-32.FR-8) —, each once and by name; the person's Account links and who has a confirmed contact at a Notification
+// gateway. It only reads.
+func (s *Service) readReach(ctx context.Context, q Queries, schedules map[int64]int64, users map[int64]bool) (reach,
+	error) {
+	out := reach{schedules: map[int64][]teamDestination{}, spaces: map[int64]map[string]bool{},
+		gateway: map[int64]bool{}}
+	if len(schedules) == 0 || len(users) == 0 {
 		return out, nil
+	}
+	teams := map[int64]bool{}
+	for _, team := range schedules {
+		teams[team] = true
 	}
 	rows, err := q.ListTeamReach(ctx, dbgen.ListTeamReachParams{OrgID: s.orgID, TeamIds: sortedKeys(teams)})
 	if err != nil {
 		return reach{}, fmt.Errorf("read the destinations of the teams: %w", err)
 	}
+	byTeam := map[int64][]teamDestination{}
 	for _, r := range rows {
-		d := teamDestination{DestinationRef: DestinationRef{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Type: r.Type,
-			Health: r.Health}, WebhookMode: r.WebhookMode, ReplyInThread: r.ReplyInThread,
-			NativeMentions: r.NativeMentions, Absent: r.TelegramAbsentUserIds}
-		if r.BrokenSince.Valid {
-			at := r.BrokenSince.Time
-			d.BrokenSince = &at
+		byTeam[r.TeamID] = append(byTeam[r.TeamID], reachDestination(r))
+	}
+	ids := make(map[int64]bool, len(schedules))
+	for id := range schedules {
+		ids[id] = true
+	}
+	chained, err := q.ListChainReach(ctx, dbgen.ListChainReachParams{OrgID: s.orgID, ScheduleIds: sortedKeys(ids)})
+	if err != nil {
+		return reach{}, fmt.Errorf("read the destinations of the chains that page the schedules: %w", err)
+	}
+	byChain := map[int64][]teamDestination{}
+	for _, r := range chained {
+		byChain[r.ScheduleID] = append(byChain[r.ScheduleID], reachDestination(dbgen.ListTeamReachRow{ID: r.ID,
+			PublicID: r.PublicID, Name: r.Name, Type: r.Type, Health: r.Health, BrokenSince: r.BrokenSince,
+			BrokenReason: r.BrokenReason, ConnectionID: r.ConnectionID, WebhookMode: r.WebhookMode,
+			ReplyInThread: r.ReplyInThread, NativeMentions: r.NativeMentions,
+			TelegramAbsentUserIds: r.TelegramAbsentUserIds}))
+	}
+	for id, team := range schedules {
+		ds := slices.Clone(byTeam[team])
+		for _, d := range byChain[id] {
+			if !slices.ContainsFunc(ds, func(x teamDestination) bool { return x.ID == d.ID }) {
+				ds = append(ds, d)
+			}
 		}
-		if r.BrokenReason.Valid {
-			reason := r.BrokenReason.String
-			d.BrokenReason = &reason
-		}
-		if r.ConnectionID.Valid {
-			id := r.ConnectionID.Int64
-			d.Connection = &id
-		}
-		out.teams[r.TeamID] = append(out.teams[r.TeamID], d)
+		slices.SortStableFunc(ds, byName)
+		out.schedules[id] = ds
 	}
 	links, err := q.ListAccountLinkSpaces(ctx, dbgen.ListAccountLinkSpacesParams{OrgID: s.orgID,
 		UserIds: sortedKeys(users)})
@@ -182,12 +230,12 @@ func onCalls(results ...Result) map[int64]bool {
 	return out
 }
 
-// withReach adds to the Result res of a Schedule of the Team team its warnings unreachable (C-27.FR-8).
-func (s *Service) withReach(ctx context.Context, q Queries, team int64, res *Result) error {
-	r, err := s.readReach(ctx, q, map[int64]bool{team: true}, onCalls(*res))
+// withReach adds to the Result res of the Schedule sc its warnings unreachable (C-27.FR-8).
+func (s *Service) withReach(ctx context.Context, q Queries, sc Schedule, res *Result) error {
+	r, err := s.readReach(ctx, q, map[int64]int64{sc.ID: sc.Team.ID}, onCalls(*res))
 	if err != nil {
 		return err
 	}
-	res.Warnings = append(res.Warnings, unreachableWarnings(*res, team, r)...)
+	res.Warnings = append(res.Warnings, unreachableWarnings(*res, sc.ID, r)...)
 	return nil
 }

@@ -29,6 +29,6 @@ export interface TeamOnCall {
   until: string | null;
   /** The segment that follows within `schedule.gap_view`, or null. */
   next: OnCallNext | null;
-  /** The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them. */
+  /** The Destinations of the Team, and of the Routes and Teams that name an Escalation chain with a `page_on_call` step on the main Schedule, that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), each once, by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them. */
   unreachable: OnCallReach[];
 }

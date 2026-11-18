@@ -5907,12 +5907,12 @@ type DestinationCheckItem struct {
 	// MissingScopes Set with the code `missing_scope` (Slack `channel`), omitted otherwise — the scopes Slack named as needed (`needed` of its answer), which clients name in their own words; `message` names them in English.
 	MissingScopes *[]string `json:"missing_scopes,omitempty"`
 
-	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside (C-27.FR-8).
+	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person with a Telegram Account link of the Teams that name the Destination, and each one whom an Escalation chain Paging in it can Page through a Schedule — in a Rotation layer of a Schedule that a `page_on_call` step of the chain names, or with an Override of it that has not ended —, is in the discussion group, once per person, and names in `absent_users` those it saw outside (C-27.FR-8).
 	Name DestinationCheckItemName `json:"name"`
 	Ok   bool                     `json:"ok"`
 }
 
-// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside (C-27.FR-8).
+// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which always passes, reads with `getChatMember` whether each person with a Telegram Account link of the Teams that name the Destination, and each one whom an Escalation chain Paging in it can Page through a Schedule — in a Rotation layer of a Schedule that a `page_on_call` step of the chain names, or with an Override of it that has not ended —, is in the discussion group, once per person, and names in `absent_users` those it saw outside (C-27.FR-8).
 type DestinationCheckItemName string
 
 // DestinationCheckResult defines model for DestinationCheckResult.
@@ -7836,7 +7836,7 @@ type OnCallNow struct {
 	Items []TeamOnCall `json:"items"`
 }
 
-// OnCallReach A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).
+// OnCallReach A Destination of the Team, or of an Escalation chain that Pages its main Schedule, that a Mention of its On-call cannot reach, with why (C-27.FR-8).
 type OnCallReach struct {
 	Destination DestinationRef `json:"destination"`
 
@@ -7846,7 +7846,7 @@ type OnCallReach struct {
 	// Messenger The messenger of the Destination — the type of its Connection, or `webhook`.
 	Messenger DestinationType `json:"messenger"`
 
-	// Reason Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
+	// Reason Why a Mention of an On-call cannot reach a Destination of their Team, or of an Escalation chain that Pages their Schedule (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
 	Reason ReachReason `json:"reason"`
 }
 
@@ -8331,7 +8331,7 @@ type QueueDepth struct {
 	Queued      int       `json:"queued"`
 }
 
-// ReachReason Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
+// ReachReason Why a Mention of an On-call cannot reach a Destination of their Team, or of an Escalation chain that Pages their Schedule (C-27.FR-8): `no_account_link` — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination check of a Telegram Destination saw the person outside the discussion group of its channel.
 type ReachReason string
 
 // RelatedAlertGroup defines model for RelatedAlertGroup.
@@ -9044,7 +9044,7 @@ type ScheduleRef struct {
 
 // ScheduleWarning defines model for ScheduleWarning.
 type ScheduleWarning struct {
-	// Destination The Destination of the Team that a Mention of the person cannot reach; null for another kind.
+	// Destination The Destination of the Team, or of an Escalation chain that Pages the Schedule — of a Route or a Team that names the chain —, that a Mention of the person cannot reach; null for another kind.
 	Destination nullable.Nullable[DestinationRef] `json:"destination"`
 
 	// End The end of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
@@ -9922,7 +9922,7 @@ type TeamOnCall struct {
 	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 	Team TeamRef `json:"team"`
 
-	// Unreachable The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them.
+	// Unreachable The Destinations of the Team, and of the Routes and Teams that name an Escalation chain with a `page_on_call` step on the main Schedule, that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), each once, by the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them.
 	Unreachable []OnCallReach `json:"unreachable"`
 
 	// Until The end of the current segment — the On-call's, or the gap's; null when it lasts beyond `schedule.gap_view` and without a Schedule.

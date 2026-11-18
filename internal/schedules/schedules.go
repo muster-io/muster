@@ -301,6 +301,7 @@ type Queries interface {
 	GetOrganizationTeamLabel(ctx context.Context, orgID int64) (string, error)
 	ListOnCallTeams(ctx context.Context, arg dbgen.ListOnCallTeamsParams) ([]dbgen.ListOnCallTeamsRow, error)
 	ListTeamReach(ctx context.Context, arg dbgen.ListTeamReachParams) ([]dbgen.ListTeamReachRow, error)
+	ListChainReach(ctx context.Context, arg dbgen.ListChainReachParams) ([]dbgen.ListChainReachRow, error)
 	ListAccountLinkSpaces(ctx context.Context, arg dbgen.ListAccountLinkSpacesParams) (
 		[]dbgen.ListAccountLinkSpacesRow, error)
 	ListGatewayReachUsers(ctx context.Context, arg dbgen.ListGatewayReachUsersParams) ([]int64, error)

@@ -7,7 +7,7 @@ import type { DestinationType } from './destinationType';
 import type { ReachReason } from './reachReason';
 
 /**
- * A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).
+ * A Destination of the Team, or of an Escalation chain that Pages its main Schedule, that a Mention of its On-call cannot reach, with why (C-27.FR-8).
  */
 export interface OnCallReach {
   destination: DestinationRef;
