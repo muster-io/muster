@@ -1646,6 +1646,9 @@ WHERE org_id = @org_id AND id = @id;
 -- Secrets (C-11.FR-14, C-15.FR-12); the delete of the named Secrets runs whether or not the update reads it. It
 -- changes nothing otherwise, and nothing the second time. @id null wipes every deleted Destination of the
 -- Organization that qualifies, which the retention of outgoing webhook events runs for a call whose replica stopped.
+-- The Destinations it changes are locked in id order where they are picked, before the update, which alone would lock
+-- them in the order of its scan: a transaction that locks several of them in id order, as key activation locks the
+-- outgoing webhooks, would otherwise deadlock with it.
 -- name: WipeDestinationSecrets :exec
 WITH gone AS (
     SELECT x.id
@@ -1662,6 +1665,8 @@ WITH gone AS (
       AND NOT EXISTS (SELECT 1
                       FROM webhook_events e
                       WHERE e.org_id = x.org_id AND e.destination_id = x.id AND e.lease_until > @now::timestamptz)
+    ORDER BY x.id
+    FOR NO KEY UPDATE
 ), secrets AS (
     DELETE FROM destination_secrets s
     USING gone
