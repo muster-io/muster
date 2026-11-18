@@ -1611,7 +1611,10 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
     `group`
     :   A group of the messenger — a [Team mention](https://muster-io.github.io/muster/latest/concepts/teams.md#team-mentions) or a group entry of the
         Destination — with the name an Admin typed for it as `external_id` and `display_name`, which the bridge maps to
-        its messenger's group. It comes only while Muster's copy of the bridge's `info` declares `group_mentions`.
+        its messenger's group. It comes only while Muster's copy of the bridge's `info` declares `group_mentions`. A
+        `{{ mention "group" "payments_team" }}` in a Route's template stays text in `body`, which notifies nobody, and
+        adds its entry to the line of Mentions of a Loud message or Thread reply, once beside a group entry of the same
+        name, when the bridge's `info` declares `group_mentions`.
 
     `everyone`
     :   Everyone in the chat, with the symbolic name `channel`, `here`, `all` or `everyone` as `external_id` and

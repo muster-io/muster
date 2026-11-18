@@ -3507,7 +3507,10 @@ entries it always saw.</dd>
 <dt><code>group</code></dt>
 <dd>A group of the messenger — a <a href="../../concepts/teams/#team-mentions">Team mention</a> or a group entry of the
 Destination — with the name an Admin typed for it as <code>external_id</code> and <code>display_name</code>, which the bridge maps to
-its messenger's group. It comes only while Muster's copy of the bridge's <code>info</code> declares <code>group_mentions</code>.</dd>
+its messenger's group. It comes only while Muster's copy of the bridge's <code>info</code> declares <code>group_mentions</code>. A
+<code>{{ mention "group" "payments_team" }}</code> in a Route's template stays text in <code>body</code>, which notifies nobody, and
+adds its entry to the line of Mentions of a Loud message or Thread reply, once beside a group entry of the same
+name, when the bridge's <code>info</code> declares <code>group_mentions</code>.</dd>
 <dt><code>everyone</code></dt>
 <dd>Everyone in the chat, with the symbolic name <code>channel</code>, <code>here</code>, <code>all</code> or <code>everyone</code> as <code>external_id</code> and
 <code>display_name</code>. It comes only with a name that Muster's copy of the bridge's <code>info</code> lists in
