@@ -5931,7 +5931,10 @@ SET desired_version     = desired_version + 1,
     configuration_only  = $9::boolean AND published_at IS NOT NULL AND NOT desired_retire
                           AND (state = 'delivered' OR (state = 'pending' AND configuration_only)),
     urgent              = $10,
-    next_attempt_at     = $11,
+    next_attempt_at     = CASE
+                              WHEN state = 'pending' AND attempts > 0 THEN greatest(next_attempt_at, $11)
+                              ELSE $11
+                          END,
     updated_at          = $11
 WHERE org_id = $12 AND id = $13
 RETURNING state
@@ -5955,8 +5958,11 @@ type SetDesiredParams struct {
 
 // SetDesired stores a new Desired state: the next version, its text, payload and hash, the key that signed its
 // buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
-// now, and returns the state it leaves. A delivery deleted in the messenger or retired stays so; a withheld one stays
-// so unless its Alert Group is open again (@open), when it is published after all, Loud when it is @firing
+// now, and returns the state it leaves. A delivery that was pending and waits out the backoff of a counted Transient
+// error (attempts > 0) keeps that time, or a later wait set since, so that a change neither retries it at once nor uses up the attempts of
+// delivery.transient_budget sooner (C-11.FR-8); its next attempt sends the newest version. A delivery deleted in the
+// messenger or retired stays so; a withheld one stays so unless its Alert Group is open again (@open), when it is
+// published after all, Loud when it is @firing
 // (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10), Quiet when it was never published and the
 // change is one of configuration (@quiet: a re-render without lifecycle events, or only rises that the Route's Minimum
 // severity made). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
