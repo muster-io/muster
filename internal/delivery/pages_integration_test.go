@@ -290,3 +290,88 @@ func TestIntegrationDropPageReplies(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationPageReplyLeftOut is C-32.FR-10 and C-12.FR-11 for RecordReplySent on PostgreSQL (#625): a Page reply
+// recorded sent with the people its Mention line did not leave out mentions only those, which ListPageReplies
+// reports, an empty list included; one recorded without them keeps the people decided when it was queued; and a reply
+// whose lease went to another replica is left as it is.
+func TestIntegrationPageReplyLeftOut(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fire(t, "leftout", "LeftOut/a")
+		l.round(t, l.a)
+		var group, del, page int64
+		if err := l.d.Pool.QueryRow(ctx, `SELECT a.id, x.id FROM alert_groups a JOIN deliveries x
+			ON x.alert_group_id = a.id WHERE a.public_id = $1 AND x.destination_id = $2`, l.group(t, "LeftOut"),
+			l.dests[0]).Scan(&group, &del); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO pages (org_id, alert_group_id, step_number, kind, state,
+			created_at) VALUES ($1, $2, 1, 'mention', 'pending', $3) RETURNING id`, l.orgID, group, t0).
+			Scan(&page); err != nil {
+			t.Fatal(err)
+		}
+		reply := func() int64 {
+			t.Helper()
+			var id int64
+			if err := l.d.Pool.QueryRow(ctx, `INSERT INTO thread_replies (org_id, delivery_id, alert_group_id,
+				destination_id, event, event_seqs, loudness, mentions, state, next_attempt_at, created_at, page_id,
+				paged_user_ids, lease_owner, lease_until) VALUES ($1, $2, $3, $4, 'paged', '{1}', 'loud', '{paged}',
+				'pending', $5, $5, $6, '{11,12,13}', 'w', $7) RETURNING id`, l.orgID, del, group, l.dests[0], t0,
+				page, t0.Add(time.Hour)).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		q := deliverydb.New(l.d.Pool)
+		sent := func(id int64, owner string, paged []int64) int64 {
+			t.Helper()
+			n, err := q.RecordReplySent(ctx, deliverydb.RecordReplySentParams{OrgID: l.orgID, ID: id, Owner: owner,
+				PagedUserIds: paged, Now: t0})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		leftOut, kept, none, other := reply(), reply(), reply(), reply()
+		if sent(leftOut, "w", []int64{11, 13}) != 1 || sent(kept, "w", nil) != 1 || sent(none, "w", []int64{}) != 1 ||
+			sent(other, "another", []int64{11}) != 0 {
+			t.Fatal("a reply not recorded as its lease says")
+		}
+		got := map[int64][]int64{}
+		rows, err := l.d.Pool.Query(ctx, `SELECT id, paged_user_ids FROM thread_replies WHERE page_id = $1`, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var id int64
+			var paged []int64
+			if err := rows.Scan(&id, &paged); err != nil {
+				t.Fatal(err)
+			}
+			got[id] = paged
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(got[leftOut], []int64{11, 13}) || !slices.Equal(got[kept], []int64{11, 12, 13}) ||
+			got[none] == nil || len(got[none]) != 0 || !slices.Equal(got[other], []int64{11, 12, 13}) {
+			t.Errorf("paged_user_ids %v", got)
+		}
+		replies, err := q.ListPageReplies(ctx, deliverydb.ListPageRepliesParams{OrgID: l.orgID, PageID: page})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reached []int64
+		for _, r := range replies {
+			if r.State == "sent" {
+				reached = append(reached, r.PagedUserIds...)
+			}
+		}
+		slices.Sort(reached)
+		if want := []int64{11, 11, 12, 13, 13}; !slices.Equal(reached, want) {
+			t.Errorf("the sent replies mention %v, want %v", reached, want)
+		}
+	})
+}

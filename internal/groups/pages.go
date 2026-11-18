@@ -64,7 +64,8 @@ type PageGateway struct {
 // no Notification gateway any more, before the call was sent (C-30.FR-9), or it came due while the gateway was Broken
 // (C-30.FR-8). A Page by Mention is not delivered when none of its chain's Destinations has the Alert Group's Root
 // message, when the person has no Account link in the Identity space of any of them, or when every Thread reply that
-// could mention them ended Not delivered or was withheld while its Destination was Broken (C-32.FR-10).
+// could mention them ended Not delivered, was withheld while its Destination was Broken or was sent with its line of
+// Mentions leaving them out for length (C-32.FR-10, C-12.FR-11).
 const (
 	PageCallRefused        = "call_refused"
 	PageCallUnknown        = "call_unknown"

@@ -6,6 +6,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
@@ -591,7 +594,7 @@ func TestPages(t *testing.T) {
 	})
 
 	t.Run("Pages in Telegram, through Bridges and to outgoing webhooks", func(t *testing.T) {
-		testPagesBeyondMattermost(t, h, e.on(t), ivan, td, chain, route)
+		testPagesBeyondMattermost(t, h, e.on(t), ivan, petr, td, chain, route)
 	})
 }
 
@@ -655,8 +658,9 @@ type pagedEvent struct {
 // importance (C-15.FR-2, FR-11); its template-mode webhook with "reply in thread" gets the Page through that request
 // with ivan as data, one without it no Page (C-32.FR-11). Beyond it: once the bridge no longer declares
 // native_mentions, its reply names ivan by the plain name and, no other Destination of that chain reaching him, the
-// Page records page_not_delivered not_delivered (C-32.FR-10, FR-11).
-func testPagesBeyondMattermost(t *testing.T, h *Harness, e *mm, ivan, devops string,
+// Page records page_not_delivered not_delivered (C-32.FR-10, FR-11); and a Page whose line of Mentions through the
+// bridge leaves out a person for length does not reach them (testPageLeftOut).
+func testPagesBeyondMattermost(t *testing.T, h *Harness, e *mm, ivan, petr, devops string,
 	chain func(name, owner, steps string) string,
 	route func(name, category string, entries []map[string]string, chains ...string) string) {
 	tgConn := e.demoConnection("telegram", devmode.TelegramConnectionName)
@@ -771,6 +775,8 @@ func testPagesBeyondMattermost(t *testing.T, h *Harness, e *mm, ivan, devops str
 		t.Errorf("the webhook without reply in thread %+v", c)
 	}
 
+	testPageLeftOut(t, h, e, ivan, petr, devops, brConn, br, chain, route)
+
 	// A bridge without native_mentions, read by a check of its Connection on every replica.
 	capabilities, _ := json.Marshal(fakebridge.DefaultConfig().Capabilities)
 	t.Cleanup(func() {
@@ -800,6 +806,73 @@ func testPagesBeyondMattermost(t *testing.T, h *Harness, e *mm, ivan, devops str
 		"Step 1: [@Ivan](muster-mention:m1), you are needed\n\n") || strings.Contains(in.Body, "has no linked") {
 		t.Errorf("plain bridge %q", in.Body)
 	}
+}
+
+// testPageLeftOut is #625 against `muster dev` (C-32.FR-10, FR-12, C-12.FR-11): with max_body_length 500, read by a
+// check of the bridge's Connection on every replica, a step that Pages ivan and petr, both linked through the bridge,
+// petr by a display name whose marker is longer than half of it, makes a reply whose line of Mentions keeps ivan
+// and leaves petr out; the Page reaches ivan alone, who becomes the only Assignee, and records page_not_delivered
+// not_delivered for petr, as no other reply of the Page mentioned him.
+func testPageLeftOut(t *testing.T, h *Harness, e *mm, ivan, petr, devops, brConn, br string,
+	chain func(name, owner, steps string) string,
+	route func(name, category string, entries []map[string]string, chains ...string) string) {
+	t.Helper()
+	limits, _ := json.Marshal(fakebridge.DefaultConfig().Limits)
+	check := func() {
+		t.Helper()
+		for _, rep := range h.Replicas {
+			api := patClient{t: t, base: rep.App, token: e.api.token}
+			if c := api.json(http.MethodPost, "/api/v1/connections/"+brConn+"/checks", "", http.StatusOK); c["ok"] !=
+				true {
+				t.Fatalf("the check of the bridge: %v", c)
+			}
+		}
+	}
+	t.Cleanup(func() { restore(t, http.MethodPut, h.Fakes.Bridge+"/_fake/config", `{"limits":`+string(limits)+`}`) })
+	e.fake(http.MethodPut, h.Fakes.Bridge+"/_fake/config",
+		`{"limits":{"max_body_length":500,"edit_max_age_seconds":null}}`)
+	check()
+	// Each "_" of the name is escaped in the marker: 275 code points of the name alone, more than 250.
+	h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id,
+		display_name, created_at) SELECT 1, 'AK0000000000B8', u.id, 'bridge', c.id, 'u-petr', 'Petr `+
+		strings.Repeat("p_", 90)+`', now() FROM users u, connections c WHERE u.public_id = '`+petr+
+		`' AND c.public_id = '`+brConn+`'`)
+	t.Cleanup(func() {
+		conn, err := pgx.Connect(context.Background(), h.DatabaseURL)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() { _ = conn.Close(context.Background()) }()
+		if _, err := conn.Exec(context.Background(),
+			`DELETE FROM account_links WHERE org_id = 1 AND public_id = 'AK0000000000B8'`); err != nil {
+			t.Error(err)
+		}
+	})
+	long := chain("long", devops,
+		`[{"kind":"page_people","user_ids":["`+ivan+`","`+petr+`"],"importance":"normal"}]`)
+	route("Long", "long", []map[string]string{{"destination_id": br, "severity_condition": "any"}}, long)
+	e.group("p11", "Long")
+	e.alert("p11", "a", `{"category":"long","system":"l","cluster":"p11a"}`, "")
+	e.notify("p11", "first notification")
+	g := e.groupOf("p11a")
+	eventually(t, "page_not_delivered not_delivered for petr", func() bool {
+		return slices.Equal(e.pageEntries(g, "paged", "page_not_delivered"),
+			[]string{"paged/ivan/petr", "page_not_delivered/not_delivered/petr"}) &&
+			h.dump(t, `SELECT p.state FROM pages p JOIN alert_groups a ON a.id = p.alert_group_id
+				WHERE a.public_id = '`+g+`'`) == "delivered"
+	})
+	e.waitAssignees(g, "ivan/devops")
+	page := bridgeReplies(t, h, "Chain of the Route Long")
+	if len(page) != 1 {
+		t.Fatalf("the Page through the bridge %+v", page)
+	}
+	if in := page[0].Input; !strings.HasPrefix(in.Body, "Step 1: [@Ivan](muster-mention:m1), you are needed\n\n") ||
+		len(in.Mentions) != 1 || in.Mentions[0].ExternalId != "u-ivan" || strings.Contains(in.Body, "p\\_p") {
+		t.Errorf("bridge %+v", in)
+	}
+	restore(t, http.MethodPut, h.Fakes.Bridge+"/_fake/config", `{"limits":`+string(limits)+`}`)
+	check()
 }
 
 // sortedCopy is s sorted.

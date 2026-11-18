@@ -1222,3 +1222,87 @@ func TestPageRepliesBeyondMattermost(t *testing.T) {
 		}
 	}
 }
+
+// leavingOut is the adapter of a bridge whose Mention line leaves out the people whose public ids are ids for its
+// length (C-12.FR-11): its replies are sent and report them in Outcome.LeftOut.
+type leavingOut struct {
+	*deliverytest.Recorder
+	ids []string
+}
+
+func (a leavingOut) Reply(ctx context.Context, c delivery.Call, root delivery.Root,
+	m delivery.Message) delivery.Outcome {
+	out := a.Recorder.Reply(ctx, c, root, m)
+	if out.Kind == delivery.OutcomeOK {
+		out.LeftOut = a.ids
+	}
+	return out
+}
+
+// TestPageReplyLeftOut is C-32.FR-10, FR-12 and C-12.FR-11: a sent Page reply through a bridge whose Mention
+// line left out a person for its length does not reach them — the reply mentions only the others from then on, and
+// the Page reports the others reached once its replies ended, so that the dispatcher records the person not
+// delivered and makes them no Assignee — unless another reply of the Page mentioned them. Left out, someone who is not
+// among the people the reply mentions changes nothing; and carol, a person of the Page linked only in Mattermost, whom
+// the bridge reply never mentioned, is not added to it.
+func TestPageReplyLeftOut(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		leftOut int64
+		other   bool
+		want    []int64
+		mention []int64
+	}{
+		{"left out", petrID, false, []int64{ivanID}, []int64{ivanID}},
+		{"mentioned by another reply", petrID, true, []int64{ivanID, petrID}, []int64{ivanID}},
+		{"left out someone else", carolID, false, []int64{ivanID, petrID}, []int64{ivanID, petrID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, s := pageEnvOfAll(t)
+			e.w.Adapters[delivery.TypeBridge] = leavingOut{Recorder: e.rec,
+				ids: []string{pagePeople[tc.leftOut].PublicID}}
+			e.db.pageDB.links = append(e.db.pageDB.links,
+				dbgen.ListPageLinksRow{UserID: petrID, IdentitySpace: spacePageBridge},
+				dbgen.ListPageLinksRow{UserID: petrID, IdentitySpace: "mattermost:" + strconv.Itoa(connID)},
+				dbgen.ListPageLinksRow{UserID: carolID, IdentitySpace: "mattermost:" + strconv.Itoa(connID)})
+			e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID, petrID, carolID)
+			targets := []groups.PageTarget{{DestinationID: destPageBridge, Source: groups.PageSourceRoute,
+				Linked: []int64{ivanID, petrID}}}
+			if tc.other {
+				targets = append(targets, groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute,
+					Linked: []int64{petrID}})
+			}
+			e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, pagedEvent(2, pageID, targets...))
+			e.rounds(t)
+			var sent []string
+			for _, c := range e.replies() {
+				if c.Destination.ID != destPageBridge {
+					continue
+				}
+				for _, tg := range c.Targets {
+					if tg.User != nil {
+						sent = append(sent, tg.User.Login)
+					}
+				}
+			}
+			if !slices.Equal(sent, []string{"ivan", "petr"}) {
+				t.Fatalf("the bridge reply mentions %v", sent)
+			}
+			var ended []groups.PageOutcome
+			for _, o := range s.outcomes {
+				if o.Page == pageID && o.Ended {
+					ended = append(ended, o)
+				}
+			}
+			if len(ended) != 1 || !ended[0].Delivered ||
+				!slices.Equal(slices.Sorted(slices.Values(ended[0].Reached)), tc.want) {
+				t.Errorf("outcomes %+v, want %v reached", s.outcomes, tc.want)
+			}
+			for _, r := range e.db.replies {
+				if r.page == pageID && r.dest == destPageBridge && !slices.Equal(r.pagedUsers, tc.mention) {
+					t.Errorf("the sent bridge reply mentions %v", r.pagedUsers)
+				}
+			}
+		})
+	}
+}

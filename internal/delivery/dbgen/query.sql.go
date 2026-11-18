@@ -3405,7 +3405,8 @@ type ListPageRepliesRow struct {
 	PagedUserIds []int64
 }
 
-// ListPageReplies lists the Thread replies of a Page with their state and the people each mentions.
+// ListPageReplies lists the Thread replies of a Page with their state and the people each mentions: for a sent one,
+// those its Mention line did not leave out for length.
 func (q *Queries) ListPageReplies(ctx context.Context, arg ListPageRepliesParams) ([]ListPageRepliesRow, error) {
 	rows, err := q.db.Query(ctx, listPageReplies, arg.OrgID, arg.PageID)
 	if err != nil {
@@ -4867,26 +4868,30 @@ const recordReplySent = `-- name: RecordReplySent :execrows
 UPDATE thread_replies
 SET state = 'sent', sent_at = $1::timestamptz, message_id = $2::text,
     button_key_id = $3::text, last_error_class = NULL, last_error = NULL, lease_owner = NULL,
-    lease_until = NULL
-WHERE org_id = $4 AND id = $5 AND lease_owner = $6::text
+    lease_until = NULL, paged_user_ids = coalesce($4::bigint[], paged_user_ids)
+WHERE org_id = $5 AND id = $6 AND lease_owner = $7::text
 `
 
 type RecordReplySentParams struct {
-	Now         time.Time
-	MessageID   pgtype.Text
-	ButtonKeyID pgtype.Text
-	OrgID       int64
-	ID          int64
-	Owner       string
+	Now          time.Time
+	MessageID    pgtype.Text
+	ButtonKeyID  pgtype.Text
+	PagedUserIds []int64
+	OrgID        int64
+	ID           int64
+	Owner        string
 }
 
 // RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
-// buttons (a Reminder's), for the presses on them.
+// buttons (a Reminder's), for the presses on them. The reply of a Page whose Mention line left out some of its people
+// for length (C-12.FR-11) mentions only @paged_user_ids, which replace those decided when it was queued; null keeps
+// them.
 func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, recordReplySent,
 		arg.Now,
 		arg.MessageID,
 		arg.ButtonKeyID,
+		arg.PagedUserIds,
 		arg.OrgID,
 		arg.ID,
 		arg.Owner,
