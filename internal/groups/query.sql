@@ -1363,8 +1363,13 @@ GROUP BY m.alert_group_id;
 -- still waits — those with a pending delivery — so that the final edit shows the change: delivery renders such an
 -- Alert Group again only in the Destinations where its delivery is still pending, so a final edit that went out, or a
 -- delivery that ended, is never sent again. Each walk is a UNION of two branches, each ordered by id and limited to
--- the batch: the open Alert Groups, read as before, and the resolved ones, read from the pending deliveries through
--- their partial index and then by id, once each; the batch is the first of both by id.
+-- the batch: the open Alert Groups, read as before, and the resolved ones, read from the pending deliveries after the
+-- cursor in the order of their Alert Group through deliveries_alert_group_pending_idx, once each; the batch is the
+-- first of both by id. That branch's conditions imply the index predicate whatever the parameters are —
+-- p.state = 'pending' is a constant, and p.alert_group_id > @after_id holds for no null Alert Group — so generic plans
+-- use the index too. It looks up the Alert Group of each pending delivery in a LATERAL subquery with LIMIT 1, which
+-- PostgreSQL keeps as a lookup by primary key per delivery: as a join, it merged the deliveries with alert_groups_pkey
+-- walked from the cursor, every resolved Alert Group up to the first pending one.
 
 -- ListOpenGroupsOfDestinationAfter lists, by id after a cursor, a batch of the open Alert Groups with a delivery in a
 -- Destination that is not being retired, and of the resolved ones whose delivery there is pending and not being
@@ -1381,12 +1386,15 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.destination_id = @destination_id
-         AND NOT p.desired_retire AND g.org_id = @org_id AND g.status = 'resolved' AND g.id > @after_id
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.status = 'resolved'
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id
+         AND p.destination_id = @destination_id AND NOT p.desired_retire
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
@@ -1408,14 +1416,16 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
        JOIN destinations x ON x.org_id = p.org_id AND x.id = p.destination_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND NOT p.desired_retire AND g.org_id = @org_id
-         AND g.status = 'resolved' AND g.id > @after_id AND x.org_id = @org_id AND x.buttons IS NULL
-         AND x.type <> 'webhook' AND x.deleted_at IS NULL
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.status = 'resolved'
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id AND NOT p.desired_retire
+         AND x.org_id = @org_id AND x.buttons IS NULL AND x.type <> 'webhook' AND x.deleted_at IS NULL
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
@@ -1434,15 +1444,17 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND g.org_id = @org_id AND g.status = 'resolved'
-         AND g.id > @after_id
-         AND EXISTS (SELECT 1
-                     FROM alert_group_teams t
-                     WHERE t.org_id = @org_id AND t.alert_group_id = g.id AND t.team_id = @team_id)
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.status = 'resolved'
+                       AND EXISTS (SELECT 1
+                                   FROM alert_group_teams t
+                                   WHERE t.org_id = @org_id AND t.alert_group_id = g.id AND t.team_id = @team_id)
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
@@ -1458,12 +1470,15 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND g.org_id = @org_id AND g.route_id = @route_id
-         AND g.status = 'resolved' AND g.id > @after_id
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.route_id = @route_id
+                       AND g.status = 'resolved'
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
@@ -1478,12 +1493,14 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND g.org_id = @org_id AND g.status = 'resolved'
-         AND g.id > @after_id
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.status = 'resolved'
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
@@ -1511,12 +1528,15 @@ FROM ((SELECT g.id
        ORDER BY a.alert_group_id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND g.org_id = @org_id AND g.status = 'resolved'
-         AND g.resolved_by_user_id = @user_id AND g.id > @after_id
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.status = 'resolved'
+                       AND g.resolved_by_user_id = @user_id
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
@@ -1533,12 +1553,15 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND g.org_id = @org_id AND g.status = 'resolved'
-         AND g.resolved_by_service_account_id = @service_account_id AND g.id > @after_id
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.status = 'resolved'
+                       AND g.resolved_by_service_account_id = @service_account_id
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
@@ -1573,12 +1596,14 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT @lim)
       UNION
-      (SELECT DISTINCT g.id
+      (SELECT DISTINCT p.alert_group_id AS id
        FROM deliveries p
-       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
-       WHERE p.org_id = @org_id AND p.state = 'pending' AND g.org_id = @org_id AND g.status = 'resolved'
-         AND g.id > @after_id
-       ORDER BY g.id
+       JOIN LATERAL (SELECT g.id
+                     FROM alert_groups g
+                     WHERE g.org_id = @org_id AND g.id = p.alert_group_id AND g.status = 'resolved'
+                     LIMIT 1) g ON true
+       WHERE p.org_id = @org_id AND p.state = 'pending' AND p.alert_group_id > @after_id
+       ORDER BY p.alert_group_id
        LIMIT @lim)) AS w
 ORDER BY w.id
 LIMIT @lim;
