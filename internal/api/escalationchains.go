@@ -325,10 +325,13 @@ func escalationRunOf(r escalation.ChainRun) gen.EscalationRun {
 			Title: r.Group.Title, SeverityLevel: gen.SeverityLevel(r.Group.Severity)}}
 	for i, st := range r.Steps {
 		step := gen.EscalationRunStep{Number: st.Number, Kind: gen.EscalationStepKind(st.Kind), At: st.At,
-			Outcome: gen.EscalationRunStepOutcome(st.Outcome)}
+			Outcome: gen.EscalationRunStepOutcome(st.Outcome), Pages: make([]gen.EscalationRunPage, len(st.Pages))}
 		step.Reason.SetNull()
 		if st.Reason != "" {
 			step.Reason.Set(gen.EscalationSkipReason(st.Reason))
+		}
+		for j, p := range st.Pages {
+			step.Pages[j] = escalationRunPageOf(p)
 		}
 		out.Steps[i] = step
 	}
@@ -345,6 +348,29 @@ func escalationRunOf(r escalation.ChainRun) gen.EscalationRun {
 			stop.Actor.Set(ref)
 		}
 		out.StoppedBy.Set(stop)
+	}
+	return out
+}
+
+// escalationRunPageOf is the API form of a Page a step of a run made.
+func escalationRunPageOf(p escalation.RunPageView) gen.EscalationRunPage {
+	out := gen.EscalationRunPage{Kind: gen.EscalationRunPageKind(p.Kind), Users: make([]gen.UserRef, len(p.Users)),
+		Outcome: gen.EscalationRunPageOutcome(p.Outcome)}
+	for i, u := range p.Users {
+		login := u.Login
+		out.Users[i] = gen.UserRef{Id: u.PublicID, Name: u.Name, Login: &login, Deactivated: u.Status == "deleted"}
+	}
+	out.Team.SetNull()
+	if p.Team != nil {
+		out.Team.Set(escalationTeamRefOf(*p.Team))
+	}
+	out.Everyone.SetNull()
+	if p.Everyone != "" {
+		out.Everyone.Set(gen.PageEveryone(p.Everyone))
+	}
+	out.Reason.SetNull()
+	if p.Reason != "" {
+		out.Reason.Set(gen.PageNotDeliveredReason(p.Reason))
 	}
 	return out
 }

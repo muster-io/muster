@@ -594,6 +594,11 @@ type TimelineEntry struct {
 	// Transport gateway came from (C-30.FR-6).
 	PagedUsers []*ActorRef
 	Gateway    *Ref
+	// Everyone is the word for everyone in the chat that a page_team step wrote, and Importance how a step Paged its
+	// people, normal or important, of a Page by Mention's paged and page_not_delivered (C-32.FR-19); the Team of a
+	// page_team step is Team.
+	Everyone   *string
+	Importance *string
 	// Chain and Step are the Escalation chain and the number of the step of an event of a chain, such as
 	// escalation_step_skipped, whose reason is Reason (C-32.FR-14); Chain is nil once the chain was deleted, and
 	// ChainName is the name it had when the run started.
@@ -759,7 +764,7 @@ func (s *Service) entries(ctx context.Context, gid int64, asc bool, kinds []stri
 			Detail: textOf(r.Detail), position: TimelinePosition{At: r.At.UTC(), Source: sourceEntries, ID: r.ID},
 			TeamRule: textOf(r.TeamRule), TeamMatcher: textOf(r.TeamMatcher), TeamValue: textOf(r.TeamValue),
 			teamID: r.TeamID.Int64, destinationID: r.DestinationID.Int64, gatewayID: r.GatewayConnectionID.Int64,
-			runID: r.EscalationRunID.Int64}
+			runID: r.EscalationRunID.Int64, Everyone: textOf(r.PageEveryone), Importance: textOf(r.PageImportance)}
 		if r.StepNumber.Valid {
 			e.Step = ptr(int(r.StepNumber.Int32))
 		}

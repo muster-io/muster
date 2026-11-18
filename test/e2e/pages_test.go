@@ -34,6 +34,90 @@ type pageEntry struct {
 		Login string `json:"login"`
 	} `json:"paged_users"`
 	SkipReason *string `json:"skip_reason"`
+	Team       *struct {
+		Slug string `json:"slug"`
+	} `json:"team"`
+	Everyone   *string `json:"everyone"`
+	Importance *string `json:"importance"`
+}
+
+// pageFields are the paged entries of the Alert Group g, in their order, each as its importance, team:<slug> or
+// everyone:<word>, "-" for none.
+func (e *mm) pageFields(g string) []string {
+	e.t.Helper()
+	var page struct {
+		Items []pageEntry `json:"items"`
+	}
+	decode(e.t, e.api.do(http.MethodGet, "/api/v1/alert-groups/"+g+"/timeline?kind=escalation&order=asc&limit=200",
+		""), &page)
+	out := []string{}
+	for _, x := range page.Items {
+		if x.Event != "paged" {
+			continue
+		}
+		var s []string
+		if x.Importance != nil {
+			s = append(s, *x.Importance)
+		}
+		if x.Team != nil {
+			s = append(s, "team:"+x.Team.Slug)
+		}
+		if x.Everyone != nil {
+			s = append(s, "everyone:"+*x.Everyone)
+		}
+		if len(s) == 0 {
+			s = []string{"-"}
+		}
+		out = append(out, strings.Join(s, "/"))
+	}
+	return out
+}
+
+// runPages are the steps of the newest run of the chain as number/outcome: and each of their Pages as
+// kind/outcome/logins/team:<slug>/everyone:<word>, as "How it went" lists them.
+func (e *mm) runPages(chain string) []string {
+	e.t.Helper()
+	var runs struct {
+		Items []struct {
+			Steps []struct {
+				Number  int    `json:"number"`
+				Outcome string `json:"outcome"`
+				Pages   []struct {
+					Kind  string `json:"kind"`
+					Users []struct {
+						Login string `json:"login"`
+					} `json:"users"`
+					Team *struct {
+						Slug string `json:"slug"`
+					} `json:"team"`
+					Everyone *string `json:"everyone"`
+					Outcome  string  `json:"outcome"`
+				} `json:"pages"`
+			} `json:"steps"`
+		} `json:"items"`
+	}
+	decode(e.t, e.api.do(http.MethodGet, "/api/v1/escalation-chains/"+chain+"/runs", ""), &runs)
+	out := []string{}
+	if len(runs.Items) == 0 {
+		return out
+	}
+	for _, st := range runs.Items[0].Steps {
+		s := fmt.Sprintf("%d/%s:", st.Number, st.Outcome)
+		for _, p := range st.Pages {
+			s += " " + p.Kind + "/" + p.Outcome
+			for _, u := range p.Users {
+				s += "/" + u.Login
+			}
+			if p.Team != nil {
+				s += "/team:" + p.Team.Slug
+			}
+			if p.Everyone != nil {
+				s += "/everyone:" + *p.Everyone
+			}
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // String is the entry as event/reason/logins.
@@ -313,6 +397,17 @@ func TestPages(t *testing.T) {
 	if n := pagesOf(t, g, false) + pagesOf(t, g, true); n != before {
 		t.Errorf("%d Pages after the acknowledgement, want %d", n, before)
 	}
+	// "How it went" lists the Pages of each step of the run of devops (C-32.AC-17, FR-18): step 1 Paged ivan, the
+	// wait none, and step 3 its first Mention and the later Mention of the important rule it started, all delivered;
+	// the paged entries of the Timeline carry their importance (C-32.FR-19).
+	devopsPages := []string{"1/made: mention/delivered/ivan", "2/made:",
+		"3/made: mention/delivered/ivan mention/delivered/ivan"}
+	eventually(t, "the Pages of the run of devops", func() bool {
+		return slices.Equal(e.runPages(cd), devopsPages)
+	})
+	if got := e.pageFields(g); !slices.Equal(got, []string{"normal", "normal", "important", "important"}) {
+		t.Errorf("the importance of the paged entries %v", got)
+	}
 
 	t.Run("an acknowledgement between two Mentions of the rule", func(t *testing.T) {
 		e := e.on(t)
@@ -377,6 +472,16 @@ func TestPages(t *testing.T) {
 			"escalation_step_skipped/no_mention_possible"}) {
 			t.Errorf("entries %v", got)
 		}
+		// The paged entries and "How it went" name the Team of step 1 and the word of step 2, without people or an
+		// importance (C-32.FR-18, FR-19).
+		if got := e.pageFields(g); !slices.Equal(got, []string{"team:devops", "everyone:here"}) {
+			t.Errorf("the paged entries of a Team %v", got)
+		}
+		want := []string{"1/made: mention/delivered/team:devops", "2/made: mention/delivered/everyone:here",
+			"3/skipped:"}
+		eventually(t, "the Pages of the run of teams", func() bool {
+			return slices.Equal(e.runPages(teams), want)
+		})
 	})
 
 	t.Run("a reply that ends Not delivered", func(t *testing.T) {

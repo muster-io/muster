@@ -308,6 +308,8 @@ export function entryText(
     case "escalation":
       // The events of Escalation chains and Pages show their name until S-159 renders them fully.
       switch (entry.event) {
+        case "paged":
+          return t("timeline.escalation.event", { event: entry.event });
         case "page_not_delivered":
           return t("timeline.escalation.event", { event: entry.event });
         case "escalation_step_skipped":
