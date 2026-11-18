@@ -213,6 +213,38 @@ func TestAcknowledgeByInactiveUser(t *testing.T) {
 	}
 }
 
+// TestResolveSharesWhoResolves is C-12.FR-12 for the footer of a resolved Alert Group whose final edit still waits: a
+// Resolve locks the row of the User or the Service account who resolves FOR SHARE before it locks the Alert Group, as a
+// Snooze does, so that a change of their name or Account links, which locks that row before it writes its re-render,
+// either waits for the Resolve and then walks its Alert Group, or the Resolve renders the footer after the change; a
+// failing lock fails the Resolve.
+func TestResolveSharesWhoResolves(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	for _, c := range []struct {
+		name   string
+		caller Caller
+		lock   string
+	}{{"a user", alice, "ShareUser"}, {"a service account", robot, "ShareServiceAccount"}} {
+		g := h.firing(t, c.name)
+		locks := h.db.calls[c.lock]
+		h.db.fail[c.lock] = errBoom
+		if _, err := h.do(c.caller, CommandResolve, g); !errors.Is(err, errBoom) || g.Status != "firing" {
+			t.Errorf("%s: a failing lock = %v, %s", c.name, err, g.Status)
+		}
+		delete(h.db.fail, c.lock)
+		var before int
+		h.db.before["LockGroups"] = func() { before = h.db.calls[c.lock] }
+		if _, err := h.do(c.caller, CommandResolve, g); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if before != locks+2 || g.Status != "resolved" {
+			t.Errorf("%s: %d share locks before the alert group, %s", c.name, before-locks, g.Status)
+		}
+		delete(h.db.before, "LockGroups")
+	}
+}
+
 // TestSnoozeSharesWhoSnoozes is C-12.FR-12 for the footer of a snoozed Alert Group: a Snooze locks the row of the User
 // or the Service account who snoozes FOR SHARE before it locks the Alert Group, as an Acknowledge locks who
 // acknowledges, so that a change of their name or Account links, which locks that row before it writes its re-render,

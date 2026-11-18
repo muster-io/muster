@@ -324,6 +324,11 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 	// own entries, destination_joined its Destination and a change of a Team's entries the Destination it touched.
 	adds := growth{joined: r.Joined(), teams: joinedTeams(r), grows: r.Grows}
 	targets := withAdded(withReached(reached, had, created || moved || len(had) == 0 || grows(r)), reached, adds)
+	if finalEditsOnly(r) {
+		targets = slices.DeleteFunc(slices.Clone(targets), func(t target) bool {
+			return t.had == nil || t.had.State != statePending
+		})
+	}
 	if created && r.Unreached != nil && !reachable(targets) {
 		r.Unreached()
 	}
@@ -756,6 +761,10 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 	if row.Inserted && !how.created {
 		how.replies = nil
 	}
+	if finalEditsOnly(r) && row.State != statePending {
+		// The final edit went out, or the delivery ended, since the rendering listed the Destinations.
+		return nil
+	}
 	state := row.State
 	if (how.moved || how.rejoin) && !row.Inserted {
 		p := dbgen.RejoinDeliveryParams{OrgID: s.orgID, AlertGroupID: g.ID, DestinationID: d.ID,
@@ -906,6 +915,14 @@ func configurationOnly(r groups.Rendering) bool {
 		}
 	}
 	return true
+}
+
+// finalEditsOnly reports whether a rendering is the re-render of a change of configuration of a resolved Alert Group,
+// whose final edit still waits (C-12.FR-12, C-26.FR-9): it renders the Root messages whose delivery is pending again,
+// Quietly, so that the final edit shows the change, and touches no other — a final edit that went out is not sent
+// again, a delivery that ended or is Not delivered is not revived, and no Destination is added.
+func finalEditsOnly(r groups.Rendering) bool {
+	return r.Configuration && r.Group.Status == groups.StatusResolved
 }
 
 // ended reports whether a delivery is in a state that a change of the Desired state does not revive: withheld,

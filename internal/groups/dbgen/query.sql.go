@@ -2024,10 +2024,21 @@ func (q *Queries) ListChangedAlerts(ctx context.Context, arg ListChangedAlertsPa
 }
 
 const listEvaluatedGroupsAfter = `-- name: ListEvaluatedGroupsAfter :many
-SELECT id
-FROM alert_groups
-WHERE org_id = $1 AND (status <> 'resolved' OR grace_deadline IS NOT NULL) AND id > $2
-ORDER BY id
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND (g.status <> 'resolved' OR g.grace_deadline IS NOT NULL) AND g.id > $2
+       ORDER BY g.id
+       LIMIT $3)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND g.org_id = $1 AND g.status = 'resolved'
+         AND g.id > $2
+       ORDER BY g.id
+       LIMIT $3)) AS w
+ORDER BY w.id
 LIMIT $3
 `
 
@@ -2039,7 +2050,9 @@ type ListEvaluatedGroupsAfterParams struct {
 
 // ListEvaluatedGroupsAfter lists, by id after a cursor, a batch of the Alert Groups whose firing Alerts the evaluation
 // on a save of a Team or of the Team label classifies again (C-25.FR-13): the open ones, and those a person resolved
-// that are still in their Grace period, whose firing tails the end of the Grace period groups again.
+// that are still in their Grace period, whose firing tails the end of the Grace period groups again; and those with a
+// pending delivery, whose final edit a change of the Organization's message settings re-renders (the evaluation leaves
+// a resolved Alert Group outside its Grace period as it is).
 func (q *Queries) ListEvaluatedGroupsAfter(ctx context.Context, arg ListEvaluatedGroupsAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listEvaluatedGroupsAfter, arg.OrgID, arg.AfterID, arg.Lim)
 	if err != nil {
@@ -3577,10 +3590,21 @@ func (q *Queries) ListOpenGroupIDs(ctx context.Context, orgID int64) ([]int64, e
 }
 
 const listOpenGroupsAfter = `-- name: ListOpenGroupsAfter :many
-SELECT id
-FROM alert_groups
-WHERE org_id = $1 AND status <> 'resolved' AND id > $2
-ORDER BY id
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+       ORDER BY g.id
+       LIMIT $3)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND g.org_id = $1 AND g.status = 'resolved'
+         AND g.id > $2
+       ORDER BY g.id
+       LIMIT $3)) AS w
+ORDER BY w.id
 LIMIT $3
 `
 
@@ -3590,8 +3614,8 @@ type ListOpenGroupsAfterParams struct {
 	Lim     int32
 }
 
-// ListOpenGroupsAfter lists, by id after a cursor, a batch of the open Alert Groups of the Organization, whose links a
-// change of a Link rule or of a Lookup table re-renders.
+// ListOpenGroupsAfter lists, by id after a cursor, a batch of the open Alert Groups of the Organization, and of the
+// resolved ones with a pending delivery, whose links a change of a Link rule or of a Lookup table re-renders.
 func (q *Queries) ListOpenGroupsAfter(ctx context.Context, arg ListOpenGroupsAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsAfter, arg.OrgID, arg.AfterID, arg.Lim)
 	if err != nil {
@@ -3613,15 +3637,28 @@ func (q *Queries) ListOpenGroupsAfter(ctx context.Context, arg ListOpenGroupsAft
 }
 
 const listOpenGroupsFollowingOrganizationAfter = `-- name: ListOpenGroupsFollowingOrganizationAfter :many
-SELECT g.id
-FROM alert_groups g
-WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
-  AND EXISTS (SELECT 1
-              FROM deliveries d
-              JOIN destinations x ON x.org_id = d.org_id AND x.id = d.destination_id
-              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND NOT d.desired_retire AND x.buttons IS NULL
-                AND x.type <> 'webhook' AND x.deleted_at IS NULL)
-ORDER BY g.id
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+         AND EXISTS (SELECT 1
+                     FROM deliveries d
+                     JOIN destinations x ON x.org_id = d.org_id AND x.id = d.destination_id
+                     WHERE d.org_id = $1 AND d.alert_group_id = g.id AND NOT d.desired_retire
+                       AND x.buttons IS NULL AND x.type <> 'webhook' AND x.deleted_at IS NULL)
+       ORDER BY g.id
+       LIMIT $3)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       JOIN destinations x ON x.org_id = p.org_id AND x.id = p.destination_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND NOT p.desired_retire AND g.org_id = $1
+         AND g.status = 'resolved' AND g.id > $2 AND x.org_id = $1 AND x.buttons IS NULL
+         AND x.type <> 'webhook' AND x.deleted_at IS NULL
+       ORDER BY g.id
+       LIMIT $3)) AS w
+ORDER BY w.id
 LIMIT $3
 `
 
@@ -3633,7 +3670,8 @@ type ListOpenGroupsFollowingOrganizationAfterParams struct {
 
 // ListOpenGroupsFollowingOrganizationAfter lists, by id after a cursor, a batch of the open Alert Groups with a
 // delivery that is not being retired in a messenger Destination that is not deleted and follows the Organization's
-// button set, whose Root messages a change of that set re-renders (C-28.FR-9).
+// button set, and of the resolved ones whose delivery in such a Destination is pending, whose Root messages a change
+// of that set re-renders (C-28.FR-9).
 func (q *Queries) ListOpenGroupsFollowingOrganizationAfter(ctx context.Context, arg ListOpenGroupsFollowingOrganizationAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsFollowingOrganizationAfter, arg.OrgID, arg.AfterID, arg.Lim)
 	if err != nil {
@@ -3655,14 +3693,26 @@ func (q *Queries) ListOpenGroupsFollowingOrganizationAfter(ctx context.Context, 
 }
 
 const listOpenGroupsOfDestinationAfter = `-- name: ListOpenGroupsOfDestinationAfter :many
-SELECT g.id
-FROM alert_groups g
-WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
-  AND EXISTS (SELECT 1
-              FROM deliveries d
-              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND d.destination_id = $3
-                AND NOT d.desired_retire)
-ORDER BY g.id
+
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+         AND EXISTS (SELECT 1
+                     FROM deliveries d
+                     WHERE d.org_id = $1 AND d.alert_group_id = g.id AND d.destination_id = $3
+                       AND NOT d.desired_retire)
+       ORDER BY g.id
+       LIMIT $4)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND p.destination_id = $3
+         AND NOT p.desired_retire AND g.org_id = $1 AND g.status = 'resolved' AND g.id > $2
+       ORDER BY g.id
+       LIMIT $4)) AS w
+ORDER BY w.id
 LIMIT $4
 `
 
@@ -3673,9 +3723,15 @@ type ListOpenGroupsOfDestinationAfterParams struct {
 	Lim           int32
 }
 
+// The walks of a change of configuration below take, besides the open Alert Groups, the resolved ones whose final edit
+// still waits — those with a pending delivery — so that the final edit shows the change: delivery renders such an
+// Alert Group again only in the Destinations where its delivery is still pending, so a final edit that went out, or a
+// delivery that ended, is never sent again. Each walk is a UNION of two branches, each ordered by id and limited to
+// the batch: the open Alert Groups, read as before, and the resolved ones, read from the pending deliveries through
+// their partial index and then by id, once each; the batch is the first of both by id.
 // ListOpenGroupsOfDestinationAfter lists, by id after a cursor, a batch of the open Alert Groups with a delivery in a
-// Destination that is not being retired, whose Root messages its button set (C-28.FR-9) and its Connection
-// (C-12.FR-12) re-render.
+// Destination that is not being retired, and of the resolved ones whose delivery there is pending and not being
+// retired, whose Root messages its button set (C-28.FR-9) and its Connection (C-12.FR-12) re-render.
 func (q *Queries) ListOpenGroupsOfDestinationAfter(ctx context.Context, arg ListOpenGroupsOfDestinationAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfDestinationAfter,
 		arg.OrgID,
@@ -3735,10 +3791,21 @@ func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsO
 }
 
 const listOpenGroupsOfRouteAfter = `-- name: ListOpenGroupsOfRouteAfter :many
-SELECT id
-FROM alert_groups
-WHERE org_id = $1 AND route_id = $2 AND status <> 'resolved' AND id > $3
-ORDER BY id
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND g.route_id = $2 AND g.status <> 'resolved' AND g.id > $3
+       ORDER BY g.id
+       LIMIT $4)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND g.org_id = $1 AND g.route_id = $2
+         AND g.status = 'resolved' AND g.id > $3
+       ORDER BY g.id
+       LIMIT $4)) AS w
+ORDER BY w.id
 LIMIT $4
 `
 
@@ -3750,7 +3817,8 @@ type ListOpenGroupsOfRouteAfterParams struct {
 }
 
 // ListOpenGroupsOfRouteAfter lists, by id after a cursor, a batch of the open Alert Groups of a Route, those moved to
-// it included.
+// it included, and of its resolved ones with a pending delivery, which a change of the Route's settings re-renders;
+// its Minimum severity leaves the resolved ones as they are.
 func (q *Queries) ListOpenGroupsOfRouteAfter(ctx context.Context, arg ListOpenGroupsOfRouteAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfRouteAfter,
 		arg.OrgID,
@@ -3777,11 +3845,22 @@ func (q *Queries) ListOpenGroupsOfRouteAfter(ctx context.Context, arg ListOpenGr
 }
 
 const listOpenGroupsOfServiceAccountAfter = `-- name: ListOpenGroupsOfServiceAccountAfter :many
-SELECT id
-FROM alert_groups
-WHERE org_id = $1 AND status <> 'resolved' AND id > $2
-  AND snoozed_by_service_account_id = $3
-ORDER BY id
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+         AND g.snoozed_by_service_account_id = $3
+       ORDER BY g.id
+       LIMIT $4)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND g.org_id = $1 AND g.status = 'resolved'
+         AND g.resolved_by_service_account_id = $3 AND g.id > $2
+       ORDER BY g.id
+       LIMIT $4)) AS w
+ORDER BY w.id
 LIMIT $4
 `
 
@@ -3792,8 +3871,9 @@ type ListOpenGroupsOfServiceAccountAfterParams struct {
 	Lim              int32
 }
 
-// ListOpenGroupsOfServiceAccountAfter lists, by id after a cursor, a batch of the open Alert Groups whose footer names
-// the Service account, who snoozed them, which a rename of it re-renders.
+// ListOpenGroupsOfServiceAccountAfter lists, by id after a cursor, a batch of the Alert Groups whose footer names the
+// Service account — who snoozed them, and who resolved them while their final edit still waits, with a pending
+// delivery — which a rename of it re-renders.
 func (q *Queries) ListOpenGroupsOfServiceAccountAfter(ctx context.Context, arg ListOpenGroupsOfServiceAccountAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfServiceAccountAfter,
 		arg.OrgID,
@@ -3820,13 +3900,27 @@ func (q *Queries) ListOpenGroupsOfServiceAccountAfter(ctx context.Context, arg L
 }
 
 const listOpenGroupsOfTeamAfter = `-- name: ListOpenGroupsOfTeamAfter :many
-SELECT g.id
-FROM alert_groups g
-WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
-  AND EXISTS (SELECT 1
-              FROM alert_group_teams t
-              WHERE t.org_id = $1 AND t.alert_group_id = g.id AND t.team_id = $3)
-ORDER BY g.id
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+         AND EXISTS (SELECT 1
+                     FROM alert_group_teams t
+                     WHERE t.org_id = $1 AND t.alert_group_id = g.id AND t.team_id = $3)
+       ORDER BY g.id
+       LIMIT $4)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND g.org_id = $1 AND g.status = 'resolved'
+         AND g.id > $2
+         AND EXISTS (SELECT 1
+                     FROM alert_group_teams t
+                     WHERE t.org_id = $1 AND t.alert_group_id = g.id AND t.team_id = $3)
+       ORDER BY g.id
+       LIMIT $4)) AS w
+ORDER BY w.id
 LIMIT $4
 `
 
@@ -3837,8 +3931,9 @@ type ListOpenGroupsOfTeamAfterParams struct {
 	Lim     int32
 }
 
-// ListOpenGroupsOfTeamAfter lists, by id after a cursor, a batch of the open Alert Groups that have the Team, whose
-// Root messages show its name, which a rename re-renders.
+// ListOpenGroupsOfTeamAfter lists, by id after a cursor, a batch of the open Alert Groups that have the Team, and of
+// the resolved ones with a pending delivery, whose Root messages show its name, which a rename re-renders; a change of
+// the Team's Destination entries walks the same list and leaves the resolved ones out.
 func (q *Queries) ListOpenGroupsOfTeamAfter(ctx context.Context, arg ListOpenGroupsOfTeamAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfTeamAfter,
 		arg.OrgID,
@@ -3865,11 +3960,22 @@ func (q *Queries) ListOpenGroupsOfTeamAfter(ctx context.Context, arg ListOpenGro
 }
 
 const listOpenGroupsOfUserAfter = `-- name: ListOpenGroupsOfUserAfter :many
-SELECT id
-FROM alert_groups
-WHERE org_id = $1 AND status <> 'resolved' AND id > $2
-  AND (owner_user_id = $3 OR snoozed_by_user_id = $3)
-ORDER BY id
+SELECT w.id
+FROM ((SELECT g.id
+       FROM alert_groups g
+       WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+         AND (g.owner_user_id = $3 OR g.snoozed_by_user_id = $3)
+       ORDER BY g.id
+       LIMIT $4)
+      UNION
+      (SELECT DISTINCT g.id
+       FROM deliveries p
+       JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
+       WHERE p.org_id = $1 AND p.state = 'pending' AND g.org_id = $1 AND g.status = 'resolved'
+         AND g.resolved_by_user_id = $3 AND g.id > $2
+       ORDER BY g.id
+       LIMIT $4)) AS w
+ORDER BY w.id
 LIMIT $4
 `
 
@@ -3880,9 +3986,10 @@ type ListOpenGroupsOfUserAfterParams struct {
 	Lim     int32
 }
 
-// ListOpenGroupsOfUserAfter lists, by id after a cursor, a batch of the open Alert Groups whose footer names the User
-// (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed — which a change of the User's display
-// name or Account links re-renders.
+// ListOpenGroupsOfUserAfter lists, by id after a cursor, a batch of the Alert Groups whose footer names the User
+// (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed, and who resolved them while their
+// final edit still waits, with a pending delivery — which a change of the User's display name or Account links
+// re-renders.
 func (q *Queries) ListOpenGroupsOfUserAfter(ctx context.Context, arg ListOpenGroupsOfUserAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfUserAfter,
 		arg.OrgID,

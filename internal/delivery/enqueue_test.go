@@ -1554,6 +1554,92 @@ func TestFooterUserRerenderIsQuiet(t *testing.T) {
 	}
 }
 
+// TestResolvedRerenderEditsOnlyQueuedFinalEdit is C-12.FR-12 and C-26.FR-9 for a resolved Alert Group: the re-render
+// of a change of configuration renders again a delivery whose final edit still waits, Quietly and keeping its place
+// before the edits of configuration, so that the final edit shows the change once; it leaves a final edit that went
+// out, a delivery Not delivered or withheld, and one whose final edit went out after the rendering listed its
+// Destinations, as they are.
+func TestResolvedRerenderEditsOnlyQueuedFinalEdit(t *testing.T) {
+	rerender := func(t *testing.T, e *env, title string) {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusResolved, title),
+			Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolved := func(t *testing.T) (*env, *fakeDelivery) {
+		t.Helper()
+		e := newEnv(t)
+		e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+		e.round(t)
+		e.enqueue(t, e.group(groups.StatusResolved, "disk full"), groups.System,
+			groups.Recorded{Seq: 2, Event: groups.EventResolved, Loudness: groups.Quiet})
+		return e, e.only(t)
+	}
+
+	sent := func(e *env) []deliverytest.Call {
+		return slices.DeleteFunc(e.rec.Calls(), func(c deliverytest.Call) bool {
+			return c.Method != deliverytest.MethodUpdate && c.Method != deliverytest.MethodPublish
+		})
+	}
+
+	e, d := resolved(t)
+	version := d.version
+	rerender(t, e, "disk full again")
+	if d.state != "pending" || d.configOnly || d.version != version+1 {
+		t.Fatalf("the queued final edit: %s, configuration only %v, version %d after %d", d.state, d.configOnly,
+			d.version, version)
+	}
+	e.rec.Reset()
+	e.round(t)
+	ms := sent(e)
+	if len(ms) != 1 || ms[0].Method != deliverytest.MethodUpdate || ms[0].Loudness != groups.Quiet ||
+		len(ms[0].Mentions) != 0 || !slices.Contains(ms[0].Message.Lines, "#7 disk full again") {
+		t.Fatalf("the final edit: %+v", ms)
+	}
+
+	for _, c := range []struct {
+		name  string
+		state string
+		set   func(t *testing.T, e *env, d *fakeDelivery)
+	}{
+		{"delivered", "delivered", func(t *testing.T, e *env, _ *fakeDelivery) { e.round(t) }},
+		{"not delivered", "not_delivered", func(_ *testing.T, _ *env, d *fakeDelivery) { d.state = "not_delivered" }},
+		{"withheld", "withheld", func(_ *testing.T, _ *env, d *fakeDelivery) { d.state = "withheld" }},
+		{"delivered meanwhile", "delivered", func(_ *testing.T, e *env, d *fakeDelivery) {
+			e.db.before["EnsureDelivery"] = func() { d.state = "delivered" }
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, d := resolved(t)
+			c.set(t, e, d)
+			version := d.version
+			e.rec.Reset()
+			rerender(t, e, "disk full again")
+			e.round(t)
+			if d.state != c.state || d.version != version || len(sent(e)) != 0 {
+				t.Errorf("%s, version %d after %d, calls %+v", d.state, d.version, version, e.rec.Calls())
+			}
+		})
+	}
+
+	// An Alert Group that resolved with no Destination, whose Route gained one since, is not published there by a
+	// change of configuration: a re-render reaches only the final edits that wait.
+	t.Run("destination added after the resolution", func(t *testing.T) {
+		e := newEnv(t)
+		e.db.routeDests[routeID] = nil
+		e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+		e.enqueue(t, e.group(groups.StatusResolved, "disk full"), groups.System,
+			groups.Recorded{Seq: 2, Event: groups.EventResolved, Loudness: groups.Quiet})
+		e.db.routeDests[routeID] = []int64{destMM}
+		rerender(t, e, "disk full again")
+		e.round(t)
+		if len(e.db.deliveries) != 0 || len(sent(e)) != 0 {
+			t.Errorf("deliveries %d, calls %+v", len(e.db.deliveries), e.rec.Calls())
+		}
+	})
+}
+
 // TestFooterOfAnotherSpaceChangesNothing is C-12.FR-12 for a footer that names a user with Account links in several
 // identity spaces: the hash of the Desired state of a Root message covers only the footer of its Destination's space,
 // so a link that appears, changes or goes in another space — a Telegram account, for a Mattermost Destination —

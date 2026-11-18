@@ -227,11 +227,13 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // rules or Lookup tables, of the name or Account links of the user a footer names or of a Destination's Connection
 // (C-12.FR-12), or of what else the Root messages show (evaluateAndRerender, KindTeamName): delivery edits, Quietly,
 // each Root message whose Desired state the change changed and leaves the others, whose hashes are unchanged, so that
-// a second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no live-update hint
-// is sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that failed recorded,
-// as the dispatcher records it, with the Alert Group's live-update hint, so that a second run, which changes no
-// Desired state, records nothing. It returns how many Alert Groups had a Desired state changed; after collects what
-// runs once the transaction committed.
+// a second run changes nothing. The walks list, besides the open Alert Groups, the resolved ones whose final edit
+// still waits, with a pending delivery, of which delivery edits only those pending deliveries, so that the final edit
+// shows the change and a final edit that went out is not sent again. The Alert Groups themselves do not change, so
+// nothing is saved and no live-update hint is sent. Only when the re-render changed a Desired state of an Alert Group
+// is a Route template that failed recorded, as the dispatcher records it, with the Alert Group's live-update hint, so
+// that a second run, which changes no Desired state, records nothing. It returns how many Alert Groups had a Desired
+// state changed; after collects what runs once the transaction committed.
 func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
 	changed, err := s.rerenderIDs(ctx, q, ids, rerendering{}, after)
 	return len(changed), err
@@ -274,10 +276,12 @@ func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, how r
 	// The re-render step takes the membership lock of each Alert Group's Route shared, then those of its Teams; the
 	// Alert Groups go in the order (Route, id), and every lock is taken up front, the Routes' in id order and then the
 	// Teams' in id order, as the deletion of a Destination takes them exclusively, so that the walk never takes a lock
-	// below one it holds.
+	// below one it holds. A resolved Alert Group the walk listed has a final edit that still waits: it is rendered too,
+	// and delivery edits only its pending deliveries; a change of a Team's Destination entries leaves it out, as it
+	// neither grows nor ends the reach of a resolved Alert Group.
 	open := make([]*Group, 0, len(locked))
 	for _, g := range locked {
-		if g != nil && g.Status != StatusResolved {
+		if g != nil && (g.Status != StatusResolved || how.team == 0) {
 			open = append(open, g)
 		}
 	}
@@ -610,10 +614,11 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 // names of the Teams or the Link rules and Lookup tables before the save could miss — the evaluation of the Teams, the
 // Organization's message settings, the name of a Team and the links — and those of the user a footer names, since a
 // Snapshot that reopens an Alert Group gives it back its Owner or who snoozed it, and renders their name and links,
-// without a lock of their row. The Commands that make the footer name someone lock that row FOR SHARE before the
-// Alert Group (lockActive, sharePerson), and the changes of a name or of Account links lock it before they write their
-// row, so those need no barrier. The kinds of a Route need none: grouping holds the Route FOR SHARE until the Snapshot
-// commits, and its update takes it FOR UPDATE.
+// without a lock of their row. The Commands that make the footer name someone — Acknowledge, Snooze and Resolve,
+// whose final edit the walk reaches while it waits — lock that row FOR SHARE before the Alert Group (lockActive,
+// sharePerson), and the changes of a name or of Account links lock it before they write their row, so those need no
+// barrier. The kinds of a Route need none: grouping holds the Route FOR SHARE until the Snapshot commits, and its
+// update takes it FOR UPDATE.
 func evaluationBarrier(kind string) bool {
 	switch kind {
 	case KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindOrganizationLinks, KindUserName,
