@@ -12,18 +12,22 @@ import { type Locator, type Page, expect, test } from "@playwright/test";
 
 import {
   APP,
+  type AssigneeSeed,
   ON_CALL,
   onCallNames,
   TEAM_SPEC_PASSWORD,
   adminApi,
   berlinStamp,
+  dropAssignees,
   ensureLocalUser,
   expectNoHorizontalScroll,
   removeOnCall,
+  seedAssignees,
   seedOnCall,
   shot,
   signIn,
   signInAdmin,
+  waitAssignees,
   watchCsp,
 } from "./support";
 
@@ -203,4 +207,125 @@ test("the Home page reads in Russian and fits 360 px", async ({ browser }) => {
   await expectNoHorizontalScroll(page);
   await context.close();
   expect(csp).toEqual([]);
+});
+
+// Scenario 2 of C-32 (Verification of the story "Running chains and Assignees on the Alert Group page…"): ivan (devops)
+// and petr (payments) are the Assignees of the firing Alert Group KubernetesContainerOOMKilled. "I am an Assignee" lists
+// it for each of them with its status, its Assignees, the chain and its step and the buttons "Acknowledge" and
+// "Snooze…", in Russian too and at 360 px without horizontal scrolling; a person who is no Assignee sees the empty
+// text; acknowledging the Alert Group takes it off the list.
+test.describe("I am an Assignee", () => {
+  test.describe.configure({ mode: "serial" });
+  let assign: AssigneeSeed;
+
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
+    assign = await seedAssignees("ash");
+    await waitAssignees(assign.groupId, 2);
+  });
+
+  test.afterAll(async () => {
+    await dropAssignees("ash");
+  });
+
+  const assigneeRow = (page: Page): Locator =>
+    page.getByTestId("assignee-row").filter({ hasText: assign.alertname });
+
+  test("a person who is no Assignee sees the section with its empty text", async ({ page }) => {
+    await signInAdmin(page);
+    await page.goto("/");
+    const section = page.getByTestId("i-am-an-assignee");
+    await expect(
+      section.getByRole("heading", { name: "I am an Assignee", level: 2 }),
+    ).toBeVisible();
+    await expect(
+      section.getByText(
+        "Alert Groups that an Escalation chain Paged you about. They leave this list once acknowledged.",
+      ),
+    ).toBeVisible();
+    await expect(section.getByTestId("assignee-empty")).toHaveText(
+      "No Escalation chain has Paged you about an open Alert Group.",
+    );
+    await expect(assigneeRow(page)).toHaveCount(0);
+  });
+
+  test("petr reads it in Russian at 360 px, with no horizontal scrolling", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 360, height: 740 } });
+    const ru = await context.newPage();
+    const csp = watchCsp(ru);
+    await signIn(ru, assign.logins.petr, TEAM_SPEC_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel("Language").selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/");
+    const section = ru.getByTestId("i-am-an-assignee");
+    await expect(section.getByRole("heading", { name: "Назначено мне", level: 2 })).toBeVisible();
+    await expect(
+      section.getByText("Группы, куда вас позвала цепочка. После подтверждения они уходят отсюда."),
+    ).toBeVisible();
+    const mine = assigneeRow(ru);
+    await expect(mine).toHaveCount(1);
+    await expect(mine.getByTestId("alert-group-status")).toHaveText("Горит");
+    await expect(mine.getByTestId("assignee-row-assignees")).toContainText(
+      `@${assign.logins.ivan} (${assign.teams.devops})`,
+    );
+    await expect(mine.getByTestId("assignee-row-assignees")).toContainText(
+      `@${assign.logins.petr} (${assign.teams.payments})`,
+    );
+    await expect(mine.getByTestId("assignee-row-chain").first()).toContainText("Цепочка");
+    await expect(mine.getByRole("button", { name: "Подтвердить" })).toBeVisible();
+    await expect(mine.getByRole("button", { name: "Отложить…" })).toBeVisible();
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "home-assignee-ru-360");
+    await context.close();
+    expect(csp).toEqual([]);
+  });
+
+  test("ivan sees the Alert Group with its Assignees, chain and step, and acknowledging it takes it off the list", async ({
+    page,
+  }) => {
+    const csp = watchCsp(page);
+    await signIn(page, assign.logins.ivan, TEAM_SPEC_PASSWORD);
+    await expect(page).toHaveURL(`${APP}/`);
+    const section = page.getByTestId("i-am-an-assignee");
+    await expect(
+      section.getByRole("heading", { name: "I am an Assignee", level: 2 }),
+    ).toBeVisible();
+    const mine = assigneeRow(page);
+    await expect(mine).toHaveCount(1);
+    await expect(mine.getByTestId("assignee-row-title")).toHaveText(
+      new RegExp(`^#\\d+ ${assign.alertname}$`),
+    );
+    await expect(mine.getByTestId("alert-group-status")).toHaveText("Firing");
+    await expect(mine.getByTestId("assignee-row-assignees")).toContainText(
+      `@${assign.logins.ivan} (${assign.teams.devops})`,
+    );
+    await expect(mine.getByTestId("assignee-row-assignees")).toContainText(
+      `@${assign.logins.petr} (${assign.teams.payments})`,
+    );
+    const chain = mine.getByTestId("assignee-row-chain").filter({ hasText: assign.chains.devops });
+    await expect(chain).toHaveText(
+      new RegExp(`Chain\\s*${assign.chains.devops}\\s*·\\s*step \\d+`),
+    );
+    await expect(mine.getByRole("button", { name: "Acknowledge" })).toBeVisible();
+    await expect(mine.getByRole("button", { name: "Snooze…" })).toBeVisible();
+    await shot(page, "home-assignee");
+
+    await mine.getByRole("button", { name: "Acknowledge" }).click();
+    await expect(assigneeRow(page)).toHaveCount(0);
+    await expect(section.getByTestId("assignee-empty")).toBeVisible();
+    // The Alert Group is acknowledged by ivan, and has no Assignees any more.
+    const admin = await adminApi();
+    try {
+      const group = await admin.call<{ status: string; assignees: unknown[] }>(
+        "GET",
+        `/api/v1/alert-groups/${assign.groupId}`,
+      );
+      expect(group.status).toBe("acknowledged");
+      expect(group.assignees).toEqual([]);
+    } finally {
+      await admin.dispose();
+    }
+    expect(csp).toEqual([]);
+  });
 });

@@ -132,6 +132,7 @@
     }
   },
   "alertGroups": {
+    "acknowledgedByStopped": "Acknowledged by {{name}} · {{stopped}}",
     "alertCounts_one": "{{count}} of {{total}} firing",
     "alertCounts_other": "{{count}} of {{total}} firing",
     "alerts": {
@@ -141,6 +142,20 @@
       "reason": "Reason",
       "resolvedAt": "Resolved",
       "source": "Source"
+    },
+    "assignees": {
+      "column": "Assignees",
+      "line": "Assignees: {{list}}",
+      "withTeam": "{{person}} ({{team}})"
+    },
+    "chains": {
+      "chain": "Chain",
+      "nextStep": "next step at {{time}}",
+      "ranOut": "ran out",
+      "step": "step {{n}}",
+      "stopped": "stopped",
+      "stoppedNote": "Escalation chains stopped",
+      "title": "Escalation chains"
     },
     "columns": {
       "add": "Add column",
@@ -177,6 +192,8 @@
       "any": "Any",
       "anyone": "Anyone",
       "anyReason": "Any reason",
+      "assignee": "Assignee",
+      "assigneeSearch": "Find an Assignee",
       "button": "Filters",
       "buttonActive_one": "Filters ({{count}})",
       "buttonActive_other": "Filters ({{count}})",
@@ -188,6 +205,7 @@
       "deliveryProblemHint": "Not delivered, waiting for a Broken Destination, deleted in the messenger, or a Thread not attached.",
       "done": "Show Alert Groups",
       "integration": "Integrations",
+      "me": "me",
       "mine": "Mine",
       "neverReopened": "Never reopened",
       "nobody": "Nobody",
@@ -592,6 +610,7 @@
       "acknowledge": "Acknowledge",
       "resolve": "Resolve",
       "snooze": "Snooze",
+      "snoozeDialog": "Snooze…",
       "stillOnIt": "Still on it",
       "takeOver": "Take over from {{name}}",
       "unacknowledge": "Unacknowledge",
@@ -1239,6 +1258,7 @@
   },
   "docs": {
     "fields": {
+      "alertGroupChains": "Escalation chains and Assignees of an Alert Group",
       "bridgeEvents": "Bridge event delivery",
       "buttons": "Button sets",
       "chainSteps": "Steps of an Escalation chain",
@@ -1697,6 +1717,11 @@
     "title": "Heartbeat"
   },
   "home": {
+    "assignee": {
+      "empty": "No Escalation chain has Paged you about an open Alert Group.",
+      "hint": "Alert Groups that an Escalation chain Paged you about. They leave this list once acknowledged.",
+      "title": "I am an Assignee"
+    },
     "title": "Home"
   },
   "ical": {
@@ -3587,6 +3612,7 @@
       "threadNotAttached": "Thread not attached to the Root message in {{destination}}"
     },
     "details": {
+      "chain": "Escalation chain",
       "detail": "Detail",
       "error": "Error",
       "fingerprints_one": "{{count}} fingerprint",
@@ -3602,7 +3628,16 @@
     },
     "empty": "No entries.",
     "escalation": {
-      "event": "{{event}}"
+      "assigneesCleared": "No Assignees any more",
+      "event": "{{event}}",
+      "pagedEveryone": "Paged everyone in the chat ({{word}})",
+      "pagedPeople": "Paged {{people}}",
+      "pagedPeopleHow": "Paged {{people}}, {{importance}}",
+      "pagedTeam": "Paged the whole Team {{team}}",
+      "stepSkippedUnnumbered": "A step skipped: {{reason}}",
+      "stepSkippedUnnumberedNoReason": "A step skipped",
+      "webhook": "Sent to the outgoing webhook {{destination}}",
+      "withChain": "Step {{number}} · {{chain}}: {{text}}"
     },
     "events": {
       "acknowledged": "Acknowledged",

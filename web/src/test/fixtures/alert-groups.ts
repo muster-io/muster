@@ -7,7 +7,13 @@
 // cares about. A required field added to a read is set here, the one place the TypeScript check names, instead of in
 // every test that builds one.
 
-import type { AlertGroup, AlertGroupDelivery, IntegrationAlert } from "../../api/gen/model";
+import type {
+  AlertGroup,
+  AlertGroupChain,
+  AlertGroupDelivery,
+  Assignee,
+  IntegrationAlert,
+} from "../../api/gen/model";
 
 export function alertGroup(overrides: Partial<AlertGroup> = {}): AlertGroup {
   return {
@@ -31,6 +37,44 @@ export function alertGroup(overrides: Partial<AlertGroup> = {}): AlertGroup {
     escalation_chains: [],
     assignees: [],
     ...overrides,
+  };
+}
+
+/** A run of an Escalation chain on an Alert Group: "devops", running at its step 1 with the next one due at 10:05. */
+export function alertGroupChain(overrides: Partial<AlertGroupChain> = {}): AlertGroupChain {
+  return {
+    run_id: "ER0000000000AA",
+    chain: { id: "EC0000000DEVO1", name: "devops", owning_team: null },
+    chain_name: "devops",
+    sources: [{ kind: "route", team: null }],
+    state: "running",
+    step: { number: 1, kind: "page_on_call" },
+    next_step_at: "2026-10-12T10:05:00Z",
+    started_at: "2026-10-12T09:00:00Z",
+    ...overrides,
+  };
+}
+
+/** A person an Escalation chain Paged and reached, with the owning Team of the chain; none for a chain no Team owns. */
+export function assignee(login: string, team: string | null = null): Assignee {
+  return {
+    user: {
+      id: `SR00000000${login.toUpperCase().padEnd(4, "0").slice(0, 4)}`,
+      name: login,
+      login,
+      deactivated: false,
+    },
+    team:
+      team === null
+        ? null
+        : {
+            id: `TM0000000${team.toUpperCase().padEnd(5, "0").slice(0, 5)}`,
+            name: team,
+            slug: team,
+            deleted: false,
+          },
+    chain: { id: "EC0000000DEVO1", name: "devops", owning_team: null },
+    since: "2026-10-12T09:00:00Z",
   };
 }
 

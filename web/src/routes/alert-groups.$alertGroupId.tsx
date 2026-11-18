@@ -2,7 +2,7 @@
 // Copyright The Muster Authors
 
 // An Alert Group's page (C-09.FR-14, FR-10, FR-16, FR-20, FR-24; C-10.FR-1, FR-8; C-12.FR-9; C-11.FR-16; C-17.FR-3):
-// the header first, its Links under it, then the Command buttons, its notices ("⚠ Nobody has taken this" while the
+// the header first, its Links under it, then the Command buttons, its running Escalation chains (C-32.FR-18), its notices ("⚠ Nobody has taken this" while the
 // Alert Group is Unclaimed), its Alerts (alerts:read), its Timeline and the Note box; beside them on a desktop, below
 // them on a phone, the delivery state per Destination, its labels and annotations and the previous Alert Groups with
 // the same key. Live hints read each part again as the Alert Group changes. Once its details were removed by
@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import { useGetAlertGroup } from "../api/gen/endpoints/alert-groups/alert-groups";
 import { AlertGroupAlerts } from "../components/alert-group-alerts";
+import { AlertGroupChains } from "../components/alert-group-chains";
 import { AlertGroupDeliveries } from "../components/alert-group-deliveries";
 import { AlertGroupHeader } from "../components/alert-group-header";
 import { AlertGroupLinks } from "../components/alert-group-links";
@@ -48,6 +49,7 @@ function AlertGroupView({ alertGroupId }: { alertGroupId: string }) {
       <AlertGroupHeader group={group} />
       <AlertGroupLinks links={group.links} />
       <CommandButtons group={group} />
+      <AlertGroupChains chains={group.escalation_chains} />
       <AlertGroupNotices
         notices={(group.notices ?? []).filter((n) => n.kind !== "newer_alert_group_exists")}
         unclaimed={group.unclaimed}

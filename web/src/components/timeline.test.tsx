@@ -33,7 +33,9 @@ import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { formatDateTime } from "../lib/time";
 import { telegramConnection } from "../test/fixtures/connections";
+import { assignee } from "../test/fixtures/alert-groups";
 import { telegramDestination } from "../test/fixtures/destinations";
+import { chain, paymentsSteps } from "../test/fixtures/escalation-chains";
 import { Timeline, actorText, entryText, kindLabel } from "./timeline";
 
 const AT = "2026-10-07T09:00:00Z";
@@ -125,6 +127,29 @@ function delivery(event: DeliveryEventKind): TimelineEntry {
   return entry;
 }
 
+const PETR = { id: "SR0000000PETR", name: "Petr", login: "petr", deactivated: false };
+const IVAN = { id: "SR0000000IVAN", name: "Ivan", login: "ivan", deactivated: false };
+const GATEWAY = { id: "CN0000000000GW", name: "Example Gateway" };
+const PAYMENTS_CHAIN = { id: "EC0000000PAYM1", name: "payments", owning_team: null };
+
+/** An entry of the kind "Escalation chains" of the event, with the fields a test names. */
+function escalation(
+  event: LifecycleEvent,
+  extra: Partial<TimelineEscalationEntry> = {},
+): TimelineEscalationEntry {
+  return {
+    id: `TE${event}`,
+    at: AT,
+    kind: "escalation",
+    actor: SYSTEM,
+    event,
+    loudness: "quiet",
+    mentions: [],
+    paged_users: [],
+    ...extra,
+  };
+}
+
 function noteEntry(body: string): TimelineEntry {
   const entry: TimelineNoteEntry = {
     id: "NE1",
@@ -172,6 +197,14 @@ beforeEach(async () => {
         url.pathname === "/api/v1/destinations" ? lists.destinations : lists.connections;
       return Promise.resolve(
         new Response(JSON.stringify({ items, next_cursor: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    if (url.pathname.startsWith("/api/v1/escalation-chains/")) {
+      return Promise.resolve(
+        new Response(JSON.stringify(chain()), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -280,40 +313,164 @@ describe("entryText", () => {
     }
   });
 
-  test("names the events of the kind escalation until they are rendered fully", () => {
-    const entry: TimelineEscalationEntry = {
-      id: "TE00000000ES01",
-      at: AT,
-      kind: "escalation",
-      actor: SYSTEM,
-      event: "page_not_delivered",
-      loudness: "quiet",
-      mentions: [],
-      paged_users: [{ id: "SR0000000000PE", name: "Petr", login: "petr", deactivated: false }],
-      gateway: { id: "CN0000000000GW", name: "Example Gateway" },
-      reason: "call_refused",
-    };
-    expect(text(entry)).toBe("page_not_delivered");
-    expect(kindLabel(i18n.t, "escalation")).toBe("Escalation chains");
+  test("says each Page of a chain with its step, its people and how they were Paged, in English and Russian", async () => {
+    const petr = escalation("paged", {
+      chain: PAYMENTS_CHAIN,
+      chain_name: "payments",
+      step: 1,
+      paged_users: [PETR],
+      importance: "normal",
+    });
+    expect(text(petr)).toBe("Step 1 · payments: Paged @petr, normal");
+    expect(
+      text(escalation("paged", { ...petr, paged_users: [PETR, IVAN], importance: "important" })),
+    ).toBe("Step 1 · payments: Paged @petr, @ivan, important");
+    expect(
+      text(
+        escalation("paged", {
+          chain: PAYMENTS_CHAIN,
+          chain_name: "payments",
+          step: 6,
+          team: { id: "TM0000000000PA", name: "payments", slug: "payments", deleted: false },
+        }),
+      ),
+    ).toBe("Step 6 · payments: Paged the whole Team payments");
+    expect(
+      text(
+        escalation("paged", {
+          chain: PAYMENTS_CHAIN,
+          chain_name: "payments",
+          step: 6,
+          everyone: "here",
+        }),
+      ),
+    ).toBe("Step 6 · payments: Paged everyone in the chat (@here)");
+    // A chain deleted since still has the name it had.
+    expect(text(escalation("paged", { ...petr, chain: null }))).toBe(
+      "Step 1 · payments: Paged @petr, normal",
+    );
+    await i18n.changeLanguage("ru");
+    expect(text(petr)).toBe("Шаг 1 · payments: Позвала @petr, обычно");
+    expect(kindLabel(i18n.t, "escalation")).toBe("Цепочки эскалации");
   });
 
-  test("shows a Page by Mention by its event name, in English and Russian", async () => {
-    const entry: TimelineEscalationEntry = {
-      id: "TE00000000ES02",
-      at: AT,
-      kind: "escalation",
-      actor: SYSTEM,
-      event: "paged",
-      loudness: "loud",
-      mentions: [],
-      paged_users: [{ id: "SR0000000000PE", name: "Petr", login: "petr", deactivated: false }],
-      team: null,
-      everyone: null,
-      importance: "important",
-    };
-    expect(text(entry)).toBe("paged");
+  test("says a call through a Notification gateway with the gateway's name, and a call that was not delivered with its reason", async () => {
+    const call = escalation("paged", {
+      chain: PAYMENTS_CHAIN,
+      chain_name: "payments",
+      step: 2,
+      paged_users: [PETR],
+      gateway: GATEWAY,
+    });
+    expect(text(call)).toBe("Step 2 · payments: Call through Example Gateway: @petr");
+    const refused = escalation("page_not_delivered", {
+      chain: PAYMENTS_CHAIN,
+      chain_name: "payments",
+      step: 2,
+      paged_users: [PETR],
+      gateway: GATEWAY,
+      reason: "call_refused",
+    });
+    expect(text(refused)).toBe("Step 2 · payments: Call not delivered: the gateway refused it");
+    expect(kindLabel(i18n.t, "escalation")).toBe("Escalation chains");
     await i18n.changeLanguage("ru");
-    expect(text(entry)).toBe("paged");
+    expect(text(call)).toBe("Шаг 2 · payments: Звонок через Example Gateway: @petr");
+    expect(text(refused)).toBe("Шаг 2 · payments: Звонок не доставлен: шлюз отказал");
+  });
+
+  test("says a Page that was not delivered with its reason, naming the messenger when the chain says it", async () => {
+    const undelivered = escalation("page_not_delivered", {
+      chain: PAYMENTS_CHAIN,
+      chain_name: "payments",
+      step: 1,
+      paged_users: [PETR],
+      reason: "no_account_link",
+    });
+    expect(text(undelivered)).toBe(
+      "Step 1 · payments: Page not delivered: @petr has no linked account",
+    );
+    const chainRead = {
+      steps: [],
+      destinations: [{ ...SEARCH_NOTICE }],
+    };
+    expect(entryText(i18n.t, undelivered, dateTime, chainRead)).toBe(
+      "Step 1 · payments: Page not delivered: @petr has no linked Mattermost account",
+    );
+    expect(
+      text(escalation("page_not_delivered", { ...undelivered, reason: "no_root_message" })),
+    ).toBe("Step 1 · payments: Page not delivered: no Root message in the chain's Destinations");
+    await i18n.changeLanguage("ru");
+    expect(entryText(i18n.t, undelivered, dateTime, chainRead)).toBe(
+      "Шаг 1 · payments: Призыв не доставлен: у @petr нет привязки к Mattermost",
+    );
+  });
+
+  test("says a step that was skipped with its reason, the condition read from the chain", async () => {
+    const skipped = escalation("escalation_step_skipped", {
+      chain: PAYMENTS_CHAIN,
+      chain_name: "payments",
+      step: 3,
+      skip_reason: "severity",
+    });
+    expect(text(skipped)).toBe("Step 3 skipped: its Severity condition was not met");
+    expect(entryText(i18n.t, skipped, dateTime, { steps: paymentsSteps(), destinations: [] })).toBe(
+      "Step 3 skipped: only for critical",
+    );
+    expect(
+      text(
+        escalation("escalation_step_skipped", { ...skipped, skip_reason: "outside_working_hours" }),
+      ),
+    ).toBe("Step 3 skipped: outside the working hours");
+    expect(
+      text(escalation("escalation_step_skipped", { ...skipped, skip_reason: "schedule_gap" })),
+    ).toBe("Step 3 skipped: the Schedule has a gap");
+    await i18n.changeLanguage("ru");
+    expect(entryText(i18n.t, skipped, dateTime, { steps: paymentsSteps(), destinations: [] })).toBe(
+      "Шаг 3 пропущен: только для critical",
+    );
+  });
+
+  test("says a skipped step without a number when the entry has none", async () => {
+    const unnumbered = escalation("escalation_step_skipped", {
+      chain: PAYMENTS_CHAIN,
+      chain_name: "payments",
+      step: null,
+      skip_reason: "schedule_gap",
+    });
+    expect(text(unnumbered)).toBe("A step skipped: the Schedule has a gap");
+    expect(text(escalation("escalation_step_skipped", { ...unnumbered, skip_reason: null }))).toBe(
+      "A step skipped",
+    );
+    await i18n.changeLanguage("ru");
+    expect(text(escalation("escalation_step_skipped", { ...unnumbered, skip_reason: null }))).toBe(
+      "Шаг пропущен",
+    );
+  });
+
+  test("says the Assignees' changes and a step that sent to an outgoing webhook", async () => {
+    const changed = escalation("assignees_changed", {
+      assignees: [assignee("ivan", "devops"), assignee("petr", "payments")],
+    });
+    expect(text(changed)).toBe("Assignees: @ivan (devops), @petr (payments)");
+    expect(text(escalation("assignees_changed", { assignees: [] }))).toBe("No Assignees any more");
+    expect(
+      text(
+        escalation("escalation_webhook", {
+          chain: PAYMENTS_CHAIN,
+          chain_name: "payments",
+          step: 4,
+          destination: {
+            id: "DS0000000000WH",
+            name: "ops-hook",
+            type: "webhook",
+            health: { state: "healthy" },
+          },
+        }),
+      ),
+    ).toBe("Step 4 · payments: Sent to the outgoing webhook ops-hook");
+    await i18n.changeLanguage("ru");
+    expect(text(changed)).toBe("Назначенные: @ivan (devops), @petr (payments)");
+    expect(text(escalation("assignees_changed", { assignees: [] }))).toBe("Назначенных больше нет");
   });
 
   test("has a text for system entries and delivery events", () => {
@@ -685,6 +842,52 @@ describe("Timeline", () => {
     await screen.getByLabelText("Order").selectOptions("asc");
     await expect.poll(() => requests.at(-1)?.searchParams.get("order")).toBe("asc");
   });
+  test("shows the entries of Escalation chains under their kind filter, with the words the chain gives a skipped step", async () => {
+    entries = [
+      status("created"),
+      escalation("paged", {
+        id: "TE1",
+        chain: PAYMENTS_CHAIN,
+        chain_name: "payments",
+        step: 1,
+        paged_users: [PETR],
+        importance: "normal",
+        loudness: "loud",
+      }),
+      escalation("page_not_delivered", {
+        id: "TE2",
+        chain: PAYMENTS_CHAIN,
+        chain_name: "payments",
+        step: 1,
+        paged_users: [IVAN],
+        reason: "no_account_link",
+      }),
+      escalation("escalation_step_skipped", {
+        id: "TE3",
+        chain: PAYMENTS_CHAIN,
+        chain_name: "payments",
+        step: 3,
+        skip_reason: "severity",
+      }),
+      escalation("assignees_changed", { id: "TE4", assignees: [assignee("petr", "payments")] }),
+    ];
+    const screen = await renderTimeline(["escalation-chains:read"]);
+    await expect.element(item("Alert Group created")).toBeVisible();
+    await screen.getByRole("button", { name: "Escalation chains" }).click();
+    expect(requests.at(-1)?.searchParams.getAll("kind")).toEqual(["escalation"]);
+    await expect.poll(() => item("Alert Group created").elements().length).toBe(0);
+    await expect.element(item("Step 1 · payments: Paged @petr, normal")).toBeVisible();
+    await expect
+      .element(item("Step 1 · payments: Page not delivered: @ivan has no linked"))
+      .toBeVisible();
+    await expect.element(item("Step 3 skipped: only for critical")).toBeVisible();
+    await expect.element(item("Assignees: @petr (payments)")).toBeVisible();
+    await expect
+      .element(item("Step 3 skipped").getByTestId("escalation-chain"))
+      .toHaveTextContent("payments");
+    await expect.element(item("Paged @petr").getByTestId("timeline-loud")).toBeVisible();
+  });
+
   test("gives a delivery entry the full label of its Destination as tooltip and description", async () => {
     lists = {
       destinations: [

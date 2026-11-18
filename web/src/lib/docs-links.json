@@ -1,4 +1,5 @@
 {
+  "field.alert_group_chains": "concepts/escalation-chains.md#assignees",
   "field.bridge_events": "messengers/bridge.md#create-the-connection",
   "field.buttons": "concepts/statuses-and-commands.md#button-sets",
   "field.chain_steps": "concepts/escalation-chains.md#steps",

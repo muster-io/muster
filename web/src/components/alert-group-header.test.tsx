@@ -22,7 +22,7 @@ import type { AlertGroup, Session } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { formatDateTime } from "../lib/time";
-import { alertGroup } from "../test/fixtures/alert-groups";
+import { alertGroup, alertGroupChain, assignee } from "../test/fixtures/alert-groups";
 import { teamRef } from "../test/fixtures/teams";
 import { AlertGroupHeader } from "./alert-group-header";
 
@@ -71,6 +71,63 @@ const badge = () => page.getByTestId("unclaimed-badge");
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
+});
+
+const IVAN = { id: "SR0000000IVAN", name: "Ivan Petrov", login: "ivan", deactivated: false };
+
+describe("AlertGroupHeader Assignees and chains", () => {
+  test("lists the Assignees with their Teams, and one without a Team without parentheses, in English and Russian", async () => {
+    await renderHeader(
+      group({
+        assignees: [assignee("ivan", "devops"), assignee("petr", "payments"), assignee("olga")],
+      }),
+    );
+    const line = page.getByTestId("alert-group-assignees");
+    await expect
+      .element(line)
+      .toHaveTextContent("Assignees: @ivan (devops), @petr (payments), @olga");
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(line)
+      .toHaveTextContent("Назначенные: @ivan (devops), @petr (payments), @olga");
+  });
+
+  test("shows no line of Assignees while there are none", async () => {
+    await renderHeader(group());
+    await expect.element(page.getByTestId("alert-group-assignees")).not.toBeInTheDocument();
+  });
+
+  test("reads 'Acknowledged by @ivan · Escalation chains stopped' after an acknowledgement, the Owner without a Team", async () => {
+    await renderHeader(
+      group({
+        status: "acknowledged",
+        owner: IVAN,
+        assignees: [],
+        escalation_chains: [alertGroupChain({ state: "stopped", step: null, next_step_at: null })],
+      }),
+    );
+    const owner = page.getByTestId("alert-group-owner");
+    await expect
+      .element(owner)
+      .toHaveTextContent("Acknowledged by @ivan · Escalation chains stopped");
+    expect(owner.element().textContent).not.toContain("devops");
+    await expect.element(page.getByTestId("alert-group-assignees")).not.toBeInTheDocument();
+    await i18n.changeLanguage("ru");
+    await expect.element(owner).toHaveTextContent("Подтвердил(а) @ivan · Цепочки остановлены");
+  });
+
+  test("keeps 'Owner: …' for an acknowledgement that stopped no chain", async () => {
+    await renderHeader(
+      group({
+        status: "acknowledged",
+        owner: IVAN,
+        escalation_chains: [alertGroupChain({ state: "ran_out", step: null, next_step_at: null })],
+      }),
+    );
+    await expect
+      .element(page.getByTestId("alert-group-owner"))
+      .toHaveTextContent("Owner: Ivan Petrov");
+  });
 });
 
 describe("AlertGroupHeader", () => {

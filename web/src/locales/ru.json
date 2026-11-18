@@ -144,6 +144,7 @@
     }
   },
   "alertGroups": {
+    "acknowledgedByStopped": "Подтвердил(а) {{name}} · {{stopped}}",
     "alertCounts_one": "горит {{count}} из {{total}}",
     "alertCounts_few": "горят {{count}} из {{total}}",
     "alertCounts_many": "горят {{count}} из {{total}}",
@@ -155,6 +156,20 @@
       "reason": "Причина",
       "resolvedAt": "Закрыт",
       "source": "Источник"
+    },
+    "assignees": {
+      "column": "Назначенные",
+      "line": "Назначенные: {{list}}",
+      "withTeam": "{{person}} ({{team}})"
+    },
+    "chains": {
+      "chain": "Цепочка",
+      "nextStep": "следующий шаг в {{time}}",
+      "ranOut": "закончилась",
+      "step": "шаг {{n}}",
+      "stopped": "остановлена",
+      "stoppedNote": "Цепочки остановлены",
+      "title": "Цепочки эскалации"
     },
     "columns": {
       "add": "Добавить столбец",
@@ -191,6 +206,8 @@
       "any": "Любые",
       "anyone": "Кто угодно",
       "anyReason": "Любая причина",
+      "assignee": "Назначенный",
+      "assigneeSearch": "Найти назначенного",
       "button": "Фильтры",
       "buttonActive_one": "Фильтры ({{count}})",
       "buttonActive_few": "Фильтры ({{count}})",
@@ -204,6 +221,7 @@
       "deliveryProblemHint": "Не доставлено, ждёт сломанное место доставки, удалено в мессенджере или тред не прикреплён.",
       "done": "Показать группы алертов",
       "integration": "Интеграции",
+      "me": "я",
       "mine": "Мои",
       "neverReopened": "Не переоткрывались",
       "nobody": "Ничьи",
@@ -626,6 +644,7 @@
       "acknowledge": "Подтвердить",
       "resolve": "Закрыть",
       "snooze": "Отложить",
+      "snoozeDialog": "Отложить…",
       "stillOnIt": "Ещё работаю",
       "takeOver": "Перехватить у владельца {{name}}",
       "unacknowledge": "Снять подтверждение",
@@ -1283,6 +1302,7 @@
   },
   "docs": {
     "fields": {
+      "alertGroupChains": "Цепочки эскалации и назначенные группы алертов",
       "bridgeEvents": "Доставка событий моста",
       "buttons": "Наборы кнопок",
       "chainSteps": "Шаги цепочки эскалации",
@@ -1757,6 +1777,11 @@
     "title": "Heartbeat"
   },
   "home": {
+    "assignee": {
+      "empty": "Ни одна цепочка не позвала вас в открытую группу алертов.",
+      "hint": "Группы, куда вас позвала цепочка. После подтверждения они уходят отсюда.",
+      "title": "Назначено мне"
+    },
     "title": "Главная"
   },
   "ical": {
@@ -3715,6 +3740,7 @@
       "threadNotAttached": "Тред не прикреплён к корневому сообщению в {{destination}}"
     },
     "details": {
+      "chain": "Цепочка эскалации",
       "detail": "Подробности",
       "error": "Ошибка",
       "fingerprints_one": "{{count}} отпечаток",
@@ -3732,7 +3758,16 @@
     },
     "empty": "Записей нет.",
     "escalation": {
-      "event": "{{event}}"
+      "assigneesCleared": "Назначенных больше нет",
+      "event": "{{event}}",
+      "pagedEveryone": "Позвала всех в чате ({{word}})",
+      "pagedPeople": "Позвала {{people}}",
+      "pagedPeopleHow": "Позвала {{people}}, {{importance}}",
+      "pagedTeam": "Позвала всю команду {{team}}",
+      "stepSkippedUnnumbered": "Шаг пропущен: {{reason}}",
+      "stepSkippedUnnumberedNoReason": "Шаг пропущен",
+      "webhook": "Отправлено на исходящий вебхук {{destination}}",
+      "withChain": "Шаг {{number}} · {{chain}}: {{text}}"
     },
     "events": {
       "acknowledged": "Подтверждена",

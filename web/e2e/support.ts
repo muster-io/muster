@@ -1717,6 +1717,219 @@ export async function createSchedule(
   return created.id;
 }
 
+/** What the specs of Assignees work with, all of it named by its key so that no spec meets another's. */
+export interface AssigneeSeed {
+  key: string;
+  seed: RoutingSeed;
+  /** The logins of the three people: ivan (devops) and petr (payments) are linked to Mattermost, olga is not. */
+  logins: { ivan: string; petr: string; olga: string };
+  /** The names of the Escalation chains and the slugs of their Teams. */
+  chains: { devops: string; payments: string };
+  teams: { devops: string; payments: string };
+  alertname: string;
+  groupId: string;
+}
+
+const LINK_CODE = /\b([2-9A-HJKMNP-Z]{8})\b/;
+
+/** The direct messages the Mattermost bot of the fake server sent to a person, oldest first. */
+async function mattermostDms(userId: string): Promise<string[]> {
+  const all = await fmm<{ user_id: string; message: string }[]>("GET", "/dms");
+  return all.filter((d) => d.user_id === userId).map((d) => d.message);
+}
+
+/** The code of the first direct message to the person after the before ones, polled until it arrives. */
+async function newMattermostCode(userId: string, before: number): Promise<string> {
+  let code = "";
+  await expect
+    .poll(async () => {
+      const list = await mattermostDms(userId);
+      code = list.length > before ? (LINK_CODE.exec(list.at(-1) ?? "")?.[1] ?? "") : "";
+      return code;
+    })
+    .not.toBe("");
+  return code;
+}
+
+/** Links the user with the login to the Mattermost user of the fake server through the Connection, as the person does in their profile. */
+async function linkMattermost(
+  login: string,
+  connectionId: string,
+  username: string,
+  userId: string,
+): Promise<void> {
+  const api = await Api.signIn(login, TEAM_SPEC_PASSWORD);
+  try {
+    // The fake server is shared by every spec and keeps the DMs of earlier seeds of the same fake user, so only a DM
+    // that arrives after this request holds this request's code.
+    const before = (await mattermostDms(userId)).length;
+    const started = await api.call<{ request_id: string }>(
+      "POST",
+      "/api/v1/me/account-links/mattermost",
+      { connection_id: connectionId, username },
+    );
+    const code = await newMattermostCode(userId, before);
+    await api.call("POST", "/api/v1/me/account-links/mattermost/confirmation", {
+      request_id: started.request_id,
+      code,
+    });
+  } finally {
+    await api.dispose();
+  }
+}
+
+/**
+ * Sets up scenario 2 of C-32 for a spec: the Route "Infrastructure" with the chain "devops" and the Team
+ * "payments-<key>" with the chain "payments", both Paging through the Mattermost Destinations of routing to Teams, and
+ * a firing warning Alert Group KubernetesContainerOOMKilled of payments. ivan (devops) is Paged by the first step of
+ * devops, which waits two hours; petr (payments) and olga, who has no Mattermost Account link, by the first step of
+ * payments, whose third step is only for critical and is skipped ten minutes on. Returns what the spec reads. What an
+ * earlier run of the key left is removed first, and dropAssignees removes all of it.
+ */
+export async function seedAssignees(key: string): Promise<AssigneeSeed> {
+  const k = key.toLowerCase();
+  await dropAssignees(k);
+  const seed = await seedRouting(k);
+  const logins = { ivan: `${k}-ivan`, petr: `${k}-petr`, olga: `${k}-olga` };
+  const chains = { devops: `${k}-devops`, payments: `${k}-payments` };
+  const alertname = seed.alertName("KubernetesContainerOOMKilled");
+  const admin = await adminApi();
+  try {
+    const ivan = await ensureLocalUser(admin, logins.ivan, "responder");
+    const petr = await ensureLocalUser(admin, logins.petr, "responder");
+    const olga = await ensureLocalUser(admin, logins.olga, "responder");
+    const devopsTeam = await ensureTeam(admin, seed.slugs.ops, [ivan]);
+    const paymentsTeam = await teamIdOf(admin, seed.slugs.pay);
+    await admin.call("POST", `/api/v1/teams/${paymentsTeam}/users`, { user_id: petr });
+    await setTeamDestinations(admin, seed.slugs.pay, [
+      { destination_id: seed.destination("payments-critical").id, severity_condition: "critical" },
+      {
+        destination_id: seed.destination("payments-notice").id,
+        severity_condition: "below_critical",
+      },
+    ]);
+    await linkMattermost(logins.ivan, seed.connectionId, "ivan", "u-ivan");
+    await linkMattermost(logins.petr, seed.connectionId, "petr", "u-petr");
+    const devops = await createChain(admin, chains.devops, devopsTeam, [
+      { kind: "page_people", user_ids: [ivan], importance: "normal" },
+      { kind: "wait", wait_seconds: 7200 },
+      { kind: "page_people", user_ids: [ivan], importance: "important" },
+    ]);
+    const payments = await createChain(admin, chains.payments, paymentsTeam, [
+      { kind: "page_people", user_ids: [petr, olga], importance: "normal" },
+      { kind: "wait", wait_seconds: 600 },
+      {
+        kind: "page_people",
+        user_ids: [petr],
+        importance: "important",
+        severity_condition: "critical",
+      },
+      { kind: "wait", wait_seconds: 7200 },
+    ]);
+    await setTeamChains(admin, seed.slugs.pay, [{ chain_id: payments }]);
+    const profiles = await admin.call<{ items: { id: string; policy: unknown }[] }>(
+      "GET",
+      "/api/v1/route-profiles",
+    );
+    await admin.call("POST", "/api/v1/routes", {
+      name: `Infrastructure-${k}`,
+      matchers: [{ label: "category", op: "=", value: seed.category }],
+      group_key: ["alertname", "system"],
+      deliver_to_teams: true,
+      run_team_chains: true,
+      destination_entries: [
+        { destination_id: seed.destination("infra-critical").id, severity_condition: "critical" },
+        {
+          destination_id: seed.destination("infra-notice").id,
+          severity_condition: "below_critical",
+        },
+      ],
+      chain_entries: [{ chain_id: devops }],
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
+    });
+  } finally {
+    await admin.dispose();
+  }
+  await seed.fire([{ alertname, team: seed.slugs.pay, severity: "warning" }]);
+  const groupId = await alertGroupOf(seed.integrationId, alertname);
+  return {
+    key: k,
+    seed,
+    logins,
+    chains,
+    teams: { devops: seed.slugs.ops, payments: seed.slugs.pay },
+    alertname,
+    groupId,
+  };
+}
+
+/** Waits until the Alert Group has this many Assignees, 60 seconds at most: the Pages wait for the Root messages. */
+export async function waitAssignees(groupId: string, count: number): Promise<void> {
+  const admin = await adminApi();
+  try {
+    await expect
+      .poll(
+        async () => {
+          const group = await admin.call<{ assignees: unknown[] }>(
+            "GET",
+            `/api/v1/alert-groups/${groupId}`,
+          );
+          return group.assignees.length;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(count);
+  } finally {
+    await admin.dispose();
+  }
+}
+
+/** Removes what seedAssignees made, in the order the references allow; it is safe to call twice. */
+export async function dropAssignees(key: string): Promise<void> {
+  const k = key.toLowerCase();
+  const admin = await adminApi();
+  try {
+    // The open Alert Groups of its Integration are resolved, so that no later spec lists them.
+    const integrations = await admin.call<{ items: { id: string; name: string }[] }>(
+      "GET",
+      "/api/v1/integrations?limit=500",
+    );
+    for (const integration of integrations.items.filter((i) => i.name === `${k}-routing`)) {
+      const groups = await admin.call<{ items: { id: string }[] }>(
+        "GET",
+        `/api/v1/alert-groups?integration=${integration.id}&status=firing&status=acknowledged&status=snoozed&limit=200`,
+      );
+      for (const g of groups.items) {
+        await admin.call("POST", `/api/v1/alert-groups/${g.id}/resolve`, {});
+      }
+    }
+    // The Routes that name the chains go first, then the chains, then the Teams that own them.
+    const routes = await admin.call<{
+      items: { id: string; matchers: { value: string }[] }[];
+    }>("GET", "/api/v1/routes");
+    for (const r of routes.items.filter((x) =>
+      x.matchers.some((m) => m.value.startsWith(`infra-${k}-`)),
+    )) {
+      await admin.call("POST", `/api/v1/routes/${r.id}/move-open-alert-groups`);
+      await admin.call("DELETE", `/api/v1/routes/${r.id}`);
+    }
+    await removeChains(admin, `${k}-`);
+    // Deleting a User deletes their Account links, which the Connection of dropRouting needs gone.
+    for (const login of [`${k}-ivan`, `${k}-petr`, `${k}-olga`]) {
+      const found = await admin.call<{ items: { id: string; login?: string }[] }>(
+        "GET",
+        `/api/v1/user-directory?q=${encodeURIComponent(login)}`,
+      );
+      for (const u of found.items.filter((x) => x.login === login)) {
+        await admin.call("DELETE", `/api/v1/users/${u.id}`);
+      }
+    }
+  } finally {
+    await admin.dispose();
+  }
+  await dropRouting(k);
+}
+
 /** The id of the Team with the slug. */
 export async function teamIdOf(admin: Api, slug: string): Promise<string> {
   const list = await admin.call<{ items: { id: string; slug: string }[] }>(
