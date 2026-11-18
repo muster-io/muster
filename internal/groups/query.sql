@@ -1489,9 +1489,11 @@ ORDER BY w.id
 LIMIT @lim;
 
 -- ListOpenGroupsOfUserAfter lists, by id after a cursor, a batch of the Alert Groups whose footer names the User
--- (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed, and who resolved them while their
--- final edit still waits, with a pending delivery — which a change of the User's display name or Account links
--- re-renders.
+-- (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed, an Assignee of them while firing
+-- (C-32.FR-12), through alert_group_assignees_user_idx and once however many chains made them one, and who resolved
+-- them while their final edit still waits, with a pending delivery — which a change of the User's display name or
+-- Account links re-renders. An Assignee row left on an Alert Group that no longer fires names nobody, as in
+-- ListGroupAssignees.
 -- name: ListOpenGroupsOfUserAfter :many
 SELECT w.id
 FROM ((SELECT g.id
@@ -1499,6 +1501,14 @@ FROM ((SELECT g.id
        WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
          AND (g.owner_user_id = @user_id OR g.snoozed_by_user_id = @user_id)
        ORDER BY g.id
+       LIMIT @lim)
+      UNION
+      (SELECT DISTINCT a.alert_group_id AS id
+       FROM alert_group_assignees a
+       JOIN alert_groups g ON g.org_id = a.org_id AND g.id = a.alert_group_id
+       WHERE a.org_id = @org_id AND a.user_id = @user_id AND a.alert_group_id > @after_id AND g.org_id = @org_id
+         AND g.status = 'firing'
+       ORDER BY a.alert_group_id
        LIMIT @lim)
       UNION
       (SELECT DISTINCT g.id
@@ -1540,6 +1550,13 @@ LIMIT @lim;
 -- or changed.
 -- name: LockTeamEvaluation :exec
 SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@org_id::bigint));
+
+-- ShareTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
+-- keyed by the Organization) shared, before the outcome of a Page locks its Alert Group (SettlePage), as a Snapshot
+-- does: a batch of user_name or account_links takes it exclusively before it lists, so it waits for the Assignees an
+-- outcome in flight makes, and an outcome that starts later renders their name and Account links after the change.
+-- name: ShareTeamEvaluation :exec
+SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@org_id::bigint));
 
 -- ListEvaluatedGroupsAfter lists, by id after a cursor, a batch of the Alert Groups whose firing Alerts the evaluation
 -- on a save of a Team or of the Team label classifies again (C-25.FR-13): the open ones, and those a person resolved

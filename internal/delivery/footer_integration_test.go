@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
@@ -435,6 +437,178 @@ func TestIntegrationFooterRerenderOfQueuedFinalEdit(t *testing.T) {
 		})
 		pending(t, 0)
 		again(t, "an unlink")
+		f.noDeadlock(t)
+	})
+}
+
+// TestIntegrationFooterAssigneeRerender is #628, C-12.FR-12, C-29.FR-1 item 7 and C-32.FR-12 on PostgreSQL, with the
+// renderer, the Account links and delivery of the runtime: in two Mattermost Destinations, alice is an Assignee of the
+// firing Alert Group FaA, and FaB fires without Assignees. A rename of alice edits the Root messages of FaA to her new
+// name, a Mattermost Account link she makes to the Mention of its username, and its unlink back to her name, each
+// once in each Destination, Quietly, with no Mention and no new message; FaB is never edited.
+func TestIntegrationFooterAssigneeRerender(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		f := setupFooterLive(t, s)
+		ctx := t.Context()
+		f.fresh(t, 1000, 1)
+		f.attach(t, f.dests...)
+		w := f.worker("fa")
+		updates := f.updates()
+		space := accountlinks.SpaceMattermost(f.conn)
+		f.fire(t, "fa", "FaA/a", "FaB/a")
+		var group, run int64
+		if err := f.d.Pool.QueryRow(ctx, `SELECT id FROM alert_groups WHERE public_id = $1`,
+			f.group(t, "FaA")).Scan(&group); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.d.Pool.QueryRow(ctx, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name,
+			sources, steps, state, generation, started_at)
+			VALUES ($1, 'ER0000000000FA', $2, 'devops', '[{"kind":"route"}]', '[]', 'running', 1, $3) RETURNING id`,
+			f.orgID, group, t0).Scan(&run); err != nil {
+			t.Fatal(err)
+		}
+		f.exec(t, `INSERT INTO alert_group_assignees (org_id, alert_group_id, escalation_run_id, step_number, user_id,
+			since) VALUES ($1, $2, $3, 1, $4, $5)`, f.orgID, group, run, f.aliceID, t0)
+		f.round(t, w)
+		if n := f.count(t, `SELECT count(*) FROM deliveries WHERE state = 'delivered'`); n != 4 {
+			t.Fatalf("%d of 4 delivered\n%s", n, f.log)
+		}
+		// change makes the change, runs the open Alert Group updates and a delivery round, and checks that they edited
+		// the Root messages of FaA once in each Destination, Quietly, with no Mention, showing what shows says, and
+		// nothing else.
+		change := func(t *testing.T, what string, do func(), shows func(m delivery.Message) bool) {
+			t.Helper()
+			f.rec.Reset()
+			do()
+			if n := f.count(t, `SELECT count(*) FROM open_group_updates`); n != 1 {
+				t.Fatalf("%s: %d rows of open_group_updates", what, n)
+			}
+			if _, err := updates.Round(ctx); err != nil {
+				t.Fatal(err)
+			}
+			f.round(t, w)
+			calls := f.rec.Calls()
+			seen := map[string]int{}
+			for _, c := range calls {
+				if c.Method != deliverytest.MethodUpdate || c.Loudness != groups.Quiet || len(c.Mentions) != 0 ||
+					!shows(c.Message) {
+					t.Errorf("%s: %s %s, %s, mentions %v, footer %q %v %v", what, c.Method, head(c.Message),
+						c.Loudness, c.Mentions, c.Message.Footer, c.Message.Footers, c.Message.FooterPeople)
+				}
+				if fs := strings.Fields(head(c.Message)); len(fs) > 1 {
+					seen[fs[1]]++
+				}
+			}
+			if want := map[string]int{"FaA": 2}; !maps.Equal(seen, want) {
+				t.Errorf("%s: edited %v, want %v\n%s", what, seen, want, f.log)
+			}
+		}
+		named := func(name string) func(m delivery.Message) bool {
+			return func(m delivery.Message) bool {
+				return m.Footer == "Assignees: "+name && m.FooterPeople == nil
+			}
+		}
+		change(t, "a rename", func() {
+			if _, err := f.admin.Update(ctx, users.Requester{Actor: audit.System, Transport: audit.TransportAPI},
+				f.alice.Actor.PublicID, nil, users.Changes{Name: "Alice Assignee", Role: auth.RoleResponder}); err != nil {
+				t.Fatal(err)
+			}
+		}, named("Alice Assignee"))
+		change(t, "a link", func() { f.linkMattermost(t, "alice_mm") }, func(m delivery.Message) bool {
+			p := m.FooterPeople[space]
+			return m.Footer == "Assignees: Alice Assignee" && len(p) == 1 && p[0].Username == "alice_mm" &&
+				m.Footers[space] == "Assignees: "+messages.FooterToken(0)
+		})
+		change(t, "an unlink", func() {
+			var link string
+			if err := f.d.Pool.QueryRow(ctx, `SELECT public_id FROM account_links WHERE user_id = $1`,
+				f.aliceID).Scan(&link); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.links.Unlink(ctx, accountlinks.Requester{UserID: f.aliceID,
+				UserPublicID: f.alice.Actor.PublicID, Actor: f.alice.Actor, Transport: audit.TransportUI},
+				link); err != nil {
+				t.Fatal(err)
+			}
+		}, named("Alice Assignee"))
+		f.noDeadlock(t)
+	})
+}
+
+// TestSettlePageAgainstRename is #628, C-12.FR-12 against the lock order of the outcome of a Page: while the outcome
+// that makes alice an Assignee of the firing FpA has rendered its footer with her old name and not committed, alice
+// is renamed and the run of the row user_name starts. The outcome holds the lock of the evaluation of the Teams shared
+// (SettlePage), so the run waits for it before it lists, then finds FpA, and the one edit of its Root message names
+// alice by her new name. Neither ends in a deadlock.
+func TestSettlePageAgainstRename(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		f := setupFooterLive(t, s)
+		ctx := t.Context()
+		f.fresh(t, 1000, 1)
+		updates := f.updates()
+		f.fire(t, "fp", "FpA/a")
+		f.round(t, f.a)
+		var group, run, page int64
+		if err := f.d.Pool.QueryRow(ctx, `SELECT id FROM alert_groups WHERE public_id = $1`,
+			f.group(t, "FpA")).Scan(&group); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.d.Pool.QueryRow(ctx, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name,
+			sources, steps, state, generation, started_at)
+			VALUES ($1, 'ER0000000000FP', $2, 'devops', '[{"kind":"route"}]', '[]', 'running', 1, $3) RETURNING id`,
+			f.orgID, group, t0).Scan(&run); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.d.Pool.QueryRow(ctx, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id, step_number,
+			kind, importance, again, state, created_at, run_step_seq)
+			VALUES ($1, $2, $3, 1, 'mention', 'normal', false, 'pending', $4, 1) RETURNING id`, f.orgID, group, run,
+			t0).Scan(&page); err != nil {
+			t.Fatal(err)
+		}
+		f.exec(t, `INSERT INTO page_users (org_id, page_id, user_id, outcome) VALUES ($1, $2, $3, 'pending')`, f.orgID,
+			page, f.aliceID)
+		// The outcome stops once it rendered and queued the footer that names alice as she is called before the rename.
+		g := newTxGate()
+		f.groups.SetRerender(func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+			if err := f.svc.Enqueue(ctx, tx, r); err != nil {
+				return err
+			}
+			return g.hold(ctx, tx)
+		})
+		blocked, settleErr, changeErr := f.against(t, g, func(ctx context.Context) error {
+			return pgx.BeginFunc(ctx, f.d.Pool, func(tx pgx.Tx) error {
+				_, err := f.groups.SettlePage(ctx, tx, group, groups.PageOutcome{Page: page,
+					Reached: []int64{f.aliceID}})
+				return err
+			})
+		}, func(ctx context.Context) error {
+			if _, err := f.admin.Update(ctx, users.Requester{Actor: audit.System, Transport: audit.TransportAPI},
+				f.alice.Actor.PublicID, nil, users.Changes{Name: "Alice Paged", Role: auth.RoleResponder}); err != nil {
+				return err
+			}
+			_, err := updates.Round(ctx)
+			return err
+		})
+		f.groups.SetRerender(f.svc.Enqueue)
+		if settleErr != nil || changeErr != nil {
+			t.Fatalf("outcome %v; rename %v\n%s", settleErr, changeErr, f.log)
+		}
+		if !blocked {
+			t.Error("the run of user_name did not wait for the outcome")
+		}
+		if n := f.count(t, `SELECT count(*) FROM alert_group_assignees WHERE user_id = $1`, f.aliceID); n != 1 {
+			t.Fatalf("%d assignees", n)
+		}
+		f.rec.Reset()
+		if _, err := updates.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		f.round(t, f.a)
+		calls := f.rec.Calls()
+		if len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate ||
+			calls[0].Message.Footer != "Assignees: Alice Paged" {
+			t.Errorf("calls %s, footer %q, want one edit naming Alice Paged\n%s", methods(calls), footerOf(calls), f.log)
+		}
 		f.noDeadlock(t)
 	})
 }

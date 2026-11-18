@@ -96,6 +96,7 @@ type Queries interface {
 	LockActiveUser(ctx context.Context, arg dbgen.LockActiveUserParams) ([]int64, error)
 	ShareUser(ctx context.Context, arg dbgen.ShareUserParams) ([]int64, error)
 	ShareServiceAccount(ctx context.Context, arg dbgen.ShareServiceAccountParams) ([]int64, error)
+	ShareTeamEvaluation(ctx context.Context, arg dbgen.ShareTeamEvaluationParams) error
 	GetUserTimeZone(ctx context.Context, arg dbgen.GetUserTimeZoneParams) (string, error)
 	InsertMemberships(ctx context.Context, arg dbgen.InsertMembershipsParams) error
 	ResolveMemberships(ctx context.Context, arg dbgen.ResolveMembershipsParams) error

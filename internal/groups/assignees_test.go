@@ -552,6 +552,44 @@ func TestFilterByAssignee(t *testing.T) {
 	}
 }
 
+// TestSettlePageSharesTheEvaluation is #628, C-12.FR-12 for the footer of a firing Alert Group: the outcome of a Page
+// that reached someone takes the lock of the evaluation of the Teams shared, once, before it locks the Alert Group
+// whose Assignees it makes them, as a Snapshot does, so that a batch of user_name or account_links, which takes it
+// exclusively before it lists, sees the Assignees; it locks no row of a User. An outcome that reached nobody takes no
+// such lock, and a failing lock fails the outcome before it changes anything.
+func TestSettlePageSharesTheEvaluation(t *testing.T) {
+	h, g, _ := assigneeHarness(t)
+	id := h.page(t, g, runID, 1, 0, owner, bobID, carolID)
+	shares, users := h.db.calls["ShareTeamEvaluation"], h.db.calls["ShareUser"]
+	before := -1
+	h.db.before["LockGroups"] = func() { before = h.db.calls["ShareTeamEvaluation"] - shares }
+	if _, err := h.svc.SettlePage(t.Context(), nil, g.ID, PageOutcome{Page: id,
+		Reached: []int64{carolID, owner}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.db.calls["ShareTeamEvaluation"] - shares; before != 1 || n != 1 || h.db.calls["ShareUser"] != users {
+		t.Errorf("%d shared locks before the alert group, %d in all, %d user locks", before, n,
+			h.db.calls["ShareUser"]-users)
+	}
+	if got := h.assignees(g); !slices.Equal(got, []string{"pay:alice", "pay:carol"}) {
+		t.Errorf("assignees %v", got)
+	}
+	shares = h.db.calls["ShareTeamEvaluation"]
+	if _, err := h.svc.SettlePage(t.Context(), nil, g.ID, PageOutcome{Page: id}); err != nil ||
+		h.db.calls["ShareTeamEvaluation"] != shares {
+		t.Errorf("an outcome that reached nobody: %v, %d shared locks", err, h.db.calls["ShareTeamEvaluation"]-shares)
+	}
+	errBoom := errors.New("boom")
+	h.db.fail["ShareTeamEvaluation"] = errBoom
+	locks := h.db.calls["LockGroups"]
+	if _, err := h.svc.SettlePage(t.Context(), nil, g.ID, PageOutcome{Page: id, Reached: []int64{bobID}}); !errors.Is(err,
+		errBoom) || h.db.calls["LockGroups"] != locks || len(h.assignees(g)) != 2 {
+		t.Errorf("a failing lock: %v, %d alert group locks, assignees %v", err, h.db.calls["LockGroups"]-locks,
+			h.assignees(g))
+	}
+	delete(h.db.fail, "ShareTeamEvaluation")
+}
+
 // TestAssigneeFailures: a failure of each read and write of the Assignees fails the change or the read.
 func TestAssigneeFailures(t *testing.T) {
 	h, g, _ := assigneeHarness(t)
