@@ -1616,8 +1616,10 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   transactions), `page_id`, the Page (`ON DELETE CASCADE`, `thread_replies_page_idx`;
   `thread_replies_page_id_fkey`, added `NOT VALID` and validated with those CHECKs), `paged_user_ids`, the people
   of the Page with an Account link in the Destination's Identity space whom the reply mentions, decided when it is
-  queued, and `page_source`, `route` or `team`, whether the Destination is one of the Route or of a Team of the chain,
-  which its text names ("Chain of the Route …"). A reply of a Page is `pending` at once, never batched.
+  queued — once it is `sent`, without those its line of Mentions left out for length through a bridge (C-12.FR-11),
+  whom it did not reach (C-32.FR-10) — and `page_source`, `route` or `team`, whether the Destination is one of the
+  Route or of a Team of the chain, which its text names ("Chain of the Route …"). A reply of a Page is `pending` at
+  once, never batched.
 - **`webhook_events`** — the events-mode queue of outgoing webhooks: one row per lifecycle event and Destination, with
   `sequence` (the Alert Group's `event_seq`: it grows with every lifecycle event, may have gaps on one Destination and
   does not start at 1 for a Destination added to the Route later), `webhook_id` (unique, kept across retries), `notify`,

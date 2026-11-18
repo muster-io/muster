@@ -81,6 +81,9 @@ type replyAttempt struct {
 	anchor      string
 	// resolved are the Mentions of a Loud reply, whose people its delivery records (C-28.FR-3).
 	resolved mentions.Result
+	// paged are the public ids of the people of a Page's reply by users.id, for the people its Mention line leaves
+	// out (reached).
+	paged map[int64]string
 	// after is what its render left to run once the transaction that prepared it committed.
 	after []func(context.Context)
 }
@@ -171,8 +174,9 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		var fallbacks []string
 		var page *messages.PageInput
 		var pageTargets []mentions.Target
+		var paged map[int64]string
 		if row.PageID.Valid {
-			if page, pageTargets, err = w.pageReply(ctx, tx, q, org, row, d); err != nil {
+			if page, pageTargets, paged, err = w.pageReply(ctx, tx, q, org, row, d); err != nil {
 				return err
 			}
 		}
@@ -204,7 +208,8 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
 				Mentions: ms, Targets: resolved.Targets, Webhook: webhook},
-			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, resolved: resolved, after: pending}
+			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, resolved: resolved, paged: paged,
+			after: pending}
 		if idem, ok := w.idempotent(d.Type); ok {
 			a.call.Key = idem.ReplyKey(d, row.ID)
 		}
