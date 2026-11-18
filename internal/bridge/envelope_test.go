@@ -757,6 +757,55 @@ func TestLongMentionLine(t *testing.T) {
 	}
 }
 
+// TestMentionsLeftOut covers C-28.FR-3 and C-12.FR-11 (#591): through a bridge with max_body_length 500, a Publication
+// and a Thread reply whose Mention line leaves out a linked person for its length report that person's public id in
+// LeftOut, and not those it keeps, nor a person named as text; a person the footer's marker mentions is not left out,
+// and a Quiet call leaves nobody out.
+func TestMentionsLeftOut(t *testing.T) {
+	e := newAdapterEnv(t, set("limits", "max_body_length", 500))
+	person := func(id, name, external, display string) mentions.Target {
+		p := linked(name, external, display)
+		p.User.PublicID = id
+		return p
+	}
+	c := call(groups.Loud, "pub-"+destPublicID+"-1-1")
+	c.Targets = []mentions.Target{person("SRALICE0000001", "Alice", "u-alice", strings.Repeat("a", 150)),
+		person("SRBOB000000001", "Bob", "u-bob", strings.Repeat("b", 200)),
+		person("SRCAROL0000001", strings.Repeat("c", 30), "", ""),
+		person("SRDORA00000001", "Dora", "u-dora", "Dora")}
+	e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m1","truncated":false,"replayed":false}`))
+	o := e.adapter.Publish(t.Context(), c, rootMessage(t, messages.ColourFiring))
+	if o.Kind != delivery.OutcomeOK || !slices.Equal(o.LeftOut, []string{"SRBOB000000001"}) {
+		t.Fatalf("publish %+v", o)
+	}
+	c.Key = "reply-" + destPublicID + "-1"
+	o = e.adapter.Reply(t.Context(), c, delivery.Root{MessageID: "m1"}, replyMessage("New Alert: pod i3"))
+	if o.Kind != delivery.OutcomeOK || !slices.Equal(o.LeftOut, []string{"SRBOB000000001"}) {
+		t.Fatalf("reply %+v", o)
+	}
+
+	// The footer's marker mentions Bob, whom the line leaves out.
+	m := rootMessage(t, messages.ColourAcknowledged)
+	m.Footers["bridge:1"] = "Acknowledged by " + templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+	m.FooterUsers = map[string]messages.FooterUser{"bridge:1": {Name: "Bob", ExternalID: "u-bob",
+		DisplayName: "Bob"}}
+	c.Key = "pub-" + destPublicID + "-2-1"
+	e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m2","truncated":false,"replayed":false}`))
+	if o = e.adapter.Publish(t.Context(), c, m); o.Kind != delivery.OutcomeOK || len(o.LeftOut) != 0 {
+		t.Fatalf("publish with bob in the footer %+v, body %q", o, decode(t, e.bridge.requests("post")[1])["body"])
+	}
+
+	c.Loudness, c.Key = groups.Quiet, "pub-"+destPublicID+"-3-1"
+	e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m3","truncated":false,"replayed":false}`))
+	if o = e.adapter.Publish(t.Context(), c, rootMessage(t, messages.ColourFiring)); o.Kind != delivery.OutcomeOK ||
+		len(o.LeftOut) != 0 {
+		t.Fatalf("quiet %+v", o)
+	}
+}
+
 // TestFooterOfTheConnection covers C-22.FR-16 and C-12.FR-12: the body's footer names the user as the identity space
 // of the Destination's Connection does — by the display name of their Bridge link there — and by the Muster display
 // name without a link there.

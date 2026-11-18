@@ -1921,6 +1921,7 @@ func (e MentionName) Valid() bool {
 // Defines values for MentionNotDeliveredReason.
 const (
 	MentionNotDeliveredReasonBridgeCannotMentionPeople MentionNotDeliveredReason = "bridge_cannot_mention_people"
+	MentionNotDeliveredReasonMessageTooLong            MentionNotDeliveredReason = "message_too_long"
 	MentionNotDeliveredReasonNoAccountLink             MentionNotDeliveredReason = "no_account_link"
 )
 
@@ -1928,6 +1929,8 @@ const (
 func (e MentionNotDeliveredReason) Valid() bool {
 	switch e {
 	case MentionNotDeliveredReasonBridgeCannotMentionPeople:
+		return true
+	case MentionNotDeliveredReasonMessageTooLong:
 		return true
 	case MentionNotDeliveredReasonNoAccountLink:
 		return true
@@ -7269,7 +7272,7 @@ type MentionEvent string
 // MentionName A symbolic Mention that each Destination turns into real Mentions; `paged` is the people of a Page by their Account links, or the Team mention or token of a step "Page the whole Team" (C-32.FR-9).
 type MentionName string
 
-// MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16).
+// MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).
 type MentionNotDeliveredReason string
 
 // MentionResolution What an entry mentions now for one Team, or for no Team.
@@ -10639,7 +10642,7 @@ type UndeliveredMention struct {
 	// Event A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).
 	Event MentionEvent `json:"event"`
 
-	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16).
+	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).
 	Reason MentionNotDeliveredReason `json:"reason"`
 
 	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.

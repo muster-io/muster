@@ -1639,6 +1639,17 @@ func TestDestinationCheckGroupPeopleAPI(t *testing.T) {
 	}
 }
 
+// TestMentionNotDeliveredReasons pins every reason a Mention is recorded as not delivered with (C-28.FR-3) to
+// MentionNotDeliveredReason of the spec, so that the code and the spec cannot drift apart.
+func TestMentionNotDeliveredReasons(t *testing.T) {
+	for _, r := range []string{mentions.ReasonNoAccountLink, mentions.ReasonBridgeCannotMentionPeople,
+		mentions.ReasonMessageTooLong} {
+		if !gen.MentionNotDeliveredReason(r).Valid() {
+			t.Errorf("%q is not a MentionNotDeliveredReason of the spec", r)
+		}
+	}
+}
+
 // TestDestinationMentionWarningsAPI is C-28.FR-3 and AC-4 at the API: every Destination read carries mention_warnings
 // — a list and a read of one, empty when there are none — each with the person, the entry as it is on the Destination
 // now with its position and target, the messenger, the reason and since when.
