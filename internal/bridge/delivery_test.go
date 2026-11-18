@@ -390,6 +390,103 @@ func TestFooterMarker(t *testing.T) {
 	}
 }
 
+// TestTemplateEveryoneTokens covers C-12.FR-8 and C-22.FR-16 (#586): a template's `{{ mention "here" }}` and its
+// siblings stay text that notifies nobody in the body and, in a Loud Root message or Thread reply through a bridge
+// that declares the symbolic name, add an entry of the kind everyone to the Mention line after the targets, each once,
+// as Slack and Mattermost add them to theirs; a token the bridge does not declare, a Quiet message and an edit add
+// none. The tokens of a body, of a line template's Alert lines and of the Alerts line count alike.
+func TestTemplateEveryoneTokens(t *testing.T) {
+	token := func(name string) string { return templates.MentionToken(templates.Token{Name: name}) }
+	m := rootMessage(t, messages.ColourFiring)
+	m.Body = &messages.Body{Text: "Paging " + token(templates.MentionHere), Markup: messages.MarkupCommonMark}
+	m.Alerts.Lines = []messages.AlertLine{{Text: "**i1** " + token(templates.MentionChannel) + " " +
+		token(templates.MentionHere) + " " + token(templates.MentionAll), Markup: messages.MarkupCommonMark}}
+	everyone := func(ref, name string) string {
+		return "map[display_name:" + name + " external_id:" + name + " kind:everyone ref:" + ref + "]"
+	}
+	text := func(name string) string { return "@" + zeroWidthSpace + name }
+	alice := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{Name: "Alice", ExternalID: "u-al",
+		DisplayName: "Alice"}}
+
+	declared := newAdapterEnv(t, declaring("here", "all"))
+	loud := call(groups.Loud, "pub-"+destPublicID+"-1-1")
+	loud.Targets = []mentions.Target{alice}
+	if o := declared.adapter.Publish(t.Context(), loud, m); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	env := decode(t, declared.bridge.requests("post")[0])
+	body := env["body"].(string)
+	if !strings.HasPrefix(body,
+		"[@Alice](muster-mention:m1) [@here](muster-mention:m2) [@all](muster-mention:m3)\n\n") ||
+		!strings.Contains(body, "Paging "+text("here")) ||
+		!strings.Contains(body, "- **i1** "+text("channel")+" "+text("here")+" "+text("all")) ||
+		fmt.Sprint(env["mentions"]) != "[map[display_name:Alice external_id:u-al ref:m1] "+everyone("m2", "here")+
+			" "+everyone("m3", "all")+"]" {
+		t.Fatalf("declared: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// The Alerts line of a line template: its token becomes an entry too, and its text never a bare `@all`.
+	line := rootMessage(t, messages.ColourFiring)
+	line.Alerts = nil
+	line.AlertsLine = &messages.AlertsLine{Label: "pod", Values: []messages.AlertValue{{Value: "i1"}},
+		Lines: []messages.AlertLine{{Text: "i1 " + token(templates.MentionAll), Markup: messages.MarkupCommonMark}},
+		Total: 1}
+	if o := declared.adapter.Publish(t.Context(), call(groups.Loud, "pub-"+destPublicID+"-2-1"), line); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("publish of an alerts line = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("post")[1])
+	body = env["body"].(string)
+	if !strings.HasPrefix(body, "[@all](muster-mention:m1)\n\n") || !strings.Contains(body, "i1 "+text("all")) ||
+		fmt.Sprint(env["mentions"]) != "["+everyone("m1", "all")+"]" {
+		t.Fatalf("alerts line: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// A Loud Thread reply with template output, an ack timeout notice, mentions as Slack's reply does.
+	notice := replyMessage()
+	notice.Body = &messages.Body{Text: "Nobody acknowledged " + token(templates.MentionHere),
+		Markup: messages.MarkupCommonMark}
+	if o := declared.adapter.Reply(t.Context(), call(groups.Loud, "reply-"+destPublicID+"-3"),
+		delivery.Root{MessageID: "m1"}, notice); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("reply = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("reply")[0])
+	if body := env["body"].(string); !strings.HasPrefix(body, "[@here](muster-mention:m1)\n\n") ||
+		fmt.Sprint(env["mentions"]) != "["+everyone("m1", "here")+"]" {
+		t.Fatalf("reply: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// Quiet, and an edit: the tokens stay text and nobody is mentioned.
+	if o := declared.adapter.Publish(t.Context(), call(groups.Quiet, "pub-"+destPublicID+"-4-1"), m); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("quiet publish = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("post")[2])
+	if body := env["body"].(string); strings.Contains(body, "muster-mention:") ||
+		!strings.Contains(body, "Paging "+text("here")) || fmt.Sprint(env["mentions"]) != "[]" {
+		t.Fatalf("quiet: body %q, mentions %v", body, env["mentions"])
+	}
+	if o := declared.adapter.Update(t.Context(), call(groups.Quiet, ""), "m1", m); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("update = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("edit")[0])
+	if body := env["body"].(string); strings.Contains(body, "muster-mention:") || env["mentions"] != nil {
+		t.Fatalf("edit: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// A bridge that declares no mention of everyone keeps the tokens as text and sends the people alone.
+	undeclared := newAdapterEnv(t)
+	if o := undeclared.adapter.Publish(t.Context(), loud, m); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish undeclared = %+v", o)
+	}
+	env = decode(t, undeclared.bridge.requests("post")[0])
+	body = env["body"].(string)
+	if !strings.HasPrefix(body, "[@Alice](muster-mention:m1)\n\n") || !strings.Contains(body, "Paging "+text("here")) ||
+		fmt.Sprint(env["mentions"]) != "[map[display_name:Alice external_id:u-al ref:m1]]" {
+		t.Fatalf("undeclared: body %q, mentions %v", body, env["mentions"])
+	}
+}
+
 // TestReplyThreadRef covers C-22.FR-6 and AC-4: a Thread reply goes under the Root message with its own key and the
 // thread_ref of the Root message — null without one — and its outcome returns the thread_ref the bridge answered; a
 // Loud reply notifies, with its Mentions first, and a Reminder carries its buttons.
