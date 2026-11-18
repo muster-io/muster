@@ -3466,7 +3466,8 @@ field, for example <code>/events/headers/0/value</code>: the value is shown to e
 or <code>{"type": "team", "slug": …, "name": …}</code>, with one target per Team of the Alert Group for "Team from the label".
 Always <code>[]</code> for a Quiet event. A Team is a target of the Destination's
 <a href="../../concepts/mentions/#what-each-messenger-supports">Mention entries</a>, given by its <code>team_id</code>, and the receiver
-gets its slug and name.</dd>
+gets its slug and name. On <code>paged</code> they are not the Destination's Mention entries but the people of the Page, each
+a <code>user</code> target, or for a step "Page the whole Team" its Team as a <code>team</code> target or <code>{"type": "everyone"}</code>.</dd>
 <dt><code>sequence</code></dt>
 <dd>The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
 and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".</dd>
@@ -3487,9 +3488,13 @@ its name, <code>[]</code> for none (<a href="../../concepts/teams/#which-alerts-
 <dd>Only on <code>destination_joined</code>, the <code>id</code>, <code>name</code> and <code>type</code> of the Destination the Alert Group joined, and on
 <code>escalation_webhook</code>, those of the outgoing webhook Destination the step sends to. No other event carries it.</dd>
 <dt><code>page</code></dt>
-<dd>Only on <code>page_not_delivered</code>: the people the Page names in <code>users</code> (<code>id</code>, <code>name</code>, <code>login</code>), the Notification
-gateway of a call in <code>gateway</code> (<code>id</code>, <code>name</code>), null for a Page by Mention, and the <code>reason</code>. No other event
-carries it.</dd>
+<dd>Only on <code>paged</code> and <code>page_not_delivered</code>: the people the Page names in <code>users</code> (<code>id</code>, <code>name</code>, <code>login</code>), empty for
+a step "Page the whole Team"; the Notification gateway of a call in <code>gateway</code> (<code>id</code>, <code>name</code>), null for a Page by
+Mention; the <code>reason</code> of a <code>page_not_delivered</code>, null on <code>paged</code>; the Escalation chain whose step made the Page in
+<code>chain</code> (<code>id</code>, <code>name</code>), null when no step of a chain made it and once the chain was deleted, and the number of
+that step in <code>step</code>, null when no step of a chain made the Page and kept when the chain was deleted; and the
+<code>importance</code>, <code>normal</code> or <code>important</code>, null for a step "Page the whole Team" and a call. No other event carries
+it.</dd>
 <dt><code>escalation_step</code></dt>
 <dd>Only on <code>escalation_step_skipped</code> and <code>escalation_webhook</code>: the Escalation chain in <code>chain</code> (<code>id</code>, <code>name</code>), null
 once the chain was deleted, the number of the step in <code>step</code>, and the <code>reason</code> of a skip, null on
@@ -3548,10 +3553,29 @@ value and Alert Group.</dd>
 reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
 Destination, named in <code>destination</code> (<a href="../../concepts/routing-to-teams/">Routing to Teams</a>).</dd>
 <dt><code>paged</code></dt>
-<dd><code>notify</code>: true. A step of an Escalation chain, or an action of a person's Notification rule, Paged people, a Team
+<dd>
+<p><code>notify</code>: true. A step of an Escalation chain, or an action of a person's Notification rule, Paged people, a Team
 or everyone in the chat by a Mention in the Threads of the chain's Destinations
-(<a href="../../concepts/escalation-chains/#where-chains-page">Where chains Page</a>). The people as <code>mentions</code> data come in
-a later version; until then <code>mentions</code> is empty.</dd>
+(<a href="../../concepts/escalation-chains/#where-chains-page">Where chains Page</a>). It carries the people of the Page as
+<code>user</code> targets of <code>mentions</code> — every one of them, whether or not they have an Account link — or the Team of a step
+"Page the whole Team" as a <code>team</code> target, or <code>{"type": "everyone"}</code> for everyone in the chat, and the Page in
+<code>page</code>, with its chain, step and importance. The receiver acts on it to reach them
+(<a href="../../concepts/escalation-chains/#how-a-page-reaches-a-person">How a Page reaches a person</a>). An events-mode
+Destination has no Root message and takes no reply, so it receives <code>paged</code> only when the Page replies in another
+Destination of the chain; a chain whose only Destinations are outgoing webhooks in the events mode records no
+<code>paged</code>, but <code>page_not_delivered</code> with <code>no_root_message</code> for a Page of people and <code>escalation_step_skipped</code> with
+<code>no_mention_possible</code> for a step "Page the whole Team".</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"mentions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SR4V7K2Q9X1MPA"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Ivan Petrov"</span><span class="p">,</span><span class="w"> </span><span class="nt">"login"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ivan"</span><span class="w"> </span><span class="p">}],</span>
+<span class="nt">"page"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"users"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SR4V7K2Q9X1MPA"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Ivan Petrov"</span><span class="p">,</span><span class="w"> </span><span class="nt">"login"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ivan"</span><span class="w"> </span><span class="p">}],</span>
+<span class="w">  </span><span class="nt">"gateway"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"chain"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"EC5R2W8M1K7Q3D"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devops"</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"step"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"importance"</span><span class="p">:</span><span class="w"> </span><span class="s2">"normal"</span>
+<span class="p">}</span>
+</code></pre></div>
+</dd>
 <dt><code>page_not_delivered</code></dt>
 <dd><code>notify</code>: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
 refused it (<code>call_refused</code>), answered what Muster cannot classify (<code>call_unknown</code>), kept failing until the retry

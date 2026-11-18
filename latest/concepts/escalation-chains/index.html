@@ -3559,11 +3559,18 @@ Chain of the Route Infrastructure · On-call of devops Main · normal
   mention neither, the step makes no reply there; where it can reply in none of the chain's Destinations, as when the
   only one is a Telegram channel, it records <code>escalation_step_skipped</code> with <code>no_mention_possible</code>.</li>
 <li><strong>The Timeline.</strong> Each Page records the Loud lifecycle event <code>paged</code>, of the kind <code>escalation</code>, with its people,
-  its chain and its step; outgoing webhooks in events mode receive it as every event
+  its chain and its step; outgoing webhooks in events mode receive it as every event, with its people as data
   (<a href="../../outgoing-webhooks/events/">Events</a>).</li>
 </ul>
-<p>In this version a Page by Mention replies in Mattermost and Slack Destinations. Telegram and Bridge Destinations and
-outgoing webhooks take Pages in a later version: until then a chain makes no Thread reply there.</p>
+<p>A Page by Mention replies in Mattermost, Slack and Telegram Destinations and through Bridges; in Telegram the reply
+is a comment under the channel post in the discussion group, as every Thread reply. An outgoing webhook in the template
+mode takes the Page through its "reply in thread" request, and one without that request takes none. One in the events
+mode has no Root message and takes no reply: it receives <code>paged</code> as an event, and only when the Page replies in
+another Destination of the chain. A chain whose only Destinations are outgoing webhooks in the events mode records no
+<code>paged</code>: a Page of people records <code>page_not_delivered</code> with <code>no_root_message</code>, and a step "Page the whole Team"
+<code>escalation_step_skipped</code> with <code>no_mention_possible</code>. A step "Page the whole Team" never replies in Telegram, which
+mentions no group and no one for everyone in the chat, and through a Bridge only when its bridge declares group
+mentions, for a Team mention, or the word for everyone in its <code>everyone_mentions</code>.</p>
 <h2 id="how-a-page-reaches-a-person">How a Page reaches a person<a class="headerlink" href="#how-a-page-reaches-a-person" title="Permanent link">&para;</a></h2>
 <p>A Page names each person as a Mention only where they have an Account link in the Identity space of that Destination's
 Connection (<a href="../../messengers/account-links/">Account links</a>); a person without one is named in the line "Page not
@@ -3588,9 +3595,24 @@ delivered: @petr has no linked Mattermost account" instead, which mentions nobod
 <td>they have an Account link for the Connection</td>
 </tr>
 <tr>
-<td>Telegram, Bridge, outgoing webhooks</td>
-<td>from a later version</td>
-<td>—</td>
+<td>Telegram</td>
+<td>a comment in the discussion group with a <code>tg://user?id=</code> link</td>
+<td>they have a Telegram Account link and are in the discussion group</td>
+</tr>
+<tr>
+<td>Bridge</td>
+<td>a Thread reply with a Mention marker</td>
+<td>they have an Account link for the Connection and the bridge declares <code>native_mentions</code></td>
+</tr>
+<tr>
+<td>Outgoing webhook, events mode</td>
+<td>the event <code>paged</code>, with the people as <code>mentions</code> data, when the Page replies in another Destination of the chain</td>
+<td>the receiver acts on it</td>
+</tr>
+<tr>
+<td>Outgoing webhook, template mode</td>
+<td>the "reply in thread" request, when it has one</td>
+<td>the receiver acts on it</td>
 </tr>
 <tr>
 <td>Notification gateway</td>
@@ -3599,6 +3621,17 @@ delivered: @petr has no linked Mattermost account" instead, which mentions nobod
 </tr>
 </tbody>
 </table>
+<p>In Telegram the reply reads "Step 1: Ivan, you are needed" with Ivan as a link that mentions him, and in a bridge
+"Step 1: <a href="muster-mention:m1">@Ivan</a>, you are needed" with his entry in the envelope's <code>mentions</code>
+(<a href="../../messengers/write-a-bridge/#rendering-the-envelope">Rendering the envelope</a>). A Mention in Telegram rings only a
+member of the discussion group: the creator of the group, anonymous in it, who muted it is not rung. A bridge without
+<code>native_mentions</code> shows a linked person's marker as their plain name, which rings nobody, so the Page is not delivered
+to them through that Destination: when no other Destination of the chain reaches them, it records
+<code>page_not_delivered</code> with <code>not_delivered</code>. An outgoing webhook takes every person of the Page as data, linked or not,
+and the Team of a step "Page the whole Team" by its slug and name; the template mode gives them to the "reply in
+thread" request as <code>.Mentions</code>, with <code>.Event</code> <code>paged</code> (<a href="../../outgoing-webhooks/templates/#mentions">Template mode</a>).
+One whose "reply in thread" request was removed after the Page was queued sends nothing, and that reply ends Not
+delivered.</p>
 <div class="admonition warning">
 <p class="admonition-title">At night, only a Notification gateway is reliable</p>
 <p>Whether a Mention in a Thread pushes a notification to a phone is still to be verified for Mattermost and Slack.

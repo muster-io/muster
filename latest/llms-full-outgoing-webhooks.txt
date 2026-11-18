@@ -160,7 +160,8 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
     or `{"type": "team", "slug": …, "name": …}`, with one target per Team of the Alert Group for "Team from the label".
     Always `[]` for a Quiet event. A Team is a target of the Destination's
     [Mention entries](https://muster-io.github.io/muster/latest/concepts/mentions.md#what-each-messenger-supports), given by its `team_id`, and the receiver
-    gets its slug and name.
+    gets its slug and name. On `paged` they are not the Destination's Mention entries but the people of the Page, each
+    a `user` target, or for a step "Page the whole Team" its Team as a `team` target or `{"type": "everyone"}`.
 
 `sequence`
 :   The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
@@ -188,9 +189,13 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
     `escalation_webhook`, those of the outgoing webhook Destination the step sends to. No other event carries it.
 
 `page`
-:   Only on `page_not_delivered`: the people the Page names in `users` (`id`, `name`, `login`), the Notification
-    gateway of a call in `gateway` (`id`, `name`), null for a Page by Mention, and the `reason`. No other event
-    carries it.
+:   Only on `paged` and `page_not_delivered`: the people the Page names in `users` (`id`, `name`, `login`), empty for
+    a step "Page the whole Team"; the Notification gateway of a call in `gateway` (`id`, `name`), null for a Page by
+    Mention; the `reason` of a `page_not_delivered`, null on `paged`; the Escalation chain whose step made the Page in
+    `chain` (`id`, `name`), null when no step of a chain made it and once the chain was deleted, and the number of
+    that step in `step`, null when no step of a chain made the Page and kept when the chain was deleted; and the
+    `importance`, `normal` or `important`, null for a step "Page the whole Team" and a call. No other event carries
+    it.
 
 `escalation_step`
 :   Only on `escalation_step_skipped` and `escalation_webhook`: the Escalation chain in `chain` (`id`, `name`), null
@@ -275,8 +280,27 @@ never sent.
 `paged`
 :   `notify`: true. A step of an Escalation chain, or an action of a person's Notification rule, Paged people, a Team
     or everyone in the chat by a Mention in the Threads of the chain's Destinations
-    ([Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page)). The people as `mentions` data come in
-    a later version; until then `mentions` is empty.
+    ([Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page)). It carries the people of the Page as
+    `user` targets of `mentions` — every one of them, whether or not they have an Account link — or the Team of a step
+    "Page the whole Team" as a `team` target, or `{"type": "everyone"}` for everyone in the chat, and the Page in
+    `page`, with its chain, step and importance. The receiver acts on it to reach them
+    ([How a Page reaches a person](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#how-a-page-reaches-a-person)). An events-mode
+    Destination has no Root message and takes no reply, so it receives `paged` only when the Page replies in another
+    Destination of the chain; a chain whose only Destinations are outgoing webhooks in the events mode records no
+    `paged`, but `page_not_delivered` with `no_root_message` for a Page of people and `escalation_step_skipped` with
+    `no_mention_possible` for a step "Page the whole Team".
+
+    ```json
+    "mentions": [{ "type": "user", "id": "SR4V7K2Q9X1MPA", "name": "Ivan Petrov", "login": "ivan" }],
+    "page": {
+      "users": [{ "id": "SR4V7K2Q9X1MPA", "name": "Ivan Petrov", "login": "ivan" }],
+      "gateway": null,
+      "reason": null,
+      "chain": { "id": "EC5R2W8M1K7Q3D", "name": "devops" },
+      "step": 1,
+      "importance": "normal"
+    }
+    ```
 
 `page_not_delivered`
 :   `notify`: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
