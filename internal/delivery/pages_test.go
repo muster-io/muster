@@ -1410,23 +1410,30 @@ func TestPageRepliesBeyondMattermost(t *testing.T) {
 }
 
 // leavingOut is the adapter of a bridge whose Mention line leaves out the people whose public ids are ids for its
-// length (C-12.FR-11): its replies are sent and report them in Outcome.LeftOut.
+// length (C-12.FR-11), or, when plain, names them by the plain name for want of a marker (C-22.FR-16): its replies
+// are sent and report them in Outcome.LeftOut, or in Outcome.Plain.
 type leavingOut struct {
 	*deliverytest.Recorder
-	ids []string
+	ids   []string
+	plain bool
 }
 
 func (a leavingOut) Reply(ctx context.Context, c delivery.Call, root delivery.Root,
 	m delivery.Message) delivery.Outcome {
 	out := a.Recorder.Reply(ctx, c, root, m)
-	if out.Kind == delivery.OutcomeOK {
+	switch {
+	case out.Kind != delivery.OutcomeOK:
+	case a.plain:
+		out.Plain = a.ids
+	default:
 		out.LeftOut = a.ids
 	}
 	return out
 }
 
-// TestPageReplyLeftOut is C-32.FR-10, FR-12 and C-12.FR-11: a sent Page reply through a bridge whose Mention
-// line left out a person for its length does not reach them — the reply mentions only the others from then on, and
+// TestPageReplyLeftOut is C-32.FR-10, FR-12, C-12.FR-11 and C-22.FR-16: a sent Page reply through a bridge whose
+// Mention line left out a person for its length, or that named them by the plain name because no marker could be
+// built for their Account link (#652), does not reach them — the reply mentions only the others from then on, and
 // the Page reports the others reached once its replies ended, so that the dispatcher records the person not
 // delivered and makes them no Assignee — unless another reply of the Page mentioned them. Left out, someone who is not
 // among the people the reply mentions changes nothing; and carol, a person of the Page linked only in Mattermost, whom
@@ -1435,18 +1442,22 @@ func TestPageReplyLeftOut(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		leftOut int64
+		plain   bool
 		other   bool
 		want    []int64
 		mention []int64
 	}{
-		{"left out", petrID, false, []int64{ivanID}, []int64{ivanID}},
-		{"mentioned by another reply", petrID, true, []int64{ivanID, petrID}, []int64{ivanID}},
-		{"left out someone else", carolID, false, []int64{ivanID, petrID}, []int64{ivanID, petrID}},
+		{"left out", petrID, false, false, []int64{ivanID}, []int64{ivanID}},
+		{"mentioned by another reply", petrID, false, true, []int64{ivanID, petrID}, []int64{ivanID}},
+		{"left out someone else", carolID, false, false, []int64{ivanID, petrID}, []int64{ivanID, petrID}},
+		{"plain", petrID, true, false, []int64{ivanID}, []int64{ivanID}},
+		{"plain, mentioned by another reply", petrID, true, true, []int64{ivanID, petrID}, []int64{ivanID}},
+		{"plain someone else", carolID, true, false, []int64{ivanID, petrID}, []int64{ivanID, petrID}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, s := pageEnvOfAll(t)
 			e.w.Adapters[delivery.TypeBridge] = leavingOut{Recorder: e.rec,
-				ids: []string{pagePeople[tc.leftOut].PublicID}}
+				ids: []string{pagePeople[tc.leftOut].PublicID}, plain: tc.plain}
 			e.db.pageDB.links = append(e.db.pageDB.links,
 				dbgen.ListPageLinksRow{UserID: petrID, IdentitySpace: spacePageBridge},
 				dbgen.ListPageLinksRow{UserID: petrID, IdentitySpace: "mattermost:" + strconv.Itoa(connID)},

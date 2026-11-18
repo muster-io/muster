@@ -806,6 +806,53 @@ func TestMentionsLeftOut(t *testing.T) {
 	}
 }
 
+// TestMentionsPlain covers C-28.FR-3, C-22.FR-16 and C-32.FR-10 (#652): a Publication and a Thread reply of a Loud
+// call report in Plain, once each and in the order of the targets, the people they name by the plain name, without
+// a marker: one whose Account link has an external id longer than 512 characters, one whose link and Muster display
+// names are white space only, and one without a link; not those with a marker, an external id of exactly 512
+// characters included, and none of them in LeftOut. A Quiet call reports nobody.
+func TestMentionsPlain(t *testing.T) {
+	e := newAdapterEnv(t)
+	person := func(id, name, external, display string) mentions.Target {
+		p := linked(name, external, display)
+		p.User.PublicID = id
+		return p
+	}
+	long := person("SRBOB000000001", "Bob", strings.Repeat("b", maxID+1), "Bob")
+	c := call(groups.Loud, "pub-"+destPublicID+"-1-1")
+	c.Targets = []mentions.Target{person("SRALICE0000001", "Alice", "u-alice", "Alice"), long,
+		person("SRCAROL0000001", " \t ", "u-carol", "\n "), person("SRDORA00000001", "Dora", "", ""),
+		person("SRERIN00000001", "Erin", strings.Repeat("e", maxID), "Erin"), long,
+		{Kind: mentions.TargetGroup, Group: "payments_team"}}
+	want := []string{"SRBOB000000001", "SRCAROL0000001", "SRDORA00000001"}
+	e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m1","truncated":false,"replayed":false}`))
+	o := e.adapter.Publish(t.Context(), c, rootMessage(t, messages.ColourFiring))
+	if o.Kind != delivery.OutcomeOK || !slices.Equal(o.Plain, want) || len(o.LeftOut) != 0 {
+		t.Fatalf("publish %+v", o)
+	}
+	var ids []string
+	for _, x := range decode(t, e.bridge.requests("post")[0])["mentions"].([]any) {
+		ids = append(ids, x.(map[string]any)["external_id"].(string))
+	}
+	if !slices.Equal(ids, []string{"u-alice", strings.Repeat("e", maxID)}) {
+		t.Errorf("the entries name %v", ids)
+	}
+	c.Key = "reply-" + destPublicID + "-1"
+	o = e.adapter.Reply(t.Context(), c, delivery.Root{MessageID: "m1"}, replyMessage("New Alert: pod i3"))
+	if o.Kind != delivery.OutcomeOK || !slices.Equal(o.Plain, want) || len(o.LeftOut) != 0 {
+		t.Fatalf("reply %+v", o)
+	}
+
+	c.Loudness, c.Key = groups.Quiet, "pub-"+destPublicID+"-2-1"
+	e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m2","truncated":false,"replayed":false}`))
+	if o = e.adapter.Publish(t.Context(), c, rootMessage(t, messages.ColourFiring)); o.Kind != delivery.OutcomeOK ||
+		len(o.Plain) != 0 {
+		t.Fatalf("quiet %+v", o)
+	}
+}
+
 // TestFooterOfTheConnection covers C-22.FR-16 and C-12.FR-12: the body's footer names the user as the identity space
 // of the Destination's Connection does — by the display name of their Bridge link there — and by the Muster display
 // name without a link there.

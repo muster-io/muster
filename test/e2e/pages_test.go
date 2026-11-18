@@ -694,7 +694,8 @@ type pagedEvent struct {
 // with ivan as data, one without it no Page (C-32.FR-11). Beyond it: once the bridge no longer declares
 // native_mentions, its reply names ivan by the plain name and, no other Destination of that chain reaching him, the
 // Page records page_not_delivered not_delivered (C-32.FR-10, FR-11); and a Page whose line of Mentions through the
-// bridge leaves out a person for length does not reach them (testPageLeftOut).
+// bridge leaves out a person for length does not reach them (testPageLeftOut), nor one that names a person by the
+// plain name for want of a marker (testPagePlain).
 func testPagesBeyondMattermost(t *testing.T, h *Harness, e *mm, ivan, petr, devops string,
 	chain func(name, owner, steps string) string,
 	route func(name, category string, entries []map[string]string, chains ...string) string) {
@@ -811,6 +812,7 @@ func testPagesBeyondMattermost(t *testing.T, h *Harness, e *mm, ivan, petr, devo
 	}
 
 	testPageLeftOut(t, h, e, ivan, petr, devops, brConn, br, chain, route)
+	testPagePlain(t, h, e, ivan, petr, devops, brConn, br, chain, route)
 
 	// A bridge without native_mentions, read by a check of its Connection on every replica.
 	capabilities, _ := json.Marshal(fakebridge.DefaultConfig().Capabilities)
@@ -908,6 +910,57 @@ func testPageLeftOut(t *testing.T, h *Harness, e *mm, ivan, petr, devops, brConn
 	}
 	restore(t, http.MethodPut, h.Fakes.Bridge+"/_fake/config", `{"limits":`+string(limits)+`}`)
 	check()
+}
+
+// testPagePlain is #652 against `muster dev` (C-32.FR-10, FR-12, C-22.FR-16): a step that Pages ivan and petr,
+// both linked through the bridge, petr by an external id longer than the 512 characters a Mention entry carries, makes
+// a reply that mentions ivan by his marker and names petr by the plain name, which mentions nobody; the Page reaches
+// ivan alone, who becomes the only Assignee, and records page_not_delivered not_delivered for petr, as no other reply
+// of the Page mentioned him. It replaces petr's link of testPageLeftOut.
+func testPagePlain(t *testing.T, h *Harness, e *mm, ivan, petr, devops, brConn, br string,
+	chain func(name, owner, steps string) string,
+	route func(name, category string, entries []map[string]string, chains ...string) string) {
+	t.Helper()
+	h.exec(t, `DELETE FROM account_links WHERE org_id = 1 AND public_id = 'AK0000000000B8'`)
+	h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id,
+		display_name, created_at) SELECT 1, 'AK0000000000B9', u.id, 'bridge', c.id, '`+strings.Repeat("p", 513)+
+		`', 'Petr', now() FROM users u, connections c WHERE u.public_id = '`+petr+`' AND c.public_id = '`+brConn+`'`)
+	t.Cleanup(func() {
+		conn, err := pgx.Connect(context.Background(), h.DatabaseURL)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() { _ = conn.Close(context.Background()) }()
+		if _, err := conn.Exec(context.Background(),
+			`DELETE FROM account_links WHERE org_id = 1 AND public_id = 'AK0000000000B9'`); err != nil {
+			t.Error(err)
+		}
+	})
+	markerless := chain("markerless", devops,
+		`[{"kind":"page_people","user_ids":["`+ivan+`","`+petr+`"],"importance":"normal"}]`)
+	route("Markerless", "markerless", []map[string]string{{"destination_id": br, "severity_condition": "any"}},
+		markerless)
+	e.group("p12", "Markerless")
+	e.alert("p12", "a", `{"category":"markerless","system":"u","cluster":"p12a"}`, "")
+	e.notify("p12", "first notification")
+	g := e.groupOf("p12a")
+	eventually(t, "page_not_delivered not_delivered for petr", func() bool {
+		return slices.Equal(e.pageEntries(g, "paged", "page_not_delivered"),
+			[]string{"paged/ivan/petr", "page_not_delivered/not_delivered/petr"}) &&
+			h.dump(t, `SELECT p.state FROM pages p JOIN alert_groups a ON a.id = p.alert_group_id
+				WHERE a.public_id = '`+g+`'`) == "delivered"
+	})
+	e.waitAssignees(g, "ivan/devops")
+	page := bridgeReplies(t, h, "Chain of the Route Markerless")
+	if len(page) != 1 {
+		t.Fatalf("the Page through the bridge %+v", page)
+	}
+	if in := page[0].Input; !strings.HasPrefix(in.Body, "Step 1: [@Ivan](muster-mention:m1)") ||
+		len(in.Mentions) != 1 || in.Mentions[0].ExternalId != "u-ivan" || strings.Contains(in.Body, "ppp") ||
+		strings.Contains(in.Body, "](muster-mention:m2)") {
+		t.Errorf("bridge %+v", in)
+	}
 }
 
 // sortedCopy is s sorted.

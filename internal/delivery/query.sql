@@ -909,8 +909,8 @@ RETURNING ds.public_id;
 
 -- RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
 -- buttons (a Reminder's), for the presses on them. The reply of a Page whose Mention line left out some of its people
--- for length (C-12.FR-11) mentions only @paged_user_ids, which replace those decided when it was queued; null keeps
--- them.
+-- for length (C-12.FR-11), or named some by the plain name for want of a marker (C-22.FR-16), mentions only
+-- @paged_user_ids, which replace those decided when it was queued; null keeps them.
 -- name: RecordReplySent :execrows
 UPDATE thread_replies
 SET state = 'sent', sent_at = @now::timestamptz, message_id = sqlc.narg('message_id')::text,
@@ -2388,7 +2388,7 @@ WHERE pu.org_id = @org_id AND pu.page_id = @page_id
 ORDER BY u.id;
 
 -- ListPageReplies lists the Thread replies of a Page with their state and the people each mentions: for a sent one,
--- those its Mention line did not leave out for length.
+-- those its Mention line did not leave out for length nor name by the plain name for want of a marker.
 -- name: ListPageReplies :many
 SELECT state, coalesce(paged_user_ids, '{}')::bigint[] AS paged_user_ids
 FROM thread_replies

@@ -249,7 +249,8 @@ func mentionsOf(c delivery.Call, i Info) ([]string, []gen.Mention) {
 
 // leftOut are the public ids of the people of the Loud call c who have a marker and whom sent, the Mentions the
 // message carries, lacks: the Mention line left them out for the body's length (C-12.FR-11), and no marker of the
-// footer mentions them. Delivery records them as not delivered (C-28.FR-3); a Quiet call has none.
+// footer mentions them. Delivery records them as not delivered (C-28.FR-3); a Quiet call has none. The people without
+// a marker are those of plainNamed.
 func leftOut(c delivery.Call, sent []gen.Mention) []string {
 	if c.Loudness != groups.Loud {
 		return nil
@@ -260,6 +261,24 @@ func leftOut(c delivery.Call, sent []gen.Mention) []string {
 			continue
 		}
 		if entryOf(sent, gen.MentionKindUser, t.User.ExternalID) < 0 && !slices.Contains(out, t.User.PublicID) {
+			out = append(out, t.User.PublicID)
+		}
+	}
+	return out
+}
+
+// plainNamed are the public ids of the people of the Loud call c who have no marker — an Account link whose external
+// id is longer than maxID or whose marker has no name, or no link — and whom the message therefore names by the plain
+// name, which mentions nobody (C-22.FR-16). Delivery records them as not delivered (C-28.FR-3), and a Page reply does
+// not reach them (C-32.FR-10); a Quiet call has none.
+func plainNamed(c delivery.Call) []string {
+	if c.Loudness != groups.Loud {
+		return nil
+	}
+	var out []string
+	for _, t := range c.Targets {
+		if t.Kind == mentions.TargetUser && t.User != nil && !markable(*t.User) &&
+			!slices.Contains(out, t.User.PublicID) {
 			out = append(out, t.User.PublicID)
 		}
 	}

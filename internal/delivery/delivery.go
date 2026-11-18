@@ -152,7 +152,8 @@ const (
 // the `thread_ref` stored for the next reply), whether the answer was the first result of the call's idempotency key
 // (Replayed), and, when the call failed, whether the request may have reached the messenger without its answer — a
 // timeout, or a connection lost after the request was sent (Unanswered) (C-22.FR-6), and the public ids of the people
-// whose Mentions its Mention line left out for the message's length (LeftOut, C-12.FR-11). A notification of a
+// whose Mentions its Mention line left out for the message's length (LeftOut, C-12.FR-11) and of the people it named
+// by the plain name for want of a marker, which mentions nobody (Plain, C-22.FR-16). A notification of a
 // Notification gateway that Muster refused without reaching the gateway — its Connection is gone, or its info no
 // longer declares the role gateway — is NotSent (C-30.FR-8); one that the outbound policy blocks reached the policy and
 // is not.
@@ -174,6 +175,7 @@ type Outcome struct {
 	Unanswered   bool
 	NotSent      bool
 	LeftOut      []string
+	Plain        []string
 }
 
 // Call is one adapter call: its client class (ADR-0015) — delivery for the worker, interactive for the interactive

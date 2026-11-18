@@ -1631,8 +1631,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   transactions), `page_id`, the Page (`ON DELETE CASCADE`, `thread_replies_page_idx`;
   `thread_replies_page_id_fkey`, added `NOT VALID` and validated with those CHECKs), `paged_user_ids`, the people
   of the Page with an Account link in the Destination's Identity space whom the reply mentions, decided when it is
-  queued — once it is `sent`, without those its line of Mentions left out for length through a bridge (C-12.FR-11),
-  whom it did not reach (C-32.FR-10) — and `page_source`, `route` or `team`, whether the Destination is one of the
+  queued — once it is `sent`, without those its line of Mentions left out for length through a bridge (C-12.FR-11)
+  and those it named by the plain name there for want of a marker (C-22.FR-16), whom it did not reach (C-32.FR-10) —
+  and `page_source`, `route` or `team`, whether the Destination is one of the
   Route or of a Team of the chain, which its text names ("Chain of the Route …"). A reply of a Page is `pending` at
   once, never batched. A reply of a Page does not wait for a Broken Destination to recover: one queued while it is
   Broken is inserted `dropped`, and one still to be sent when it became Broken is made `dropped` by the round of the

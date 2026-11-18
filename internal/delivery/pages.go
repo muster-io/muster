@@ -21,11 +21,12 @@ import (
 // paged_user_ids, decided when it was queued — or the Team mention or the token of a page_team step; a person without
 // such a link is named in a line of the reply instead. The outcome of the replies goes back to the dispatcher
 // (groups.SettlePage, PageReached and PageNotDelivered): a delivered reply that mentions a person delivers the Page to
-// them — not one whose Mention line left them out for length (C-12.FR-11): its delivery records only the others in
-// paged_user_ids (reached) — and once every reply of the Page ended — sent, Not delivered or withheld, as in a Broken
-// Destination — those it reached nowhere are not delivered. A Page reply is withheld in a Destination that is Broken
-// when the Page is queued (PageTargets), and one queued before it became Broken is dropped by the worker's round
-// (dropBrokenPages), so that its Page does not wait for the recovery; the other replies wait for it (C-11.FR-19).
+// them — not one whose Mention line left them out for length (C-12.FR-11) or that named them by the plain name for
+// want of a marker (C-22.FR-16): its delivery records only the others in paged_user_ids (reached) — and once every
+// reply of the Page ended — sent, Not delivered or withheld, as in a Broken Destination — those it reached nowhere are
+// not delivered. A Page reply is withheld in a Destination that is Broken when the Page is queued (PageTargets), and
+// one queued before it became Broken is dropped by the worker's round (dropBrokenPages), so that its Page does not
+// wait for the recovery; the other replies wait for it (C-11.FR-19).
 // Each reply settles its Page once its outcome committed, and every round settles the Pages whose replies all ended
 // without it.
 
@@ -99,18 +100,19 @@ func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org in
 	return in, targets, ids, nil
 }
 
-// reached are the people a Page's reply that was sent with its Mention line leaving out the people whose public ids
-// are leftOut mentions (C-12.FR-11): its paged_user_ids without those, which its delivery records in their place, so
-// that settlePage does not count them reached and, unless another reply of the Page mentioned them, the dispatcher
-// records them not delivered once every reply ended (C-32.FR-10, FR-12). It is nil, keeping paged_user_ids, when the
-// reply is no Page's or left out none of them.
-func (a replyAttempt) reached(leftOut []string) []int64 {
-	if !a.row.PageID.Valid || len(leftOut) == 0 {
+// reached are the people a Page's reply that was sent with the outcome o mentions: its paged_user_ids without those
+// whose Mentions its line left out for length (o.LeftOut, C-12.FR-11) and those it named by the plain name for want
+// of a marker (o.Plain, C-22.FR-16), which its delivery records in their place, so that settlePage does not count
+// them reached and, unless another reply of the Page mentioned them, the dispatcher records them not delivered once
+// every reply ended (C-32.FR-10, FR-12). It is nil, keeping paged_user_ids, when the reply is no Page's or drops none
+// of them.
+func (a replyAttempt) reached(o Outcome) []int64 {
+	if !a.row.PageID.Valid || len(o.LeftOut)+len(o.Plain) == 0 {
 		return nil
 	}
 	out := make([]int64, 0, len(a.row.PagedUserIds))
 	for _, id := range a.row.PagedUserIds {
-		if p, ok := a.paged[id]; !ok || !slices.Contains(leftOut, p) {
+		if p, ok := a.paged[id]; !ok || !slices.Contains(o.LeftOut, p) && !slices.Contains(o.Plain, p) {
 			out = append(out, id)
 		}
 	}

@@ -3462,7 +3462,7 @@ type ListPageRepliesRow struct {
 }
 
 // ListPageReplies lists the Thread replies of a Page with their state and the people each mentions: for a sent one,
-// those its Mention line did not leave out for length.
+// those its Mention line did not leave out for length nor name by the plain name for want of a marker.
 func (q *Queries) ListPageReplies(ctx context.Context, arg ListPageRepliesParams) ([]ListPageRepliesRow, error) {
 	rows, err := q.db.Query(ctx, listPageReplies, arg.OrgID, arg.PageID)
 	if err != nil {
@@ -4940,8 +4940,8 @@ type RecordReplySentParams struct {
 
 // RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
 // buttons (a Reminder's), for the presses on them. The reply of a Page whose Mention line left out some of its people
-// for length (C-12.FR-11) mentions only @paged_user_ids, which replace those decided when it was queued; null keeps
-// them.
+// for length (C-12.FR-11), or named some by the plain name for want of a marker (C-22.FR-16), mentions only
+// @paged_user_ids, which replace those decided when it was queued; null keeps them.
 func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, recordReplySent,
 		arg.Now,
