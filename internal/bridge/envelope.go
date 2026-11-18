@@ -152,7 +152,8 @@ func postInput(kind gen.MessageKind, channel string, c gen.MessageContent, notif
 }
 
 // replyInput is the Thread reply m for a bridge whose info is i, under the Thread threadRef, null when it is empty,
-// with head — its Mention line — before its body and the Mentions its markers name; notify is a Loud reply.
+// with head — its Mention line, inside the Lead of a Page: "Step 1: [@Ivan](muster-mention:m1), you are needed"
+// (C-32.FR-9) — before its body and the Mentions its markers name; notify is a Loud reply.
 func replyInput(threadRef string, m messages.Message, i Info, head []string, list []gen.Mention,
 	notify bool) gen.ThreadReplyInput {
 	ref := nullable.NewNullNullable[string]()
@@ -161,6 +162,9 @@ func replyInput(threadRef string, m messages.Message, i Info, head []string, lis
 	}
 	if list == nil {
 		list = []gen.Mention{}
+	}
+	if len(head) > 0 {
+		head = []string{m.MentionLine(head, " ", messages.EscapeCommonMark)}
 	}
 	return gen.ThreadReplyInput{ThreadRef: ref, Body: bodyOf(m, i, head), Buttons: buttonsOf(m, i),
 		Mentions: list, Notify: notify}

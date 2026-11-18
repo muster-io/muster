@@ -94,7 +94,8 @@ func newWebhookID() string {
 
 // queueEvents queues, in the dispatcher's transaction tx, one event per lifecycle event of the rendering for each
 // events-mode Destination of the Alert Group's Route (C-15.FR-2): notify is the loudness of its row and a Loud one
-// carries its Mentions in that Destination as data (C-15.FR-11); the body is rendered now. Neither a Broken Destination
+// carries its Mentions in that Destination as data (C-15.FR-11), a paged the people, the Team or the token of its
+// Page (pagedTargets); the body is rendered now. Neither a Broken Destination
 // nor a Storm holds them back (C-11.FR-6). An escalation_webhook is left out of that fan-out and queued once, for the
 // Destination of its step (stepDestinations), which its step checked in tx; the insert leaves out a Destination
 // deleted since. It reports whether it queued an event.
@@ -126,15 +127,28 @@ func (s *Service) queueEvents(ctx context.Context, tx groups.DBTX, q queries, r 
 		}
 		return nil
 	}
+	// The Mentions of a paged are the same in every Destination: read once per event.
+	paged := map[int][]mentions.Target{}
+	if len(dests) > 0 {
+		for i, e := range r.Events {
+			if e.Event == groups.EventPaged {
+				if paged[i], err = s.pagedTargets(ctx, q, e); err != nil {
+					return false, err
+				}
+			}
+		}
+	}
 	for _, d := range dests {
-		for _, e := range r.Events {
+		for i, e := range r.Events {
 			if e.Event == groups.EventEscalationWebhook {
 				continue // only to the Destination of its step, below
 			}
 			row, _ := rowOf(e, r.Actor) // Enqueue refused an event without a row before
 			loud := row.Loudness == groups.Loud
 			var targets []mentions.Target
-			if names := row.mentionsOf(e); loud && s.mentions != nil && len(names) > 0 {
+			if e.Event == groups.EventPaged {
+				targets = paged[i]
+			} else if names := row.mentionsOf(e); loud && s.mentions != nil && len(names) > 0 {
 				res, err := s.mentions.Resolve(ctx, tx, s.orgID, mentions.Request{DestinationID: d.ID,
 					DestinationType: d.Type, AlertGroupID: g.ID, Seq: e.Seq, At: now, Mentions: names})
 				if err != nil {
@@ -155,6 +169,35 @@ func (s *Service) queueEvents(ctx context.Context, tx groups.DBTX, q queries, r 
 		}
 	}
 	return true, nil
+}
+
+// pagedTargets are the Mentions of a paged as data (C-15.FR-11, C-32.FR-11): the people of its Page as user targets,
+// or the Team of a page_team step by its slug and name, or everyone in the chat by its token — never the Destination's
+// Mention entries. A Team deleted since keeps its name.
+func (s *Service) pagedTargets(ctx context.Context, q queries, e groups.Recorded) ([]mentions.Target, error) {
+	p := e.Page
+	if p == nil {
+		return nil, nil
+	}
+	var out []mentions.Target
+	for _, u := range p.Users {
+		out = append(out, mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{PublicID: u.PublicID,
+			Name: u.Name, Login: u.Login}})
+	}
+	switch {
+	case p.Everyone != "":
+		out = append(out, mentions.Target{Kind: mentions.TargetEveryone, Everyone: p.Everyone})
+	case p.Team != nil:
+		teams, err := q.ListEntryTeams(ctx, dbgen.ListEntryTeamsParams{OrgID: s.orgID, Ids: []int64{p.Team.ID}})
+		if err != nil {
+			return nil, fmt.Errorf("read the team of the page of %s: %w", e.Event, err)
+		}
+		for _, t := range teams {
+			out = append(out, mentions.Target{Kind: mentions.TargetTeam, Team: &mentions.TeamTarget{Slug: t.Slug,
+				Name: t.Name}})
+		}
+	}
+	return out, nil
 }
 
 // stepDestinations are the escalation_webhook events of a rendering, each with the Destination of its step.

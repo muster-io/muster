@@ -25,8 +25,8 @@ import (
 // Fallback template, and a Desired state of an earlier version, keep the label sections of L1 inside one
 // `<blockquote expandable>` and the Alerts one per line. Alert data are
 // escaped for HTML and their `@` neutralized; the trusted Mention tokens of template output stay text that notifies
-// nobody. A Thread reply carries its Mentions and its text. Rich Messages are not used (F-019). After the messenger
-// rejected the markup, the same sections are sent as plain text.
+// nobody. A Thread reply carries its Mentions and its text, a Page its Mentions inside its Lead. Rich Messages are not
+// used (F-019). After the messenger rejected the markup, the same sections are sent as plain text.
 
 // LengthLimit is the longest text of a message (C-14.FR-13, C-12.FR-11). Telegram counts UTF-16 code units after it
 // parsed the entities; Muster counts the UTF-16 code units of the HTML it sends, which are never fewer.
@@ -194,11 +194,15 @@ func length(s string) int {
 
 // fit lays m out within limit (C-29.FR-6, C-12.FR-11): the sections of m are shortened by messages.Shorten for a
 // budget that shrinks by what the layout of Telegram adds, until the text fits. A message that still does not fit
-// keeps its heading with the status word, its Mentions, its fields, its line of links and its footer only.
+// keeps its heading with the status word, its Mentions, its fields, its line of links and its footer only. The
+// Mentions of a Page stand in its Lead (C-32.FR-9): "Step 1: <a href="tg://user?id=…">Ivan</a>, you are needed".
 func fit(m messages.Message, w writer, mentions string, limit int) string {
 	markup := messages.MarkupHTML
 	if w.plain {
 		markup = messages.MarkupPlain
+	}
+	if mentions != "" {
+		mentions = m.MentionLine([]string{mentions}, " ", w.esc)
 	}
 	m = w.withFooter(m)
 	budget := limit - length(mentions)

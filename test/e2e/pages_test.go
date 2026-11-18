@@ -15,9 +15,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
+	"github.com/muster-io/muster/internal/fakes/faketelegram"
 )
 
 // zeroWidth is the zero-width space that keeps an `@` of a text from mentioning anyone.
@@ -140,7 +143,8 @@ func (e *mm) linkMattermost(session *agent, conn, username, userID string) {
 // page_not_delivered no_root_message (C-32.AC-7); a step "Page the whole Team" Pages the Team mention and everyone in
 // the chat by the token, and a Team without a Team mention for the Connection is skipped with no_mention_possible
 // (C-32.AC-13); a reply that the fake refuses ends Not delivered and records page_not_delivered not_delivered
-// (C-32.FR-10); a Page in a Slack Thread mentions the person by <@U…> (C-32.FR-11).
+// (C-32.FR-10); a Page in a Slack Thread mentions the person by <@U…> (C-32.FR-11); Pages in Telegram, through
+// Bridges and to outgoing webhooks (testPagesBeyondMattermost).
 func TestPages(t *testing.T) {
 	h := Start(t, DevProcess)
 	rep := h.Replicas[len(h.Replicas)-1]
@@ -473,6 +477,217 @@ func TestPages(t *testing.T) {
 			return false
 		})
 	})
+
+	t.Run("Pages in Telegram, through Bridges and to outgoing webhooks", func(t *testing.T) {
+		testPagesBeyondMattermost(t, h, e.on(t), ivan, td, chain, route)
+	})
+}
+
+// demoConnection is the id of the demo Connection of the type named name.
+func (e *mm) demoConnection(typ, name string) string {
+	e.t.Helper()
+	for _, item := range e.api.json(http.MethodGet, "/api/v1/connections?type="+typ, "", http.StatusOK)["items"].([]any) {
+		if c := item.(map[string]any); c["name"] == name {
+			return c["id"].(string)
+		}
+	}
+	e.t.Fatalf("no demo %s Connection %q", typ, name)
+	return ""
+}
+
+// bridgeReplies are the Thread replies the fake bridge received whose body contains s.
+func bridgeReplies(t *testing.T, h *Harness, s string) []fakebridge.Reply {
+	t.Helper()
+	var all []fakebridge.Message
+	decode(t, call(t, http.MethodGet, h.Fakes.Bridge+"/_fake/messages", ""), &all)
+	var out []fakebridge.Reply
+	for _, m := range all {
+		for _, r := range m.Replies {
+			if strings.Contains(r.Input.Body, s) {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+// pagedEvent is the body of an events-mode request of paged as the fake receiver recorded it.
+type pagedEvent struct {
+	Body struct {
+		Event    string `json:"event"`
+		Notify   bool   `json:"notify"`
+		Mentions []struct {
+			Type  string `json:"type"`
+			ID    string `json:"id"`
+			Name  string `json:"name"`
+			Login string `json:"login"`
+		} `json:"mentions"`
+		Page *struct {
+			Users []struct {
+				Login string `json:"login"`
+			} `json:"users"`
+			Chain *struct {
+				ID string `json:"id"`
+			} `json:"chain"`
+			Step       *int    `json:"step"`
+			Importance *string `json:"importance"`
+		} `json:"page"`
+	} `json:"body"`
+}
+
+// testPagesBeyondMattermost is S-177 against `muster dev`, as its Verification: the chain fanout Pages ivan, linked
+// in Telegram and through the demo Bridge, in the Threads of the Route's Telegram channel — in the discussion group,
+// "Step 1: <a href="tg://user?id=5001">ivan</a>, you are needed" (C-32.FR-8, FR-9, C-14.FR-3) — and of its Bridge
+// Destination, "Step 1: [@Ivan](muster-mention:m1), you are needed" with ivan's entry in mentions (C-22.FR-16); its
+// events-mode outgoing webhook receives paged with ivan as a user target of mentions and the Page's chain, step and
+// importance (C-15.FR-2, FR-11); its template-mode webhook with "reply in thread" gets the Page through that request
+// with ivan as data, one without it no Page (C-32.FR-11). Beyond it: once the bridge no longer declares
+// native_mentions, its reply names ivan by the plain name and, no other Destination of that chain reaching him, the
+// Page records page_not_delivered not_delivered (C-32.FR-10, FR-11).
+func testPagesBeyondMattermost(t *testing.T, h *Harness, e *mm, ivan, devops string,
+	chain func(name, owner, steps string) string,
+	route func(name, category string, entries []map[string]string, chains ...string) string) {
+	tgConn := e.demoConnection("telegram", devmode.TelegramConnectionName)
+	brConn := e.demoConnection("bridge", devmode.BridgeConnectionName)
+	e.fake(http.MethodPut, fmt.Sprintf("%s/_fake/chats/%d/members/%d", h.Fakes.Telegram, faketelegram.GroupID,
+		faketelegram.BotID), `{"status":"administrator","can_post_messages":true}`)
+	tg := e.api.json(http.MethodPost, "/api/v1/destinations", fmt.Sprintf(`{"type":"telegram","name":"tg-pages",
+		"connection_id":%q,"channel_id":"@muster_alerts","mentions":%s,"limiter":{"limit":60,"per_seconds":60}}`,
+		tgConn, mentionSettings(nil)), http.StatusCreated)["destination"].(map[string]any)["id"].(string)
+	br := e.api.json(http.MethodPost, "/api/v1/destinations", fmt.Sprintf(`{"type":"bridge","name":"bridge-pages",
+		"connection_id":%q,"channel_id":%q,"mentions":%s,"limiter":{"limit":60,"per_seconds":60}}`, brConn,
+		fakebridge.ChannelAlerts, mentionSettings(nil)), http.StatusCreated)["destination"].(map[string]any)["id"].(string)
+	events := e.webhook("pages-events", "pages", `[]`)["id"].(string)
+	reply := map[string]any{}
+	if err := json.Unmarshal([]byte(chatTemplate("pages", false)), &reply); err != nil {
+		t.Fatal(err)
+	}
+	reply["reply_in_thread"].(map[string]any)["body"] = `{"text":"{{ .Event }} {{ .Notify }}` +
+		`{{ range .Mentions }} {{ mention . }}{{ end }}"}`
+	withReply, _ := json.Marshal(reply)
+	delete(reply, "reply_in_thread")
+	for _, k := range []string{"create", "update"} {
+		r := reply[k].(map[string]any)
+		r["url"] = strings.Replace(r["url"].(string), "/chat/pages/", "/chat/pages-silent/", 1)
+	}
+	withoutReply, _ := json.Marshal(reply)
+	tmpl := e.templateWebhook("pages-chat", "template", string(withReply), "", nil)
+	silent := e.templateWebhook("pages-silent", "template", string(withoutReply), "", nil)
+	h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username,
+		display_name, created_at) SELECT 1, 'AK0000000000T7', u.id, 'telegram', c.id, '5001', 'ivan_tg', 'Ivan',
+		now() FROM users u, connections c WHERE u.public_id = '`+ivan+`' AND c.public_id = '`+tgConn+`'`)
+	h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id,
+		display_name, created_at) SELECT 1, 'AK0000000000B7', u.id, 'bridge', c.id, 'u-ivan', 'Ivan', now()
+		FROM users u, connections c WHERE u.public_id = '`+ivan+`' AND c.public_id = '`+brConn+`'`)
+	anyLevel := func(ids ...string) []map[string]string {
+		var out []map[string]string
+		for _, id := range ids {
+			out = append(out, map[string]string{"destination_id": id, "severity_condition": "any"})
+		}
+		return out
+	}
+	fanout := chain("fanout", devops, `[{"kind":"page_people","user_ids":["`+ivan+`"],"importance":"normal"}]`)
+	route("Fanout", "fanout", anyLevel(tg, br, events, tmpl, silent), fanout)
+	e.group("p9", "Fanout")
+	e.alert("p9", "a", `{"category":"fanout","system":"f","cluster":"p9a"}`, "")
+	e.notify("p9", "first notification")
+	g := e.groupOf("p9a")
+
+	var tgText string
+	eventually(t, "the Page in the discussion group", func() bool {
+		var msgs []faketelegram.Message
+		decode(t, call(t, http.MethodGet, fmt.Sprintf("%s/_fake/messages?chat=%d", h.Fakes.Telegram,
+			faketelegram.GroupID), ""), &msgs)
+		for _, m := range msgs {
+			if m.From != nil && m.From.ID == faketelegram.BotID && strings.Contains(m.Text, "you are needed") {
+				tgText = strings.ReplaceAll(m.Text, zeroWidth, "")
+				return true
+			}
+		}
+		return false
+	})
+	if want := `Step 1: <a href="tg://user?id=5001">ivan</a>, you are needed` + "\n" +
+		"Chain of the Route Fanout · @ivan · normal"; tgText != want {
+		t.Errorf("telegram\n%q\nwant\n%q", tgText, want)
+	}
+	// The bridge's info is first read and stored by its own Publication, which may come after the chain started with
+	// the Publication in Telegram: the Page then found no stored info and Named ivan there, reaching him in Telegram
+	// only. Either way the reply carries the same marker, rendered from what the Page decided when it was queued.
+	var page []fakebridge.Reply
+	eventually(t, "the Page through the bridge", func() bool {
+		page = bridgeReplies(t, h, "you are needed")
+		return len(page) == 1
+	})
+	if in := page[0].Input; !strings.HasPrefix(in.Body, "Step 1: [@Ivan](muster-mention:m1), you are needed\n\n") ||
+		len(in.Mentions) != 1 || in.Mentions[0].Ref != "m1" || in.Mentions[0].ExternalId != "u-ivan" || !in.Notify {
+		t.Errorf("bridge %+v", in)
+	}
+	var paged pagedEvent
+	eventually(t, "paged to the events-mode webhook", func() bool {
+		var got []pagedEvent
+		decode(t, call(t, http.MethodGet, webhookBase+"/_fake/received/pages", ""), &got)
+		for _, x := range got {
+			if x.Body.Event == "paged" {
+				paged = x
+				return true
+			}
+		}
+		return false
+	})
+	if b := paged.Body; !b.Notify || len(b.Mentions) != 1 || b.Mentions[0].Type != "user" || b.Mentions[0].ID != ivan ||
+		b.Mentions[0].Login != "ivan" || b.Page == nil || b.Page.Chain == nil || b.Page.Chain.ID != fanout ||
+		b.Page.Step == nil || *b.Page.Step != 1 || b.Page.Importance == nil || *b.Page.Importance != "normal" ||
+		len(b.Page.Users) != 1 || b.Page.Users[0].Login != "ivan" {
+		t.Errorf("paged %+v", b)
+	}
+	eventually(t, "the Page through reply in thread", func() bool {
+		for _, m := range e.chat("pages").Messages {
+			for _, r := range m.Replies {
+				if r.Text == "paged true @ivan" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	eventually(t, "the Page delivered", func() bool {
+		return slices.Equal(e.pageEntries(g, "paged", "page_not_delivered"), []string{"paged/ivan"}) &&
+			h.dump(t, `SELECT p.state FROM pages p JOIN alert_groups a ON a.id = p.alert_group_id
+				WHERE a.public_id = '`+g+`'`) == "delivered"
+	})
+	if c := e.chat("pages-silent"); len(c.Messages) != 1 || len(c.Messages[0].Replies) != 0 {
+		t.Errorf("the webhook without reply in thread %+v", c)
+	}
+
+	// A bridge without native_mentions, read by a check of its Connection on every replica.
+	capabilities, _ := json.Marshal(fakebridge.DefaultConfig().Capabilities)
+	t.Cleanup(func() {
+		restore(t, http.MethodPut, h.Fakes.Bridge+"/_fake/config", `{"capabilities":`+string(capabilities)+`}`)
+	})
+	e.fake(http.MethodPut, h.Fakes.Bridge+"/_fake/config", `{"capabilities":{"native_mentions":false}}`)
+	for _, rep := range h.Replicas {
+		api := patClient{t: t, base: rep.App, token: e.api.token}
+		if c := api.json(http.MethodPost, "/api/v1/connections/"+brConn+"/checks", "", http.StatusOK); c["ok"] != true {
+			t.Fatalf("the check of the bridge: %v", c)
+		}
+	}
+	plain := chain("plain", devops, `[{"kind":"page_people","user_ids":["`+ivan+`"]}]`)
+	route("Plain", "plain", anyLevel(br), plain)
+	e.group("p10", "Plain")
+	e.alert("p10", "a", `{"category":"plain","system":"p","cluster":"p10a"}`, "")
+	e.notify("p10", "first notification")
+	g = e.groupOf("p10a")
+	eventually(t, "page_not_delivered not_delivered", func() bool {
+		return slices.Equal(e.pageEntries(g, "paged", "page_not_delivered"),
+			[]string{"paged/ivan", "page_not_delivered/not_delivered/ivan"})
+	})
+	eventually(t, "the plain name through the bridge", func() bool {
+		return len(bridgeReplies(t, h, "Chain of the Route Plain")) == 1
+	})
+	if in := bridgeReplies(t, h, "Chain of the Route Plain")[0].Input; !strings.HasPrefix(in.Body,
+		"Step 1: [@Ivan](muster-mention:m1), you are needed\n\n") || strings.Contains(in.Body, "has no linked") {
+		t.Errorf("plain bridge %q", in.Body)
+	}
 }
 
 // sortedCopy is s sorted.

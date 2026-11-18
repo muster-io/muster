@@ -32,7 +32,8 @@ type PageSettler interface {
 }
 
 // pageReply is what the reply of a Page says and whom it mentions in the Destination d: its PageInput, and its
-// targets — the people it mentions by their Account links, or the Team mention or the token of a page_team step.
+// targets — the people it mentions by their Account links, or the Team mention or the token of a page_team step; in
+// an outgoing webhook, whose "reply in thread" request carries them as data, every person and the Team itself.
 func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org int64, row dbgen.GetLeasedReplyRow,
 	d Destination) (*messages.PageInput, []mentions.Target, error) {
 	p, err := q.GetPageReply(ctx, dbgen.GetPageReplyParams{OrgID: org, ID: row.PageID.Int64})
@@ -53,12 +54,19 @@ func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org in
 	}
 	var targets []mentions.Target
 	for _, u := range users {
-		if !slices.Contains(row.PagedUserIds, u.ID) {
-			in.Unlinked = append(in.Unlinked, u.Login)
-		} else {
+		// The reply renders what the Page decided when it was queued, never the Connection's info of now: a person
+		// the queue found linked through a bridge whose stored info did not declare native_mentions — or had none
+		// yet — is not among the people the reply reaches (paged_user_ids), but is still named by their marker,
+		// which such a bridge shows as the plain name (C-22.FR-16, C-32.FR-11). The marker is the same whatever the
+		// bridge declares, so the reply does not depend on when its info was read. A person the Page recorded as
+		// linked nowhere (no_account_link), such as one who linked their account since, is named without a Mention.
+		named := d.Type == TypeBridge && u.ExternalID != "" && u.Reason != groups.PageNoAccountLink
+		if slices.Contains(row.PagedUserIds, u.ID) || named {
 			targets = append(targets, mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{
 				PublicID: u.PublicID, Name: u.Name, Login: u.Login, Username: u.Username, ExternalID: u.ExternalID,
 				DisplayName: u.DisplayName}})
+		} else {
+			in.Unlinked = append(in.Unlinked, u.Login)
 		}
 		if !p.OnCall {
 			in.People = append(in.People, u.Login)
@@ -67,6 +75,10 @@ func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org in
 	switch {
 	case p.Everyone != "":
 		targets = append(targets, mentions.Target{Kind: mentions.TargetEveryone, Everyone: p.Everyone})
+	case p.TeamID.Valid && d.Type == TypeWebhook:
+		// An outgoing webhook takes the Team as data (C-15.FR-11).
+		targets = append(targets, mentions.Target{Kind: mentions.TargetTeam,
+			Team: &mentions.TeamTarget{Slug: p.TeamSlug, Name: p.TeamName}})
 	case p.TeamID.Valid && w.TeamMentions != nil && d.Connection != nil:
 		m, ok, err := w.TeamMentions.ForConnection(ctx, tx, p.TeamID.Int64, *d.Connection)
 		if err != nil {

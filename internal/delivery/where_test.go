@@ -4,6 +4,7 @@
 package delivery
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,7 +12,11 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/routing"
 )
 
@@ -124,5 +129,90 @@ func TestWhereChainsPageWithoutRoots(t *testing.T) {
 	}
 	if _, ok := pageOf(groups.Recorded{Event: groups.EventPaged}, 11); ok {
 		t.Error("a paged without its Page")
+	}
+}
+
+// teamMentionsOf has a Team mention of Team 3 for every Connection.
+type teamMentionsOf struct{}
+
+func (teamMentionsOf) ForConnection(_ context.Context, _ mentions.DBTX, team, _ int64) (mentions.TeamMention, bool,
+	error) {
+	return mentions.TeamMention{Group: "payments"}, team == 3, nil
+}
+
+// TestWherePageTeam is C-32.FR-9 and FR-11 for a step "Page the whole Team": Telegram mentions no group and no one
+// for everyone in the chat, so it is never Paged; a Bridge only when its bridge declares group mentions — with a Team
+// mention for its Connection — or the token in everyone_mentions, and only as a messenger; an outgoing webhook always,
+// as data; Mattermost with its Team mention and its tokens.
+func TestWherePageTeam(t *testing.T) {
+	s := &Service{teamMentions: teamMentionsOf{}}
+	conn := int64(5)
+	root := func(typ string, c mentions.Connection) pageRoot {
+		r := pageRoot{typ: typ, conn: c, replies: true}
+		if typ != TypeWebhook {
+			r.connection = &conn
+		}
+		return r
+	}
+	declares := mentions.Connection{GroupMentions: true, Messenger: true, Everyone: []string{"here"}}
+	team, here, all := groups.PageRequest{Team: 3}, groups.PageRequest{Everyone: "here"},
+		groups.PageRequest{Everyone: "all"}
+	for _, c := range []struct {
+		name string
+		root pageRoot
+		r    groups.PageRequest
+		want bool
+	}{
+		{"Telegram, the Team", root(TypeTelegram, mentions.Connection{}), team, false},
+		{"Telegram, everyone", root(TypeTelegram, mentions.Connection{}), here, false},
+		{"a bridge that declares group mentions", root(TypeBridge, declares), team, true},
+		{"a bridge without group mentions", root(TypeBridge, mentions.Connection{Messenger: true}), team, false},
+		{"a bridge with a Team without a Team mention", root(TypeBridge, declares), groups.PageRequest{Team: 4},
+			false},
+		{"a bridge that declares the token", root(TypeBridge, declares), here, true},
+		{"a bridge that does not declare the token", root(TypeBridge, declares), all, false},
+		{"a gateway bridge", root(TypeBridge, mentions.Connection{GroupMentions: true,
+			Everyone: []string{"here"}}), here, false},
+		{"an outgoing webhook, the Team", root(TypeWebhook, mentions.Connection{}), team, true},
+		{"an outgoing webhook, everyone", root(TypeWebhook, mentions.Connection{}), all, true},
+		{"Mattermost, the Team", root(TypeMattermost, mentions.Connection{}), team, true},
+		{"Slack without usergroups:read", root(TypeSlack, mentions.Connection{}), team, false},
+		{"Slack with usergroups:read", root(TypeSlack, mentions.Connection{UsergroupsRead: true}), team, true},
+	} {
+		got, err := s.canMention(t.Context(), nil, c.root, c.r)
+		if err != nil || got != c.want {
+			t.Errorf("%s: %v %v, want %v", c.name, got, err, c.want)
+		}
+	}
+	if ok, _ := (&Service{}).canMention(t.Context(), nil, root(TypeBridge, declares), team); ok {
+		t.Error("a Team mention without Team mentions")
+	}
+}
+
+// TestWherePageTypes is C-32.FR-11: a Page replies in Mattermost, Slack, Telegram and through Bridges, and in an
+// outgoing webhook only with a "reply in thread" request; pageRootOf reads what the Connection can mention.
+func TestWherePageTypes(t *testing.T) {
+	for _, c := range []struct {
+		row  dbgen.ListPageRootsRow
+		want bool
+	}{
+		{dbgen.ListPageRootsRow{Type: TypeMattermost}, true},
+		{dbgen.ListPageRootsRow{Type: TypeSlack}, true},
+		{dbgen.ListPageRootsRow{Type: TypeTelegram}, true},
+		{dbgen.ListPageRootsRow{Type: TypeBridge}, true},
+		{dbgen.ListPageRootsRow{Type: TypeWebhook, WebhookReplies: true}, true},
+		{dbgen.ListPageRootsRow{Type: TypeWebhook}, false},
+		{dbgen.ListPageRootsRow{Type: "other"}, false},
+	} {
+		if got := pageRootOf(c.row).pages(); got != c.want {
+			t.Errorf("%s replies %v: %v", c.row.Type, c.row.WebhookReplies, got)
+		}
+	}
+	r := pageRootOf(dbgen.ListPageRootsRow{ID: 9, Type: TypeBridge, ConnectionID: pgtype.Int8{Int64: 5, Valid: true},
+		Health: healthBroken, GroupMentions: true, NativeMentions: true, Messenger: true,
+		EveryoneMentions: []string{"here"}})
+	if r.id != 9 || r.connection == nil || *r.connection != 5 || !r.broken || r.conn.ID != 5 || !r.conn.GroupMentions ||
+		!r.conn.NativeMentions || !r.conn.Messenger || !slices.Equal(r.conn.Everyone, []string{"here"}) {
+		t.Errorf("root %+v", r)
 	}
 }

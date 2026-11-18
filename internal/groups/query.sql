@@ -1637,9 +1637,10 @@ INSERT INTO page_users (org_id, page_id, user_id, outcome, reason)
 VALUES (@org_id, @page_id, @user_id, @outcome, sqlc.narg('reason'));
 
 -- LockPage locks a Page whose outcome its Thread replies settle, after its Alert Group, with the run, the chain and the
--- step that made it.
+-- step that made it, and the importance of a Page of people, empty for none.
 -- name: LockPage :one
 SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
+       coalesce(p.importance, '')::text AS importance,
        p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
        coalesce(r.chain_name, '')::text AS chain_name
 FROM pages p

@@ -547,6 +547,35 @@ func TestMentions(t *testing.T) {
 	}
 }
 
+// TestPageLead is C-32.FR-9, FR-11 and C-22.FR-16: the Thread reply of a Page writes its Mention markers inside its
+// Lead — "Step 1: [@Ivan](muster-mention:m1), you are needed" — with their entries in mentions, the line valid against
+// the protocol; a bridge without native_mentions gets the same marker, which it shows as the plain name; without
+// Mentions the reply has no Lead.
+func TestPageLead(t *testing.T) {
+	page := messages.PageMessage("en", "Infrastructure", "UTC", messages.ColourFiring, messages.PageInput{Step: 1,
+		Mentioned: true, Messenger: "bridge", Source: messages.PageSourceRoute, OnCallTeam: "devops",
+		Schedule: "Main", Importance: "normal"})
+	c := delivery.Call{Loudness: groups.Loud, Targets: []mentions.Target{linked("Ivan", "u-ivan", "Ivan")}}
+	for _, i := range []Info{infoOf(t), infoOf(t, func(m map[string]any) {
+		delete(at(m, "capabilities"), "native_mentions")
+	})} {
+		head, list := mentionsOf(c, i)
+		in := replyInput("t-m1", page, i, head, list, true)
+		in.Mentions = marked(in.Mentions, in.Body)
+		want := "Step 1: [@Ivan](muster-mention:m1), you are needed\n\n" +
+			"Chain of the Route Infrastructure · On-call of devops Main · normal"
+		if in.Body != want || len(in.Mentions) != 1 || in.Mentions[0].ExternalId != "u-ivan" || !in.Notify {
+			t.Errorf("page\n%q\nwant\n%q\n%+v", in.Body, want, in.Mentions)
+		}
+		if b, _ := json.Marshal(in); visit(t, bridgeSchema(t, "ThreadReplyInput"), b) != nil {
+			t.Errorf("%s does not match ThreadReplyInput", b)
+		}
+	}
+	if in := replyInput("t-m1", page, infoOf(t), nil, nil, true); strings.Contains(in.Body, "you are needed") {
+		t.Errorf("without mentions %q", in.Body)
+	}
+}
+
 // declaring is a bridge that declares group mentions and the mentions of everyone named.
 func declaring(words ...string) func(map[string]any) {
 	return func(m map[string]any) {

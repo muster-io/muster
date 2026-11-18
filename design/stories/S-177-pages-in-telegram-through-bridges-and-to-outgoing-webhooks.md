@@ -12,8 +12,13 @@ files_touched:
   - internal/delivery/where_test.go
   - internal/delivery/pages.go
   - internal/delivery/pages_test.go
+  - internal/delivery/query.sql
   - internal/delivery/webhookevents.go
   - internal/delivery/webhookevents_test.go
+  - internal/groups/pages.go
+  - internal/groups/pages_test.go
+  - internal/groups/query.sql
+  - design/db/schema.md
   - internal/telegram/layout.go
   - internal/telegram/layout_test.go
   - internal/bridge/envelope.go
@@ -63,9 +68,19 @@ issue: 606
 - **Delivery** (`internal/delivery/where.go`, `pages.go`, `webhookevents.go`): `pageTypes` gains Telegram, Bridge and
   the outgoing webhooks with a Thread — template mode with "reply in thread"; an events-mode webhook takes `paged` as an
   event, not a reply. A target's people with an Account link through a bridge whose stored info does not declare
-  `native_mentions` are not `Linked` for that Destination (C-22.FR-16), and `page_team` checks the bridge's group
-  mentions and `everyone_mentions` through `mentions.Can` with the Connection's capabilities. The events of `paged`
+  `native_mentions` — or has none yet, as mentions.Resolve and the reach of S-171 read it — are not `Linked` for that
+  Destination (C-22.FR-16). This is decided once, when the Page is queued: the reply renders from its row and the
+  Page's people (`paged_user_ids`, and the `no_account_link` the Page recorded), never from the Connection's info at
+  send time, so the bridge's first info read racing the Page cannot turn a Named person into "Page not delivered".
+  `page_team` checks the bridge's group
+  mentions and `everyone_mentions` through `mentions.Can` with the Connection's capabilities, which `ListPageRoots`
+  reads with whether an outgoing webhook has a "reply in thread" request (`query.sql`). The events of `paged`
   resolve its people and its Team or token as `mentions` data instead of the Destination's Mention entries.
+- **Dispatcher** (`internal/groups/pages.go`, `query.sql`): `groups.PageTarget` gains `Named`, the linked people its
+  reply names by the plain name; a person only Named, or only in withheld replies, is not delivered at once
+  (`not_delivered`), not `no_account_link`, since they have an Account link. The `page_not_delivered` of a Page by
+  Mention carries its importance, which `LockPage` reads for the one recorded once the replies ended, so that `page`
+  has it on both events.
 - **Telegram** (`internal/telegram/layout.go`) and **Bridge** (`internal/bridge/envelope.go`): the Mention line is
   `messages.Message.MentionLine`, so a Page's Lead stands around it, as S-155 does in Mattermost and Slack.
 - **Webhooks** (`internal/webhooks/body.go`, `adapter.go`): the body of `paged`, and the event a "reply in thread"
@@ -92,7 +107,8 @@ FTG=127.0.0.1:18081/_fake; FBR=127.0.0.1:18094/_fake
 curl -s $FTG/messages | jq -r '[.[] | select(.text | test("you are needed"))][0].text'
 # Step 1: <a href="tg://user?id=…">Ivan</a>, you are needed
 curl -s $FBR/messages | jq -c '[.[] | select(.body | test("you are needed"))][0] | {body, mentions}'
-# {"body":"Step 1: [@Ivan](muster-mention:m1), you are needed\n…","mentions":[{"ref":"m1","kind":"user",…}]}
+# {"body":"Step 1: [@Ivan](muster-mention:m1), you are needed\n…","mentions":[{"ref":"m1","external_id":"u-ivan",…}]}
+# (an entry for a person has no kind: only groups and everyone carry one, C-22.FR-16)
 # FWH: the recorded requests of the outgoing webhook's receiver (internal/fakes/fakewebhook, as webhook_events_test.go)
 curl -s $FWH/requests | jq -c '[.[] | select(.body.event == "paged")][0].body.mentions'
 # [{"type":"user","id":"SR…","name":"Ivan","login":"ivan"}]
@@ -114,6 +130,12 @@ None.
   records `page_not_delivered` `no_root_message` until this story.
 - In Telegram a Mention reaches only members of the discussion group (F-014, F-129): S-172 warns about the On-calls who
   are not.
+- A Bridge Connection's info is stored only by a check of the Connection, a probe of a Notification gateway, or the
+  first read of a send through it. A chain starts with the first Publication in any Destination, so a Page can be
+  queued before the first send through a bridge that was never checked: its linked people are then Named there and
+  counted as not reached through it, though the bridge, if it declares `native_mentions`, renders the marker as a real
+  Mention. This race only under-reports; question for the maintainer: read the info when a Bridge
+  Connection is saved, so that it is never unknown.
 
 ## Coverage
 
