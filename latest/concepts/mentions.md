@@ -191,17 +191,16 @@ A person whom an entry names is sometimes not mentioned as their messenger menti
   text.
 - The Destination is a bridge whose `info` does not declare `native_mentions`, or Muster has not read its `info` yet.
   The message names them by their plain name, which notifies nobody.
-
-Through a bridge the line of Mentions keeps, in their order, the whole Mentions that fit half of the bridge's body
-limit, and leaves out the rest. A Mention left out for its length is still recorded as delivered today, so it appears
-in no Timeline entry and in no warning.
+- The Destination is a bridge, and the message's line of Mentions has no room for theirs. The line keeps, in their
+  order, the whole Mentions that fit half of the bridge's body limit, and leaves out the rest.
 
 Nothing is written in the Thread for them: Muster never posts a message about a Mention. Instead, once the Loud
 message is delivered, the Alert Group's Timeline records the delivery event "Mention not delivered in
 {Destination}" (`mention_not_delivered`). Each person, entry and message gets one, with the entry, the Loud event and
-the reason: `no_account_link` or `bridge_cannot_mention_people`. A message that ends Not delivered records none, nor
-does a Quiet message or an edit, since neither mentions anyone. The first publication of a Storm summary belongs to no
-Alert Group, so its undelivered Mentions appear in no Timeline. They still warn on the Destination.
+the reason: `no_account_link`, `bridge_cannot_mention_people` or `message_too_long`, one for each case above. A message
+that ends Not delivered records none, nor does a Quiet message or an edit, since neither mentions anyone. The first
+publication of a Storm summary belongs to no Alert Group, so its undelivered Mentions appear in no Timeline. They still
+warn on the Destination.
 
 The Destination page warns about each person and entry whose latest "Mention not delivered" is not followed by a
 delivered Mention of that person through that entry. The API reads the warnings in `mention_warnings` of every
@@ -212,6 +211,8 @@ The warning clears by itself, because Muster computes it from the delivery event
 
 - When the person links an account (or the bridge declares `native_mentions`), the next Loud message that mentions
   them through that entry clears it.
+- When the message's line of Mentions had no room for them, a later Loud message whose line has room for them clears
+  it.
 - When the events behind it are older than `retention.alert_details`, which removes them, the warning goes too.
 
 A warning whose entry was removed from the Destination since goes at once. So does the warning of a deleted User.
