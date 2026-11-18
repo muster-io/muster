@@ -17,7 +17,8 @@ import (
 // Undelivered Mentions (C-28.FR-3, C-11.FR-21 revised for L2). Once a Loud message is delivered — a first Publication
 // or a Thread reply, in the transaction that records it delivered under its lease, so that a retry after a crash
 // records them once — its delivery records, for each person whom a Mention entry named, once per entry:
-// mention_not_delivered when the message does not mention them as their messenger mentions them, with the reason; and
+// mention_not_delivered when the message does not mention them as their messenger mentions them, with the reason —
+// message_too_long for a person whose Mention the adapter left out for the message's length (Outcome.LeftOut); and
 // mention_delivered when it does and their latest such event through that entry on the Destination is
 // mention_not_delivered, which closes that warning. Nothing is posted for either (ADR-0005). A message that ends Not
 // delivered, a Quiet one and an edit record neither. The events of the first publication of a Storm summary name its

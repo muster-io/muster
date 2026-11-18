@@ -707,10 +707,12 @@ func (s *Service) labelTeams(ctx context.Context, q Queries, org int64, r Reques
 
 // The reasons a person whom a Mention entry names is not mentioned as their messenger mentions them
 // (MentionNotDeliveredReason, C-28.FR-3): no Account link in the Destination's identity space, which leaves them out of
-// the message, or a bridge without native_mentions, which names them by the plain name (C-22.FR-16).
+// the message, a bridge without native_mentions, which names them by the plain name (C-22.FR-16), or a bridge message
+// whose Mention line left their Mention out for its length (C-12.FR-11).
 const (
 	ReasonNoAccountLink             = "no_account_link"
 	ReasonBridgeCannotMentionPeople = "bridge_cannot_mention_people"
+	ReasonMessageTooLong            = "message_too_long"
 )
 
 // EntryRef is the Mention entry that named a person: its id, its position and its target, which is the entry's
@@ -731,11 +733,12 @@ type Undelivered struct {
 }
 
 // Mentioned is a person whom an entry named for the Loud event Event and whom the message mentions as their
-// messenger mentions them.
+// messenger mentions them; PublicID is the person's, as their target names them.
 type Mentioned struct {
-	UserID int64
-	Entry  EntryRef
-	Event  string
+	UserID   int64
+	PublicID string
+	Entry    EntryRef
+	Event    string
 }
 
 // Result is the resolution of a Loud message's Mentions: its targets, in order, and for each person an entry named,
@@ -838,7 +841,7 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) (R
 				continue
 			}
 			if p.entry != nil && r.DestinationType != TypeWebhook {
-				out.record(p, u.Linked, r.DestinationType == TypeBridge && !conn.NativeMentions)
+				out.record(p, u.PublicID, u.Linked, r.DestinationType == TypeBridge && !conn.NativeMentions)
 				if !u.Linked {
 					continue
 				}
@@ -850,10 +853,29 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) (R
 	return out, nil
 }
 
-// record adds the person of the part p, which an entry named, as Undelivered or Mentioned, once per person and entry:
-// Undelivered without an Account link (linked false) and through a bridge that names people by the plain name
-// (plain), Mentioned otherwise.
-func (r *Result) record(p entryPart, linked, plain bool) {
+// LeftOut is r once the delivered message left out the Mentions of the people whose public ids are ids for its length
+// (C-12.FR-11): each Mentioned of theirs is Undelivered with message_too_long, after the Undelivered of r. r is left
+// as it is.
+func (r Result) LeftOut(ids []string) Result {
+	if len(ids) == 0 {
+		return r
+	}
+	out := Result{Targets: r.Targets, Undelivered: slices.Clone(r.Undelivered)}
+	for _, m := range r.Mentioned {
+		if slices.Contains(ids, m.PublicID) {
+			out.Undelivered = append(out.Undelivered, Undelivered{UserID: m.UserID, Entry: m.Entry, Event: m.Event,
+				Reason: ReasonMessageTooLong})
+		} else {
+			out.Mentioned = append(out.Mentioned, m)
+		}
+	}
+	return out
+}
+
+// record adds the person of the part p, whose public id is id and whom an entry named, as Undelivered or Mentioned,
+// once per person and entry: Undelivered without an Account link (linked false) and through a bridge that names people
+// by the plain name (plain), Mentioned otherwise.
+func (r *Result) record(p entryPart, id string, linked, plain bool) {
 	seen := func(user, entry int64) bool {
 		return slices.ContainsFunc(r.Undelivered, func(u Undelivered) bool {
 			return u.UserID == user && u.Entry.ID == entry
@@ -870,7 +892,7 @@ func (r *Result) record(p entryPart, linked, plain bool) {
 		r.Undelivered = append(r.Undelivered, Undelivered{UserID: p.user, Entry: *p.entry, Event: p.event,
 			Reason: ReasonBridgeCannotMentionPeople})
 	default:
-		r.Mentioned = append(r.Mentioned, Mentioned{UserID: p.user, Entry: *p.entry, Event: p.event})
+		r.Mentioned = append(r.Mentioned, Mentioned{UserID: p.user, PublicID: id, Entry: *p.entry, Event: p.event})
 	}
 }
 

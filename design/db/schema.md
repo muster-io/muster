@@ -1648,12 +1648,12 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   warning. Both are Quiet, without Mentions; their `detail` holds the person (`user_id`), the entry (`entry_id`,
   `position` and `target`, the target in the API's form, which identifies the entry across saves of the Destination,
   which write its entries again), the Loud event (`event`) and, for `mention_not_delivered`, the `reason`
-  (`no_account_link` or `bridge_cannot_mention_people`). The Timeline lists `mention_not_delivered` and never
-  `mention_delivered`. The warnings of a Destination are computed from them, never stored, on the partial index
-  `delivery_events_mentions_idx` `(org_id, destination_id, kind, occurred_at DESC) WHERE kind IN
-  ('mention_not_delivered', 'mention_delivered')`: created on the parent alone, invalid, which every partition created
-  later gets too, then built on each existing partition, oldest first, and attached, in a fourth transaction, so that
-  writes of the current month wait only while its partition is scanned; a partition whose `DETACH … CONCURRENTLY`
+  (`no_account_link`, `bridge_cannot_mention_people` or `message_too_long`, a free value that no CHECK constrains). The
+  Timeline lists `mention_not_delivered` and never `mention_delivered`. The warnings of a Destination are computed
+  from them, never stored, on the partial index `delivery_events_mentions_idx` `(org_id, destination_id, kind,
+  occurred_at DESC) WHERE kind IN ('mention_not_delivered', 'mention_delivered')`: created on the parent alone,
+  invalid, which every partition created later gets too, then built on each existing partition, oldest first, and
+  attached, in a fourth transaction, so that writes of the current month wait only while its partition is scanned; a partition whose `DETACH … CONCURRENTLY`
   retention left unfinished (`pg_inherits.inhdetachpending`) is skipped, since it takes no attached index, and the
   parent's index is valid without it. Its down migration deletes the rows of both
   kinds, drops the index and restores `delivery_events_kind_v2_check`.

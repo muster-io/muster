@@ -286,7 +286,10 @@ export function resolvesToText(t: TFunction, language: string, entry: MentionEnt
   return parts.length === 0 ? t("mentions.nobody") : parts.join("; ");
 }
 
-/** The words of a warning's reason: "has no linked Mattermost account" or "the bridge cannot mention people". */
+/**
+ * The words of a warning's reason: "has no linked Mattermost account", "the bridge cannot mention people" or "the
+ * message had no room for their Mention".
+ */
 export function notDeliveredReasonText(
   t: TFunction,
   reason: MentionNotDeliveredReason,
@@ -294,6 +297,9 @@ export function notDeliveredReasonText(
 ): string {
   if (reason === "bridge_cannot_mention_people") {
     return t("mentions.notDelivered.bridgeCannotMentionPeople");
+  }
+  if (reason === "message_too_long") {
+    return t("mentions.notDelivered.messageTooLong");
   }
   return messenger === undefined
     ? t("mentions.notDelivered.noAccountLinkHere")

@@ -1881,6 +1881,7 @@
     "nobody": "никого",
     "notDelivered": {
       "bridgeCannotMentionPeople": "мост не умеет упоминать людей",
+      "messageTooLong": "в сообщении не хватило места для упоминания",
       "noAccountLink": "нет привязки к {{messenger}}",
       "noAccountLinkHere": "нет привязки"
     },

@@ -410,6 +410,13 @@ describe("the Mentions grid", () => {
         reason: "bridge_cannot_mention_people",
         since: "2026-11-16T10:00:00Z",
       },
+      {
+        user: BOB,
+        entry: { position: 2, target: { kind: "on_call_of_teams_from_label" } },
+        messenger: "bridge",
+        reason: "message_too_long",
+        since: "2026-11-16T10:00:00Z",
+      },
     ];
     await render(providers(<Harness warnings={warnings} />));
     const shown = page.getByTestId("mention-warning");
@@ -421,6 +428,11 @@ describe("the Mentions grid", () => {
     await expect
       .element(shown.nth(1))
       .toHaveTextContent("Mention not delivered: @bob, @bob, the bridge cannot mention people");
+    await expect
+      .element(shown.nth(2))
+      .toHaveTextContent(
+        "Mention not delivered: @bob, On-call of the Team from the label, the message had no room for their Mention",
+      );
     await i18n.changeLanguage("ru");
     await expect
       .element(shown.nth(0))
@@ -430,6 +442,11 @@ describe("the Mentions grid", () => {
     await expect
       .element(shown.nth(1))
       .toHaveTextContent("Упоминание не доставлено: @bob, @bob, мост не умеет упоминать людей");
+    await expect
+      .element(shown.nth(2))
+      .toHaveTextContent(
+        "Упоминание не доставлено: @bob, Дежурный команды из метки, в сообщении не хватило места для упоминания",
+      );
   });
 
   test("shows the refusal of an entry at its row", async () => {

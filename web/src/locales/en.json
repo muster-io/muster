@@ -1817,6 +1817,7 @@
     "nobody": "nobody",
     "notDelivered": {
       "bridgeCannotMentionPeople": "the bridge cannot mention people",
+      "messageTooLong": "the message had no room for their Mention",
       "noAccountLink": "has no linked {{messenger}} account",
       "noAccountLinkHere": "has no linked account"
     },

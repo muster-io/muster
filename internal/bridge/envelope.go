@@ -245,6 +245,25 @@ func mentionsOf(c delivery.Call, i Info) ([]string, []gen.Mention) {
 	return []string{line}, marked(list, line)
 }
 
+// leftOut are the public ids of the people of the Loud call c who have a marker and whom sent, the Mentions the
+// message carries, lacks: the Mention line left them out for the body's length (C-12.FR-11), and no marker of the
+// footer mentions them. Delivery records them as not delivered (C-28.FR-3); a Quiet call has none.
+func leftOut(c delivery.Call, sent []gen.Mention) []string {
+	if c.Loudness != groups.Loud {
+		return nil
+	}
+	var out []string
+	for _, t := range c.Targets {
+		if t.Kind != mentions.TargetUser || t.User == nil || !markable(*t.User) {
+			continue
+		}
+		if entryOf(sent, gen.MentionKindUser, t.User.ExternalID) < 0 && !slices.Contains(out, t.User.PublicID) {
+			out = append(out, t.User.PublicID)
+		}
+	}
+	return out
+}
+
 // fitLine joins names, whole and in their order, by spaces within limit characters, leaving out each one that no
 // longer fits; empty when none fits.
 func fitLine(names []string, limit int) string {

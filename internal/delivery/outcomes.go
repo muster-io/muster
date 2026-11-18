@@ -342,7 +342,8 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 				return false, err
 			}
 		}
-		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), a.resolved, now); err != nil {
+		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), a.resolved.LeftOut(out.LeftOut),
+			now); err != nil {
 			return false, err
 		}
 	}
@@ -638,7 +639,8 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		// Under the lease only, so that a reply another replica sends again records its Mentions once.
 		if n == 1 {
 			group := a.row.AlertGroupID
-			if err := recordMentions(ctx, q, org, a.destination, &group, nil, a.resolved, now); err != nil {
+			if err := recordMentions(ctx, q, org, a.destination, &group, nil, a.resolved.LeftOut(out.LeftOut),
+				now); err != nil {
 				return replyNotRecorded, err
 			}
 		}

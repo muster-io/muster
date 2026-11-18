@@ -560,6 +560,32 @@ describe("Timeline", () => {
     await expect.element(row.getByTestId("mention-reason")).toHaveTextContent("нет привязки");
   });
 
+  test("says a Mention a bridge message left out for its length was not delivered, in English and Russian", async () => {
+    entries = [
+      {
+        id: "DE",
+        at: AT,
+        kind: "delivery",
+        actor: SYSTEM,
+        delivery_event: "mention_not_delivered",
+        destination: { id: "DS0000000000OP", name: "bridge" },
+        loudness: "quiet",
+        mentions: [],
+        mention: {
+          user: { id: "US0000000000PE", name: "Bob Jones", login: "bob", deactivated: false },
+          entry: { position: 0, target: { kind: "on_call_of_teams_from_label" } },
+          event: "new_alert_group",
+          reason: "message_too_long",
+        },
+      },
+    ];
+    await renderTimeline();
+    const reason = page.getByTestId("timeline-entry").getByTestId("mention-reason");
+    await expect.element(reason).toHaveTextContent("the message had no room for their Mention");
+    await i18n.changeLanguage("ru");
+    await expect.element(reason).toHaveTextContent("в сообщении не хватило места для упоминания");
+  });
+
   test("names the gateway of the call an acknowledgement came from", async () => {
     entries = [
       status("acknowledged", {
