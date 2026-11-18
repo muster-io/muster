@@ -487,6 +487,120 @@ func TestTemplateEveryoneTokens(t *testing.T) {
 	}
 }
 
+// TestTemplateGroupTokens covers C-12.FR-8 and C-22.FR-16 (#631): a template's `{{ mention "group" "name" }}` stays
+// text that notifies nobody in the body and, in a Loud message through a bridge that declares group mentions, adds an
+// entry of the kind group with the group's name to the Mention line after the targets, once beside the Destination's
+// own group entry for it, within half of the body limit, as Mattermost mentions the group on a Loud Publish; a bridge
+// without group mentions, a Quiet message and an edit add none.
+func TestTemplateGroupTokens(t *testing.T) {
+	group := func(name string) string {
+		return templates.MentionToken(templates.Token{Name: templates.MentionGroup, Group: name})
+	}
+	m := rootMessage(t, messages.ColourFiring)
+	m.Body = &messages.Body{Text: "Paging " + group("payments_team"), Markup: messages.MarkupCommonMark}
+	text := "Paging @" + zeroWidthSpace + "payments\\_team"
+	entry := func(ref, name string) string {
+		return "map[display_name:" + name + " external_id:" + name + " kind:group ref:" + ref + "]"
+	}
+
+	declared := newAdapterEnv(t, declaring("here"))
+	if o := declared.adapter.Publish(t.Context(), call(groups.Loud, "pub-"+destPublicID+"-1-1"), m); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	env := decode(t, declared.bridge.requests("post")[0])
+	body := env["body"].(string)
+	if !strings.HasPrefix(body, "[@payments\\_team](muster-mention:m1)\n\n") || !strings.Contains(body, text) ||
+		fmt.Sprint(env["mentions"]) != "["+entry("m1", "payments_team")+"]" {
+		t.Fatalf("declared: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// The Destination's own group entry db-oncall, and the tokens payments_team in the body and db-oncall and
+	// payments_team in an Alert line: each group once, the call's targets first, then the tokens in their order.
+	own := call(groups.Loud, "pub-"+destPublicID+"-2-1")
+	own.Targets = []mentions.Target{{Kind: mentions.TargetGroup, Group: "db-oncall"}}
+	both := rootMessage(t, messages.ColourFiring)
+	both.Body = m.Body
+	both.Alerts.Lines = []messages.AlertLine{{Text: "**i1** " + group("db-oncall") + " " + group("payments_team"),
+		Markup: messages.MarkupCommonMark}}
+	if o := declared.adapter.Publish(t.Context(), own, both); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish with an own entry = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("post")[1])
+	body = env["body"].(string)
+	if !strings.HasPrefix(body,
+		"[@db-oncall](muster-mention:m1) [@payments\\_team](muster-mention:m2)\n\n") || !strings.Contains(body, text) ||
+		fmt.Sprint(env["mentions"]) != "["+entry("m1", "db-oncall")+" "+entry("m2", "payments_team")+"]" {
+		t.Fatalf("own entry: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// A Loud Thread reply whose Alerts line of a line template has a group token mentions the group.
+	reply := replyMessage()
+	reply.AlertsLine = &messages.AlertsLine{Label: "pod", Values: []messages.AlertValue{{Value: "i1"}},
+		Lines: []messages.AlertLine{{Text: "i1 " + group("payments_team"), Markup: messages.MarkupCommonMark}},
+		Total: 1}
+	if o := declared.adapter.Reply(t.Context(), call(groups.Loud, "reply-"+destPublicID+"-6"),
+		delivery.Root{MessageID: "m1"}, reply); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("reply = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("reply")[0])
+	if body := env["body"].(string); !strings.HasPrefix(body, "[@payments\\_team](muster-mention:m1)\n\n") ||
+		fmt.Sprint(env["mentions"]) != "["+entry("m1", "payments_team")+"]" {
+		t.Fatalf("reply: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// The groups that do not fit half of max_body_length are left out whole; the body is shortened as ever.
+	tiny := newAdapterEnv(t, set("limits", "max_body_length", 500), declaring("here"))
+	long := rootMessage(t, messages.ColourFiring)
+	var tokens []string
+	for n := range 4 {
+		tokens = append(tokens, group(fmt.Sprintf("g%d%s", n, strings.Repeat("x", 59))))
+	}
+	long.Body = &messages.Body{Text: strings.Join(tokens, " "), Markup: messages.MarkupCommonMark}
+	if o := tiny.adapter.Publish(t.Context(), call(groups.Loud, "pub-"+destPublicID+"-3-1"), long); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("publish of long groups = %+v", o)
+	}
+	env = decode(t, tiny.bridge.requests("post")[0])
+	body = env["body"].(string)
+	line, _, _ := strings.Cut(body, "\n\n")
+	list, _ := env["mentions"].([]any)
+	if utf8.RuneCountInString(line) > 250 || len(list) != 2 || strings.Count(line, "muster-mention:") != 2 ||
+		utf8.RuneCountInString(body) > 500 || strings.Contains(body, "@g2") || strings.Contains(body, "@g3") {
+		t.Fatalf("long groups: %d entries, body %q", len(list), body)
+	}
+
+	// Quiet, and an edit: the token stays text and nobody is mentioned.
+	if o := declared.adapter.Publish(t.Context(), call(groups.Quiet, "pub-"+destPublicID+"-4-1"), m); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("quiet publish = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("post")[2])
+	if body := env["body"].(string); strings.Contains(body, "muster-mention:") || !strings.Contains(body, text) ||
+		fmt.Sprint(env["mentions"]) != "[]" {
+		t.Fatalf("quiet: body %q, mentions %v", body, env["mentions"])
+	}
+	if o := declared.adapter.Update(t.Context(), call(groups.Loud, ""), "m1", m); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("update = %+v", o)
+	}
+	env = decode(t, declared.bridge.requests("edit")[0])
+	if body := env["body"].(string); strings.Contains(body, "muster-mention:") || env["mentions"] != nil {
+		t.Fatalf("edit: body %q, mentions %v", body, env["mentions"])
+	}
+
+	// A bridge without group mentions keeps the token as text and mentions nobody.
+	undeclared := newAdapterEnv(t, set("capabilities", "group_mentions", false))
+	if o := undeclared.adapter.Publish(t.Context(), call(groups.Loud, "pub-"+destPublicID+"-5-1"), m); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("publish undeclared = %+v", o)
+	}
+	env = decode(t, undeclared.bridge.requests("post")[0])
+	if body := env["body"].(string); strings.Contains(body, "muster-mention:") || !strings.Contains(body, text) ||
+		fmt.Sprint(env["mentions"]) != "[]" {
+		t.Fatalf("undeclared: body %q, mentions %v", body, env["mentions"])
+	}
+}
+
 // TestReplyThreadRef covers C-22.FR-6 and AC-4: a Thread reply goes under the Root message with its own key and the
 // thread_ref of the Root message — null without one — and its outcome returns the thread_ref the bridge answered; a
 // Loud reply notifies, with its Mentions first, and a Reminder carries its buttons.

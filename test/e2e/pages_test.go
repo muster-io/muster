@@ -358,10 +358,17 @@ func TestPages(t *testing.T) {
 			e.countIn("ch-infra-notice", "Step 3: @ivan, you are needed\n"+
 				"Chain of the Route Infrastructure · On-call of devops Main · important, again") == 2
 	})
+	// A Page is counted by the replica that ended it, so the count is the sum over the replicas.
+	pagesCounted := func(series string) int {
+		n := 0
+		for _, x := range h.Replicas {
+			n += metricValue(t, x, series)
+		}
+		return n
+	}
 	eventually(t, "the Pages counted", func() bool {
-		m := string(call(t, http.MethodGet, rep.Internal+"/metrics", "").body)
-		return strings.Contains(m, `muster_pages_total{chain="`+cp+`",kind="mention",outcome="not_delivered"} 1`) &&
-			strings.Contains(m, `muster_pages_total{chain="`+cd+`",kind="mention",outcome="delivered"} 3`)
+		return pagesCounted(`muster_pages_total{chain="`+cp+`",kind="mention",outcome="not_delivered"}`) == 1 &&
+			pagesCounted(`muster_pages_total{chain="`+cd+`",kind="mention",outcome="delivered"}`) == 3
 	})
 	// pagesOf counts the Pages of the Alert Group g in the database, those of the later Mentions of a rule with again.
 	pagesOf := func(t *testing.T, g string, again bool) int {

@@ -330,7 +330,8 @@ func TestIntegrationFooterUserRerender(t *testing.T) {
 // is still queued in both, FrB, whose final edit went out in both, and FrC, whose final edit went out in one and waits
 // for a retry in the other. A Mattermost Account link she makes writes one row account_links, whose run renders the
 // queued final edits again, Quietly: each names her by her link's username, once in each Destination where it waited,
-// with no Mention and no new message, and FrB and the final edit of FrC that went out are not edited again. Then she
+// FrC's once its retry is due, with no Mention and no new message, and FrB
+// and the final edit of FrC that went out are not edited again. Then she
 // resolves FrD, whose final edit with her link waits in both Destinations, and removes the link: the final edits name
 // her by her name with no Mention. Neither run changes an Alert Group or its Timeline, and a second run of each row
 // edits nothing.
@@ -414,6 +415,8 @@ func TestIntegrationFooterRerenderOfQueuedFinalEdit(t *testing.T) {
 		}
 
 		f.linkMattermost(t, "alice_mm")
+		// The retry of FrC's final edit is due once the backoff of its Transient error ran out.
+		f.business.Advance(delivery.TransientFirstStep)
 		edited(t, "a link", run(t), map[string]int{"FrA": 2, "FrC": 1}, func(m delivery.Message) bool {
 			u, ok := m.FooterUsers[space]
 			return ok && u.Username == "alice_mm" && strings.Contains(m.Footers[space], messages.FooterUserToken)
