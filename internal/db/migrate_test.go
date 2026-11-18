@@ -2759,18 +2759,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (52)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (53)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":52`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":53`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":52`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":53`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2786,10 +2786,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (52)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (53)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":52`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":53`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -5433,6 +5433,36 @@ func TestIntegrationThreadRepliesPagePendingIndex(t *testing.T) {
 		}
 		e.step(t, 1)
 		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 52 || index(t) != 1 {
+			t.Errorf("up again: version %d, dirty %v, %v, %d indexes", v, dirty, err, index(t))
+		}
+	})
+}
+
+// TestIntegrationAlertGroupsEvaluatedIndex runs 0053 over a database at 52: up adds alert_groups_evaluated_idx on
+// (org_id, id) for the open Alert Groups and those in their Grace period, which each batch of the evaluation of the
+// Teams lists by id; down drops it; up again adds it.
+func TestIntegrationAlertGroupsEvaluatedIndex(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 52)
+		index := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'alert_groups'
+				AND indexname = 'alert_groups_evaluated_idx' AND indexdef LIKE '%(org_id, id) WHERE %'
+				AND indexdef LIKE '%status <> ''resolved''%OR%grace_deadline IS NOT NULL%'`)
+		}
+		if got := index(t); got != 0 {
+			t.Fatal("before 0053: alert_groups_evaluated_idx exists")
+		}
+		e.step(t, 1)
+		if got := index(t); got != 1 {
+			t.Errorf("after up: %d indexes", got)
+		}
+		e.step(t, -1)
+		if got := index(t); got != 0 {
+			t.Error("after down: alert_groups_evaluated_idx is left")
+		}
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 53 || index(t) != 1 {
 			t.Errorf("up again: version %d, dirty %v, %v, %d indexes", v, dirty, err, index(t))
 		}
 	})
