@@ -5609,6 +5609,8 @@ func (s *probeRotationStore) NotifyKeyring(context.Context, dbgen.NotifyKeyringP
 
 func (s *probeRotationStore) Notify(context.Context, db.Hint) error { return nil }
 
+func (s *probeRotationStore) LockRows(context.Context, string, int64) error { return nil }
+
 func (s *probeRotationStore) InsertAuditEntry(_ context.Context, arg adb.InsertAuditEntryParams) error {
 	s.audit = append(s.audit, arg)
 	return nil

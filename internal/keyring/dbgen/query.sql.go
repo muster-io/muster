@@ -731,6 +731,7 @@ const listRotateOfflineToken = `-- name: ListRotateOfflineToken :many
 SELECT id, oidc_offline_token_ciphertext AS ciphertext, oidc_offline_token_key_id::text AS key_id
 FROM users
 WHERE org_id = $1 AND oidc_offline_token_ciphertext IS NOT NULL AND oidc_offline_token_key_id <> $2::text
+ORDER BY id
 FOR NO KEY UPDATE
 `
 
@@ -745,6 +746,8 @@ type ListRotateOfflineTokenRow struct {
 	KeyID      string
 }
 
+// ListRotateOfflineToken locks the users in id order, the order in which the changes that may remove the last active
+// Admin lock the active Admins (LockActiveAdmins); users has no other encrypted field.
 func (q *Queries) ListRotateOfflineToken(ctx context.Context, arg ListRotateOfflineTokenParams) ([]ListRotateOfflineTokenRow, error) {
 	rows, err := q.db.Query(ctx, listRotateOfflineToken, arg.OrgID, arg.KeyID)
 	if err != nil {
@@ -1047,6 +1050,40 @@ func (q *Queries) LockKeyringState(ctx context.Context) (string, error) {
 	var active_key_id string
 	err := row.Scan(&active_key_id)
 	return active_key_id, err
+}
+
+const lockRotateConnections = `-- name: LockRotateConnections :exec
+SELECT id
+FROM connections
+WHERE org_id = $1
+ORDER BY id
+FOR NO KEY UPDATE
+`
+
+// LockRotateConnections locks every Connection of the Organization in id order, before rotation re-encrypts their
+// fields one by one, which alone would lock them out of id order: a save of a Team takes the Connections of its Team
+// mentions FOR SHARE in id order.
+func (q *Queries) LockRotateConnections(ctx context.Context, orgID int64) error {
+	_, err := q.db.Exec(ctx, lockRotateConnections, orgID)
+	return err
+}
+
+const lockRotateDestinations = `-- name: LockRotateDestinations :exec
+SELECT id
+FROM destinations
+WHERE org_id = $1 AND type = 'webhook'
+ORDER BY id
+FOR NO KEY UPDATE
+`
+
+// LockRotateDestinations locks every outgoing webhook of the Organization in id order, after the Connections, as
+// LockRotateConnections does: a save of a Team takes the Destinations it names in id order after its Connections, and
+// the deletion of a Team those it owns. Only outgoing webhooks hold encrypted values (their proxy password, Signing
+// secrets and Destination Secrets), and only they are locked: a save of a messenger Destination locks it and then its
+// Connection, the opposite order, which an activation holding every Connection would deadlock with.
+func (q *Queries) LockRotateDestinations(ctx context.Context, orgID int64) error {
+	_, err := q.db.Exec(ctx, lockRotateDestinations, orgID)
+	return err
 }
 
 const notifyKeyring = `-- name: NotifyKeyring :exec

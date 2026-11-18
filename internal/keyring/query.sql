@@ -127,6 +127,28 @@ WHERE d.org_id = @org_id AND g.status <> 'resolved' AND d.desired_button_key_id 
 -- name: NotifyKeyring :exec
 SELECT pg_notify(@channel::text, @payload::text);
 
+-- LockRotateConnections locks every Connection of the Organization in id order, before rotation re-encrypts their
+-- fields one by one, which alone would lock them out of id order: a save of a Team takes the Connections of its Team
+-- mentions FOR SHARE in id order.
+-- name: LockRotateConnections :exec
+SELECT id
+FROM connections
+WHERE org_id = @org_id
+ORDER BY id
+FOR NO KEY UPDATE;
+
+-- LockRotateDestinations locks every outgoing webhook of the Organization in id order, after the Connections, as
+-- LockRotateConnections does: a save of a Team takes the Destinations it names in id order after its Connections, and
+-- the deletion of a Team those it owns. Only outgoing webhooks hold encrypted values (their proxy password, Signing
+-- secrets and Destination Secrets), and only they are locked: a save of a messenger Destination locks it and then its
+-- Connection, the opposite order, which an activation holding every Connection would deadlock with.
+-- name: LockRotateDestinations :exec
+SELECT id
+FROM destinations
+WHERE org_id = @org_id AND type = 'webhook'
+ORDER BY id
+FOR NO KEY UPDATE;
+
 -- The re-encryption of `muster secrets rotate-key`: for every field of the encrypted_values view, the values of the
 -- Organization that another key encrypted, locked, and the update of one value with its new ciphertext and key id.
 -- An update keeps the field's *_updated_at (previous_signing_secret_since for the previous Signing secret): the
@@ -189,10 +211,13 @@ UPDATE oidc_auth_requests
 SET code_verifier_ciphertext = @ciphertext, code_verifier_key_id = @key_id::text
 WHERE org_id = @org_id AND state_hash = @state_hash AND code_verifier_key_id = @previous_key_id::text;
 
+-- ListRotateOfflineToken locks the users in id order, the order in which the changes that may remove the last active
+-- Admin lock the active Admins (LockActiveAdmins); users has no other encrypted field.
 -- name: ListRotateOfflineToken :many
 SELECT id, oidc_offline_token_ciphertext AS ciphertext, oidc_offline_token_key_id::text AS key_id
 FROM users
 WHERE org_id = @org_id AND oidc_offline_token_ciphertext IS NOT NULL AND oidc_offline_token_key_id <> @key_id::text
+ORDER BY id
 FOR NO KEY UPDATE;
 
 -- name: ReencryptOfflineToken :execrows
