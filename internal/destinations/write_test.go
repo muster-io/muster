@@ -1511,8 +1511,7 @@ func TestCreateTelegram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tg.calls) != 1 || tg.calls[0].Destination != nil || tg.calls[0].Connection != "CNAAAAAAAAAAA2" ||
-		tg.calls[0].ChannelID != "@muster_alerts" {
+	if len(tg.calls) != 1 || tg.calls[0].Connection != "CNAAAAAAAAAAA2" || tg.calls[0].ChannelID != "@muster_alerts" {
 		t.Errorf("checks %+v", tg.calls)
 	}
 	if d.ID != 31 || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA2" || *d.TelegramChannelID != "@muster_alerts" ||
@@ -1603,7 +1602,7 @@ func TestCreateTelegramRefusals(t *testing.T) {
 	}
 }
 
-// TestUpdateTelegram is updateDestination of type telegram: the check runs limited by the Destination; a change is
+// TestUpdateTelegram is updateDestination of type telegram: the check runs through the Connection; a change is
 // recorded with its diff, a new title the check found is stored without an Audit log entry, an unchanged save writes
 // nothing, and a passing save of a Broken Destination ends its Broken state.
 func TestUpdateTelegram(t *testing.T) {
@@ -1619,8 +1618,8 @@ func TestUpdateTelegram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := tg.calls[len(tg.calls)-1]; last.Destination == nil || *last.Destination != 2 {
-		t.Errorf("the check is not limited by the destination: %+v", last)
+	if last := tg.calls[len(tg.calls)-1]; last.Connection != "CNAAAAAAAAAAA2" || last.ChannelID != "@muster_alerts" {
+		t.Errorf("check %+v", last)
 	}
 	if d.Health.State != "healthy" || len(*healed) != 1 || len(w.tgSets) != 1 || w.tgSets[0].ChannelChatID.Int64 != -1001000000001 ||
 		w.tgSets[0].ChannelID.String != "@muster_alerts" || w.tgSets[0].DiscussionChatID.Int64 != -1001000000002 ||
@@ -1693,7 +1692,7 @@ func TestUpdateTelegram(t *testing.T) {
 }
 
 // TestCheckTelegramDestination is checkDestination of a Telegram Destination (C-14.FR-14): each step with its result,
-// limited by the Destination; a passing check of a Broken Destination ends its Broken state.
+// through the Connection; a passing check of a Broken Destination ends its Broken state.
 func TestCheckTelegramDestination(t *testing.T) {
 	s, store, _, _, healed := newSaver(t)
 	tg := s.writer.Telegram.(*fakeTelegram)
@@ -1704,7 +1703,7 @@ func TestCheckTelegramDestination(t *testing.T) {
 		res.Items[1].Code != "comments_disabled" || res.Health.State != "broken" {
 		t.Errorf("failing = %+v, %v", res, err)
 	}
-	if c := tg.calls[0]; c.Destination == nil || *c.Destination != 2 || c.Connection != "CNAAAAAAAAAAA2" {
+	if c := tg.calls[0]; c.Connection != "CNAAAAAAAAAAA2" || c.ChannelID != "@no_comments" {
 		t.Errorf("check %+v", c)
 	}
 	store.rows[1].TelegramChannelID = txt("@muster_alerts")
