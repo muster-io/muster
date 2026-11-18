@@ -722,7 +722,7 @@ func TestCreateMattermost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(checker.calls) != 1 || checker.calls[0].Destination != nil || checker.calls[0].Connection != "CNAAAAAAAAAAA1" {
+	if len(checker.calls) != 1 || checker.calls[0].Connection != "CNAAAAAAAAAAA1" {
 		t.Errorf("checks %+v", checker.calls)
 	}
 	if d.ID != 11 || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA1" || *d.MattermostTeamName != "dev" ||
@@ -824,7 +824,7 @@ func TestCreateRefusals(t *testing.T) {
 	}
 }
 
-// TestUpdateMattermost is updateDestination: the check runs limited by the Destination; the change is recorded with
+// TestUpdateMattermost is updateDestination: the check runs through the Connection; the change is recorded with
 // its diff; a stale If-Match, a changed type and a refused check change nothing; a passing save of a Broken
 // Destination ends its Broken state.
 func TestUpdateMattermost(t *testing.T) {
@@ -858,9 +858,8 @@ func TestUpdateMattermost(t *testing.T) {
 	if !slices.Equal(renamed, []string{"DSAAAAAAAAAAA1=ops-renamed"}) {
 		t.Errorf("rename hook = %v", renamed)
 	}
-	last := checker.calls[len(checker.calls)-1]
-	if last.Destination == nil || *last.Destination != 1 {
-		t.Errorf("the check is not limited by the destination: %+v", last)
+	if last := checker.calls[len(checker.calls)-1]; last.Connection != "CNAAAAAAAAAAA1" || last.ChannelID != "chan" {
+		t.Errorf("check %+v", last)
 	}
 	if d.Name != "ops-renamed" || d.Version != 3 || len(w.updated) != 1 || w.updated[0].Name != "ops-renamed" ||
 		len(w.audit) != 1 || w.audit[0].Action != ActionUpdated || len(*healed) != 0 {
@@ -1161,7 +1160,7 @@ func TestOpenGroupUpdateNames(t *testing.T) {
 	}
 }
 
-// TestCheckDestination is checkDestination (C-13.FR-10): each check with its result, limited by the Destination; a
+// TestCheckDestination is checkDestination (C-13.FR-10): each check with its result, through the Connection; a
 // passing check of a Broken Destination ends its Broken state; a type without a check is check_not_supported.
 func TestCheckDestination(t *testing.T) {
 	s, store, _, checker, healed := newSaver(t)
@@ -1173,7 +1172,7 @@ func TestCheckDestination(t *testing.T) {
 		res.Items[0].Code != "" || res.Health.State != "healthy" {
 		t.Errorf("failing = %+v, %v", res, err)
 	}
-	if c := checker.calls[0]; c.Destination == nil || *c.Destination != 1 || c.ChannelID != "ch-nobot" {
+	if c := checker.calls[0]; c.Connection != "CNAAAAAAAAAAA1" || c.ChannelID != "ch-nobot" {
 		t.Errorf("check %+v", c)
 	}
 	store.rows[0].MattermostChannelID = txt("ch-alerts")
@@ -1899,8 +1898,7 @@ func TestCreateBridge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(br.calls) != 1 || br.calls[0].Destination != nil || br.calls[0].Connection != "CNAAAAAAAAAAA3" ||
-		br.calls[0].ChannelID != "ch-alerts" {
+	if len(br.calls) != 1 || br.calls[0].Connection != "CNAAAAAAAAAAA3" || br.calls[0].ChannelID != "ch-alerts" {
 		t.Errorf("checks %+v", br.calls)
 	}
 	if d.ID != 41 || d.Type != TypeBridge || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA3" ||
@@ -2015,7 +2013,7 @@ func TestCreateBridgeRefusals(t *testing.T) {
 	}
 }
 
-// TestUpdateBridge is updateDestination of type bridge (C-22.FR-3): the check runs limited by the Destination; a
+// TestUpdateBridge is updateDestination of type bridge (C-22.FR-3): the check runs through the Connection; a
 // change is recorded with its diff, a new channel name the check read is stored without an Audit log entry, an
 // unchanged save writes nothing, and a passing save of a Broken Destination ends its Broken state.
 func TestUpdateBridge(t *testing.T) {
@@ -2031,9 +2029,8 @@ func TestUpdateBridge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := br.calls[len(br.calls)-1]; last.Destination == nil || *last.Destination != 4 ||
-		last.ChannelID != "ch-alerts-prod" {
-		t.Errorf("the check is not limited by the destination: %+v", last)
+	if last := br.calls[len(br.calls)-1]; last.Connection != "CNAAAAAAAAAAA3" || last.ChannelID != "ch-alerts-prod" {
+		t.Errorf("check %+v", last)
 	}
 	if d.Health.State != "healthy" || !slices.Equal(*healed, []int64{4}) || len(w.brSets) != 1 ||
 		w.brSets[0].ID != 4 || w.brSets[0].ConnectionID.Int64 != 7 || w.brSets[0].ChannelID.String != "ch-alerts-prod" ||
@@ -2119,8 +2116,7 @@ func TestCheckBridgeDestination(t *testing.T) {
 		len(*healed) != 0 {
 		t.Errorf("failing = %+v, %v", res, err)
 	}
-	if c := br.calls[0]; c.Destination == nil || *c.Destination != 4 || c.Connection != "CNAAAAAAAAAAA3" ||
-		c.ChannelID != "ch-nobot" {
+	if c := br.calls[0]; c.Connection != "CNAAAAAAAAAAA3" || c.ChannelID != "ch-nobot" {
 		t.Errorf("check %+v", c)
 	}
 	r.BridgeChannelID = txt("ch-alerts")
@@ -2194,8 +2190,7 @@ func TestCreateSlack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sl.calls) != 1 || sl.calls[0].Destination != nil || sl.calls[0].Connection != "CNAAAAAAAAAAA8" ||
-		sl.calls[0].ChannelID != "C0FAKEALERTS" {
+	if len(sl.calls) != 1 || sl.calls[0].Connection != "CNAAAAAAAAAAA8" || sl.calls[0].ChannelID != "C0FAKEALERTS" {
 		t.Errorf("checks %+v", sl.calls)
 	}
 	if d.ID != 51 || d.Type != TypeSlack || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA8" ||
@@ -2322,7 +2317,7 @@ func TestCreateSlackRefusals(t *testing.T) {
 	}
 }
 
-// TestUpdateSlack is updateDestination of type slack (C-24.FR-3): the check runs limited by the Destination; a change
+// TestUpdateSlack is updateDestination of type slack (C-24.FR-3): the check runs through the Connection; a change
 // is recorded with its diff, a new channel name the check read is stored without an Audit log entry, an unchanged save
 // writes nothing, and a passing save of a Broken Destination ends its Broken state.
 func TestUpdateSlack(t *testing.T) {
@@ -2338,9 +2333,8 @@ func TestUpdateSlack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := sl.calls[len(sl.calls)-1]; last.Destination == nil || *last.Destination != 5 ||
-		last.ChannelID != "C0FAKEPROD" {
-		t.Errorf("the check is not limited by the destination: %+v", last)
+	if last := sl.calls[len(sl.calls)-1]; last.Connection != "CNAAAAAAAAAAA8" || last.ChannelID != "C0FAKEPROD" {
+		t.Errorf("check %+v", last)
 	}
 	if d.Health.State != "healthy" || !slices.Equal(*healed, []int64{5}) || len(w.slSets) != 1 ||
 		w.slSets[0].ID != 5 || w.slSets[0].ConnectionID.Int64 != 8 || w.slSets[0].ChannelID.String != "C0FAKEPROD" ||
@@ -2429,8 +2423,7 @@ func TestCheckSlackDestination(t *testing.T) {
 		res.Health.State != "broken" || len(*healed) != 0 || res.Run == "" {
 		t.Errorf("failing = %+v, %v", res, err)
 	}
-	if c := sl.calls[0]; c.Destination == nil || *c.Destination != 5 || c.Connection != "CNAAAAAAAAAAA8" ||
-		c.ChannelID != "C0FAKEOTHER" {
+	if c := sl.calls[0]; c.Connection != "CNAAAAAAAAAAA8" || c.ChannelID != "C0FAKEOTHER" {
 		t.Errorf("check %+v", c)
 	}
 	r.SlackChannelID = txt("CSCOPE")
@@ -2600,7 +2593,7 @@ func TestBridgeGatewayOnly(t *testing.T) {
 	_, err = s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts-renamed", "ch-alerts"))
 	failed, ok := errors.AsType[*CheckFailedError](err)
 	if !ok || len(failed.Items) != 1 || failed.Items[0].Code != "request_failed" ||
-		failed.Items[0].Pointer != "/channel_id" || len(br.calls) != 1 || br.calls[0].Destination == nil ||
+		failed.Items[0].Pointer != "/channel_id" || len(br.calls) != 1 || br.calls[0].ChannelID != "ch-alerts" ||
 		len(w.brSets) != 0 {
 		t.Fatalf("an update on the same Connection, now a gateway = %v, checks %+v, sets %+v", err, br.calls, w.brSets)
 	}

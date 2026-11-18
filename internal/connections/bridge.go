@@ -408,8 +408,9 @@ func bridgeResult(info bridge.Info, r bridge.Result, latency time.Duration, via,
 
 // CheckBridgeChannel runs the Destination check of a Bridge Destination being saved or checked, for the Destination
 // write path (C-22.FR-3): checkChannel through the Bridge Connection that the check names, on the interactive path,
-// limited by the Destination when it exists and by the Connection otherwise, with a client built for the check. A
-// Connection that is missing, deleted or not a Bridge Connection is destinations.ErrUnknownConnection.
+// with a client built for the check. checkChannel posts nothing to the channel, so only the Connection's limiter
+// limits it: the Destination's bucket is for the sends and edits in its channel, which a check must neither starve nor
+// wait for. A Connection that is missing, deleted or not a Bridge Connection is destinations.ErrUnknownConnection.
 func (s *Service) CheckBridgeChannel(ctx context.Context, in destinations.BridgeChannelCheck) (
 	destinations.BridgeChannelChecked, error) {
 	row, err := s.row(ctx, s.cfg.Store, in.Connection)
@@ -424,12 +425,8 @@ func (s *Service) CheckBridgeChannel(ctx context.Context, in destinations.Bridge
 		return destinations.BridgeChannelChecked{}, err
 	}
 	conn := row.ID
-	subject := delivery.Subject{Connection: &conn}
-	if in.Destination != nil {
-		subject = delivery.Subject{Destination: &delivery.Destination{ID: *in.Destination, Type: TypeBridge,
-			Connection: &conn}}
-	}
-	res, err := bridge.CheckDestination(ctx, c, bridge.Interactive(s.cfg.Interactive, subject), in.ChannelID)
+	res, err := bridge.CheckDestination(ctx, c, bridge.Interactive(s.cfg.Interactive,
+		delivery.Subject{Connection: &conn}), in.ChannelID)
 	if err != nil {
 		return destinations.BridgeChannelChecked{}, err
 	}

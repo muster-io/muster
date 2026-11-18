@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
@@ -129,7 +130,8 @@ func setupLiveEnv(t *testing.T, s dbtest.Server) *liveEnv {
 		}})
 	e.dests = destinations.New(org.ID, destinations.NewStore(d.Pool))
 	e.dests.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(d.Pool), Audit: w, Business: business,
-		Mentions: mentions.New(org.ID, d.Pool), Mattermost: e.conns, Telegram: e.conns, Slack: e.conns})
+		Mentions: mentions.New(org.ID, d.Pool), Mattermost: e.conns, Telegram: e.conns, Bridge: e.conns,
+		Slack: e.conns})
 	return e
 }
 
@@ -168,8 +170,11 @@ func TestLive(t *testing.T) {
 		t.Run("telegramDestinations", e.telegramDestinations)
 		t.Run("telegramGroupPeople", e.telegramGroupPeople)
 		t.Run("telegramCheckLimiter", e.telegramCheckLimiter)
+		t.Run("mattermostCheckLimiter", e.mattermostCheckLimiter)
 		t.Run("bridge_event_claim", e.bridgeEventClaim)
+		t.Run("bridgeCheckLimiter", e.bridgeCheckLimiter)
 		t.Run("slack", e.slack)
+		t.Run("slackCheckLimiter", e.slackCheckLimiter)
 	})
 }
 
@@ -680,6 +685,117 @@ func (e *liveEnv) telegramCheckLimiter(t *testing.T) {
 		t.Fatalf("a check of a Destination without tokens = %+v, %v", res, err)
 	}
 	if n := tokens(); n != 0 {
+		t.Errorf("the Destination's bucket after a check without tokens: %v tokens, want 0", n)
+	}
+}
+
+// mattermostCheckLimiter is checkLimiter for a Mattermost Destination (C-13.FR-10).
+func (e *liveEnv) mattermostCheckLimiter(t *testing.T) {
+	in := input("live-mm-check-limiter", e.fake.URL())
+	in.Limiter = connections.Limiter{Limit: 1000, PerSeconds: 1}
+	c, err := e.conns.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.checkLimiter(t, c.ID, destinationInput("live-mm-check-limiter", c.PublicID, fakemattermost.ChannelAlerts))
+}
+
+// slackCheckLimiter is checkLimiter for a Slack Destination (C-24.FR-3).
+func (e *liveEnv) slackCheckLimiter(t *testing.T) {
+	ctx := t.Context()
+	f := fakeslack.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	e.slackBase = f.URL() + "/api/"
+	t.Cleanup(func() { e.slackBase = "" })
+	c, err := e.conns.Create(ctx, by, connections.Input{Type: connections.TypeSlack, Name: "live-sl-check-limiter",
+		EventMode: connections.EventModeSocket, BotToken: keyring.Replace(fakeslack.BotToken),
+		AppToken: keyring.Replace(fakeslack.AppToken), Limiter: connections.Limiter{Limit: 1000, PerSeconds: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.checkLimiter(t, c.ID, destinations.Input{Type: destinations.TypeSlack, Name: "live-sl-check-limiter",
+		Mentions: quiet(), Slack: &destinations.SlackInput{Connection: c.PublicID, ChannelID: fakeslack.ChannelAlerts}})
+}
+
+// bridgeCheckLimiter is checkLimiter for a Bridge Destination (C-22.FR-3).
+func (e *liveEnv) bridgeCheckLimiter(t *testing.T) {
+	ctx := t.Context()
+	f := fakebridge.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	c, err := e.conns.Create(ctx, by, connections.Input{Type: connections.TypeBridge, Name: "live-br-check-limiter",
+		BridgeBaseURL: f.URL(), EventDelivery: connections.EventDeliveryPoll, BotToken: keyring.Replace(fakebridge.Token),
+		Limiter: connections.Limiter{Limit: 1000, PerSeconds: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.checkLimiter(t, c.ID, destinations.Input{Type: destinations.TypeBridge, Name: "live-br-check-limiter",
+		Mentions: quiet(), Bridge: &destinations.BridgeInput{Connection: c.PublicID, ChannelID: fakebridge.ChannelAlerts}})
+}
+
+// checkLimiter is telegramCheckLimiter for the Destination of in through the Connection conn, whose limiter allows 1000
+// requests a second: the requests of its check post nothing, so they take no token of the Destination's bucket, which
+// counts its sends and edits, only of the Connection's. Eleven "Check"s within a minute of a Destination whose limiter
+// allows 10 a minute all pass, and neither they nor a save leave the Destination's bucket lower; a Destination whose
+// deliveries took every token still checks, and its deliveries keep the token that refills next.
+func (e *liveEnv) checkLimiter(t *testing.T, conn int64, in destinations.Input) {
+	t.Helper()
+	ctx := t.Context()
+	in.Limiter = destinations.Limiter{Limit: 10, PerSeconds: 60}
+	dby := destinations.Requester{Actor: by.Actor, Transport: by.Transport}
+	d, err := e.dests.Create(ctx, dby, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(kind string, id int64, tokens float64) {
+		t.Helper()
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO rate_limit_buckets (subject_kind, subject_id, org_id, tokens,
+				refilled_at) VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (subject_kind, subject_id) DO UPDATE SET tokens = excluded.tokens,
+				refilled_at = excluded.refilled_at`, kind, id, e.orgID, tokens, e.business.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(kind string, id int64) float64 {
+		t.Helper()
+		var n float64
+		if err := e.d.Pool.QueryRow(ctx, `SELECT tokens FROM rate_limit_buckets WHERE subject_kind = $1
+			AND subject_id = $2`, kind, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// The business clock stands still, so neither bucket refills while the checks run.
+	set("destination", d.ID, 10)
+	set("connection", conn, 1000)
+	for i := range 11 {
+		if res, err := e.dests.Check(ctx, d.PublicID); err != nil || !res.OK {
+			t.Fatalf("check %d = %+v, %v", i+1, res, err)
+		}
+	}
+	if n := read("destination", d.ID); n != 10 {
+		t.Errorf("the Destination's bucket after eleven checks: %v tokens, want 10", n)
+	}
+	if n := read("connection", conn); n > 989 {
+		t.Errorf("the Connection's bucket after eleven checks: %v tokens, want at most 989", n)
+	}
+	in.Name += "-saved"
+	if _, err := e.dests.Update(ctx, dby, d.PublicID, nil, in); err != nil {
+		t.Fatalf("save = %v", err)
+	}
+	if n := read("destination", d.ID); n != 10 {
+		t.Errorf("the Destination's bucket after a save: %v tokens, want 10", n)
+	}
+	set("destination", d.ID, 0)
+	if res, err := e.dests.Check(ctx, d.PublicID); err != nil || !res.OK {
+		t.Fatalf("a check of a Destination without tokens = %+v, %v", res, err)
+	}
+	if n := read("destination", d.ID); n != 0 {
 		t.Errorf("the Destination's bucket after a check without tokens: %v tokens, want 0", n)
 	}
 }

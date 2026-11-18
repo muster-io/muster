@@ -1378,9 +1378,11 @@ func read(ctx context.Context, run mattermost.Runner,
 }
 
 // CheckChannel runs the Destination check of a Mattermost Destination being saved or checked, for the Destination
-// write path (C-13.FR-2, FR-10): through the Mattermost Connection that ChannelCheck names, on the interactive path,
-// limited by the Destination when it exists and by the Connection otherwise. A Connection that is missing, deleted or
-// not a Mattermost one is destinations.ErrUnknownConnection.
+// write path (C-13.FR-2, FR-10): through the Mattermost Connection that ChannelCheck names, on the interactive path.
+// Every request of the check — the bot, its membership, the channel and its team — posts nothing to the channel, so
+// only the Connection's limiter limits it: the Destination's bucket is for the sends and edits in its channel, which a
+// check must neither starve nor wait for. A Connection that is missing, deleted or not a Mattermost one is
+// destinations.ErrUnknownConnection.
 func (s *Service) CheckChannel(ctx context.Context, in destinations.ChannelCheck) (destinations.ChannelChecked, error) {
 	row, err := s.row(ctx, s.cfg.Store, in.Connection)
 	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeMattermost) {
@@ -1394,13 +1396,8 @@ func (s *Service) CheckChannel(ctx context.Context, in destinations.ChannelCheck
 		return destinations.ChannelChecked{}, err
 	}
 	conn := row.ID
-	subject := delivery.Subject{Connection: &conn}
-	if in.Destination != nil {
-		subject = delivery.Subject{Destination: &delivery.Destination{ID: *in.Destination, Type: TypeMattermost,
-			Connection: &conn}}
-	}
-	res, err := mattermost.CheckDestination(ctx, c, mattermost.Interactive(s.cfg.Interactive, subject), in.TeamID,
-		in.ChannelID)
+	res, err := mattermost.CheckDestination(ctx, c, mattermost.Interactive(s.cfg.Interactive,
+		delivery.Subject{Connection: &conn}), in.TeamID, in.ChannelID)
 	if err != nil {
 		return destinations.ChannelChecked{}, err
 	}

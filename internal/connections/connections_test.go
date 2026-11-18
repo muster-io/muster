@@ -1485,8 +1485,8 @@ func isMessenger(err error) bool {
 }
 
 // TestCheckChannel is the Destination check for the Destination write path (C-13.FR-2, FR-10): through the Mattermost
-// Connection, limited by the Destination once it exists and by the Connection before; a missing, deleted or Telegram
-// Connection is destinations.ErrUnknownConnection.
+// Connection, limited by the Connection alone, since none of its requests posts to the channel; a missing, deleted or
+// Telegram Connection is destinations.ErrUnknownConnection.
 func TestCheckChannel(t *testing.T) {
 	e := newEnv(t)
 	c := e.create(t, "mm")
@@ -1504,14 +1504,16 @@ func TestCheckChannel(t *testing.T) {
 		t.Errorf("bot = %+v %+v", e.store.bots, res.Check.Bot)
 	}
 	e.path.subjects = nil
-	dest := int64(42)
-	res, err = e.svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID, Destination: &dest,
-		TeamID: fakemattermost.TeamID, ChannelID: fakemattermost.ChannelNoBot})
-	s := e.path.subjects[0]
+	res, err = e.svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID, TeamID: fakemattermost.TeamID,
+		ChannelID: fakemattermost.ChannelNoBot})
 	if err != nil || res.Check.OK() || res.Check.Steps[1].Message != mattermost.MessageNotMember ||
-		s.Destination == nil || s.Destination.ID != 42 || s.Destination.Type != connections.TypeMattermost ||
-		*s.Destination.Connection != c.ID {
-		t.Errorf("no bot = %+v, %v, %+v", res, err, s)
+		len(e.path.subjects) != 2 {
+		t.Errorf("no bot = %+v, %v, %+v", res, err, e.path.subjects)
+	}
+	for i, s := range e.path.subjects {
+		if s.Destination != nil || s.NoLimiter || s.Connection == nil || *s.Connection != c.ID {
+			t.Errorf("request %d limited by %+v", i, s)
+		}
 	}
 	e.store.addTelegram()
 	for _, id := range []string{"CN000000000000", telegramID, "bad"} {

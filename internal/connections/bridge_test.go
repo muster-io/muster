@@ -779,10 +779,10 @@ func (e *env) createFakeBridge(t *testing.T, f *fakebridge.Fake, name, token, mo
 	return c
 }
 
-// TestCheckBridgeChannel is the Destination check of a Bridge Destination for the Destination write path
-// (C-22.FR-3): checkChannel through the Bridge Connection, limited by the Destination once it exists and by the
-// Connection before, with the code of a refused channel; a missing, deleted, malformed or Mattermost Connection is
-// destinations.ErrUnknownConnection, and no limiter token within the budget sends nothing.
+// TestCheckBridgeChannel is the Destination check of a Bridge Destination for the Destination write path (C-22.FR-3):
+// checkChannel through the Bridge Connection, limited by the Connection alone, since it posts nothing, with the code
+// of a refused channel; a missing, deleted, malformed or Mattermost Connection is destinations.ErrUnknownConnection,
+// and no limiter token within the budget sends nothing.
 func TestCheckBridgeChannel(t *testing.T) {
 	e := newEnv(t)
 	f := startFakeBridge(t)
@@ -799,7 +799,7 @@ func TestCheckBridgeChannel(t *testing.T) {
 	}
 	f.ResetRequests()
 	res, err = e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: c.PublicID,
-		Destination: new(int64(9)), ChannelID: fakebridge.ChannelNoBot})
+		ChannelID: fakebridge.ChannelNoBot})
 	if err != nil || res.Check.OK() || res.Check.Code != bridge.CodeChannelForbidden ||
 		res.Check.Message != fakebridge.MessageNotMember || res.Check.Outcome.Kind != delivery.OutcomeFatal {
 		t.Errorf("ch-nobot = %+v, %v", res, err)
@@ -808,8 +808,8 @@ func TestCheckBridgeChannel(t *testing.T) {
 		!strings.HasSuffix(reqs[0].Path, "/channels/"+fakebridge.ChannelNoBot+"/check") {
 		t.Errorf("ch-nobot reached the bridge with %+v, not one channel check", reqs)
 	}
-	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination == nil || s.Destination.ID != 9 ||
-		s.Destination.Type != connections.TypeBridge || *s.Destination.Connection != c.ID {
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination != nil || s.NoLimiter || s.Connection == nil ||
+		*s.Connection != c.ID {
 		t.Errorf("subject %+v", s)
 	}
 	mm := e.create(t, "mm")
