@@ -94,6 +94,9 @@ type RotationQueries interface {
 	EncryptedValues(ctx context.Context, field string, orgID int64, keyID string) ([]EncryptedValue, error)
 	Reencrypt(ctx context.Context, field string, orgID int64, row RowKey, ciphertext []byte, keyID, previous string) (
 		int64, error)
+	// LockRows locks, in id order, the rows of table, one of lockedInOrder, in the Organization that may hold an
+	// encrypted value, whatever key encrypted it: every Connection, and every outgoing webhook.
+	LockRows(ctx context.Context, table string, orgID int64) error
 	audit.Store
 }
 
@@ -134,6 +137,16 @@ func (q pgRotationQueries) EncryptedValues(ctx context.Context, field string, or
 		return nil, fmt.Errorf("%s is not an encrypted field", field)
 	}
 	return f.list(ctx, q.Queries, orgID, keyID)
+}
+
+func (q pgRotationQueries) LockRows(ctx context.Context, table string, orgID int64) error {
+	switch table {
+	case "connections":
+		return q.LockRotateConnections(ctx, orgID)
+	case "destinations":
+		return q.LockRotateDestinations(ctx, orgID)
+	}
+	return fmt.Errorf("%s is not locked in id order", table)
 }
 
 func (q pgRotationQueries) Reencrypt(ctx context.Context, field string, orgID int64, row RowKey, ciphertext []byte,
@@ -417,6 +430,20 @@ var rotationOrder = []string{
 	"destinations.signing_secret", "destinations.previous_signing_secret", "destination_secrets.value",
 }
 
+// lockedInOrder are the tables with several encrypted fields whose rows rotation locks in id order before it
+// re-encrypts them, which field by field would lock several rows of a table out of id order: the Connections, of which
+// a save of a Team takes those of its Team mentions FOR SHARE in id order, and the outgoing webhooks, of which a save
+// of a Team takes those it names, and the deletion of a Team those it owns, in id order after its Connections. Without
+// it, a save that holds a lower id and waits for a higher one deadlocks with an activation that holds the higher one
+// first. users has one encrypted field, whose query locks them in id order, as the changes that lock the active Admins
+// do.
+//
+// A save of a messenger Destination locks its Destination and then its Connection FOR SHARE, the opposite of the
+// activation's order. That is safe only because messenger Destinations hold no encrypted value: the proxy password,
+// the Signing secrets and the Destination Secrets are an outgoing webhook's, and an outgoing webhook has no Connection;
+// so the activation, which holds every Connection by then, never locks a messenger Destination.
+var lockedInOrder = map[string]bool{"connections": true, "destinations": true}
+
 // EncryptedFields are the fields rotation re-encrypts, in its order: every field of the encrypted_values view.
 func EncryptedFields() []string {
 	return slices.Clone(rotationOrder)
@@ -529,12 +556,21 @@ func (r Rotation) activate(ctx context.Context, q RotationQueries, kk *key, prev
 	return nil
 }
 
-// organization re-encrypts the values of the Organization org, counts its deliveries to re-render, records the
-// activation in its Audit log and sends its hints.
+// organization re-encrypts the values of the Organization org, the rows of each table of lockedInOrder locked in id
+// order before its first field, counts its deliveries to re-render, records the activation in its Audit log and sends its hints.
 func (r Rotation) organization(ctx context.Context, q RotationQueries, org int64, kk *key, actor string,
 	out *Rotated) error {
 	var reencrypted int64
+	var table string
 	for _, field := range rotationOrder {
+		if t, _, _ := strings.Cut(field, "."); t != table {
+			table = t
+			if lockedInOrder[table] {
+				if err := q.LockRows(ctx, table, org); err != nil {
+					return fmt.Errorf("lock the %s: %w", table, err)
+				}
+			}
+		}
 		n, err := r.reencrypt(ctx, q, org, field, kk)
 		if err != nil {
 			return err

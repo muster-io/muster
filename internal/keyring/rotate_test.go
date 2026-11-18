@@ -68,6 +68,8 @@ type rotationDB struct {
 	hints    []db.Hint
 	notified []dbgen.NotifyKeyringParams
 	fail     string
+	// reads are the tables locked, as "lock <table>", and the fields read, by Organization, in their order.
+	reads map[int64][]string
 }
 
 // tx is one transaction of rotationDB: its writes apply when it commits.
@@ -150,6 +152,7 @@ func (t *tx) InsertAuditEntry(_ context.Context, arg adb.InsertAuditEntryParams)
 
 func (t *tx) EncryptedValues(_ context.Context, field string, org int64, keyID string) ([]keyring.EncryptedValue,
 	error) {
+	t.read(org, field)
 	var out []keyring.EncryptedValue
 	for _, v := range t.values[org][field] {
 		if v.KeyID != keyID {
@@ -157,6 +160,18 @@ func (t *tx) EncryptedValues(_ context.Context, field string, org int64, keyID s
 		}
 	}
 	return out, t.err("EncryptedValues")
+}
+
+func (t *tx) read(org int64, what string) {
+	if t.d.reads == nil {
+		t.d.reads = map[int64][]string{}
+	}
+	t.d.reads[org] = append(t.d.reads[org], what)
+}
+
+func (t *tx) LockRows(_ context.Context, table string, org int64) error {
+	t.read(org, "lock "+table)
+	return t.err("LockRows")
 }
 
 func (t *tx) Reencrypt(_ context.Context, field string, org int64, row keyring.RowKey, ct []byte, keyID,
@@ -324,6 +339,24 @@ func TestActivateAlreadyActive(t *testing.T) {
 	e.opens(t, 2, "connections.bot_token", e.b, "late")
 }
 
+// TestActivateLocksInIDOrder: in every Organization, the Connections and then the Destinations are locked in id order
+// before their first field is read, and no other table is.
+func TestActivateLocksInIDOrder(t *testing.T) {
+	e := newRotationEnv(t)
+	if _, err := e.rotation.Activate(t.Context(), e.b, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	fields := keyring.EncryptedFields()
+	want := slices.Insert(slices.Clone(fields), slices.Index(fields, "destinations.proxy_password"),
+		"lock destinations")
+	want = slices.Insert(want, slices.Index(want, "connections.bot_token"), "lock connections")
+	for _, org := range []int64{1, 2} {
+		if got := e.db.reads[org]; !slices.Equal(got, want) {
+			t.Errorf("organization %d: %v, want %v", org, got, want)
+		}
+	}
+}
+
 // TestActivateRefusals: a key this process does not hold, a live replica that lacks the key — named, sorted — and a
 // missing actor are refused before anything changes, as is a value that does not decrypt, whose error names the field
 // and the row, never the value; every failed step rolls back.
@@ -363,7 +396,7 @@ func TestActivateRefusals(t *testing.T) {
 // TestActivateErrors: every failed query is the activation's error and changes nothing.
 func TestActivateErrors(t *testing.T) {
 	for _, q := range []string{"LockKeyringState", "ListLiveReplicas", "ActivateKey", "ActivateKey0",
-		"ListOrganizationIDs", "EncryptedValues", "Reencrypt", "CountOpenDeliveriesSignedByOtherKey",
+		"ListOrganizationIDs", "LockRows", "EncryptedValues", "Reencrypt", "CountOpenDeliveriesSignedByOtherKey",
 		"InsertAuditEntry", "Notify", "NotifyKeyring"} {
 		t.Run(q, func(t *testing.T) {
 			e := newRotationEnv(t)
