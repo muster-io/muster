@@ -10,12 +10,15 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database"
 	"github.com/golang-migrate/migrate/v4/source"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/muster-io/muster/internal/logging"
 )
@@ -173,7 +176,7 @@ func (d *DB) migrate(ctx context.Context, log *logging.Logger, c conn) error {
 	if err != nil {
 		return err
 	}
-	m, err := d.newMigrator(ctx, c)
+	m, err := d.newMigrator(ctx, log, c)
 	if err != nil {
 		return err
 	}
@@ -201,15 +204,23 @@ func (d *DB) migrate(ctx context.Context, log *logging.Logger, c conn) error {
 }
 
 // newMigrate is golang-migrate with the embedded migrations, run over c, which holds the migration lock.
-func newMigrate(ctx context.Context, c conn) (migrator, error) {
-	src, err := iofs.New(migrationFiles, migrationsDir)
+func newMigrate(ctx context.Context, log *logging.Logger, c conn) (migrator, error) {
+	driver, err := newDriver(ctx, log, c)
+	if err != nil {
+		return nil, err
+	}
+	m, err := migrateWith(migrationFiles, migrationsDir, driver)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// migrateWith is golang-migrate with the migrations in dir of fsys, run by driver.
+func migrateWith(fsys fs.FS, dir string, driver *driver) (*migrate.Migrate, error) {
+	src, err := iofs.New(fsys, dir)
 	if err != nil {
 		return nil, fmt.Errorf("read the embedded migrations: %w", err)
-	}
-	driver, err := newDriver(ctx, c)
-	if err != nil {
-		_ = src.Close()
-		return nil, err
 	}
 	m, err := migrate.NewWithInstance("iofs", src, "muster", driver)
 	if err != nil {
@@ -235,15 +246,59 @@ func version(m migrator) (uint, bool, error) {
 type driver struct {
 	ctx  context.Context // the context of the migration run; golang-migrate's driver calls take none
 	conn conn
+	log  *logging.Logger
+	// exec runs SQL as one simple-protocol request and counts the transactions of it that committed, also before an
+	// error; -1 is unknown.
+	exec func(ctx context.Context, sql string) (commits int, err error)
+	// wait waits between the attempts of a migration, on the real clock, and reports whether ctx let it end.
+	wait func(ctx context.Context, d time.Duration) bool
+	// version is the version of the running migration, which golang-migrate records as dirty before Run.
+	version int
 }
 
-func newDriver(ctx context.Context, c conn) (*driver, error) {
+// The attempts of a migration whose transaction PostgreSQL ended on a deadlock or a lock timeout, which a rolling
+// update can cause while the replicas of the previous version write the tables it alters; the wait before attempt n+1
+// is n times migrationRetryWait.
+const (
+	migrationAttempts  = 3
+	migrationRetryWait = time.Second
+)
+
+// The SQLSTATEs of a transaction that runs again: deadlock_detected and lock_not_available, the latter on lock_timeout.
+const (
+	sqlstateDeadlock    = "40P01"
+	sqlstateLockTimeout = "55P03"
+)
+
+func newDriver(ctx context.Context, log *logging.Logger, c conn) (*driver, error) {
 	_, err := c.Exec(ctx, "CREATE TABLE IF NOT EXISTS "+migrationsTable+
 		" (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)")
 	if err != nil {
 		return nil, fmt.Errorf("create the %s table: %w", migrationsTable, err)
 	}
-	return &driver{ctx: ctx, conn: c}, nil
+	return &driver{ctx: ctx, conn: c, log: log, exec: execCounting(c), wait: sleep}, nil
+}
+
+// execCounting runs SQL over c and counts the COMMITs that completed. A connection that is not a pgx connection, as
+// the fakes of the tests, counts -1, so that its failures are never retried.
+func execCounting(c conn) func(context.Context, string) (int, error) {
+	pc, ok := c.(interface{ PgConn() *pgconn.PgConn })
+	if !ok {
+		return func(ctx context.Context, sql string) (int, error) {
+			_, err := c.Exec(ctx, sql)
+			return -1, err
+		}
+	}
+	return func(ctx context.Context, sql string) (int, error) {
+		mrr := pc.PgConn().Exec(ctx, sql)
+		commits := 0
+		for mrr.NextResult() {
+			if tag, err := mrr.ResultReader().Close(); err == nil && tag.String() == "COMMIT" {
+				commits++
+			}
+		}
+		return commits, mrr.Close()
+	}
 }
 
 func (d *driver) Open(string) (database.Driver, error) {
@@ -258,20 +313,86 @@ func (d *driver) Lock() error { return nil }
 func (d *driver) Unlock() error { return nil }
 
 // Run executes one migration file as one simple-protocol request, so that the file's own BEGIN and COMMIT apply.
+// When PostgreSQL ends a transaction of it on a deadlock or a lock timeout, Run rolls it back, waits and runs the file
+// again from that transaction, up to migrationAttempts times in all: the transactions that committed before it never
+// run twice, and golang-migrate, which recorded the version as dirty, sees only the last error. A file whose committed
+// transactions cannot be told apart (see afterCommits) is not run again.
 func (d *driver) Run(migration io.Reader) error {
-	sql, err := io.ReadAll(migration)
+	b, err := io.ReadAll(migration)
 	if err != nil {
 		return err
 	}
-	if _, err := d.conn.Exec(d.ctx, string(sql)); err != nil {
-		return fmt.Errorf("run the migration: %w", err)
+	sql := string(b)
+	for attempt := 1; ; attempt++ {
+		commits, err := d.exec(d.ctx, sql)
+		if err == nil {
+			return nil
+		}
+		sqlstate := retryable(err)
+		rest, ok := afterCommits(sql, commits)
+		if sqlstate == "" || !ok || attempt == migrationAttempts {
+			return fmt.Errorf("run the migration: %w", err)
+		}
+		// A transaction that failed stays open, aborted, on the session; without one, ROLLBACK only warns.
+		if _, rerr := d.conn.Exec(d.ctx, "ROLLBACK"); rerr != nil {
+			return fmt.Errorf("run the migration: %w", errors.Join(err, rerr))
+		}
+		d.log.Log(d.ctx, logging.MigrationRetried, logging.F("version", d.version), logging.F("attempt", attempt),
+			logging.F("sqlstate", sqlstate))
+		if !d.wait(d.ctx, time.Duration(attempt)*migrationRetryWait) {
+			return fmt.Errorf("run the migration: %w", errors.Join(err, d.ctx.Err()))
+		}
+		sql = rest
 	}
-	return nil
+}
+
+// retryable is the SQLSTATE of err when it is a deadlock or a lock timeout, and empty otherwise.
+func retryable(err error) string {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && (pe.Code == sqlstateDeadlock || pe.Code == sqlstateLockTimeout) {
+		return pe.Code
+	}
+	return ""
+}
+
+// afterCommits is the part of a migration file after its first n transactions, which committed. Each transaction of a
+// migration file begins with a line BEGIN; and ends with a line COMMIT; (TestMigrationTransactions); ok is false when
+// n is unknown or the lines do not show where the n-th transaction ends, so that a committed one is never run again.
+// Statements outside the transactions run in implicit ones, which a later BEGIN joins and a failure rolls back, so
+// they belong to the part after the last COMMIT before them.
+func afterCommits(sql string, n int) (rest string, ok bool) {
+	if n < 0 {
+		return "", false
+	}
+	if n == 0 {
+		return sql, true
+	}
+	open, end := false, 0
+	for line := range strings.SplitAfterSeq(sql, "\n") {
+		end += len(line)
+		switch strings.ToUpper(strings.TrimSpace(line)) {
+		case "BEGIN;":
+			if open {
+				return "", false
+			}
+			open = true
+		case "COMMIT;":
+			if !open {
+				return "", false
+			}
+			open = false
+			if n--; n == 0 {
+				return sql[end:], true
+			}
+		}
+	}
+	return "", false
 }
 
 // SetVersion replaces the recorded version in one implicit transaction; a dirty nil version is kept, so that a failed
 // first down migration is not mistaken for an empty schema.
 func (d *driver) SetVersion(version int, dirty bool) error {
+	d.version = version
 	sql := "TRUNCATE " + migrationsTable
 	if version >= 0 || (version == database.NilVersion && dirty) {
 		sql += fmt.Sprintf("; INSERT INTO %s (version, dirty) VALUES (%d, %t)", migrationsTable, version, dirty)

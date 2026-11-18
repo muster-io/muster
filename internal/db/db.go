@@ -54,7 +54,7 @@ type DB struct {
 	// pool, connect and newMigrator reach the database: Pool, ConnectSession and golang-migrate, or fakes in tests.
 	pool        querier
 	connect     func(context.Context) (conn, error)
-	newMigrator func(context.Context, conn) (migrator, error)
+	newMigrator func(context.Context, *logging.Logger, conn) (migrator, error)
 }
 
 // conn is a session connection that the caller closes.
