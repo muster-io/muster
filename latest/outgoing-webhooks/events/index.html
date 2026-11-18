@@ -3586,7 +3586,8 @@ budget was used (<code>call_budget_used</code>), the person had no confirmed con
 (<code>no_confirmed_contact</code>), or the gateway was deleted before the call was sent (<code>gateway_deleted</code>); or a Page by
 Mention reached its person nowhere: no Destination of the chain has the Alert Group's Root message
 (<code>no_root_message</code>), the person has no Account link in any of their Identity spaces (<code>no_account_link</code>), or every
-Thread reply that would mention them ended Not delivered or was withheld (<code>not_delivered</code>); named in <code>page</code>
+Thread reply that would mention them ended Not delivered, was withheld, or was never sent because its Root message
+ended Not delivered (<code>not_delivered</code>); named in <code>page</code>
 (<a href="../../messengers/notification-gateways/">Notification gateways</a>,
 <a href="../../concepts/escalation-chains/#undelivered-pages">Undelivered Pages</a>).</dd>
 <dt><code>escalation_step_skipped</code></dt>

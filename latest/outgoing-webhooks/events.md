@@ -307,7 +307,8 @@ never sent.
     (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); or a Page by
     Mention reached its person nowhere: no Destination of the chain has the Alert Group's Root message
     (`no_root_message`), the person has no Account link in any of their Identity spaces (`no_account_link`), or every
-    Thread reply that would mention them ended Not delivered or was withheld (`not_delivered`); named in `page`
+    Thread reply that would mention them ended Not delivered, was withheld, or was never sent because its Root message
+    ended Not delivered (`not_delivered`); named in `page`
     ([Notification gateways](../messengers/notification-gateways.md),
     [Undelivered Pages](../concepts/escalation-chains.md#undelivered-pages)).
 

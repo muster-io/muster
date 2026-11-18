@@ -3665,9 +3665,10 @@ Until it is, rely on a call through a Notification gateway for Pages at night.</
 <li><code>no_root_message</code>: none of the chain's Destinations has the Alert Group's Root message — such as a Route with a
   chain and no Destination, whose chains start when the Alert Group is created;</li>
 <li><code>no_account_link</code>: the person has no Account link in the Identity space of any of the chain's Destinations;</li>
-<li><code>not_delivered</code>: every Thread reply that would mention them ended Not delivered, or was withheld while its
-  Destination was <a href="../broken-destinations/">Broken</a>; a reply withheld while Broken is not sent after the Destination
-  recovers.</li>
+<li><code>not_delivered</code>: every Thread reply that would mention them ended Not delivered, was withheld while its
+  Destination was <a href="../broken-destinations/">Broken</a>, or was never sent because its Root message — a first Publication,
+  or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
+  the Destination recovers.</li>
 </ul>
 <p>A Page counts in <code>muster_pages_total{chain,kind,outcome}</code> once it ended: <code>delivered</code> once a delivered reply mentioned
 one of its people — for a Team or everyone in the chat, once one of its replies was delivered — and <code>not_delivered</code>
