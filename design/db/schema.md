@@ -128,10 +128,13 @@
   (the Pages by Mention, `pages` and `page_users`, the runs of Notification rules, `notification_rule_runs`, the timer
   kind `notification_rule_action` whose subject is the rule run, `timers.notification_rule_run_id`, the Thread replies
   of Pages and the Team mention or token and the importance of a Page in the Timeline, C-32.FR-3, FR-8 to FR-10,
-  FR-19, C-31.FR-3, S-155) and
+  FR-19, C-31.FR-3, S-155),
   [`0052_thread_replies_page_pending_index`](../../internal/db/migrations/0052_thread_replies_page_pending_index.up.sql)
   (`thread_replies_page_pending_idx`, the Page replies still to be sent that the delivery worker drops in Broken
-  Destinations, C-32.FR-10), in
+  Destinations, C-32.FR-10) and
+  [`0053_alert_groups_evaluated_index`](../../internal/db/migrations/0053_alert_groups_evaluated_index.up.sql)
+  (`alert_groups_evaluated_idx`, the open Alert Groups and those in their Grace period that each batch of the
+  evaluation of the Teams lists by id, C-25.FR-13), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1342,6 +1345,7 @@ Indexes and the queries they serve:
 | `alert_groups_related_idx` | previous Alert Groups with the same Route and key (C-09.FR-20) |
 | `UNIQUE (org_id, number)` | search by `#N`, which ignores the time range |
 | `alert_groups_open_idx` `(org_id, created_at DESC, id DESC) WHERE status <> 'resolved'` | the default tab (open Alert Groups, newest first) |
+| `alert_groups_evaluated_idx` `(org_id, id) WHERE status <> 'resolved' OR grace_deadline IS NOT NULL` | the batches of the evaluation of the Teams by id after a cursor, behind the exclusive evaluation lock (`ListEvaluatedGroupsAfter`, C-25.FR-13, migration 0053): the open Alert Groups and those in their Grace period, without walking the primary key over every resolved one; the query's condition implies the index predicate with constants only, no parameters, so generic plans use it too. The walks of the open Alert Groups by id (`ListOpenGroups…After`), whose `status <> 'resolved'` implies the predicate as well, may use it too |
 | `alert_groups_started_idx`, `alert_groups_changed_idx` | lists sorted by start or last change, cursor on `(created_at, id)` or `(last_changed_at, id)` |
 | `alert_groups_resolved_idx` `(org_id, resolved_at) WHERE status = 'resolved'` | the time-range overlap (not resolved before `from`), resolved-by filters, summary retention |
 | `alert_groups_route_idx` | Route filter, statistics per Route and day |

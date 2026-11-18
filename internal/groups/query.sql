@@ -1562,7 +1562,9 @@ SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@org_id::bigint))
 -- on a save of a Team or of the Team label classifies again (C-25.FR-13): the open ones, and those a person resolved
 -- that are still in their Grace period, whose firing tails the end of the Grace period groups again; and those with a
 -- pending delivery, whose final edit a change of the Organization's message settings re-renders (the evaluation leaves
--- a resolved Alert Group outside its Grace period as it is).
+-- a resolved Alert Group outside its Grace period as it is). The first branch reads alert_groups_evaluated_idx, not the
+-- primary key from the cursor: its condition implies the index predicate with constants only, no parameters, so
+-- generic plans use it too.
 -- name: ListEvaluatedGroupsAfter :many
 SELECT w.id
 FROM ((SELECT g.id

@@ -9,8 +9,11 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/db/dbtest"
@@ -192,6 +195,149 @@ func TestIntegrationWalksTakeQueuedFinalEdits(t *testing.T) {
 			}
 			if !slices.Equal(walked, want) {
 				t.Errorf("%s: walked %v, want %v", c.name, walked, want)
+			}
+		}
+	})
+}
+
+// TestIntegrationEvaluatedWalkTakesGrace is C-25.FR-13 and #629 for the list of the evaluation of the Teams on
+// PostgreSQL: behind a history of resolved Alert Groups, it lists by id the open ones, firing or acknowledged, those a
+// person resolved that are still in their Grace period, and a resolved one whose final edit waits, and leaves out a
+// resolved one outside its Grace period; the same rows in the same order in one batch and in batches of three after
+// the cursor. In the plan of a batch, custom and generic, the branch of the open Alert Groups and those in their Grace
+// period reads alert_groups_evaluated_idx, not the primary key from the cursor nor the whole table.
+func TestIntegrationEvaluatedWalkTakesGrace(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			if _, err := e.d.Pool.Exec(ctx, sql, args...); err != nil {
+				t.Fatalf("%s: %v", sql, err)
+			}
+		}
+		route := e.route(t, "one", "one", "alertname").ID
+		// The history: 2,000 Alert Groups the system resolved, with lower ids than the fixtures.
+		exec(`INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			resolved_at, resolved_by_kind, resolve_reason, created_at, last_changed_at)
+			SELECT $1, 'AG' || lpad(upper(to_hex(n)), 12, '0'), n, $2, '{alertname}', '{}',
+			       sha256(convert_to('history' || n, 'UTF8')), 'history', '{}', '{}', $3, 'resolved', 'warning', false,
+			       $4, 'system', 'gone', $4, $4
+			FROM generate_series(1001, 3000) n`, e.orgID, route, []int64{e.intID}, t0)
+		var conn int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+			mattermost_server_url, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit,
+			limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAA1', 'mattermost', 'bot',
+			'https://mm.example.org', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, e.orgID, t0).Scan(&conn); err != nil {
+			t.Fatal(err)
+		}
+		var dest int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+			mattermost_team_id, mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health,
+			created_at, updated_at) VALUES ($1, 'DSAAAAAAAAAAA1', 'mattermost', 'd1', $2, 'team', 'd1', '{}', 1000, 1,
+			'healthy', $3, $3) RETURNING id`, e.orgID, conn, t0).Scan(&dest); err != nil {
+			t.Fatal(err)
+		}
+
+		// open fires; gone was resolved by the system; grace and later were resolved by a person and are in their
+		// Grace period; acked is acknowledged; over was resolved by a person after its Grace period ended; queued was
+		// resolved by the system and waits for its final edit; last fires.
+		fixtures := []struct {
+			name, status, by, state string
+			grace                   bool
+		}{
+			{"open", "firing", "", "delivered", false},
+			{"gone", "resolved", groups.ResolvedBySystem, "delivered", false},
+			{"grace", "resolved", groups.ResolvedByUser, "delivered", true},
+			{"acked", "firing", "", "delivered", false},
+			{"over", "resolved", groups.ResolvedByUser, "delivered", false},
+			{"later", "resolved", groups.ResolvedByUser, "delivered", true},
+			{"queued", "resolved", groups.ResolvedBySystem, "pending", false},
+			{"last", "firing", "", "delivered", false},
+		}
+		ids := map[string]int64{}
+		for i, f := range fixtures {
+			r := &row{number: int64(i + 1), route: route, ints: []int64{e.intID}, severity: "warning",
+				status: f.status, created: t0, changed: t0, labels: map[string]string{"alertname": f.name},
+				title: f.name}
+			if f.status == "resolved" {
+				r.resolved, r.by, r.reason = &t0, f.by, "gone"
+			}
+			e.insert(t, r)
+			ids[f.name] = r.id
+			if f.grace {
+				exec(`UPDATE alert_groups SET grace_deadline = $2 WHERE id = $1`, r.id, t0.Add(10*time.Minute))
+			}
+			exec(`INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, next_attempt_at, created_at,
+				updated_at) VALUES ($1, $2, $3, $4, $5, $5, $5)`, e.orgID, dest, r.id, f.state, t0)
+		}
+		exec(`UPDATE alert_groups SET status = 'acknowledged', owner_user_id = $2, acknowledged_at = $3 WHERE id = $1`,
+			ids["acked"], e.userID(t), t0)
+		exec(`ANALYZE alert_groups`)
+		exec(`ANALYZE deliveries`)
+
+		q := dbgen.New(e.d.Pool)
+		list := func(after int64, lim int32) []int64 {
+			t.Helper()
+			got, err := q.ListEvaluatedGroupsAfter(ctx, dbgen.ListEvaluatedGroupsAfterParams{OrgID: e.orgID,
+				AfterID: after, Lim: lim})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		var want []int64
+		for _, n := range []string{"open", "grace", "acked", "later", "queued", "last"} {
+			want = append(want, ids[n])
+		}
+		if got := list(0, 50); !slices.Equal(got, want) {
+			t.Errorf("listed %v, want %v (%v)", got, want, ids)
+		}
+		var batches [][]int64
+		for after := int64(0); len(batches) <= len(fixtures); {
+			batch := list(after, 3)
+			batches = append(batches, batch)
+			if len(batch) < 3 {
+				break
+			}
+			after = batch[len(batch)-1]
+		}
+		if len(batches) != 3 || !slices.Equal(slices.Concat(batches...), want) || len(batches[2]) != 0 {
+			t.Errorf("walked %v three at a time, want %v in two full batches", batches, want)
+		}
+
+		// The plan of a batch from the cursor 0, as the session prepares it, custom and generic.
+		c := &captured{}
+		_, _ = dbgen.New(c).ListEvaluatedGroupsAfter(ctx, dbgen.ListEvaluatedGroupsAfterParams{OrgID: e.orgID,
+			AfterID: 0, Lim: 50})
+		pc, err := e.d.Pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pc.Release()
+		if _, err := pc.Exec(ctx, "PREPARE evaluated AS "+c.sql); err != nil {
+			t.Fatalf("prepare: %v", err)
+		}
+		defer func() {
+			_, _ = pc.Exec(ctx, "DEALLOCATE evaluated")
+			_, _ = pc.Exec(ctx, "RESET plan_cache_mode")
+		}()
+		for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
+			if _, err := pc.Exec(ctx, "SET plan_cache_mode = "+mode); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := pc.Query(ctx, fmt.Sprintf("EXPLAIN EXECUTE evaluated(%d, 0, 50)", e.orgID))
+			if err != nil {
+				t.Fatalf("%s: explain: %v", mode, err)
+			}
+			lines, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				t.Fatalf("%s: explain: %v", mode, err)
+			}
+			plan := strings.Join(lines, "\n")
+			if !strings.Contains(plan, "using alert_groups_evaluated_idx on alert_groups g ") {
+				t.Errorf("%s: the open and Grace branch does not read alert_groups_evaluated_idx\n%s", mode, plan)
 			}
 		}
 	})
