@@ -2348,9 +2348,9 @@ each in the transaction of the change and none while a row of the same person is
 count as one, as both render the name and the links as they are when the row runs). Each batch of the three kinds
 waits for the Snapshots in flight under the lock of the evaluation, as `team_name` does, since a Snapshot that reopens
 an Alert Group gives it back its Owner or snoozer without a lock of that person's row; the Commands that make a footer
-name someone, Acknowledge and Snooze, lock that User's or Service account's row `FOR SHARE` before the Alert Group,
-and the changes lock it before they insert, so a change either waits for the Command and then sees its Alert Group, or
-the Command renders after the change. The re-render step of every batch, and every batch of
+name someone, Acknowledge, Snooze and Resolve, lock that User's or Service account's row `FOR SHARE` before the
+Alert Group, and the changes lock it before they insert, so a change either waits for the Command and then sees its
+Alert Group, or the Command renders after the change. The re-render step of every batch, and every batch of
 `team_evaluation` and `organization_message_settings`, takes the membership locks of the batch's Routes, then of their
 Teams and of the Teams the evaluation brings, shared and in id order, before its first change.
 Each batch of `team_evaluation`, `organization_message_settings`, `team_name`, `organization_links`, `user_name`,
@@ -2370,6 +2370,21 @@ no worker claims it before the save commits, and its run classifies with every s
 `user_name` or `account_links` while one of either kind of the same User is, and a row `service_account_name` while
 one of the same Service account is: the run renders with the settings, the name, the rules, the tables and the links
 as they are then.
+
+Every walk also takes the resolved Alert Groups of its scope whose final edit still waits, those with a `pending`
+delivery — in its Destination for `destination_buttons` and `destination_connection`, in a Destination that follows
+the Organization for `organization_buttons`; for `user_name` and `account_links` those its User resolved
+(`resolved_by_user_id`), for `service_account_name` those its Service account resolved — so that the final edit shows
+the change. Each batch lists them in a second branch of a `UNION`, from the pending deliveries through the partial
+index `deliveries_due_v2_idx` and then the Alert Groups by id, each branch ordered by id and limited to the batch, so
+that the branch of the open Alert Groups keeps its own plan. Delivery renders such an Alert Group only in the
+Destinations where its delivery is still `pending`, checked again under the delivery's lock, Quietly and keeping the
+final edit's place in the claims: a final edit that went out is not sent again, a delivery `not_delivered`,
+`withheld`, `deleted_in_messenger` or `retired` is not revived, no Destination is added, and the Timeline records
+only what the re-render of an open Alert Group records. `route_minimum_severity` and `team_evaluation` leave a
+resolved Alert Group as it is, and `team_destinations` leaves it out, as it neither grows nor ends the reach of one.
+Resolve, which makes the footer name who resolved, locks that User's or Service account's row `FOR SHARE` before the
+Alert Group, as Acknowledge and Snooze do.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by

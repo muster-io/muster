@@ -224,7 +224,7 @@ func (f *fakeDB) ListOpenGroupsOfRouteAfter(_ context.Context, arg dbgen.ListOpe
 	}
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if g.RouteID == arg.RouteID && g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID {
+		if g.RouteID == arg.RouteID && f.walked(g) && g.ID > arg.AfterID && arg.OrgID == orgID {
 			out = append(out, g.ID)
 		}
 	}
@@ -263,7 +263,7 @@ func (f *fakeDB) ListEvaluatedGroupsAfter(_ context.Context, arg dbgen.ListEvalu
 	}
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if (g.Status != "resolved" || g.GraceDeadline.Valid) && g.ID > arg.AfterID && arg.OrgID == orgID {
+		if (f.walked(g) || g.GraceDeadline.Valid) && g.ID > arg.AfterID && arg.OrgID == orgID {
 			out = append(out, g.ID)
 		}
 	}
@@ -278,7 +278,7 @@ func (f *fakeDB) ListOpenGroupsAfter(_ context.Context, arg dbgen.ListOpenGroups
 	}
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID {
+		if f.walked(g) && g.ID > arg.AfterID && arg.OrgID == orgID {
 			out = append(out, g.ID)
 		}
 	}
@@ -294,8 +294,11 @@ func (f *fakeDB) ListOpenGroupsOfUserAfter(_ context.Context, arg dbgen.ListOpen
 	}
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID && arg.UserID.Valid &&
-			(g.OwnerUserID == arg.UserID || g.SnoozedByUserID == arg.UserID) {
+		names := g.OwnerUserID == arg.UserID || g.SnoozedByUserID == arg.UserID
+		if g.Status == "resolved" {
+			names = f.pending[g.ID] && g.ResolvedByUserID == arg.UserID
+		}
+		if g.ID > arg.AfterID && arg.OrgID == orgID && arg.UserID.Valid && names {
 			out = append(out, g.ID)
 		}
 	}
@@ -311,8 +314,11 @@ func (f *fakeDB) ListOpenGroupsOfServiceAccountAfter(_ context.Context,
 	}
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID && arg.ServiceAccountID.Valid &&
-			g.SnoozedByServiceAccountID == arg.ServiceAccountID {
+		names := g.SnoozedByServiceAccountID == arg.ServiceAccountID
+		if g.Status == "resolved" {
+			names = f.pending[g.ID] && g.ResolvedByServiceAccountID == arg.ServiceAccountID
+		}
+		if g.ID > arg.AfterID && arg.OrgID == orgID && arg.ServiceAccountID.Valid && names {
 			out = append(out, g.ID)
 		}
 	}
@@ -329,7 +335,7 @@ func (f *fakeDB) ListOpenGroupsOfTeamAfter(_ context.Context, arg dbgen.ListOpen
 	ts := f.teamsOf()
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID &&
+		if f.walked(g) && g.ID > arg.AfterID && arg.OrgID == orgID &&
 			slices.ContainsFunc(ts.groups[g.ID], func(t fakeGroupTeam) bool { return t.team == arg.TeamID }) {
 			out = append(out, g.ID)
 		}
@@ -351,10 +357,16 @@ func (f *fakeDB) LockTeamEvaluation(_ context.Context, arg dbgen.LockTeamEvaluat
 
 // openDelivered are the open Alert Groups after the id after with a delivery that is not being retired in a
 // Destination that matches, by id, at most lim.
+// walked reports whether the re-render of a change of configuration walks g: open, or resolved with its final edit
+// still waiting.
+func (f *fakeDB) walked(g *dbgen.LockGroupsRow) bool {
+	return g.Status != "resolved" || f.pending[g.ID]
+}
+
 func (f *fakeDB) openDelivered(org, after int64, lim int32, match func(dest int64) bool) []int64 {
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if g.Status != "resolved" && g.ID > after && org == orgID && slices.ContainsFunc(f.delivered[g.ID],
+		if f.walked(g) && g.ID > after && org == orgID && slices.ContainsFunc(f.delivered[g.ID],
 			func(dest int64) bool { return match(dest) && !f.retired[[2]int64{g.ID, dest}] }) {
 			out = append(out, g.ID)
 		}
@@ -1596,6 +1608,20 @@ func TestTeamNameUpdate(t *testing.T) {
 		t.Errorf("a second run: rendered %v, rows %d, log %s", r.got, len(e.db.updates), e.log)
 	}
 
+	// A resolved Alert Group whose final edit still waits is rendered again too, without a change of its own, so
+	// that its final edit shows the new name; delivery edits only its pending deliveries.
+	r.got = nil
+	e.db.pending = map[int64]bool{resolved.ID: true}
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if want := []string{fmt.Sprintf("%d:", g.ID), fmt.Sprintf("%d:", resolved.ID)}; !slices.Equal(r.got, want) ||
+		len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || len(e.db.updates) != 0 {
+		t.Errorf("a queued final edit: rendered %v, want %v; %d entries, %d saves, rows %d", r.got, want,
+			len(e.db.entries)-entries, e.db.calls["SaveGroup"]-saves, len(e.db.updates))
+	}
+	e.db.pending = nil
+
 	// A row whose Team is gone, team_id set to null by its deletion, is done without a list.
 	r.got = nil
 	e.db.fail["ListOpenGroupsOfTeamAfter"] = errBoom
@@ -1710,10 +1736,12 @@ func TestTeamDestinationsUpdate(t *testing.T) {
 	_, paid := e.fire(t, 3, map[string]string{"alertname": "Latency", "cluster": "b", "team": "payments"})
 	_, both := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "c", "team": "search"})
 	_, none := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "e"})
-	gone, _ := e.fire(t, 3, map[string]string{"alertname": "Gone", "cluster": "d", "team": "search"})
+	gone, resolved := e.fire(t, 3, map[string]string{"alertname": "Gone", "cluster": "d", "team": "search"})
 	e.save(0)
 	e.round(t, e.worker)
 	e.resolve(t, gone)
+	// A change of the Team's Destination entries leaves a resolved Alert Group out, even one whose final edit waits.
+	e.db.pending = map[int64]bool{resolved.ID: true}
 	if !slices.Equal(e.groupTeamSlugs(t, g), []string{"search:label"}) || len(e.groupTeamSlugs(t, none)) != 0 ||
 		!slices.Equal(e.groupTeamSlugs(t, paid), []string{"payments:label"}) {
 		t.Fatalf("teams %v %v", e.groupTeamSlugs(t, g), e.groupTeamSlugs(t, paid))

@@ -7,6 +7,7 @@ package delivery_test
 
 import (
 	"context"
+	"maps"
 	"net/netip"
 	"net/url"
 	"regexp"
@@ -318,6 +319,122 @@ func TestIntegrationFooterUserRerender(t *testing.T) {
 		if n := f.count(t, `SELECT count(*) FROM timeline_entries`); n != entries {
 			t.Errorf("the re-renders recorded %d timeline entries", n-entries)
 		}
+		f.noDeadlock(t)
+	})
+}
+
+// TestIntegrationFooterRerenderOfQueuedFinalEdit is #557, C-12.FR-12 and C-11.FR-3 on PostgreSQL, with the renderer,
+// the Account links and delivery of the runtime: in two Mattermost Destinations, alice resolved FrA, whose final edit
+// is still queued in both, FrB, whose final edit went out in both, and FrC, whose final edit went out in one and waits
+// for a retry in the other. A Mattermost Account link she makes writes one row account_links, whose run renders the
+// queued final edits again, Quietly: each names her by her link's username, once in each Destination where it waited,
+// with no Mention and no new message, and FrB and the final edit of FrC that went out are not edited again. Then she
+// resolves FrD, whose final edit with her link waits in both Destinations, and removes the link: the final edits name
+// her by her name with no Mention. Neither run changes an Alert Group or its Timeline, and a second run of each row
+// edits nothing.
+func TestIntegrationFooterRerenderOfQueuedFinalEdit(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		f := setupFooterLive(t, s)
+		ctx := t.Context()
+		f.fresh(t, 1000, 1)
+		f.attach(t, f.dests...)
+		w := f.worker("fr")
+		updates := f.updates()
+		space := accountlinks.SpaceMattermost(f.conn)
+		f.fire(t, "fr", "FrA/a", "FrB/a", "FrC/a", "FrD/a")
+		f.round(t, w)
+		resolve := func(name string) {
+			t.Helper()
+			if _, err := f.groups.Resolve(ctx, f.snooze, f.group(t, name), nil); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		}
+		resolve("FrB")
+		f.round(t, w)
+		resolve("FrC")
+		f.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503"))
+		f.round(t, w)
+		resolve("FrA")
+		pending := func(t *testing.T, want int64) {
+			t.Helper()
+			if n := f.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending'`); n != want {
+				t.Fatalf("%d final edits wait, want %d\n%s", n, want, f.log)
+			}
+		}
+		pending(t, 3)
+		// run runs the open Alert Group updates, checking that they change no Alert Group, then a delivery round, and
+		// returns the edits of Root messages it made; the rounds also send the Thread replies of the resolutions.
+		run := func(t *testing.T) []deliverytest.Call {
+			t.Helper()
+			f.rec.Reset()
+			before := f.groupsUnchanged(t)
+			if _, err := updates.Round(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if n := f.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 {
+				t.Fatalf("%d rows left\n%s", n, f.log)
+			}
+			if after := f.groupsUnchanged(t); after != before {
+				t.Errorf("the run changed the alert groups: %s, was %s", after, before)
+			}
+			f.round(t, w)
+			if n := f.rec.Count(deliverytest.MethodPublish); n != 0 {
+				t.Errorf("the run published %d root messages", n)
+			}
+			return only(f.rec.Calls(), deliverytest.MethodUpdate)
+		}
+		// edited checks that the edits are those of the Alert Groups named, as many times as want says, each Quietly,
+		// with no Mention, showing what shows says.
+		edited := func(t *testing.T, what string, calls []deliverytest.Call, want map[string]int,
+			shows func(m delivery.Message) bool) {
+			t.Helper()
+			seen := map[string]int{}
+			for _, c := range calls {
+				if c.Loudness != groups.Quiet || len(c.Mentions) != 0 || !shows(c.Message) {
+					t.Errorf("%s: %s %s, mentions %v, footer %q %v", what, head(c.Message), c.Loudness, c.Mentions,
+						c.Message.Footer, c.Message.FooterUsers)
+				}
+				if fs := strings.Fields(head(c.Message)); len(fs) > 1 {
+					seen[fs[1]]++
+				}
+			}
+			if !maps.Equal(seen, want) {
+				t.Errorf("%s: edited %v, want %v\n%s", what, seen, want, f.log)
+			}
+		}
+		again := func(t *testing.T, what string) {
+			t.Helper()
+			f.exec(t, `INSERT INTO open_group_updates (org_id, kind, user_id, requested_at) VALUES ($1, $2, $3, $4)`,
+				f.orgID, groups.KindAccountLinks, f.aliceID, f.business.Now())
+			if calls := run(t); len(calls) != 0 {
+				t.Errorf("%s: a second run made %d edits", what, len(calls))
+			}
+		}
+
+		f.linkMattermost(t, "alice_mm")
+		edited(t, "a link", run(t), map[string]int{"FrA": 2, "FrC": 1}, func(m delivery.Message) bool {
+			u, ok := m.FooterUsers[space]
+			return ok && u.Username == "alice_mm" && strings.Contains(m.Footers[space], messages.FooterUserToken)
+		})
+		pending(t, 0)
+		again(t, "a link")
+
+		resolve("FrD")
+		pending(t, 2)
+		var link string
+		if err := f.d.Pool.QueryRow(ctx, `SELECT public_id FROM account_links WHERE user_id = $1`,
+			f.aliceID).Scan(&link); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.links.Unlink(ctx, accountlinks.Requester{UserID: f.aliceID, UserPublicID: f.alice.Actor.PublicID,
+			Actor: f.alice.Actor, Transport: audit.TransportUI}, link); err != nil {
+			t.Fatal(err)
+		}
+		edited(t, "an unlink", run(t), map[string]int{"FrD": 2}, func(m delivery.Message) bool {
+			return m.FooterUsers == nil && strings.Contains(m.Footer, " by alice")
+		})
+		pending(t, 0)
+		again(t, "an unlink")
 		f.noDeadlock(t)
 	})
 }

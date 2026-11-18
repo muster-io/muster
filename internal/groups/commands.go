@@ -438,7 +438,7 @@ func (s *Service) transact(ctx context.Context, c Caller, cmd Command, publicID 
 				return err
 			}
 		}
-		if cmd == CommandSnooze {
+		if cmd == CommandSnooze || cmd == CommandResolve {
 			if err := s.sharePerson(ctx, q, c); err != nil {
 				return err
 			}
@@ -562,11 +562,12 @@ func (s *Service) lockActive(ctx context.Context, q Queries, c Caller) error {
 	return nil
 }
 
-// sharePerson locks the row of the User or the Service account who snoozes, FOR SHARE, before the Alert Group, as
-// lockActive does for who acknowledges: the footer of a snoozed Alert Group names who snoozed it (C-12.FR-12), and a
-// change of their name or Account links locks that row before it writes the re-render of the open Alert Groups whose
-// footer names them, so it either waits for the Snooze and then finds its Alert Group, or the Snooze renders the
-// footer after the change.
+// sharePerson locks the row of the User or the Service account who snoozes or resolves, FOR SHARE, before the Alert
+// Group, as lockActive does for who acknowledges: the footer of a snoozed Alert Group names who snoozed it, and that of
+// one a person resolved, whose final edit the re-render reaches while it waits, who resolved it (C-12.FR-12); a change
+// of their name or Account links locks that row before it writes the re-render of the Alert Groups whose footer names
+// them, so it either waits for the Command and then finds its Alert Group, or the Command renders the footer after the
+// change.
 func (s *Service) sharePerson(ctx context.Context, q Queries, c Caller) error {
 	var err error
 	switch c.Actor.Kind {
@@ -578,7 +579,7 @@ func (s *Service) sharePerson(ctx context.Context, q Queries, c Caller) error {
 		// The system and the CLI have no row that a footer names.
 	}
 	if err != nil {
-		return fmt.Errorf("lock who snoozes: %w", err)
+		return fmt.Errorf("lock who the footer names: %w", err)
 	}
 	return nil
 }

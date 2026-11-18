@@ -117,8 +117,10 @@ type fakeDB struct {
 	updates   []*fakeUpdate
 	delivered map[int64][]int64
 	following []int64
-	// retired are the deliveries being retired, by Alert Group and Destination.
+	// retired are the deliveries being retired, by Alert Group and Destination; pending the Alert Groups with a pending
+	// delivery, whose final edit still waits once they resolved.
 	retired map[[2]int64]bool
+	pending map[int64]bool
 	// runSteps are the steps of the runs of Escalation chains, by Alert Group (retention_test.go).
 	runSteps map[int64]int
 	// teams are the Teams of the Alerts and of the Alert Groups (teams_test.go).
