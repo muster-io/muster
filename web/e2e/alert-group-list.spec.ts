@@ -12,22 +12,26 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   APP,
+  type AssigneeSeed,
   TEAM_BOB,
   TEAM_SPEC_PASSWORD,
   adminApi,
   createRoute,
   deleteRoute,
+  dropAssignees,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
   removeIntegration,
   removeTeamsBySlug,
+  seedAssignees,
   seedTeamAlerts,
   teamSlugs,
   shot,
   signIn,
   signInAdmin,
+  waitAssignees,
   watchCsp,
 } from "./support";
 
@@ -76,9 +80,9 @@ test.afterAll(async () => {
 });
 
 /** The rows of the desktop table, the header row left out. */
-function rows(page: Page) {
+function rows(page: Page, table = "Alert Groups") {
   return page
-    .getByRole("table", { name: "Alert Groups" })
+    .getByRole("table", { name: table })
     .getByRole("row")
     .filter({
       has: page.getByRole("cell"),
@@ -326,4 +330,98 @@ test("lists the Teams of each Alert Group and filters by Team and My Teams, whic
     await cleanup.dispose();
   }
   expect(csp).toEqual([]);
+});
+
+// Scenario 2 of C-32 (Verification of the story "Running chains and Assignees on the Alert Group page…"): ivan (devops)
+// and petr (payments) are the Assignees of the firing Alert Group KubernetesContainerOOMKilled; olga, Paged without a
+// Mattermost Account link, is not. The list has the column Assignees and the filter Assignee, "me" or a User, which keeps
+// its value in the URL and lists the Alert Groups where that User is an Assignee.
+test.describe("the Assignee filter and column", () => {
+  test.describe.configure({ mode: "serial" });
+  let assign: AssigneeSeed;
+
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
+    assign = await seedAssignees("asl");
+    await waitAssignees(assign.groupId, 2);
+  });
+
+  test.afterAll(async () => {
+    await dropAssignees("asl");
+  });
+
+  test("the filter Assignee 'me' lists the Alert Group for ivan, keeps `assignee` in the URL, and the column names both Assignees", async ({
+    page,
+    browser,
+  }) => {
+    const csp = watchCsp(page);
+    await signIn(page, assign.logins.ivan, TEAM_SPEC_PASSWORD);
+    await page.goto("/alert-groups");
+    const filter = page.getByTestId("filter-assignee");
+    await filter.getByLabel("Assignee", { exact: true }).selectOption("me");
+    await expect(page).toHaveURL(/[?&]assignee=me(&|$)/);
+    const row = groupRow(page, assign.alertname);
+    await expect(row).toHaveCount(1);
+    await expect(page.getByRole("columnheader", { name: "Assignees" })).toBeVisible();
+    await expect(row.getByTestId("assignees")).toContainText(
+      `@${assign.logins.ivan} (${assign.teams.devops})`,
+    );
+    await expect(row.getByTestId("assignees")).toContainText(
+      `@${assign.logins.petr} (${assign.teams.payments})`,
+    );
+    // The filter counts as one of the filters set, and survives a reload and a second browser.
+    await expect(page.getByRole("button", { name: "Clear filters" })).toBeVisible();
+    await page.reload();
+    await expect(filter.getByLabel("Assignee", { exact: true })).toHaveValue("me");
+    await expect(groupRow(page, assign.alertname)).toHaveCount(1);
+    const other = await browser.newContext();
+    const copy = await other.newPage();
+    await signIn(copy, assign.logins.ivan, TEAM_SPEC_PASSWORD);
+    await copy.goto(page.url());
+    await expect(groupRow(copy, assign.alertname)).toHaveCount(1);
+    await other.close();
+    await shot(page, "alert-group-list-assignee");
+    expect(csp).toEqual([]);
+  });
+
+  test("a User chosen as the Assignee lists their Alert Groups, and a person who was never reached lists none", async ({
+    page,
+  }) => {
+    await signInAdmin(page);
+    // The Admin is no Assignee.
+    await page.goto("/alert-groups?assignee=me");
+    await expect(groupRow(page, assign.alertname)).toHaveCount(0);
+    const select = page.getByTestId("filter-assignee").getByLabel("Assignee", { exact: true });
+    for (const [login, listed] of [
+      [assign.logins.petr, 1],
+      [assign.logins.olga, 0],
+    ] as const) {
+      await page.goto("/alert-groups");
+      await page.getByTestId("filter-assignee").getByRole("searchbox").fill(login);
+      await select.selectOption({ label: login });
+      await expect(page).toHaveURL(/[?&]assignee=SR/);
+      await expect(groupRow(page, assign.alertname)).toHaveCount(listed);
+    }
+  });
+
+  test("the filter and the column read in Russian", async ({ browser }) => {
+    const context = await browser.newContext();
+    const ru = await context.newPage();
+    await signIn(ru, assign.logins.petr, TEAM_SPEC_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel("Language").selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/alert-groups?assignee=me");
+    await expect(
+      ru.getByTestId("filter-assignee").getByLabel("Назначенный", { exact: true }),
+    ).toHaveValue("me");
+    // The table is named after the page title, which reads in Russian too.
+    const row = rows(ru, "Группы алертов").filter({ hasText: assign.alertname });
+    await expect(row).toHaveCount(1);
+    await expect(ru.getByRole("columnheader", { name: "Назначенные" })).toBeVisible();
+    await expect(row.getByTestId("assignees")).toContainText(
+      `@${assign.logins.petr} (${assign.teams.payments})`,
+    );
+    await context.close();
+  });
 });

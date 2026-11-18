@@ -15,6 +15,7 @@ files_touched:
   - web/src/components/alert-group-chains.test.tsx
   - web/src/components/timeline.tsx
   - web/src/components/timeline.test.tsx
+  - web/src/components/command-buttons.tsx
   - web/src/components/alert-group-table.tsx
   - web/src/components/alert-group-filters.tsx
   - web/src/components/alert-group-filters.test.tsx
@@ -30,6 +31,7 @@ files_touched:
   - web/e2e/alert-group-list.spec.ts
   - web/e2e/home.spec.ts
   - web/e2e/phone-width.spec.ts
+  - web/e2e/support.ts
 acceptance:
   - "[C-32.FR-18, C-32.AC-14, C-09.FR-11, C-09.FR-14] In a real browser the Alert Group page shows its running chains — each with its name, its current step and when its next step is due, or \"ran out\" or \"stopped\" — and its Assignees with their Teams, \"Assignees: @ivan (devops), @petr (payments)\", and after an acknowledgement \"Acknowledged by @ivan · Escalation chains stopped\", the Owner without a Team; at 360 CSS pixels wide the page has no horizontal scrolling; in English and in Russian (`alert-group-chains.test.tsx`, `alert-group-header.test.tsx`, `alert-group-page.spec.ts`, `phone-width.spec.ts`)."
   - "[C-32.FR-18, C-09.FR-14] The Timeline shows each Page — \"Step 1 · payments: Paged @petr, normal\", a call through \"Example Gateway\" —, each undelivered Page with its reason, each skipped step with its reason, the Assignees' changes and `escalation_webhook`, under the kind filter \"Escalation chains\", and an acknowledgement with the Transport `gateway` as \"from a call through Example Gateway\" (`timeline.test.tsx`)."
@@ -97,7 +99,7 @@ Russian:
 3. Its page: the running chains "devops" and "payments" with their steps and "next step at …"; "Assignees: @ivan
    (devops), @petr (payments)"; the Timeline filtered by "Escalation chains" shows "Step 1 · payments", "Page not
    delivered: @petr has no linked Mattermost account" where it applies, and "Step 3 skipped: only for critical".
-4. "Acknowledge" → the header reads "Acknowledged by @ivan (devops) · Escalation chains stopped", the chains "stopped",
+4. "Acknowledge" → the header reads "Acknowledged by @ivan · Escalation chains stopped" (the Owner without a Team), the chains "stopped",
    and Home no longer lists the Alert Group.
 5. At 360 × 740 the Alert Group list with the Assignees column and the filter, the Alert Group page and Home have no
    horizontal scrolling.

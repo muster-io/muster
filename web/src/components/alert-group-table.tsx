@@ -3,9 +3,9 @@
 
 // The rows of the Alert Group list (C-09.FR-13, FR-24; C-10.FR-13, FR-14, FR-16; C-13.FR-12; C-17.FR-3). On a desktop a
 // table: status with the Delivery problem mark, #N, title, Severity level, Urgent, Route, Integrations, Teams, firing and
-// total Alerts, Owner, Snooze end, the badge "Unclaimed", start, duration, last change, Reopen count, the label columns
+// total Alerts, Owner, Assignees (C-32.FR-18), Snooze end, the badge "Unclaimed", start, duration, last change, Reopen count, the label columns
 // the user picked and the "…" menu of Commands. On a phone compact rows — status, the badge "Unclaimed", #N, title,
-// Urgent mark, duration, Owner and the Delivery problem in words, a link to the page, with the menu beside it — so that
+// Urgent mark, duration, Owner, Assignees and the Delivery problem in words, a link to the page, with the menu beside it — so that
 // nothing scrolls sideways. While the user selects, each row has a checkbox. Titles, summaries and label values come
 // from alerts: text only.
 
@@ -23,6 +23,7 @@ import {
   StatusBadge,
   UnclaimedBadge,
   UrgentMark,
+  assigneesText,
   statusLabel,
 } from "./alert-group-header";
 import { useCan } from "./app-shell";
@@ -110,6 +111,17 @@ function OwnerCell({ row }: { row: AlertGroup }) {
   ) : (
     <span className="wrap-anywhere" data-testid="owner">
       {personName(t, row.owner)}
+    </span>
+  );
+}
+
+function AssigneesCell({ row }: { row: AlertGroup }) {
+  const { t } = useTranslation();
+  return row.assignees.length === 0 ? (
+    NONE
+  ) : (
+    <span className="wrap-anywhere" data-testid="assignees">
+      {assigneesText(t, row.assignees)}
     </span>
   );
 }
@@ -236,6 +248,12 @@ function useColumns(labelColumns: readonly string[], selecting: boolean): DataCo
         text: (row) => alertCounts(t, row),
       },
       { id: "owner", header: t("alertGroups.columns.owner"), Cell: OwnerCell },
+      {
+        id: "assignees",
+        header: t("alertGroups.assignees.column"),
+        className: "min-w-28",
+        Cell: AssigneesCell,
+      },
       { id: "snooze_end", header: t("alertGroups.columns.snoozeEnd"), Cell: SnoozeEndCell },
       {
         id: "unclaimed",
@@ -345,6 +363,11 @@ function CompactRow({ row }: { row: AlertGroup }) {
         {owner !== undefined && (
           <span className="text-xs text-muted-foreground wrap-anywhere" data-testid="owner">
             {t("alertGroups.owner", { name: owner })}
+          </span>
+        )}
+        {row.assignees.length > 0 && (
+          <span className="text-xs text-muted-foreground wrap-anywhere" data-testid="assignees">
+            {t("alertGroups.assignees.line", { list: assigneesText(t, row.assignees) })}
           </span>
         )}
         {row.delivery_problem && (
