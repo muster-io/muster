@@ -355,6 +355,18 @@ func (f *fakeDB) LockTeamEvaluation(_ context.Context, arg dbgen.LockTeamEvaluat
 	return nil
 }
 
+func (f *fakeDB) ShareTeamEvaluation(_ context.Context, arg dbgen.ShareTeamEvaluationParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ShareTeamEvaluation"); err != nil {
+		return err
+	}
+	if arg.LockClass != db.TeamEvaluationLockClass || arg.OrgID != orgID {
+		return fmt.Errorf("the shared lock of the evaluation of the teams %+v", arg)
+	}
+	return nil
+}
+
 // openDelivered are the open Alert Groups after the id after with a delivery that is not being retired in a
 // Destination that matches, by id, at most lim.
 // walked reports whether the re-render of a change of configuration walks g: open, or resolved with its final edit

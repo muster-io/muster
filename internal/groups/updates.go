@@ -614,11 +614,12 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 // names of the Teams or the Link rules and Lookup tables before the save could miss — the evaluation of the Teams, the
 // Organization's message settings, the name of a Team and the links — and those of the user a footer names, since a
 // Snapshot that reopens an Alert Group gives it back its Owner or who snoozed it, and renders their name and links,
-// without a lock of their row. The Commands that make the footer name someone — Acknowledge, Snooze and Resolve,
-// whose final edit the walk reaches while it waits — lock that row FOR SHARE before the Alert Group (lockActive,
-// sharePerson), and the changes of a name or of Account links lock it before they write their row, so those need no
-// barrier. The kinds of a Route need none: grouping holds the Route FOR SHARE until the Snapshot commits, and its
-// update takes it FOR UPDATE.
+// without a lock of their row; the outcome of a Page that makes someone an Assignee (SettlePage) takes the lock shared
+// as a Snapshot does, for the same reason. The Commands that make the footer name someone — Acknowledge, Snooze and
+// Resolve, whose final edit the walk reaches while it waits — lock that row FOR SHARE before the Alert Group
+// (lockActive, sharePerson), and the changes of a name or of Account links lock it before they write their row, so
+// those need no barrier. The kinds of a Route need none: grouping holds the Route FOR SHARE until the Snapshot
+// commits, and its update takes it FOR UPDATE.
 func evaluationBarrier(kind string) bool {
 	switch kind {
 	case KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindOrganizationLinks, KindUserName,

@@ -2313,7 +2313,9 @@ whose `entries` hold an entry of the Team when no entry of its Route or, while t
 of its Teams still names that Destination (C-26.FR-6); a second run changes nothing. It needs no barrier: the Team's
 membership lock orders the save against the Snapshots that read its entries. A save inserts no second row while one
 of the same Team and Destination is still unclaimed. A row `user_name` or `account_links` walks the open Alert Groups
-whose footer names its User — `owner_user_id` while acknowledged, `snoozed_by_user_id` while snoozed — and a row
+whose footer names its User — `owner_user_id` while acknowledged, `snoozed_by_user_id` while snoozed, and its rows of
+`alert_group_assignees` while firing, in a branch of their own through `alert_group_assignees_user_idx`, ordered by id,
+limited to the batch and distinct, since two chains can each make the User an Assignee — and a row
 `service_account_name` those with its Service account in `snoozed_by_service_account_id`, and each only runs the
 re-render step on them, so delivery edits only the Root messages whose footer changed: the Desired state of a Root
 message stores the footer of every identity space, and the adapter writes the one of the Destination's Connection when
@@ -2358,10 +2360,13 @@ Each batch of `team_evaluation`, `organization_message_settings`, `team_name`, `
 Organization) exclusively before it lists its Alert Groups, and routing takes it shared before a Snapshot reads the
 stamp of the classification, holding it until the Snapshot commits: a Snapshot that read the Teams, the settings, the
 names or the Link rules and Lookup tables before a save commits the Alert Groups it creates or changes before the
-batch lists them, so none is missed. The cost is a stall of Snapshot processing, never of ingestion: while a batch holds
-the lock, the processing of every new
-Snapshot of the Organization waits at its shared lock for the length of the one transaction of the batch, which locks,
-classifies and renders at most 50 Alert Groups (the batch size); the received Snapshots, already stored, are processed
+batch lists them, so none is missed. The outcome of a Page that reached someone (`SettlePage`), who may become an
+Assignee whom the footer names, takes it shared the same way before it locks its Alert Group, so a batch of
+`user_name` or `account_links` lists the Alert Groups of the Assignees such an outcome makes; it does not lock the rows
+of the people, since the changes of a User lock the active Admins in id order before the User. The cost is a stall
+of Snapshot processing and of the settling of Page outcomes, never of ingestion: while a batch holds the lock, the
+processing of every new Snapshot of the Organization, and the settling of each such outcome, waits at its shared
+lock for the length of the one transaction of the batch, which locks, classifies and renders at most 50 Alert Groups (the batch size); the received Snapshots, already stored, are processed
 in order once it commits, and a run of many batches stalls them once per batch, with the gaps between batches free. A save inserts no second row while one
 `team_evaluation` row of the Organization is still unclaimed (`leased_by IS NULL`): it locks that row `FOR UPDATE`, so
 no worker claims it before the save commits, and its run classifies with every save before it. A row

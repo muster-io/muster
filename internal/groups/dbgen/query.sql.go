@@ -3968,6 +3968,14 @@ FROM ((SELECT g.id
        ORDER BY g.id
        LIMIT $4)
       UNION
+      (SELECT DISTINCT a.alert_group_id AS id
+       FROM alert_group_assignees a
+       JOIN alert_groups g ON g.org_id = a.org_id AND g.id = a.alert_group_id
+       WHERE a.org_id = $1 AND a.user_id = $3 AND a.alert_group_id > $2 AND g.org_id = $1
+         AND g.status = 'firing'
+       ORDER BY a.alert_group_id
+       LIMIT $4)
+      UNION
       (SELECT DISTINCT g.id
        FROM deliveries p
        JOIN alert_groups g ON g.org_id = p.org_id AND g.id = p.alert_group_id
@@ -3987,9 +3995,11 @@ type ListOpenGroupsOfUserAfterParams struct {
 }
 
 // ListOpenGroupsOfUserAfter lists, by id after a cursor, a batch of the Alert Groups whose footer names the User
-// (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed, and who resolved them while their
-// final edit still waits, with a pending delivery — which a change of the User's display name or Account links
-// re-renders.
+// (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed, an Assignee of them while firing
+// (C-32.FR-12), through alert_group_assignees_user_idx and once however many chains made them one, and who resolved
+// them while their final edit still waits, with a pending delivery — which a change of the User's display name or
+// Account links re-renders. An Assignee row left on an Alert Group that no longer fires names nobody, as in
+// ListGroupAssignees.
 func (q *Queries) ListOpenGroupsOfUserAfter(ctx context.Context, arg ListOpenGroupsOfUserAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfUserAfter,
 		arg.OrgID,
@@ -6453,6 +6463,24 @@ func (q *Queries) ShareServiceAccount(ctx context.Context, arg ShareServiceAccou
 		return nil, err
 	}
 	return items, nil
+}
+
+const shareTeamEvaluation = `-- name: ShareTeamEvaluation :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareTeamEvaluationParams struct {
+	LockClass int32
+	OrgID     int64
+}
+
+// ShareTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
+// keyed by the Organization) shared, before the outcome of a Page locks its Alert Group (SettlePage), as a Snapshot
+// does: a batch of user_name or account_links takes it exclusively before it lists, so it waits for the Assignees an
+// outcome in flight makes, and an outcome that starts later renders their name and Account links after the change.
+func (q *Queries) ShareTeamEvaluation(ctx context.Context, arg ShareTeamEvaluationParams) error {
+	_, err := q.db.Exec(ctx, shareTeamEvaluation, arg.LockClass, arg.OrgID)
+	return err
 }
 
 const shareTeamMembership = `-- name: ShareTeamMembership :exec

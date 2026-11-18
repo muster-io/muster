@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/metrics"
 )
@@ -494,12 +495,24 @@ func (t pageSettled) apply(ctx context.Context, q Queries, g *Group, c *change) 
 }
 
 // SettlePage records what the Thread replies of the Page o.Page of the Alert Group groupID did, in the transaction tx
-// of delivery (PageReached, PageNotDelivered; C-32.FR-10): it locks the Alert Group first, as every change of it does,
-// then the Page, and records through the dispatcher as a system transition with Muster as the actor. An Alert Group
-// or a Page that no longer exists, and a Page that ended, change nothing. It returns what to run once tx committed.
+// of delivery (PageReached, PageNotDelivered; C-32.FR-10): it locks the Alert Group, then the Page, and records
+// through the dispatcher as a system transition with Muster as the actor. An Alert Group or a Page that no longer
+// exists, and a Page that ended, change nothing. It returns what to run once tx committed. An outcome that reached
+// someone, who may become an Assignee whom the footer of the firing Alert Group names (C-12.FR-12), first takes the
+// lock of the evaluation of the Teams shared, as a Snapshot does (ShareTeamEvaluation): a batch of user_name or
+// account_links takes it exclusively before it lists, so it waits for this outcome and then finds its Alert Group, or
+// this outcome waits for the batch and renders the name and Account links after the change. The rows of the people
+// are not locked: the changes of a User lock the active Admins before the User, in an order a lock of several people
+// here could cross.
 func (s *Service) SettlePage(ctx context.Context, tx DBTX, groupID int64, o PageOutcome) (func(context.Context),
 	error) {
 	q := s.queries(tx)
+	if len(o.Reached) > 0 {
+		if err := q.ShareTeamEvaluation(ctx, dbgen.ShareTeamEvaluationParams{LockClass: db.TeamEvaluationLockClass,
+			OrgID: s.orgID}); err != nil {
+			return nil, fmt.Errorf("wait for the open alert group updates in flight: %w", err)
+		}
+	}
 	locked, err := lock(ctx, q, s.orgID, []int64{groupID})
 	if err != nil {
 		return nil, err
