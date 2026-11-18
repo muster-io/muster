@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,8 +62,17 @@ func newFakeChainRuns() *fakeChainRuns {
 				Severity: "warning"}, State: "stopped", StartedAt: t0, EndedAt: &ended,
 				StoppedBy: &escalation.StoppedBy{Command: "acknowledge", Actor: &escalation.Actor{Kind: "user",
 					PublicID: bobPublicID, Name: "Petr", Login: "petr"}},
-				Steps: []escalation.RunStepView{{Number: 1, Kind: "page_on_call", At: t0, Outcome: "made"},
-					{Number: 3, Kind: "page_people", At: t0, Outcome: "skipped", Reason: "severity"}}},
+				Steps: []escalation.RunStepView{{Number: 1, Kind: "page_on_call", At: t0, Outcome: "made",
+					Pages: []escalation.RunPageView{
+						{Kind: "mention", Users: []escalation.UserRef{{PublicID: bobPublicID, Name: "Petr", Login: "petr",
+							Status: "active"}}, Outcome: "delivered"},
+						{Kind: "mention", Users: []escalation.UserRef{{PublicID: bobPublicID, Name: "Petr", Login: "petr",
+							Status: "deleted"}}, Outcome: "not_delivered", Reason: "no_account_link"}}},
+					{Number: 2, Kind: "page_team", At: t0, Outcome: "made", Pages: []escalation.RunPageView{
+						{Kind: "mention", Users: []escalation.UserRef{}, Team: owner, Outcome: "pending"},
+						{Kind: "mention", Users: []escalation.UserRef{}, Everyone: "here", Outcome: "delivered"}}},
+					{Number: 3, Kind: "page_people", At: t0, Outcome: "skipped", Reason: "severity",
+						Pages: []escalation.RunPageView{}}}},
 			{PublicID: "ER0000000000R4", Group: escalation.RunGroup{PublicID: groupID, Number: 412, Title: "DiskFull",
 				Severity: "warning"}, State: "stopped", StartedAt: t0, EndedAt: &ended,
 				StoppedBy: &escalation.StoppedBy{Command: "resolve"}, Steps: []escalation.RunStepView{}},
@@ -87,9 +97,28 @@ func TestEscalationChainRunsAPI(t *testing.T) {
 	stop := r.StoppedBy.MustGet()
 	if r.Id != "ER0000000000R3" || r.AlertGroup.Number != 412 || r.State != "stopped" || r.EndedAt.IsNull() ||
 		stop.Command != "acknowledge" || stop.Actor.MustGet().Name != "Petr" || *stop.Actor.MustGet().Login != "petr" ||
-		!stop.Destination.IsNull() || len(r.Steps) != 2 || !r.Steps[0].Reason.IsNull() ||
-		r.Steps[1].Reason.MustGet() != "severity" || r.Steps[1].Outcome != "skipped" {
+		!stop.Destination.IsNull() || len(r.Steps) != 3 || !r.Steps[0].Reason.IsNull() ||
+		r.Steps[2].Reason.MustGet() != "severity" || r.Steps[2].Outcome != "skipped" {
 		t.Errorf("run %s", a.body)
+	}
+	// The Pages of each step (C-32.AC-17, FR-18): people with their outcome and reason, a Team, a word for everyone,
+	// none for a skipped step.
+	for _, want := range []string{
+		`"pages":[{"everyone":null,"kind":"mention","outcome":"delivered","reason":null,"team":null,` +
+			`"users":[{"deactivated":false,"id":"` + bobPublicID + `","login":"petr","name":"Petr"}]},` +
+			`{"everyone":null,"kind":"mention","outcome":"not_delivered","reason":"no_account_link","team":null,` +
+			`"users":[{"deactivated":true,"id":"` + bobPublicID + `","login":"petr","name":"Petr"}]}]`,
+		`"pages":[{"everyone":null,"kind":"mention","outcome":"pending","reason":null,` +
+			`"team":{"deleted":false,"id":"` + teamID + `","name":"Payments","slug":"payments"},"users":[]},` +
+			`{"everyone":"here","kind":"mention","outcome":"delivered","reason":null,"team":null,"users":[]}]`,
+		`"outcome":"skipped","pages":[]`,
+	} {
+		if !strings.Contains(string(a.body), want) {
+			t.Errorf("pages: no %s in %s", want, a.body)
+		}
+	}
+	if p := list.Items[1]; len(p.Steps) != 0 {
+		t.Errorf("a run without steps %s", a.body)
 	}
 	if !list.Items[1].StoppedBy.MustGet().Actor.IsNull() {
 		t.Errorf("a stop by Muster %s", a.body)

@@ -581,6 +581,45 @@ func TestEscalationStepSkipped(t *testing.T) {
 	}
 }
 
+// TestTimelinePageFields is C-32.FR-19: the Timeline reads, with the escalation entries of Pages, the Team of a
+// page_team step's paged, the word for everyone in the chat, and the importance of a Page of people on its paged and
+// its page_not_delivered; an entry that has none of them gives none.
+func TestTimelinePageFields(t *testing.T) {
+	h, g, targets, _ := pageHarness(t)
+	h.db.teamsOf().refs[3] = dbgen.ListTeamRefsRow{ID: 3, PublicID: "TM0000000000DE", Name: "devops", Slug: "devops"}
+	targets.targets = []PageTarget{{DestinationID: 11, Source: PageSourceRoute, Linked: []int64{owner}}}
+	if err := h.step(t, g, ChainProgress{Pages: []StepPage{
+		{ChainEntry: paymentsStep, People: []int64{owner, bobID}, Importance: "important"},
+		{ChainEntry: paymentsStep, Team: 3, Seq: 1},
+		{ChainEntry: paymentsStep, Everyone: "here", Seq: 2},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Kinds: []Kind{KindEscalation}, Limit: 10,
+		Ascending: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range page.Entries {
+		s := e.Event
+		if e.Team != nil {
+			s += "/team:" + e.Team.Slug
+		}
+		if e.Everyone != nil {
+			s += "/everyone:" + *e.Everyone
+		}
+		if e.Importance != nil {
+			s += "/" + *e.Importance
+		}
+		got = append(got, s)
+	}
+	want := []string{"paged/important", "page_not_delivered/important", "paged/team:devops", "paged/everyone:here"}
+	if !slices.Equal(got, want) {
+		t.Errorf("entries %v, want %v", got, want)
+	}
+}
+
 // TestChainStepFailures: a step whose function fails, or whose Alert Group is gone, changes nothing; a failure of the
 // runs fails the change that asked them.
 func TestChainStepFailures(t *testing.T) {

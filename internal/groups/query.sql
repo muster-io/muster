@@ -526,7 +526,8 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees,
+       page_everyone, page_importance
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -541,7 +542,8 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees,
+       page_everyone, page_importance
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))

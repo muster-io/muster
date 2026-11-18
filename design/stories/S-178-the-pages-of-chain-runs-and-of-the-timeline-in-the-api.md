@@ -17,6 +17,7 @@ files_touched:
   - internal/groups/query.sql
   - internal/groups/read.go
   - internal/groups/escalation_test.go
+  - internal/groups/dispatcher_test.go
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
   - web/src/components/timeline.tsx
@@ -78,7 +79,8 @@ issue: 607
 make dev > dev.log 2>&1 &
 # As in S-155's Verification, after the devops chain Paged ivan and the Alert Group was acknowledged.
 curl -s "${A[@]}" "$API/escalation-chains/$CD/runs" | jq -c '[.items[0].steps[] | {n: .number, p: [.pages[] | {u: [.users[].login], o: .outcome}]}]'
-# [{"n":1,"p":[{"u":["ivan"],"o":"delivered"}]},{"n":2,"p":[]},{"n":3,"p":[{"u":["ivan"],"o":"delivered"}]}]
+# [{"n":1,"p":[{"u":["ivan"],"o":"delivered"}]},{"n":2,"p":[]},{"n":3,"p":[{"u":["ivan"],"o":"delivered"},{"u":["ivan"],"o":"delivered"}]}]
+# Step 3 lists its first Mention and the later Mention of the important rule it started.
 curl -s "${A[@]}" "$API/alert-groups/$G/timeline?kind=escalation" | jq -c '[.items[] | select(.event == "paged") | .importance]'
 # ["normal","normal","important","important"]
 ```
@@ -97,6 +99,12 @@ None.
 - `kind` is `be`, the kind of most of its files, as for the other backend stories with a small change in `web/` (S-121,
   S-139): the one SPA change is the case of `paged`, with the existing key `timeline.escalation.event`, so
   `web/src/locales/en.json` and `ru.json` do not change and are not in `files_touched`.
+- `internal/groups/dispatcher_test.go` joined `files_touched` during the implementation: its fake store builds the rows
+  of the Timeline reads, which gain `page_everyone` and `page_importance`, so `escalation_test.go` can read them back.
+- A Page or a rule run written before migration 0050 has no `run_step_seq`: "How it went" lists such a Page with the
+  latest step of its number the run made at or before the Page — for a later Mention of a rule, at or before the
+  start of its rule run, so that a repeat of the step since does not take it —, else the latest step of its number,
+  and leaves out one whose number the run never made. Only Pages of the `kind` `mention` are read; S-157 adds `call`.
 
 ## Coverage
 

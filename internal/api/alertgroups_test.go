@@ -1087,6 +1087,39 @@ func TestTimelineMentionNotDeliveredAPI(t *testing.T) {
 	}
 }
 
+// TestTimelinePageFieldsAPI is C-32.FR-19 at the API: an escalation entry gives the Team of a page_team step's paged,
+// the word for everyone in the chat and the importance of a Page of people, each null when the entry has none.
+func TestTimelinePageFieldsAPI(t *testing.T) {
+	system := groups.TimelineActor{Kind: "system", Transport: "system"}
+	entry := func(e groups.TimelineEntry) string {
+		t.Helper()
+		e.PublicID, e.At, e.Kind, e.Event, e.Loudness, e.Mentions, e.Actor = "TEAAAAAAAAAAP1", t0,
+			groups.KindEscalation, string(groups.EventPaged), groups.Loud, []string{"paged"}, system
+		v, err := timelineEntryOf(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(v)
+		return string(raw)
+	}
+	team := entry(groups.TimelineEntry{Team: &groups.TeamRef{PublicID: "TM0000000000DE", Name: "devops",
+		Slug: "devops"}})
+	if !strings.Contains(team, `"team":{"deleted":false,"id":"TM0000000000DE","name":"devops","slug":"devops"}`) ||
+		!strings.Contains(team, `"everyone":null`) || !strings.Contains(team, `"importance":null`) {
+		t.Errorf("a page of a team %s", team)
+	}
+	here := entry(groups.TimelineEntry{Everyone: ptr("here")})
+	if !strings.Contains(here, `"everyone":"here"`) || !strings.Contains(here, `"team":null`) {
+		t.Errorf("a page of everyone %s", here)
+	}
+	people := entry(groups.TimelineEntry{Importance: ptr("important"),
+		PagedUsers: []*groups.ActorRef{{Kind: "user", PublicID: "SR0000000000BB", Name: "Bob", Login: "bob"}}})
+	if !strings.Contains(people, `"importance":"important"`) || !strings.Contains(people, `"team":null`) ||
+		!strings.Contains(people, `"everyone":null`) {
+		t.Errorf("a page of people %s", people)
+	}
+}
+
 // TestAssigneeFilterAPI is C-32.FR-18 and C-09.FR-13 for the parameter assignee: listAlertGroups and
 // getAlertGroupCounts pass it, me included, with the caller; a FieldError of the filter, as me from a Service account,
 // answers 422 at /query/assignee.

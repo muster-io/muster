@@ -297,6 +297,25 @@ describe("entryText", () => {
     expect(kindLabel(i18n.t, "escalation")).toBe("Escalation chains");
   });
 
+  test("shows a Page by Mention by its event name, in English and Russian", async () => {
+    const entry: TimelineEscalationEntry = {
+      id: "TE00000000ES02",
+      at: AT,
+      kind: "escalation",
+      actor: SYSTEM,
+      event: "paged",
+      loudness: "loud",
+      mentions: [],
+      paged_users: [{ id: "SR0000000000PE", name: "Petr", login: "petr", deactivated: false }],
+      team: null,
+      everyone: null,
+      importance: "important",
+    };
+    expect(text(entry)).toBe("paged");
+    await i18n.changeLanguage("ru");
+    expect(text(entry)).toBe("paged");
+  });
+
   test("has a text for system entries and delivery events", () => {
     const from = "2026-10-07T08:00:00Z";
     const to = "2026-10-07T08:10:00Z";

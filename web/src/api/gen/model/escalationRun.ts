@@ -9,7 +9,7 @@ import type { EscalationRunStop } from './escalationRunStop';
 import type { PublicId } from './publicId';
 
 /**
- * A run of an Escalation chain on an Alert Group, as "How it went" lists it. S-155 adds its Pages.
+ * A run of an Escalation chain on an Alert Group, as "How it went" lists it, with the Pages of its steps.
  */
 export interface EscalationRun {
   id: PublicId;
@@ -23,6 +23,6 @@ export interface EscalationRun {
   ended_at: string | null;
   /** What stopped it; null while it runs and once it ran out. */
   stopped_by: EscalationRunStop | null;
-  /** The steps it made and skipped, in their order; a repeat makes its steps again. A step is `skipped` here only as a whole; a person a step that was made skipped — a Viewer or a disabled User — is in the Timeline of the Alert Group as `escalation_step_skipped`, and the Pages follow with a later version. */
+  /** The steps it made and skipped, in their order, each made one with its Pages; a repeat makes its steps again. A step is `skipped` here only as a whole; a person a step that was made skipped — a Viewer or a disabled User — is in the Timeline of the Alert Group as `escalation_step_skipped`. Once the details of the Alert Group are removed (C-09.FR-16) a run lists no steps, and so no Pages. */
   steps: EscalationRunStep[];
 }

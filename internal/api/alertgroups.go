@@ -762,6 +762,18 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		} else {
 			v.Gateway.SetNull()
 		}
+		v.Team.SetNull()
+		if t := e.Team; t != nil {
+			v.Team.Set(gen.TeamRef{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Deleted: t.Deleted})
+		}
+		v.Everyone.SetNull()
+		if e.Everyone != nil {
+			v.Everyone.Set(gen.PageEveryone(*e.Everyone))
+		}
+		v.Importance.SetNull()
+		if e.Importance != nil {
+			v.Importance.Set(gen.NullablePageImportance(*e.Importance))
+		}
 		v.Reason.SetNull()
 		v.SkipReason.SetNull()
 		switch {

@@ -47,8 +47,11 @@ type fakeRuns struct {
 	runs     []*fakeRun
 	timers   map[int64]time.Time
 	recorded []dbgen.InsertRunStepParams
-	people   map[int64]dbgen.ListPeopleStatesRow
-	groups   map[string]fakeGroup
+	// pages are the rows ListRunPages answers, pageCalls the run ids of each of its calls.
+	pages     []dbgen.ListRunPagesRow
+	pageCalls [][]int64
+	people    map[int64]dbgen.ListPeopleStatesRow
+	groups    map[string]fakeGroup
 	// resolved is when the Alert Group of every run resolved, none when zero, under the retention.alert_details of
 	// 90 days.
 	resolved time.Time
@@ -340,6 +343,18 @@ func (f *fakeRuns) ListRunSteps(_ context.Context, arg dbgen.ListRunStepsParams)
 		}
 	}
 	return out, f.fail["ListRunSteps"]
+}
+
+// ListRunPages answers the rows of pages of the runs asked for, in their order, and the run ids of each call.
+func (f *fakeRuns) ListRunPages(_ context.Context, arg dbgen.ListRunPagesParams) ([]dbgen.ListRunPagesRow, error) {
+	f.pageCalls = append(f.pageCalls, slices.Clone(arg.RunIds))
+	var out []dbgen.ListRunPagesRow
+	for _, p := range f.pages {
+		if slices.Contains(arg.RunIds, p.RunID) {
+			out = append(out, p)
+		}
+	}
+	return out, f.fail["ListRunPages"]
 }
 
 // fakeDispatcher is the dispatcher of the steps: it runs a step on its Alert Group and keeps what the step did.
@@ -794,6 +809,189 @@ func TestChainRunsHideRemovedDetails(t *testing.T) {
 	}
 }
 
+// pageRow is a Page of ListRunPages: its rows, one per person of people, or one without a person.
+func (e *runsEnv) pageRow(id, run int64, step, seq int32, at time.Duration, state, reason string,
+	people ...int64) []dbgen.ListRunPagesRow {
+	row := dbgen.ListRunPagesRow{ID: id, RunID: run, StepNumber: step, RunStepSeq: pgtype.Int4{Int32: seq,
+		Valid: seq > 0}, Kind: "mention", State: state, Reason: pgtype.Text{String: reason, Valid: reason != ""},
+		CreatedAt: t0.Add(at), StepAt: t0.Add(at)}
+	if len(people) == 0 {
+		return []dbgen.ListRunPagesRow{row}
+	}
+	out := make([]dbgen.ListRunPagesRow, len(people))
+	for i, p := range people {
+		u := e.q.people[p]
+		out[i] = row
+		out[i].UserPublicID, out[i].UserName = pgtype.Text{String: u.PublicID, Valid: true},
+			pgtype.Text{String: u.Name, Valid: true}
+		out[i].UserLogin, out[i].UserStatus = pgtype.Text{String: u.Login, Valid: true},
+			pgtype.Text{String: u.Status, Valid: true}
+	}
+	return out
+}
+
+// pagesOf renders the Pages of the steps of a run, a step per line as number/outcome: and its Pages as
+// outcome/reason/logins/team/everyone.
+func pagesOf(r ChainRun) string {
+	var b strings.Builder
+	for _, st := range r.Steps {
+		fmt.Fprintf(&b, "%d/%s:", st.Number, st.Outcome)
+		for _, p := range st.Pages {
+			fmt.Fprintf(&b, " %s/%s/%s", p.Kind, p.Outcome, p.Reason)
+			for _, u := range p.Users {
+				b.WriteString("/" + u.Login)
+			}
+			if p.Team != nil {
+				b.WriteString("/team:" + p.Team.Slug)
+			}
+			if p.Everyone != "" {
+				b.WriteString("/everyone:" + p.Everyone)
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// TestChainRunsPages is C-32.FR-18 and C-32.AC-17: "How it went" lists with each step a run made its Pages, read in one
+// query for the page of runs: the first Mentions of a step with its people and outcome, the later Mentions of the
+// rule it started on that step, a repeated step's Pages on the pass that made them, the Team or the word for
+// everyone of a page_team step, none on a skipped step; the run step of a Page wins over its time; a Page written
+// before migration 0050, without a run step, goes to the latest pass of its step made at or before it — that pass
+// when at its very time, for a later Mention at or before the start of its rule run, so not to a repeat made since —,
+// else the latest, never to a skipped pass, and one of a step the run never made is not listed. Once the details of
+// the Alert Group are removed no Pages are read.
+func TestChainRunsPages(t *testing.T) {
+	e := newRunsEnv(t)
+	e.chain(1, "devops", true, page(schedMain), team(), wait(600), repeat(1, 1), critical(people(21)))
+	e.source(1, 0, ConditionAny)
+	e.start(t, groups.ChainStart{All: true})
+	run := e.q.runs[0].id
+	for i := range 3 {
+		e.clock.Set(t0.Add(time.Duration(i) * 10 * time.Minute))
+		e.fire(t, run)
+	}
+	if err := e.runs.Stop(t.Context(), nil, e.g, groups.ChainStop{Command: groups.StopResolve,
+		At: e.clock.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	e.g.ChainGeneration = 2
+	e.start(t, groups.ChainStart{All: true})
+	other := e.q.runs[1].id
+	// The run steps: 1 page_on_call, 2 page_team, 3 wait; 4 repeat, 5 page_on_call, 6 page_team, 7 wait; 8 repeat,
+	// 9 page_people skipped for critical.
+	var rows []dbgen.ListRunPagesRow
+	for _, r := range [][]dbgen.ListRunPagesRow{
+		e.pageRow(6, run, 1, 0, -time.Minute, groups.PageDelivered, "", 22),
+		e.pageRow(1, run, 1, 1, 0, groups.PageDelivered, "", 22, 21),
+		e.pageRow(8, run, 2, 2, 0, groups.PagePending, ""),
+		e.pageRow(3, run, 1, 1, 5*time.Minute, groups.PageNotDelivered, groups.PageNoAccountLink, 22),
+		e.pageRow(4, run, 1, 0, 5*time.Minute, groups.PageDelivered, "", 21),
+		e.pageRow(2, run, 1, 5, 10*time.Minute, groups.PagePending, "", 22),
+		e.pageRow(9, run, 2, 6, 10*time.Minute, groups.PageDelivered, ""),
+		// Without a run step, at the very time of the second pass of step 1: that pass.
+		e.pageRow(13, run, 1, 0, 10*time.Minute, groups.PageDelivered, "", 21),
+		e.pageRow(5, run, 1, 0, 15*time.Minute, groups.PageNotDelivered, "", 22),
+		e.pageRow(7, run, 9, 0, 15*time.Minute, groups.PageDelivered, "", 22),
+		e.pageRow(11, run, 1, 0, 15*time.Minute, groups.PageDelivered, "", 23),
+		// The run step 1 wins over the time, which would give the second pass.
+		e.pageRow(12, run, 1, 1, 15*time.Minute, groups.PageDelivered, "", 24),
+		// Without a run step, after the skipped step 5: a skipped step takes no Page.
+		e.pageRow(14, run, 5, 0, 25*time.Minute, groups.PageDelivered, "", 22),
+		e.pageRow(10, other, 1, 1, 20*time.Minute, groups.PagePending, "", 22),
+	} {
+		rows = append(rows, r...)
+	}
+	for i := range rows {
+		switch rows[i].ID {
+		case 8:
+			rows[i].TeamPublicID, rows[i].TeamName = pgtype.Text{String: teamPay, Valid: true},
+				pgtype.Text{String: "payments", Valid: true}
+			rows[i].TeamSlug = pgtype.Text{String: "payments", Valid: true}
+		case 9:
+			rows[i].Everyone = pgtype.Text{String: "here", Valid: true}
+		case 11:
+			// A later Mention of a rule run without a run step, which the first pass of step 1 started at t0+1m: the
+			// repeat of step 1 at t0+10m, made between the rule's start and the Mention, does not take it.
+			rows[i].StepAt = t0.Add(time.Minute)
+		}
+	}
+	e.q.pages = rows
+	got, err := e.runs.ChainRuns(t.Context(), e.q.chains[1].PublicID, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Runs) != 2 || len(e.q.pageCalls) != 1 || !slices.Equal(e.q.pageCalls[0], []int64{other, run}) {
+		t.Fatalf("runs %+v, pages read %v", got.Runs, e.q.pageCalls)
+	}
+	want := "1/made: mention/delivered//ivan/petr mention/not_delivered/no_account_link/ivan mention/delivered//petr " +
+		"mention/delivered//vic mention/delivered//dora\n" +
+		"2/made: mention/pending//team:payments\n" +
+		"3/made:\n" +
+		"4/made:\n" +
+		"1/made: mention/delivered//ivan mention/pending//ivan mention/delivered//petr mention/not_delivered//ivan\n" +
+		"2/made: mention/delivered//everyone:here\n" +
+		"3/made:\n" +
+		"4/made:\n" +
+		"5/skipped:\n"
+	if s := pagesOf(got.Runs[1]); s != want {
+		t.Errorf("pages\n%s\nwant\n%s", s, want)
+	}
+	if len(got.Runs[0].Steps) != 0 {
+		t.Errorf("a run without steps %+v", got.Runs[0])
+	}
+	if p := got.Runs[1].Steps[1].Pages[0]; p.Team == nil || p.Team.PublicID != teamPay || len(p.Users) != 0 ||
+		p.Users == nil {
+		t.Errorf("a page of a team %+v", p)
+	}
+
+	// Once the details are removed, neither the steps nor the Pages are read.
+	e.q.resolved = t0.Add(-91 * 24 * time.Hour)
+	got, err = e.runs.ChainRuns(t.Context(), e.q.chains[1].PublicID, nil, 10)
+	if err != nil || len(got.Runs) != 2 || len(got.Runs[1].Steps) != 0 || len(e.q.pageCalls) != 1 {
+		t.Errorf("details removed %+v, %v, pages read %v", got.Runs, err, e.q.pageCalls)
+	}
+}
+
+// TestStepOfPage: the step of a run step is found at its place among steps numbered from 1, else among all the steps
+// when their seqs do not start at 1; a run step that none has falls back to the times, and a Page of no step made
+// has no step.
+func TestStepOfPage(t *testing.T) {
+	steps := []RunStepView{
+		{Number: 1, At: t0, Outcome: OutcomeMade, seq: 1},
+		{Number: 2, At: t0, Outcome: OutcomeMade, seq: 2},
+		{Number: 1, At: t0.Add(10 * time.Minute), Outcome: OutcomeMade, seq: 3},
+	}
+	shifted := []RunStepView{
+		{Number: 1, At: t0, Outcome: OutcomeMade, seq: 7},
+		{Number: 1, At: t0.Add(10 * time.Minute), Outcome: OutcomeMade, seq: 8},
+	}
+	for _, c := range []struct {
+		name  string
+		steps []RunStepView
+		step  int32
+		seq   int32
+		at    time.Duration
+		want  int
+	}{
+		{"at its place", steps, 1, 3, 0, 3},
+		{"seqs from 7", shifted, 1, 7, 15 * time.Minute, 7},
+		{"an unknown run step", steps, 1, 9, 5 * time.Minute, 1},
+		{"a run step past the steps", steps, 1, 4, 15 * time.Minute, 3},
+		{"no step of its number", steps, 4, 0, 0, 0},
+	} {
+		row := dbgen.ListRunPagesRow{StepNumber: c.step, RunStepSeq: pgtype.Int4{Int32: c.seq, Valid: c.seq > 0},
+			StepAt: t0.Add(c.at)}
+		got := 0
+		if st := stepOfPage(c.steps, row); st != nil {
+			got = st.seq
+		}
+		if got != c.want {
+			t.Errorf("%s: seq %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 // TestRunsFailures: a failure of a query fails the start, the stop or the read that made it.
 func TestRunsFailures(t *testing.T) {
 	for _, name := range []string{"ListChainSources", "ListGenerationRuns", "ShareChains", "SnapshotSteps",
@@ -832,5 +1030,10 @@ func TestRunsFailures(t *testing.T) {
 	e.q.fail["ListChainRuns"] = errors.New("boom")
 	if _, err := e.runs.ChainRuns(t.Context(), e.q.chains[1].PublicID, nil, 10); err == nil {
 		t.Error("chain runs: no error")
+	}
+	e.q.fail["ListChainRuns"] = nil
+	e.q.fail["ListRunPages"] = errors.New("boom")
+	if _, err := e.runs.ChainRuns(t.Context(), e.q.chains[1].PublicID, nil, 10); err == nil {
+		t.Error("chain runs pages: no error")
 	}
 }
