@@ -5360,7 +5360,10 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     configuration_only       = false,
     held_by_storm_id         = CASE WHEN state IN ('retired', 'withheld') THEN $2::bigint END,
     state                    = 'pending',
-    next_attempt_at          = $3,
+    next_attempt_at          = CASE
+                                   WHEN state = 'pending' AND attempts > 0 THEN greatest(next_attempt_at, $3)
+                                   ELSE $3
+                               END,
     updated_at               = $3
 WHERE org_id = $4 AND alert_group_id = $5::bigint AND destination_id = $6
   AND (state IN ('retired', 'withheld') OR desired_retire)
@@ -5379,7 +5382,8 @@ type RejoinDeliveryParams struct {
 // that left (retired) or was never published there (withheld) is published afresh, Quiet as @loud, held by the active
 // Storm @held_by_storm_id when one holds the Alert Group, its earlier release by configuration forgotten
 // (published_by_configuration); one whose final edit still waits keeps its Root message and is edited to the current
-// state instead.
+// state instead, at once, or when it waits out the backoff of a counted Transient error (attempts > 0) at that time or
+// a later wait set since (C-11.FR-8).
 func (q *Queries) RejoinDelivery(ctx context.Context, arg RejoinDeliveryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, rejoinDelivery,
 		arg.Loud,
@@ -5763,7 +5767,12 @@ SET state            = CASE WHEN published_at IS NULL AND publication_started_at
     desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
     configuration_only = false,
     held_by_storm_id = NULL,
-    next_attempt_at  = $1,
+    next_attempt_at  = CASE
+                           WHEN state = 'pending' AND attempts > 0
+                                AND NOT (published_at IS NULL AND publication_started_at IS NULL)
+                               THEN greatest(next_attempt_at, $1)
+                           ELSE $1
+                       END,
     updated_at       = $1
 WHERE org_id = $2 AND id = ANY($3::bigint[]) AND NOT desired_retire
   AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
@@ -5778,7 +5787,9 @@ type RetireDeliveriesParams struct {
 
 // RetireDeliveries gives deliveries of open Alert Groups whose Destination no entry names any more their final edit
 // (C-11.FR-14, C-26.FR-6): a published Root message is edited once more, and one never published there is withheld.
-// It returns the deliveries it changed; one that ended meanwhile is left as it is.
+// The final edit is due at once, or, for a delivery that waits out the backoff of a counted Transient error
+// (attempts > 0), at that time or a later wait set since (C-11.FR-8), as in RetireGroupDeliveries and
+// RetireDestinationDeliveries. It returns the deliveries it changed; one that ended meanwhile is left as it is.
 func (q *Queries) RetireDeliveries(ctx context.Context, arg RetireDeliveriesParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, retireDeliveries, arg.Now, arg.OrgID, arg.Ids)
 	if err != nil {
@@ -5805,7 +5816,12 @@ SET state            = CASE WHEN d.published_at IS NULL AND d.publication_starte
     desired_retire   = NOT (d.published_at IS NULL AND d.publication_started_at IS NULL),
     configuration_only = false,
     held_by_storm_id = NULL,
-    next_attempt_at  = $1,
+    next_attempt_at  = CASE
+                           WHEN d.state = 'pending' AND d.attempts > 0
+                                AND NOT (d.published_at IS NULL AND d.publication_started_at IS NULL)
+                               THEN greatest(d.next_attempt_at, $1)
+                           ELSE $1
+                       END,
     updated_at       = $1
 FROM alert_groups g
 WHERE d.org_id = $2 AND d.destination_id = $3 AND g.org_id = $2 AND g.id = d.alert_group_id
@@ -5819,7 +5835,8 @@ type RetireDestinationDeliveriesParams struct {
 	DestinationID int64
 }
 
-// RetireDestinationDeliveries gives the deliveries of the open Alert Groups in a deleted Destination their final edit.
+// RetireDestinationDeliveries gives the deliveries of the open Alert Groups in a deleted Destination their final edit,
+// due as in RetireDeliveries.
 func (q *Queries) RetireDestinationDeliveries(ctx context.Context, arg RetireDestinationDeliveriesParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, retireDestinationDeliveries, arg.Now, arg.OrgID, arg.DestinationID)
 	if err != nil {
@@ -5846,7 +5863,12 @@ SET state            = CASE WHEN published_at IS NULL AND publication_started_at
     desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
     configuration_only = false,
     held_by_storm_id = NULL,
-    next_attempt_at  = $1,
+    next_attempt_at  = CASE
+                           WHEN state = 'pending' AND attempts > 0
+                                AND NOT (published_at IS NULL AND publication_started_at IS NULL)
+                               THEN greatest(next_attempt_at, $1)
+                           ELSE $1
+                       END,
     updated_at       = $1
 WHERE org_id = $2 AND alert_group_id = $3::bigint AND destination_id <> ALL($4::bigint[])
   AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
@@ -5861,7 +5883,8 @@ type RetireGroupDeliveriesParams struct {
 }
 
 // RetireGroupDeliveries gives the deliveries of an Alert Group in the Destinations other than @keep their final edit:
-// it moved to a Route they are not Destinations of (C-09.FR-19).
+// it moved to a Route they are not Destinations of (C-09.FR-19). The final edit is due as in RetireDeliveries, so an
+// Alert Group that moves back and forth does not cut short the backoff of a Transient error.
 func (q *Queries) RetireGroupDeliveries(ctx context.Context, arg RetireGroupDeliveriesParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, retireGroupDeliveries,
 		arg.Now,

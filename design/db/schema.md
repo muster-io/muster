@@ -2245,9 +2245,10 @@ after a token makes about one claimed batch of takes there and about a dozen cla
 Urgent and comes due during ranks 3 to 5 goes in the next round. The skip is a filter, not part of the index range: with
 1,000 skipped rows due first, a claim reads them and still takes about a millisecond. A `RetryAfter` sets
 `next_attempt_at` exactly and does not touch `attempts`; `Transient` increments `attempts` and starts the time budget at
-`first_failed_at`; running out of either makes the Destination Broken. A new Desired state (`SetDesired`) makes a
-delivery due now, except one that was `pending` with `attempts > 0`: it keeps a later `next_attempt_at`, its backoff or
-a wait set since, and the attempt then sends the newest version.
+`first_failed_at`; running out of either makes the Destination Broken. A new Desired state (`SetDesired`), a final edit
+(`RetireDeliveries`, `RetireGroupDeliveries`, `RetireDestinationDeliveries`) and a rejoin (`RejoinDelivery`) make a
+delivery due now, except one that was `pending` with `attempts > 0` and stays `pending`: it keeps a later
+`next_attempt_at`, its backoff or a wait set since, and the attempt then sends the newest version or the final edit.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 
