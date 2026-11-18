@@ -192,7 +192,7 @@ A Publication started again after an earlier start whose outcome was never recor
 
 WARN · fields: `work`, `error` · C-11
 
-The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), or settle the outcome of a Page once its Thread replies ended (work is page), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group, and a Page is settled again by the next round of the delivery worker.
+The delivery worker could not attempt a delivery, a Thread reply or an event of an outgoing webhook in the events mode, or probe a Broken Destination (work is delivery, thread_reply, webhook_event or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), or settle the outcome of a Page once its Thread replies ended (work is page), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group, and a Page is settled again by the next round of the delivery worker.
 
 ### `demo_check_failed`
 
