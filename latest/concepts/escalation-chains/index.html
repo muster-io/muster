@@ -1935,6 +1935,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#assignees" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Assignees
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#unclaimed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3272,6 +3283,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#assignees" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Assignees
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#unclaimed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3650,6 +3672,36 @@ Until it is, rely on a call through a Notification gateway for Pages at night.</
 <p>A Page counts in <code>muster_pages_total{chain,kind,outcome}</code> once it ended: <code>delivered</code> once a delivered reply mentioned
 one of its people — for a Team or everyone in the chat, once one of its replies was delivered — and <code>not_delivered</code>
 otherwise; a Page whose chain was deleted before it ended is not counted (<a href="../../reference/metrics/">Metrics</a>).</p>
+<h2 id="assignees">Assignees<a class="headerlink" href="#assignees" title="Permanent link">&para;</a></h2>
+<p>Until someone acknowledges, an Alert Group shows its <strong>Assignees</strong>: for each chain started on it, running or run out,
+the people its latest step Paging people by name — the On-call of a Schedule or chosen people — reached, each with the
+owning Team of that chain. A person is reached once a delivered Thread reply mentions them, as the table of
+<a href="#how-a-page-reaches-a-person">How a Page reaches a person</a> says for each messenger — a bridge's reply that names them
+by the plain name reaches nobody; a person a Page did not reach (see <a href="#undelivered-pages">Undelivered Pages</a>) never
+becomes an Assignee.</p>
+<p>How they change, for each chain on its own:</p>
+<ul>
+<li>a later step that reaches someone replaces the chain's Assignees, a repeated step included;</li>
+<li>another reply of the same step, and the later Mentions of that step's rules, add to them; the later Mentions of an
+  earlier step's rules, and a reply of an earlier step that comes late, change nothing;</li>
+<li>a step that reaches none of its people leaves them as they were, and a step that Pages a whole Team or everyone in
+  the chat changes nothing;</li>
+<li>a chain that runs out keeps its Assignees, so an Unclaimed Alert Group still shows whom it Paged;</li>
+<li>Acknowledge, Snooze and Resolve clear them all.</li>
+</ul>
+<p>Each change records the Quiet <code>assignees_changed</code> in the Timeline, of the kind <code>escalation</code>, with the Assignees after
+it, and edits the Root messages without notifying anyone. Nobody sets Assignees by hand, and being one gives no right
+of its own: any Responder may acknowledge, and whoever does becomes the Owner.</p>
+<p>Before an acknowledgement, item 7 of the Root message names them — "Assignees: @ivan (devops), @petr (payments)" —
+each as a Mention where their account is linked in the Destination's Identity space, by name otherwise. After an
+acknowledgement that stopped running chains it reads "Acknowledged by @ivan · Escalation chains stopped": the Owner is
+named without a Team. The <code>layout</code> that a bridge receives names the Assignees in <code>assignees</code> with the Team in <code>team</code>,
+and with the <code>ref</code> of their Mention entry in a new message to a bridge with <code>native_mentions</code>.</p>
+<p>The API reads them in <code>assignees</code> of an Alert Group (<code>user</code>, <code>team</code>, <code>chain</code>, <code>since</code>), and
+<code>GET /api/v1/alert-groups?assignee=me</code> lists the open Alert Groups where the calling User is an Assignee, by a User's
+<code>public_id</code> for anyone else, and <code>GET /api/v1/alert-group-counts</code> counts them with the same parameter; a Service
+account token gets <code>422</code> for <code>me</code>. Outgoing webhook events carry them in the
+<code>assignees</code> of <code>alert_group</code>.</p>
 <h2 id="unclaimed">Unclaimed<a class="headerlink" href="#unclaimed" title="Permanent link">&para;</a></h2>
 <p>A chain has run out when it has passed its last step. An Alert Group with chains is Unclaimed once every chain started
 on it has run out without an acknowledgement: it records <code>unclaimed</code>, and the Root message and the UI show "Nobody has

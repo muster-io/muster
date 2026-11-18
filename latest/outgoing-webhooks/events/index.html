@@ -3481,7 +3481,10 @@ used) and the <code>transport</code> (<code>ui</code>, <code>api</code>, <code>m
 <dd>The Alert Group as it was when the event was recorded: number, <code>id</code>, title, <code>summary</code>, status, the <code>owner</code> (<code>id</code>,
 <code>name</code>, <code>login</code>) while acknowledged, Route, Urgent, Severity level, times, Reopen count, its page in Muster and its
 <code>teams</code>: the <code>id</code>, <code>name</code> and <code>slug</code> of each Team of the Alert Group, in the order they joined, a deleted Team by
-its name, <code>[]</code> for none (<a href="../../concepts/teams/#which-alerts-belong-to-a-team">Teams</a>).</dd>
+its name, <code>[]</code> for none (<a href="../../concepts/teams/#which-alerts-belong-to-a-team">Teams</a>), and its <code>assignees</code>: each
+person as <code>user</code> (<code>id</code>, <code>name</code>, <code>login</code>) with the owning Team of their chain as <code>team</code> (<code>id</code>, <code>name</code>, <code>slug</code>),
+null for none, <code>[]</code> once acknowledged, snoozed or resolved
+(<a href="../../concepts/escalation-chains/#assignees">Assignees</a>). The <code>owner</code> is named without a Team.</dd>
 <dt><code>alerts</code></dt>
 <dd>One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.</dd>
 <dt><code>destination</code></dt>
@@ -3595,6 +3598,10 @@ Destination was deleted (<code>destination_deleted</code>) or is no longer an ou
 (<code>webhook_events_required</code>), or for a step "Page the whole Team" that none of its chain's Destinations can
 mention (<code>no_mention_possible</code>); named in <code>escalation_step</code>
 (<a href="../../concepts/escalation-chains/#when-chains-run">Escalation chains</a>).</dd>
+<dt><code>assignees_changed</code></dt>
+<dd><code>notify</code>: false. The Assignees of the Alert Group changed: a Page reached someone, or Acknowledge, Snooze or
+Resolve cleared them; <code>alert_group.assignees</code> holds them after the change
+(<a href="../../concepts/escalation-chains/#assignees">Assignees</a>).</dd>
 <dt><code>escalation_webhook</code></dt>
 <dd><code>notify</code>: false. A step "Send to an outgoing webhook" of an Escalation chain on the Alert Group was made. Unlike
 every other event, it is sent <strong>only to the outgoing webhook Destination the step names</strong>, not to the

@@ -174,7 +174,10 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 :   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,
     `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count, its page in Muster and its
     `teams`: the `id`, `name` and `slug` of each Team of the Alert Group, in the order they joined, a deleted Team by
-    its name, `[]` for none ([Teams](../concepts/teams.md#which-alerts-belong-to-a-team)).
+    its name, `[]` for none ([Teams](../concepts/teams.md#which-alerts-belong-to-a-team)), and its `assignees`: each
+    person as `user` (`id`, `name`, `login`) with the owning Team of their chain as `team` (`id`, `name`, `slug`),
+    null for none, `[]` once acknowledged, snoozed or resolved
+    ([Assignees](../concepts/escalation-chains.md#assignees)). The `owner` is named without a Team.
 
 `alerts`
 :   One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.
@@ -317,6 +320,11 @@ never sent.
     (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can
     mention (`no_mention_possible`); named in `escalation_step`
     ([Escalation chains](../concepts/escalation-chains.md#when-chains-run)).
+
+`assignees_changed`
+:   `notify`: false. The Assignees of the Alert Group changed: a Page reached someone, or Acknowledge, Snooze or
+    Resolve cleared them; `alert_group.assignees` holds them after the change
+    ([Assignees](../concepts/escalation-chains.md#assignees)).
 
 `escalation_webhook`
 :   `notify`: false. A step "Send to an outgoing webhook" of an Escalation chain on the Alert Group was made. Unlike
