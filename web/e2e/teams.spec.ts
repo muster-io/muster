@@ -18,7 +18,10 @@ import {
   alertGroupOf,
   checkConnection,
   connectionNamed,
+  createChain,
   createRoute,
+  removeChains,
+  setTeamChains,
   createRoutingRoute,
   createSlackConnection,
   dropRouting,
@@ -1262,4 +1265,111 @@ test("How to mention the Team has a field per Connection or the reason it has no
     await removeTeamsBySlug(admin, [payments, search]);
     await admin.dispose();
   }
+});
+
+test("the Team page has Escalation chain of the Team with the chains it names and owns, and a Responder reads them", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  const payments = "tmc-payments";
+  const search = "tmc-search";
+  try {
+    await removeChains(admin, "tmc-");
+    await removeTeamsBySlug(admin, [payments, search]);
+    await ensureUser(admin, RU_ADMIN, "admin");
+    const paymentsId = await ensureTeam(admin, payments);
+    const searchId = await ensureTeam(admin, search);
+    const named = await createChain(admin, "tmc-night-shift", searchId, [
+      { kind: "wait", wait_seconds: 60 },
+    ]);
+    await createChain(admin, "tmc-owned", paymentsId, [
+      { kind: "wait", wait_seconds: 60 },
+      { kind: "page_team" },
+    ]);
+    await setTeamChains(admin, payments, [{ chain_id: named, severity_condition: "critical" }]);
+    await signInAdmin(page);
+
+    // The Teams list links the list of chains; the Team page shows what the Team names and what it owns.
+    await page.goto("/teams");
+    await page.getByRole("link", { name: "Escalation chains", exact: true }).click();
+    await expect(page).toHaveURL(`${APP}/escalation-chains`);
+    await page.goto(`/teams/${paymentsId}`);
+    const chains = page.getByTestId("team-chains-section");
+    await expect(
+      chains.getByRole("heading", { name: "Escalation chain of the Team" }),
+    ).toBeVisible();
+    await expect(chains.getByRole("link", { name: /^Learn more: Naming chains/ })).toBeVisible();
+    await expect(chains.getByTestId("team-chain")).toHaveCount(1);
+    await expect(chains.getByTestId("team-chain")).toContainText("tmc-night-shift");
+    await expect(chains.getByTestId(`team-chain-condition-${named}`)).toHaveValue("critical");
+    await expect(chains.getByTestId(`team-chain-condition-${named}`).locator("option")).toHaveText([
+      "Any severity",
+      "Severity = critical",
+      "Severity < critical",
+    ]);
+    await expect(chains.getByTestId("team-owned-chain")).toHaveText(/tmc-owned · 2 steps/);
+    await expect(chains.getByRole("link", { name: "New chain" })).toHaveAttribute(
+      "href",
+      `/escalation-chains/new?team=${paymentsId}`,
+    );
+
+    // "All chains of the Team" opens the list filtered by the Team; "All" shows every chain again.
+    await chains.getByRole("link", { name: "All chains of the Team" }).click();
+    await expect(page).toHaveURL(`${APP}/escalation-chains?team=${paymentsId}`);
+    await expect(page.getByRole("link", { name: "tmc-owned", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "tmc-night-shift", exact: true })).toHaveCount(0);
+    await page.getByLabel("Team", { exact: true }).selectOption({ label: "All" });
+    await expect(page.getByRole("link", { name: "tmc-night-shift", exact: true })).toBeVisible();
+    await shot(page, "team-chains");
+
+    // A Responder reads the section and changes nothing.
+    await ensureUser(admin, BOB, "responder");
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const bob = await context.newPage();
+    const bobCsp = watchCsp(bob);
+    await signIn(bob, BOB, PASSWORD);
+    await bob.goto(`/teams/${paymentsId}`);
+    const bobSection = bob.getByTestId("team-chains-section");
+    await expect(bobSection.getByTestId(`team-chain-condition-${named}`)).toHaveText(
+      "Severity = critical",
+    );
+    await expect(bobSection.getByRole("button", { name: "Save" })).toHaveCount(0);
+    await expect(bobSection.getByLabel("Add Escalation chain")).toHaveCount(0);
+    await expect(bobSection.getByRole("link", { name: "New chain" })).toHaveCount(0);
+    expect(bobCsp).toEqual([]);
+    await context.close();
+
+    // Russian at 360 px.
+    const phone = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await phone.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, RU_ADMIN, PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto(`/teams/${paymentsId}`);
+    const ruSection = ru.getByTestId("team-chains-section");
+    await expect(
+      ruSection.getByRole("heading", { name: "Цепочка эскалации команды" }),
+    ).toBeVisible();
+    await expect(ruSection.getByTestId("team-chains")).toContainText("Запускать для");
+    await expect(ruSection.getByTestId("team-owned-chains")).toContainText(
+      "Цепочки, которыми владеет команда",
+    );
+    await expect(ruSection.getByTestId("team-owned-chain")).toContainText("2 шага");
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "team-chains-ru-360");
+    expect(ruCsp).toEqual([]);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("en");
+    await phone.close();
+  } finally {
+    await removeChains(admin, "tmc-");
+    await removeTeamsBySlug(admin, [payments, search]);
+    await admin.dispose();
+  }
+  expect(csp).toEqual([]);
 });

@@ -3,10 +3,11 @@
 
 // The section "Severity, Escalation chains and owner" of the Route editor (C-26.FR-8, FR-9): the Minimum severity of the
 // Route, which raises the Severity level of its Alert Groups, with "Learn more" beside the field, and the owning Team
-// (C-25.FR-2), which is for ownership and the filter of the UI and does not affect delivery. The Escalation chains
-// join the section later.
+// (C-25.FR-2), which is for ownership and the filter of the UI and does not affect delivery. The Escalation chains of
+// the Route (C-32.FR-2) sit between them.
 
 import type { TFunction } from "i18next";
+import type { ReactNode } from "react";
 import type { UseFormRegisterReturn } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -55,9 +56,12 @@ export function RouteSeverityAndOwner({
   minimumSeverity,
   error,
   owningTeam,
+  chains,
 }: {
   id: string;
   minimumSeverity: UseFormRegisterReturn;
+  /** The Escalation chains of the Route (S-158), between the Minimum severity and the owning Team. */
+  chains?: ReactNode;
   /** The error code of the field. */
   error?: string;
   /** The owning Team: its id, empty for none, and the Team as stored. */
@@ -114,6 +118,7 @@ export function RouteSeverityAndOwner({
           </p>
         )}
       </div>
+      {chains}
       <OwningTeamField
         id={`${id}-owning-team`}
         value={owningTeam.value}

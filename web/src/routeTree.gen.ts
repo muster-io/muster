@@ -30,6 +30,9 @@ import { Route as ConnectionsNewRouteImport } from './routes/connections.new'
 import { Route as DestinationsIndexRouteImport } from './routes/destinations.index'
 import { Route as DestinationsDestinationIdRouteImport } from './routes/destinations.$destinationId'
 import { Route as DestinationsNewRouteImport } from './routes/destinations.new'
+import { Route as EscalationChainsIndexRouteImport } from './routes/escalation-chains.index'
+import { Route as EscalationChainsChainIdRouteImport } from './routes/escalation-chains.$chainId'
+import { Route as EscalationChainsNewRouteImport } from './routes/escalation-chains.new'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
 import { Route as RoutesIndexRouteImport } from './routes/routes.index'
@@ -169,6 +172,21 @@ const DestinationsDestinationIdRoute =
 const DestinationsNewRoute = DestinationsNewRouteImport.update({
   id: '/destinations/new',
   path: '/destinations/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EscalationChainsIndexRoute = EscalationChainsIndexRouteImport.update({
+  id: '/escalation-chains/',
+  path: '/escalation-chains/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EscalationChainsChainIdRoute = EscalationChainsChainIdRouteImport.update({
+  id: '/escalation-chains/$chainId',
+  path: '/escalation-chains/$chainId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EscalationChainsNewRoute = EscalationChainsNewRouteImport.update({
+  id: '/escalation-chains/new',
+  path: '/escalation-chains/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
@@ -380,6 +398,8 @@ export interface FileRoutesByFullPath {
   '/connections/new': typeof ConnectionsNewRoute
   '/destinations/$destinationId': typeof DestinationsDestinationIdRoute
   '/destinations/new': typeof DestinationsNewRoute
+  '/escalation-chains/$chainId': typeof EscalationChainsChainIdRoute
+  '/escalation-chains/new': typeof EscalationChainsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
@@ -391,6 +411,7 @@ export interface FileRoutesByFullPath {
   '/alert-groups/': typeof AlertGroupsIndexRoute
   '/connections/': typeof ConnectionsIndexRoute
   '/destinations/': typeof DestinationsIndexRoute
+  '/escalation-chains/': typeof EscalationChainsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/schedules/': typeof SchedulesIndexRoute
@@ -434,6 +455,8 @@ export interface FileRoutesByTo {
   '/connections/new': typeof ConnectionsNewRoute
   '/destinations/$destinationId': typeof DestinationsDestinationIdRoute
   '/destinations/new': typeof DestinationsNewRoute
+  '/escalation-chains/$chainId': typeof EscalationChainsChainIdRoute
+  '/escalation-chains/new': typeof EscalationChainsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
@@ -445,6 +468,7 @@ export interface FileRoutesByTo {
   '/alert-groups': typeof AlertGroupsIndexRoute
   '/connections': typeof ConnectionsIndexRoute
   '/destinations': typeof DestinationsIndexRoute
+  '/escalation-chains': typeof EscalationChainsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
   '/schedules': typeof SchedulesIndexRoute
@@ -492,6 +516,8 @@ export interface FileRoutesById {
   '/connections/new': typeof ConnectionsNewRoute
   '/destinations/$destinationId': typeof DestinationsDestinationIdRoute
   '/destinations/new': typeof DestinationsNewRoute
+  '/escalation-chains/$chainId': typeof EscalationChainsChainIdRoute
+  '/escalation-chains/new': typeof EscalationChainsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
@@ -503,6 +529,7 @@ export interface FileRoutesById {
   '/alert-groups/': typeof AlertGroupsIndexRoute
   '/connections/': typeof ConnectionsIndexRoute
   '/destinations/': typeof DestinationsIndexRoute
+  '/escalation-chains/': typeof EscalationChainsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/schedules/': typeof SchedulesIndexRoute
@@ -551,6 +578,8 @@ export interface FileRouteTypes {
     | '/connections/new'
     | '/destinations/$destinationId'
     | '/destinations/new'
+    | '/escalation-chains/$chainId'
+    | '/escalation-chains/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
@@ -562,6 +591,7 @@ export interface FileRouteTypes {
     | '/alert-groups/'
     | '/connections/'
     | '/destinations/'
+    | '/escalation-chains/'
     | '/integrations/'
     | '/routes/'
     | '/schedules/'
@@ -605,6 +635,8 @@ export interface FileRouteTypes {
     | '/connections/new'
     | '/destinations/$destinationId'
     | '/destinations/new'
+    | '/escalation-chains/$chainId'
+    | '/escalation-chains/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
@@ -616,6 +648,7 @@ export interface FileRouteTypes {
     | '/alert-groups'
     | '/connections'
     | '/destinations'
+    | '/escalation-chains'
     | '/integrations'
     | '/routes'
     | '/schedules'
@@ -662,6 +695,8 @@ export interface FileRouteTypes {
     | '/connections/new'
     | '/destinations/$destinationId'
     | '/destinations/new'
+    | '/escalation-chains/$chainId'
+    | '/escalation-chains/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
@@ -673,6 +708,7 @@ export interface FileRouteTypes {
     | '/alert-groups/'
     | '/connections/'
     | '/destinations/'
+    | '/escalation-chains/'
     | '/integrations/'
     | '/routes/'
     | '/schedules/'
@@ -720,6 +756,8 @@ export interface RootRouteChildren {
   ConnectionsNewRoute: typeof ConnectionsNewRoute
   DestinationsDestinationIdRoute: typeof DestinationsDestinationIdRoute
   DestinationsNewRoute: typeof DestinationsNewRoute
+  EscalationChainsChainIdRoute: typeof EscalationChainsChainIdRoute
+  EscalationChainsNewRoute: typeof EscalationChainsNewRoute
   IntegrationsNewRoute: typeof IntegrationsNewRoute
   RoutesRouteIdRoute: typeof RoutesRouteIdRoute
   RoutesNewRoute: typeof RoutesNewRoute
@@ -730,6 +768,7 @@ export interface RootRouteChildren {
   AlertGroupsIndexRoute: typeof AlertGroupsIndexRoute
   ConnectionsIndexRoute: typeof ConnectionsIndexRoute
   DestinationsIndexRoute: typeof DestinationsIndexRoute
+  EscalationChainsIndexRoute: typeof EscalationChainsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
   SchedulesIndexRoute: typeof SchedulesIndexRoute
@@ -886,6 +925,27 @@ declare module '@tanstack/react-router' {
       path: '/destinations/new'
       fullPath: '/destinations/new'
       preLoaderRoute: typeof DestinationsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/escalation-chains/': {
+      id: '/escalation-chains/'
+      path: '/escalation-chains'
+      fullPath: '/escalation-chains/'
+      preLoaderRoute: typeof EscalationChainsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/escalation-chains/$chainId': {
+      id: '/escalation-chains/$chainId'
+      path: '/escalation-chains/$chainId'
+      fullPath: '/escalation-chains/$chainId'
+      preLoaderRoute: typeof EscalationChainsChainIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/escalation-chains/new': {
+      id: '/escalation-chains/new'
+      path: '/escalation-chains/new'
+      fullPath: '/escalation-chains/new'
+      preLoaderRoute: typeof EscalationChainsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations/': {
@@ -1230,6 +1290,8 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectionsNewRoute: ConnectionsNewRoute,
   DestinationsDestinationIdRoute: DestinationsDestinationIdRoute,
   DestinationsNewRoute: DestinationsNewRoute,
+  EscalationChainsChainIdRoute: EscalationChainsChainIdRoute,
+  EscalationChainsNewRoute: EscalationChainsNewRoute,
   IntegrationsNewRoute: IntegrationsNewRoute,
   RoutesRouteIdRoute: RoutesRouteIdRoute,
   RoutesNewRoute: RoutesNewRoute,
@@ -1240,6 +1302,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlertGroupsIndexRoute: AlertGroupsIndexRoute,
   ConnectionsIndexRoute: ConnectionsIndexRoute,
   DestinationsIndexRoute: DestinationsIndexRoute,
+  EscalationChainsIndexRoute: EscalationChainsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
   SchedulesIndexRoute: SchedulesIndexRoute,

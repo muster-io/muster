@@ -404,6 +404,7 @@
       "ackTimeoutNoticeTemplate": "Ack timeout notice template",
       "autoUnacknowledge": "Auto-unacknowledge",
       "buttons": "Buttons",
+      "chainEntries": "Escalation chains",
       "contact": "Contact",
       "contactConfirmed": "Confirmed",
       "defaultRuleImportant": "Default important rule",
@@ -1240,6 +1241,7 @@
     "fields": {
       "bridgeEvents": "Bridge event delivery",
       "buttons": "Button sets",
+      "chainSteps": "Steps of an Escalation chain",
       "deliverToTeams": "Routing to Teams",
       "gatewayContact": "Contact for calls and SMS",
       "groupKey": "Group key",
@@ -1261,6 +1263,7 @@
       "outboundPolicy": "Allowed networks",
       "permissions": "Service account Permissions",
       "proxy": "Proxy",
+      "routeChains": "Naming chains on Routes and Teams",
       "routeProfile": "Route profiles",
       "severityCondition": "Severity conditions",
       "slackAppToken": "Slack app-level token",
@@ -1345,6 +1348,7 @@
         "webhookTemplate": "Outgoing webhook templates"
       },
       "destinations": "Destinations",
+      "escalationChain": "Escalation chains",
       "integrations": "Integrations",
       "linkRules": "Link rules",
       "lookupTables": "Lookup tables",
@@ -1408,6 +1412,205 @@
     "unexpected": "The page could not be shown. Try again; if it keeps failing, reload the page.",
     "unexpectedTitle": "Something went wrong",
     "wrongCredentials": "Wrong login, password or code."
+  },
+  "escalation": {
+    "chips": {
+      "always": "always",
+      "hoursOrganization": "only in the working hours of the Organization{{hours}}",
+      "hoursTeam": "only in the working hours of {{team}}{{hours}}",
+      "severityAny": "Severity: any",
+      "severityBelowCritical": "Severity < critical",
+      "severityCritical": "Severity = critical"
+    },
+    "create": {
+      "title": "New chain"
+    },
+    "delete": {
+      "action": "Delete chain",
+      "confirm": "Delete",
+      "description": "The chain is removed for good. Runs already started keep the steps they started with.",
+      "inUse": "A Route or a Team still names this chain. Remove it there first.",
+      "title": "Delete the chain {{name}}?"
+    },
+    "errors": {
+      "disabled": "A disabled User cannot be Paged.",
+      "gatewayRequired": "Choose the Notification gateway: there is more than one, or none.",
+      "nameTaken": "An Escalation chain with this name already exists.",
+      "notPageable": "This person cannot be Paged.",
+      "stale": "The chain was changed meanwhile. Reload it to see the new version.",
+      "unknownId": "This choice no longer exists.",
+      "viewer": "A Viewer cannot be Paged.",
+      "webhookEventsRequired": "Choose an outgoing webhook Destination that takes events."
+    },
+    "fields": {
+      "addPerson": "Add a person…",
+      "callOnCall": "The On-call of a Schedule",
+      "callPeople": "Chosen people",
+      "callTarget": "Whom it calls",
+      "chooseGateway": "Choose a gateway…",
+      "chooseSchedule": "Choose a Schedule…",
+      "chooseTeam": "Choose a Team…",
+      "chooseWebhook": "Choose an outgoing webhook…",
+      "gateway": "Notification gateway",
+      "hoursOrganization": "Only in the working hours of the Organization",
+      "hoursTeam": "Only in the working hours of {{team}}",
+      "importance": "How to Page",
+      "minutes": "Minutes",
+      "owningTeam": "The chain's Team ({{team}})",
+      "people": "People",
+      "removePerson": "Remove {{name}}",
+      "repeatFrom": "Repeat from step",
+      "repeatTimes": "Times",
+      "schedule": "Schedule",
+      "severity": "Severity condition",
+      "team": "Team",
+      "teamMention": "The Team mention",
+      "unavailableChoice": "{{choice}} — unavailable: {{reason}}",
+      "webhook": "Outgoing webhook",
+      "whom": "Whom 'Page the whole Team' calls"
+    },
+    "form": {
+      "back": "Back to the chains",
+      "description": "Description",
+      "name": "Name",
+      "noOwner": "None (the Organization)",
+      "owner": "Owning Team",
+      "ownerHint": "The working hours of this Team limit the steps that run only in working hours.",
+      "readOnly": "Only Admins change Escalation chains."
+    },
+    "important": "important",
+    "kinds": {
+      "call": "Call through the Notification gateway",
+      "pageOnCall": "Page the On-call of a Schedule",
+      "pagePeople": "Page people",
+      "pageTeam": "Page the whole Team",
+      "repeat": "Repeat from step",
+      "wait": "Wait",
+      "webhook": "Send to an outgoing webhook"
+    },
+    "list": {
+      "create": "New chain",
+      "empty": "No Escalation chains yet.",
+      "emptyFiltered": "No Escalation chains of this Team.",
+      "hint": "What Muster does while an Alert Group stays firing: Page people, wait, call, repeat. Routes and Teams name their chains.",
+      "namedBy": "Named by",
+      "unused": "No Route or Team"
+    },
+    "normal": "normal",
+    "page": {
+      "ownedBy": "Owned by",
+      "title": "Escalation chain"
+    },
+    "pages": {
+      "call": "Call through {{gateway}}: {{people}}",
+      "callBudgetUsed": "Call not delivered: the gateway kept failing until the retries ran out",
+      "callNotDelivered": "Call not delivered",
+      "callRefused": "Call not delivered: the gateway refused it",
+      "callUnknown": "Call not delivered: the gateway answered something Muster cannot classify",
+      "delivered": "delivered",
+      "everyone": "Mention of everyone: {{word}}",
+      "gatewayBroken": "Call not delivered: the gateway was Broken when it came due",
+      "gatewayDeleted": "Call not delivered: the gateway was deleted before the call was sent",
+      "mention": "Mention: {{people}}",
+      "noAccountLink_one": "Page not delivered: {{people}} has no linked {{messenger}} account",
+      "noAccountLink_other": "Page not delivered: {{people}} have no linked {{messenger}} account",
+      "noAccountLinkHere_one": "Page not delivered: {{people}} has no linked account",
+      "noAccountLinkHere_other": "Page not delivered: {{people}} have no linked account",
+      "noConfirmedContact_one": "Call not delivered: {{people}} has no confirmed contact at the gateway",
+      "noConfirmedContact_other": "Call not delivered: {{people}} have no confirmed contact at the gateway",
+      "noRootMessage": "Page not delivered: no Root message in the chain's Destinations",
+      "notDelivered": "not delivered",
+      "other": "Page not delivered: {{reason}}",
+      "pending": "pending",
+      "severalReasons": "Page not delivered: {{people}} were missed for several reasons",
+      "team": "Team mention: {{team}}",
+      "threadNotDelivered": "Page not delivered: the Thread replies ended Not delivered"
+    },
+    "runFor": {
+      "any": "any severity",
+      "belowCritical": "Severity < critical",
+      "critical": "Severity = critical",
+      "hint": "Whose Alert Groups it runs on: those of the Routes and Teams that name it, each when its Severity condition is met.",
+      "none": "No Route or Team names this chain yet, so it runs on nothing.",
+      "route": "Route {{name}}",
+      "team": "Team {{name}}",
+      "title": "Run for"
+    },
+    "runs": {
+      "acknowledged": "Stopped: acknowledged by {{who}}",
+      "alertGroup": "#{{number}} {{title}}",
+      "byMuster": "Muster",
+      "empty": "No Alert Group has run through this chain yet.",
+      "hint": "The recent Alert Groups this chain ran on: its Pages, the steps it skipped and what stopped it. Conditions of skipped steps are those the chain has now.",
+      "noSteps": "No steps are kept for this run.",
+      "ranOut": "Ran out: nobody acknowledged",
+      "resolved": "Stopped: resolved by {{who}}",
+      "running": "Still running",
+      "snoozed": "Stopped: snoozed by {{who}}",
+      "startedOver": "Stopped: the chains started over",
+      "step": "Step {{number}}",
+      "stepSkipped": "Step {{number}} skipped: {{reason}}",
+      "stepSkippedNoReason": "Step {{number}} skipped",
+      "title": "How it went"
+    },
+    "skip": {
+      "destinationDeleted": "its Destination was deleted",
+      "disabled": "a person it names was disabled",
+      "gatewayDeleted": "its Notification gateway was deleted",
+      "noConfirmedContact": "a person it calls has no confirmed contact",
+      "noMentionPossible": "no Destination of the chain can mention the Team",
+      "onlyBelowCritical": "only below critical",
+      "onlyCritical": "only for critical",
+      "outsideWorkingHours": "outside the working hours",
+      "scheduleGap": "the Schedule has a gap",
+      "severity": "its Severity condition was not met",
+      "unknown": "no reason is given",
+      "viewer": "a person it names became a Viewer",
+      "webhookEventsRequired": "its Destination no longer takes events"
+    },
+    "steps": {
+      "add": "Add step",
+      "empty": "No steps yet. Add the first one below.",
+      "importanceText": "What exactly happens is decided by each person's Notification rules. Muster sends no direct messages: a Page is a Mention in the Thread of the Root message.",
+      "importanceTitle": "Normal and important",
+      "limitsHint": "Any step may be limited to working hours and to a Severity condition. Steps through a Notification gateway do not depend on a messenger, but need the gateway.",
+      "moveDown": "Move step {{number}} down",
+      "moveUp": "Move step {{number}} up",
+      "number": "Step {{number}}",
+      "remove": "Remove step {{number}}",
+      "removeAction": "Remove",
+      "title": "Steps"
+    },
+    "stops": "Stops when the Alert Group is acknowledged, snoozed or resolved; starts over on Unacknowledge, the end of a Snooze, a Reopen, and a rise to critical that ends an acknowledgement or a Snooze.",
+    "title": "Escalation chains",
+    "warnings": {
+      "destinationDeleted": "Step {{step}} sends to the outgoing webhook {{destination}}, which was deleted.",
+      "everyoneUnsupported": "Step {{step}} cannot mention the Team or everyone in {{destination}}.",
+      "gatewayDeleted": "Step {{step}} calls through a Notification gateway that no longer exists.",
+      "pagesNobody": "This chain Pages nobody: none of its steps Pages the On-call, people or a Team, or calls.",
+      "teamDeleted": "Step {{step}} Pages a Team that was deleted.",
+      "title": "Warnings"
+    },
+    "words": {
+      "callOnCall": "Call the On-call of {{schedule}}",
+      "callOnCallThrough": "Call the On-call of {{schedule}} through {{gateway}}",
+      "callPeople": "Call {{people}}",
+      "callPeopleThrough": "Call {{people}} through {{gateway}}",
+      "pageEveryone": "Page everyone in the chat ({{word}})",
+      "pageOnCall": "Page the On-call of {{schedule}}",
+      "pagePeople": "Page {{people}}",
+      "pageTeam": "Page the whole Team {{team}}",
+      "pageTeamUnknown": "Page the whole Team (choose a Team)",
+      "repeat_one": "Repeat from step {{from}}, up to {{count}} time",
+      "repeat_other": "Repeat from step {{from}}, up to {{count}} times",
+      "wait_one": "Wait {{count}} minute",
+      "wait_other": "Wait {{count}} minutes",
+      "webhook": "Send to the outgoing webhook {{destination}}"
+    },
+    "writes": {
+      "none": "Writes in no Thread yet: no Route or Team that names it has a Destination. Starts at publication.",
+      "text": "Writes only in the Threads of {{destinations}}. Starts at publication."
+    }
   },
   "fieldErrors": {
     "duplicate": "This value is listed twice.",
@@ -2351,6 +2554,21 @@
     "viewer": "Viewer"
   },
   "routes": {
+    "chains": {
+      "add": "Add Escalation chain",
+      "all": "All Escalation chains",
+      "choose": "Choose an Escalation chain…",
+      "conditionFor": "Severity condition of the chain {{name}}",
+      "duplicate": "This chain is already in the list.",
+      "hint": "Pages only in the Threads of the Route's Destinations. The Teams from the label Page with their own chains.",
+      "list": "Escalation chains of the Route",
+      "noDestination": "Only a Notification gateway can reach anyone from this Escalation chain: the Route has no Destination.",
+      "none": "The Route names no Escalation chain.",
+      "noneExist": "No Escalation chains yet",
+      "remove": "Remove the chain {{name}}",
+      "title": "Escalation chains",
+      "unknown": "This chain no longer exists."
+    },
     "create": {
       "changeProfile": "Choose another profile",
       "profile": "Profile: {{profile}}",
@@ -2477,6 +2695,7 @@
       "urgentRise": "A rise to Urgent removes the acknowledgement"
     },
     "list": {
+      "chains": "Escalation chains",
       "defaultHint": "Takes every alert no other route took. Always last.",
       "destinations": "Destinations",
       "dragHint": "Drag to change the order",
@@ -2486,6 +2705,7 @@
       "moved": "{{name}} moved to position {{position}} of {{total}}.",
       "moveDown": "Move {{name}} down",
       "moveUp": "Move {{name}} up",
+      "noChains": "none",
       "noDestinations": "No Destinations",
       "noGroupKey": "none",
       "noMatchers": "No Matchers: takes every alert",
@@ -3108,6 +3328,26 @@
     "loadMore": "Load more"
   },
   "teams": {
+    "chains": {
+      "add": "Add Escalation chain",
+      "all": "All chains of the Team",
+      "allChains": "Escalation chains",
+      "chain": "Chain",
+      "choose": "Choose an Escalation chain…",
+      "empty": "The Team names no Escalation chain.",
+      "hint": "Where a Route runs the Teams' chains, these chains Page for the Alert Groups of the Team, each when its condition is met, in the Threads of the Team's Destinations.",
+      "list": "Escalation chains of the Team",
+      "new": "New chain",
+      "noneExist": "No Escalation chains yet",
+      "owned": "Chains the Team owns",
+      "ownedNone": "The Team owns no Escalation chain.",
+      "remove": "Remove",
+      "removeNamed": "Remove {{name}}",
+      "runForChain": "Run {{name}} for",
+      "steps_one": "{{count}} step",
+      "steps_other": "{{count}} steps",
+      "title": "Escalation chain of the Team"
+    },
     "create": {
       "start": "New Team",
       "title": "New Team",

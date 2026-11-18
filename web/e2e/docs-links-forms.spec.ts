@@ -270,6 +270,11 @@ test("the Route editor has Learn more beside its complex fields", async ({ page,
     ["Minimum severity", "concepts/routes-and-group-keys/", "#minimum-severity"],
     ["Severity conditions", "concepts/routing-to-teams/", "#severity-conditions"],
     ["Routing to Teams", "concepts/routing-to-teams/", "#also-to-the-teams-from-the-label"],
+    [
+      "Naming chains on Routes and Teams",
+      "concepts/escalation-chains/",
+      "#naming-chains-on-routes-and-teams",
+    ],
     ["Message templates", "configure/messages-and-templates/", "#the-template-language"],
     ["Loud and Quiet delivery", "concepts/loud-and-quiet/", ""],
     [
@@ -826,6 +831,48 @@ test("a Schedule page links to Schedules, Overrides and the gap alert", async ({
       await admin.call("DELETE", `/api/v1/schedules/${scheduleId}`);
     }
     await removeTeamsBySlug(admin, [slug]);
+    await admin.dispose();
+  }
+});
+
+test("an Escalation chain page links to Escalation chains and its steps", async ({ page }) => {
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  const name = "dlf-chain";
+  try {
+    const existing = await admin.call<{ items: { id: string; name: string; etag: string }[] }>(
+      "GET",
+      "/api/v1/escalation-chains?limit=500",
+    );
+    for (const c of existing.items.filter((x) => x.name === name)) {
+      await admin.call("DELETE", `/api/v1/escalation-chains/${c.id}`, undefined, {
+        "If-Match": c.etag,
+      });
+    }
+    const created = await admin.call<{ id: string }>("POST", "/api/v1/escalation-chains", {
+      name,
+      owning_team_id: null,
+      steps: [{ kind: "wait", wait_seconds: 60 }],
+    });
+    await signInAdmin(page);
+    await page.goto(`/escalation-chains/${created.id}`);
+    await expectTarget(docsLink(page, "Guide", "Escalation chains"), "concepts/escalation-chains/");
+    await expectTarget(
+      docsLink(page, "Learn more", "Steps of an Escalation chain"),
+      "concepts/escalation-chains/",
+      "#steps",
+    );
+    await page.goto("/escalation-chains");
+    await expectTarget(docsLink(page, "Guide", "Escalation chains"), "concepts/escalation-chains/");
+    const one = await admin.call<{ etag: string }>(
+      "GET",
+      `/api/v1/escalation-chains/${created.id}`,
+    );
+    await admin.call("DELETE", `/api/v1/escalation-chains/${created.id}`, undefined, {
+      "If-Match": one.etag,
+    });
+    expect(csp).toEqual([]);
+  } finally {
     await admin.dispose();
   }
 });
