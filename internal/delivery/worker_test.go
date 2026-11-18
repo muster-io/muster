@@ -488,6 +488,9 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	if arg.Open {
 		d.lateNote = false
 	}
+	if arg.Open && d.state == "withheld" {
+		d.attempts, d.firstFailed, d.errorClass, d.lastError = 0, nil, nil, nil
+	}
 	d.configOnly = arg.ConfigurationOnly && d.publishedAt != nil && !d.desiredRetire &&
 		(d.state == "delivered" || (d.state == "pending" && d.configOnly))
 	switch {

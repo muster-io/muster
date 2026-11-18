@@ -2261,6 +2261,10 @@ Urgent and comes due during ranks 3 to 5 goes in the next round. The skip is a f
 (`RetireDeliveries`, `RetireGroupDeliveries`, `RetireDestinationDeliveries`) and a rejoin (`RejoinDelivery`) make a
 delivery due now, except one that was `pending` with `attempts > 0` and stays `pending`: it keeps a later
 `next_attempt_at`, its backoff or a wait set since, and the attempt then sends the newest version or the final edit.
+A delivery that comes back from `withheld` or `retired` — a rejoin (`RejoinDelivery`), its Alert Group open again
+(`SetDesired`) or a Storm summary in a Destination that joins again (`EnsureStormSummary`) — starts with a fresh budget:
+`attempts`, `first_failed_at`, `last_error_class` and `last_error` are cleared, so that the time it spent away does not
+count against the time budget; a `pending` one keeps them.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 

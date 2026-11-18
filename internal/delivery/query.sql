@@ -109,14 +109,15 @@ RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_
 -- SetDesired stores a new Desired state: the next version, its text, payload and hash, the key that signed its
 -- buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
 -- now, and returns the state it leaves. A delivery that was pending and waits out the backoff of a counted Transient
--- error (attempts > 0) keeps that time, or a later wait set since, so that a change neither retries it at once nor uses up the attempts of
--- delivery.transient_budget sooner (C-11.FR-8); its next attempt sends the newest version. A delivery deleted in the
--- messenger or retired stays so; a withheld one stays so unless its Alert Group is open again (@open), when it is
--- published after all, Loud when it is @firing
--- (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10), Quiet when it was never published and the
+-- error (attempts > 0) keeps that time, or a later wait set since, so that a change neither retries it at once nor
+-- uses up the attempts of delivery.transient_budget sooner (C-11.FR-8); its next attempt sends the newest version. A
+-- delivery deleted in the messenger or retired stays so; a withheld one stays so, its budget kept, unless its Alert
+-- Group is open again (@open), when it is published after all, Loud when it is @firing (C-11.FR-19), with a fresh
+-- Transient budget: the attempts and the last error of a Transient error counted before it was withheld are forgotten
+-- (C-11.FR-8); a Not delivered one starts a new delivery (C-11.FR-10), Quiet when it was never published and the
 -- change is one of configuration (@quiet: a re-render without lifecycle events, or only rises that the Route's Minimum
--- severity made). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
--- before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
+-- severity made). An open Alert Group carries no late note: a late Publication whose Alert Group opened again before
+-- it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
 -- configuration_only marks the edit of a published Root message that a change of configuration alone made
 -- (@configuration_only, configurationOnly in enqueue.go), which ClaimDueDeliveries takes after the rest: set only on a
 -- delivered row, kept on a pending row that had it, cleared once the edit is delivered (MarkDelivered, RecordDelivered,
@@ -148,6 +149,10 @@ SET desired_version     = desired_version + 1,
     configuration_only  = @configuration_only::boolean AND published_at IS NOT NULL AND NOT desired_retire
                           AND (state = 'delivered' OR (state = 'pending' AND configuration_only)),
     urgent              = @urgent,
+    attempts            = CASE WHEN state = 'withheld' AND @open::boolean THEN 0 ELSE attempts END,
+    first_failed_at     = CASE WHEN state = 'withheld' AND @open::boolean THEN NULL ELSE first_failed_at END,
+    last_error_class    = CASE WHEN state = 'withheld' AND @open::boolean THEN NULL ELSE last_error_class END,
+    last_error          = CASE WHEN state = 'withheld' AND @open::boolean THEN NULL ELSE last_error END,
     next_attempt_at     = CASE
                               WHEN state = 'pending' AND attempts > 0 THEN greatest(next_attempt_at, @now)
                               ELSE @now
@@ -1298,9 +1303,9 @@ DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NU
 -- EnsureStormSummary creates the Storm summary of a Storm in a Destination when it is missing, Loud at its first
 -- Publication, and locks it either way. One that left the Destination — retired or withheld when the Destination left
 -- the reach of the Route's Alert Groups during the Storm — is published there afresh: its message, its Thread and its
--- desired hash are cleared as RejoinDelivery clears them, so that the caller stores its Desired state again; Loud only
--- when it was never published, its first Publication (C-11.FR-6), and Quiet otherwise, as a change of configuration
--- publishes (ADR-0018).
+-- desired hash are cleared as RejoinDelivery clears them, so that the caller stores its Desired state again, and it
+-- starts with a fresh Transient budget as there (C-11.FR-8); Loud only when it was never published, its first
+-- Publication (C-11.FR-6), and Quiet otherwise, as a change of configuration publishes (ADR-0018).
 -- name: EnsureStormSummary :one
 INSERT INTO deliveries (org_id, destination_id, storm_id, state, urgent, publication_loud, next_attempt_at, created_at,
                         updated_at)
@@ -1344,6 +1349,14 @@ DO UPDATE SET updated_at             = deliveries.updated_at,
               republished_after_delete = deliveries.republished_after_delete
                                          AND deliveries.state NOT IN ('retired', 'withheld'),
               desired_retire         = deliveries.desired_retire AND deliveries.state NOT IN ('retired', 'withheld'),
+              attempts               = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN 0
+                                            ELSE deliveries.attempts END,
+              first_failed_at        = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.first_failed_at END,
+              last_error_class       = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.last_error_class END,
+              last_error             = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.last_error END,
               next_attempt_at        = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN @now
                                             ELSE deliveries.next_attempt_at END
 RETURNING id, desired_hash;
@@ -1528,9 +1541,11 @@ WHERE org_id = @org_id AND id = @id;
 -- RejoinDelivery makes the delivery of an open Alert Group in a Destination that joins its Route current again: one
 -- that left (retired) or was never published there (withheld) is published afresh, Quiet as @loud, held by the active
 -- Storm @held_by_storm_id when one holds the Alert Group, its earlier release by configuration forgotten
--- (published_by_configuration); one whose final edit still waits keeps its Root message and is edited to the current
--- state instead, at once, or when it waits out the backoff of a counted Transient error (attempts > 0) at that time or
--- a later wait set since (C-11.FR-8).
+-- (published_by_configuration), with a fresh Transient budget: the attempts and the last error of a Transient error
+-- counted before it left are forgotten, so that time spent away does not count against delivery.transient_budget; one
+-- whose final edit still waits keeps its Root message and its budget and is edited to the current state instead, at
+-- once, or when it waits out the backoff of a counted Transient error (attempts > 0) at that time or a later wait set
+-- since (C-11.FR-8).
 -- name: RejoinDelivery :execrows
 UPDATE deliveries
 SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE message_id END,
@@ -1554,6 +1569,10 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     desired_retire           = false,
     configuration_only       = false,
     held_by_storm_id         = CASE WHEN state IN ('retired', 'withheld') THEN sqlc.narg('held_by_storm_id')::bigint END,
+    attempts                 = CASE WHEN state IN ('retired', 'withheld') THEN 0 ELSE attempts END,
+    first_failed_at          = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE first_failed_at END,
+    last_error_class         = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE last_error_class END,
+    last_error               = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE last_error END,
     state                    = 'pending',
     next_attempt_at          = CASE
                                    WHEN state = 'pending' AND attempts > 0 THEN greatest(next_attempt_at, @now)

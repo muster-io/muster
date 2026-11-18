@@ -116,6 +116,7 @@ func (f *fakeDB) EnsureStormSummary(_ context.Context, arg dbgen.EnsureStormSumm
 				d.actualVersion, d.actualHash, d.hash, d.actualStatus = 0, nil, nil, nil
 				d.desiredRetire, d.next, d.threadState, d.anchorID, d.chainLastID = false, arg.Now, "none", nil, nil
 				d.responseValues, d.threadOpened, d.lateNote, d.republished = map[string]string{}, false, false, false
+				d.attempts, d.firstFailed, d.errorClass, d.lastError = 0, nil, nil, nil
 			}
 			return dbgen.EnsureStormSummaryRow{ID: d.id, DesiredHash: d.hash}, nil
 		}
