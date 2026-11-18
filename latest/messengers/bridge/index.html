@@ -3511,7 +3511,9 @@ its messenger's group. It comes only while Muster's copy of the bridge's <code>i
 <dt><code>everyone</code></dt>
 <dd>Everyone in the chat, with the symbolic name <code>channel</code>, <code>here</code>, <code>all</code> or <code>everyone</code> as <code>external_id</code> and
 <code>display_name</code>. It comes only with a name that Muster's copy of the bridge's <code>info</code> lists in
-<code>everyone_mentions</code>.</dd>
+<code>everyone_mentions</code>. A <code>{{ mention "here" }}</code>, <code>{{ mention "channel" }}</code> or <code>{{ mention "all" }}</code> in a
+Route's template stays text in <code>body</code>, which notifies nobody, and adds its entry to the line of Mentions of a
+Loud message or Thread reply, when the bridge's <code>info</code> lists it in <code>everyone_mentions</code>.</dd>
 </dl>
 <p>A bridge that declares group mentions or a mention of everyone renders the markers of those entries as its
 messenger's mentions, <code>@payments_team</code> or <code>@here</code> for example, whether or not it has native mentions. A bridge with
