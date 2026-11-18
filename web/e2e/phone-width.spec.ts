@@ -12,6 +12,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   Api,
+  type AssigneeSeed,
   TEAM_BOB,
   TEAM_SPEC_PASSWORD,
   adminApi,
@@ -19,12 +20,14 @@ import {
   alertGroupOf,
   createRoute,
   deleteRoute,
+  dropAssignees,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
   onCallNames,
   removeOnCall,
+  seedAssignees,
   seedOnCall,
   removeIntegration,
   removeTeamsBySlug,
@@ -33,6 +36,7 @@ import {
   shot,
   signIn,
   signInAdmin,
+  waitAssignees,
   watchCsp,
 } from "./support";
 
@@ -351,4 +355,103 @@ test("the Home page with On call now fits 360 px, without horizontal scrolling",
     await removeOnCall(admin, "pw-");
     await admin.dispose();
   }
+});
+
+// Scenario 2 of C-32 (Verification of the story "Running chains and Assignees on the Alert Group page…") at 360 × 740:
+// the list with the column Assignees and the filter Assignee, the Alert Group page with its running chains and
+// Assignees, and the Home page with "I am an Assignee" do not scroll sideways, in English and in Russian.
+test.describe("running chains and Assignees", () => {
+  test.describe.configure({ mode: "serial" });
+  let assign: AssigneeSeed;
+
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
+    assign = await seedAssignees("asw");
+    await waitAssignees(assign.groupId, 2);
+  });
+
+  test.afterAll(async () => {
+    await dropAssignees("asw");
+  });
+
+  test("the list with the Assignees and the filter, the page and Home fit 360 px", async ({
+    page,
+  }) => {
+    const csp = watchCsp(page);
+    await signIn(page, assign.logins.ivan, TEAM_SPEC_PASSWORD);
+
+    // The list: a compact row names the Assignees; the filter is in the sheet of "Filters".
+    await page.goto("/alert-groups");
+    await page.getByTestId("filters-button").tap();
+    const sheet = page.getByRole("dialog", { name: "Filters" });
+    await sheet
+      .getByTestId("filter-assignee")
+      .getByLabel("Assignee", { exact: true })
+      .selectOption("me");
+    await expectNoHorizontalScroll(page);
+    await sheet.getByRole("button", { name: "Show Alert Groups" }).tap();
+    await expect(page).toHaveURL(/[?&]assignee=me(&|$)/);
+    const row = page.getByTestId("alert-group-row").filter({ hasText: assign.alertname });
+    await expect(row).toHaveCount(1);
+    await expect(row.getByTestId("assignees")).toContainText("Assignees: ");
+    await expect(row.getByTestId("assignees")).toContainText(
+      `@${assign.logins.ivan} (${assign.teams.devops})`,
+    );
+    await expect(row.getByTestId("assignees")).toContainText(
+      `@${assign.logins.petr} (${assign.teams.payments})`,
+    );
+    await expect(page.getByTestId("filters-button")).toHaveText("Filters (1)");
+    await expectNoHorizontalScroll(page);
+    await shot(page, "phone-alert-group-list-assignees");
+
+    // The page: the running chains and the Assignees under the header.
+    await row.getByTestId("alert-group-title").tap();
+    await expect(page.getByTestId("alert-group-chains")).toBeVisible();
+    await expect(page.getByTestId("alert-group-chain")).toHaveCount(2);
+    await expect(page.getByTestId("alert-group-assignees")).toContainText(
+      `@${assign.logins.ivan} (${assign.teams.devops})`,
+    );
+    await expectNoHorizontalScroll(page);
+    await page
+      .getByTestId("timeline")
+      .getByRole("button", { name: "Escalation chains", exact: true })
+      .tap();
+    await expect(
+      page.getByTestId("timeline-entry").filter({ hasText: `Paged @${assign.logins.ivan}` }),
+    ).toHaveCount(1);
+    await expectNoHorizontalScroll(page);
+    await shot(page, "phone-alert-group-chains");
+
+    // Home: "I am an Assignee" with its row, its chain and its buttons.
+    await page.goto("/");
+    const mine = page.getByTestId("assignee-row").filter({ hasText: assign.alertname });
+    await expect(mine).toHaveCount(1);
+    await expect(mine.getByRole("button", { name: "Acknowledge" })).toBeVisible();
+    await expect(mine.getByRole("button", { name: "Snooze…" })).toBeVisible();
+    await expectNoHorizontalScroll(page);
+    await shot(page, "phone-home-assignee");
+    expect(csp).toEqual([]);
+  });
+
+  test("the same in Russian", async ({ page }) => {
+    await signIn(page, assign.logins.petr, TEAM_SPEC_PASSWORD);
+    await page.goto("/profile");
+    await page.getByLabel("Language").selectOption("ru");
+    await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
+
+    await page.goto("/alert-groups?assignee=me");
+    const row = page.getByTestId("alert-group-row").filter({ hasText: assign.alertname });
+    await expect(row).toHaveCount(1);
+    await expect(row.getByTestId("assignees")).toContainText(
+      `Назначенные: @${assign.logins.ivan} (${assign.teams.devops})`,
+    );
+    await expectNoHorizontalScroll(page);
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Назначено мне", level: 2 })).toBeVisible();
+    await expect(
+      page.getByTestId("assignee-row").filter({ hasText: assign.alertname }),
+    ).toHaveCount(1);
+    await expectNoHorizontalScroll(page);
+  });
 });

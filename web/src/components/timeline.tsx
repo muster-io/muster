@@ -19,18 +19,27 @@ import {
   getAlertGroupTimeline,
   getGetAlertGroupTimelineQueryKey,
 } from "../api/gen/endpoints/alert-groups/alert-groups";
+import { useGetEscalationChain } from "../api/gen/endpoints/escalation-chains/escalation-chains";
 import {
+  type DestinationRef,
+  type EscalationRunPage,
+  type EscalationRunStep,
+  type EscalationStep,
   type GetAlertGroupTimelineParams,
   type NullableStatusChangeReason,
   TimelineKind,
   type TimelineActor,
   type TimelineEntry,
+  type TimelineEscalationEntry,
   type Transport,
   type UserRef,
 } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { eventName, notDeliveredReasonText, targetLabel } from "../lib/mention-entries";
 import { useTimeFormat } from "../lib/time";
+import { assigneesText } from "./alert-group-header";
+import { useCan } from "./app-shell";
+import { notDeliveredText, skipText } from "./escalation-chain-runs";
 import { reasonLabel } from "./integration-alerts";
 import { useDestinationLabels } from "./destination-label";
 import { unreachable } from "./destination-test-panel";
@@ -170,11 +179,110 @@ function fallbackText(t: TFunction, detail: string | null | undefined): string {
       });
 }
 
+/** What the chain of an escalation entry says about itself now: the words of a skipped step and of an undelivered Page. */
+export interface ChainContext {
+  steps: readonly EscalationStep[];
+  destinations: readonly DestinationRef[];
+}
+
+function handles(users: readonly UserRef[]): string {
+  return users
+    .map((u) => (u.login !== undefined && u.login !== "" ? `@${u.login}` : u.name))
+    .join(", ");
+}
+
+/** What a Page was: the people it named with how it Paged them, a Team, everyone in the chat, or a call. */
+function pagedText(t: TFunction, entry: TimelineEscalationEntry): string {
+  const people = handles(entry.paged_users);
+  if (entry.gateway !== null && entry.gateway !== undefined) {
+    return t("escalation.pages.call", { gateway: entry.gateway.name, people });
+  }
+  if (entry.team !== null && entry.team !== undefined) {
+    return t("timeline.escalation.pagedTeam", { team: entry.team.name });
+  }
+  if (entry.everyone !== null && entry.everyone !== undefined) {
+    return t("timeline.escalation.pagedEveryone", { word: `@${entry.everyone}` });
+  }
+  if (entry.importance === null || entry.importance === undefined) {
+    return t("timeline.escalation.pagedPeople", { people });
+  }
+  return t("timeline.escalation.pagedPeopleHow", {
+    people,
+    importance:
+      entry.importance === "important" ? t("escalation.important") : t("escalation.normal"),
+  });
+}
+
+/** The text of an entry of the kind "Escalation chains": a Page, an undelivered Page, a skipped step, a webhook or the Assignees. */
+function escalationText(
+  t: TFunction,
+  entry: TimelineEscalationEntry,
+  chain?: ChainContext,
+): string {
+  const name = entry.chain?.name ?? entry.chain_name ?? null;
+  const step = entry.step ?? null;
+  const within = (text: string) =>
+    name !== null && step !== null
+      ? t("timeline.escalation.withChain", { number: step, chain: name, text })
+      : text;
+  switch (entry.event) {
+    case "paged":
+      return within(pagedText(t, entry));
+    case "page_not_delivered": {
+      const page: EscalationRunPage = {
+        kind: entry.gateway === null || entry.gateway === undefined ? "mention" : "call",
+        gateway: entry.gateway ?? null,
+        users: entry.paged_users,
+        team: entry.team ?? null,
+        everyone: entry.everyone ?? null,
+        outcome: "not_delivered",
+        reason: entry.reason ?? null,
+      };
+      return within(notDeliveredText(t, page, chain?.destinations ?? []));
+    }
+    case "escalation_step_skipped": {
+      const steps = chain?.steps ?? [];
+      const number = step ?? 0;
+      const skipped: EscalationRunStep = {
+        number,
+        kind: steps.find((s) => s.number === number)?.kind ?? "wait",
+        at: entry.at,
+        outcome: "skipped",
+        reason: entry.skip_reason ?? null,
+        pages: [],
+      };
+      if (step === null) {
+        return skipped.reason === null
+          ? t("timeline.escalation.stepSkippedUnnumberedNoReason")
+          : t("timeline.escalation.stepSkippedUnnumbered", {
+              reason: skipText(t, skipped, steps),
+            });
+      }
+      return skipped.reason === null
+        ? t("escalation.runs.stepSkippedNoReason", { number })
+        : t("escalation.runs.stepSkipped", { number, reason: skipText(t, skipped, steps) });
+    }
+    case "escalation_webhook":
+      return within(
+        t("timeline.escalation.webhook", { destination: entry.destination?.name ?? "" }),
+      );
+    case "assignees_changed": {
+      const assignees = entry.assignees ?? [];
+      return assignees.length === 0
+        ? t("timeline.escalation.assigneesCleared")
+        : t("alertGroups.assignees.line", { list: assigneesText(t, assignees) });
+    }
+    default:
+      return t("timeline.escalation.event", { event: entry.event });
+  }
+}
+
 /** The text of an entry, in the language of the page; times in the user's time zone through dateTime. */
 export function entryText(
   t: TFunction,
   entry: TimelineEntry,
   dateTime: (iso: string) => string,
+  chain?: ChainContext,
 ): string {
   switch (entry.kind) {
     case "status": {
@@ -306,21 +414,7 @@ export function entryText(
       }
     }
     case "escalation":
-      // The events of Escalation chains and Pages show their name until S-159 renders them fully.
-      switch (entry.event) {
-        case "paged":
-          return t("timeline.escalation.event", { event: entry.event });
-        case "page_not_delivered":
-          return t("timeline.escalation.event", { event: entry.event });
-        case "escalation_step_skipped":
-          return t("timeline.escalation.event", { event: entry.event });
-        case "escalation_webhook":
-          return t("timeline.escalation.event", { event: entry.event });
-        case "assignees_changed":
-          return t("timeline.escalation.event", { event: entry.event });
-        default:
-          return t("timeline.escalation.event", { event: entry.event });
-      }
+      return escalationText(t, entry, chain);
     default:
       switch (entry.system_event) {
         case "moved_to_default_route":
@@ -388,6 +482,18 @@ function EntryDetails({ entry }: { entry: TimelineEntry }) {
     rows.push(
       <Detail key="previous" term={t("timeline.details.previousOwner")}>
         {userName(t, entry.previous_owner)}
+      </Detail>,
+    );
+  }
+  // A step that was skipped, or a Page that was not delivered, does not name its chain in its text.
+  if (
+    entry.kind === "escalation" &&
+    entry.event === "escalation_step_skipped" &&
+    (entry.chain ?? null) !== null
+  ) {
+    rows.push(
+      <Detail key="chain" term={t("timeline.details.chain")}>
+        <span data-testid="escalation-chain">{entry.chain?.name}</span>
       </Detail>,
     );
   }
@@ -470,6 +576,25 @@ function soundOf(entry: TimelineEntry): { loud: boolean; quiet: boolean; mention
   return { loud, quiet, mentions: entry.mentions };
 }
 
+/**
+ * What the chain of an escalation entry holds that its words need: the condition of a step skipped for its Severity,
+ * and the Destinations that tell the messenger of a Page without an Account link. Read only for those entries, and only
+ * with the Permission to read chains; without it the words stay general.
+ */
+function useChainContext(entry: TimelineEntry): ChainContext | undefined {
+  const canRead = useCan("escalation-chains:read");
+  const chainId = entry.kind === "escalation" ? (entry.chain?.id ?? null) : null;
+  const needed =
+    entry.kind === "escalation" &&
+    (entry.skip_reason === "severity" || entry.reason === "no_account_link");
+  const read = useGetEscalationChain(chainId ?? "", {
+    query: { enabled: canRead && needed && chainId !== null, staleTime: 60_000 },
+  });
+  return read.data === undefined
+    ? undefined
+    : { steps: read.data.steps, destinations: read.data.destinations };
+}
+
 export function TimelineItem({
   entry,
   destinationLabel,
@@ -480,6 +605,7 @@ export function TimelineItem({
 }) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
+  const chain = useChainContext(entry);
   const descriptionId = useId();
   const { loud, quiet, mentions } = soundOf(entry);
   const label = entry.kind === "delivery" ? destinationLabel : undefined;
@@ -503,7 +629,7 @@ export function TimelineItem({
         title={label}
         aria-describedby={label === undefined ? undefined : descriptionId}
       >
-        {entryText(t, entry, dateTime)}
+        {entryText(t, entry, dateTime, chain)}
       </p>
       {label !== undefined && (
         <span id={descriptionId} hidden>

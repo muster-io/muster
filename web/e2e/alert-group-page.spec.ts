@@ -11,11 +11,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  type AssigneeSeed,
+  TEAM_SPEC_PASSWORD,
   adminApi,
   advance,
   alertGroupOf,
   createRoute,
   deleteRoute,
+  dropAssignees,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
@@ -23,6 +26,7 @@ import {
   removeIntegration,
   removeMentions,
   removeTeamsBySlug,
+  seedAssignees,
   seedMentions,
   seedTeamAlerts,
   teamSlugs,
@@ -31,6 +35,7 @@ import {
   signIn,
   signInAdmin,
   sql,
+  waitAssignees,
   watchCsp,
 } from "./support";
 
@@ -453,4 +458,190 @@ test("the Timeline shows a Mention not delivered with the person, the entry, the
       await admin.dispose();
     }
   }
+});
+
+/** The entries of the Timeline whose text holds a text. */
+function timelineText(page: Page, text: string) {
+  return page.getByTestId("timeline-entry").filter({ hasText: text });
+}
+
+// Scenario 2 of C-32 (Verification of the story "Running chains and Assignees on the Alert Group page…"): the firing
+// warning Alert Group KubernetesContainerOOMKilled of the Team payments, on a Route whose chain "devops" Pages ivan and
+// whose Team chain "payments" Pages petr and olga, who has no Mattermost Account link. Both chains run: ivan and petr are
+// its Assignees with their Teams. The page names the chains with their steps and the next one due, the Timeline
+// of "Escalation chains" shows each Page, the Page that was not delivered and the step that was skipped, and ivan's
+// acknowledgement reads "Acknowledged by @ivan · Escalation chains stopped" with the chains stopped. A reader of Russian
+// at 360 px reads the same, and the page does not scroll sideways.
+test.describe("running chains and Assignees", () => {
+  test.describe.configure({ mode: "serial" });
+  let assign: AssigneeSeed;
+
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
+    assign = await seedAssignees("asp");
+    await waitAssignees(assign.groupId, 2);
+    // Ten minutes on, step 3 of the chain "payments", which is only for critical, is skipped for this warning.
+    await advance(700);
+    const admin = await adminApi();
+    try {
+      await expect
+        .poll(
+          async () => {
+            const timeline = await admin.call<{ items: { event: string }[] }>(
+              "GET",
+              `/api/v1/alert-groups/${assign.groupId}/timeline?kind=escalation&limit=200`,
+            );
+            return timeline.items.some((e) => e.event === "escalation_step_skipped");
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+    } finally {
+      await admin.dispose();
+    }
+  });
+
+  test.afterAll(async () => {
+    await dropAssignees("asp");
+  });
+
+  test("the page names the running chains, the Assignees with their Teams and the entries of the chains", async ({
+    page,
+  }) => {
+    const csp = watchCsp(page);
+    await signIn(page, assign.logins.ivan, TEAM_SPEC_PASSWORD);
+    await page.goto(`/alert-groups/${assign.groupId}`);
+
+    const chains = page.getByTestId("alert-group-chains");
+    await expect(
+      chains.getByRole("heading", { name: "Escalation chains", level: 2 }),
+    ).toBeVisible();
+    const devops = chains
+      .getByTestId("alert-group-chain")
+      .filter({ hasText: assign.chains.devops });
+    const payments = chains
+      .getByTestId("alert-group-chain")
+      .filter({ hasText: assign.chains.payments });
+    await expect(devops.getByRole("link", { name: assign.chains.devops })).toHaveAttribute(
+      "href",
+      /^\/escalation-chains\/EC/,
+    );
+    await expect(devops.getByTestId("alert-group-chain-state")).toHaveText(
+      /^step 2 · next step at .+/,
+    );
+    await expect(payments.getByTestId("alert-group-chain-state")).toHaveText(
+      /^step 4 · next step at .+/,
+    );
+    const learn = chains.getByRole("link", {
+      name: "Learn more: Escalation chains and Assignees of an Alert Group (opens in a new tab)",
+    });
+    const target = new URL((await learn.getAttribute("href")) ?? "");
+    expect(target.pathname).toBe("/muster/latest/concepts/escalation-chains/");
+    expect(target.hash).toBe("#assignees");
+
+    const assignees = page.getByTestId("alert-group-assignees");
+    await expect(assignees).toContainText("Assignees: ");
+    await expect(assignees).toContainText(`@${assign.logins.ivan} (${assign.teams.devops})`);
+    await expect(assignees).toContainText(`@${assign.logins.petr} (${assign.teams.payments})`);
+    await expect(assignees).not.toContainText(assign.logins.olga);
+
+    // The Timeline of "Escalation chains": each Page, the Page that was not delivered, the step that was skipped.
+    await page
+      .getByTestId("timeline")
+      .getByRole("button", { name: "Escalation chains", exact: true })
+      .click();
+    // The first step of "payments" Pages petr and olga together: one entry names both, and a second one that olga's
+    // Page was not delivered.
+    await expect(
+      timelineText(
+        page,
+        `Step 1 · ${assign.chains.payments}: Paged @${assign.logins.petr}, @${assign.logins.olga}, normal`,
+      ),
+    ).toHaveCount(1);
+    await expect(
+      timelineText(page, `Step 1 · ${assign.chains.devops}: Paged @${assign.logins.ivan}, normal`),
+    ).toHaveCount(1);
+    await expect(
+      timelineText(
+        page,
+        `Page not delivered: @${assign.logins.olga} has no linked Mattermost account`,
+      ),
+    ).toHaveCount(1);
+    await expect(timelineText(page, "Step 3 skipped: only for critical")).toHaveCount(1);
+    await expect(timelineText(page, "Assignees: ").first()).toBeVisible();
+    await shot(page, "alert-group-chains-and-assignees");
+    expect(csp).toEqual([]);
+  });
+
+  test("a reader of Russian at 360 px reads the same, with no horizontal scrolling", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const csp = watchCsp(ru);
+    await signIn(ru, assign.logins.olga, TEAM_SPEC_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel("Language").selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+
+    await ru.goto(`/alert-groups/${assign.groupId}`);
+    const chains = ru.getByTestId("alert-group-chains");
+    await expect(
+      chains.getByRole("heading", { name: "Цепочки эскалации", level: 2 }),
+    ).toBeVisible();
+    await expect(
+      chains
+        .getByTestId("alert-group-chain")
+        .filter({ hasText: assign.chains.devops })
+        .getByTestId("alert-group-chain-state"),
+    ).toHaveText(/^шаг 2 · следующий шаг в .+/);
+    await expect(ru.getByTestId("alert-group-assignees")).toContainText(
+      `Назначенные: @${assign.logins.ivan} (${assign.teams.devops})`,
+    );
+    await expect(chains.getByRole("link", { name: /^Подробнее: / })).toBeVisible();
+    await ru
+      .getByTestId("timeline")
+      .getByRole("button", { name: "Цепочки эскалации", exact: true })
+      .click();
+    await expect(
+      timelineText(
+        ru,
+        `Шаг 1 · ${assign.chains.payments}: Позвала @${assign.logins.petr}, @${assign.logins.olga}, обычно`,
+      ),
+    ).toHaveCount(1);
+    await expect(
+      timelineText(ru, `Призыв не доставлен: у @${assign.logins.olga} нет привязки к Mattermost`),
+    ).toHaveCount(1);
+    await expect(timelineText(ru, "Шаг 3 пропущен: только для critical")).toHaveCount(1);
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "alert-group-chains-and-assignees-ru-360");
+    await context.close();
+    expect(csp).toEqual([]);
+  });
+
+  test("an acknowledgement stops the chains: the header names the Owner without a Team and the chains read stopped", async ({
+    page,
+  }) => {
+    const csp = watchCsp(page);
+    await signIn(page, assign.logins.ivan, TEAM_SPEC_PASSWORD);
+    await page.goto(`/alert-groups/${assign.groupId}`);
+    await expect(page.getByTestId("alert-group-assignees")).toBeVisible();
+    await page.getByTestId("command-acknowledge").click();
+    await expect(page.getByTestId("alert-group-owner")).toHaveText(
+      `Acknowledged by @${assign.logins.ivan} · Escalation chains stopped`,
+    );
+    await expect(page.getByTestId("alert-group-assignees")).toHaveCount(0);
+    const states = page.getByTestId("alert-group-chain-state");
+    await expect(states).toHaveCount(2);
+    await expect(states.first()).toHaveText("stopped");
+    await expect(states.last()).toHaveText("stopped");
+    // The Timeline says the Assignees are gone.
+    await page
+      .getByTestId("timeline")
+      .getByRole("button", { name: "Escalation chains", exact: true })
+      .click();
+    await expect(timelineText(page, "No Assignees any more").first()).toBeVisible();
+    await expectNoHorizontalScroll(page);
+    expect(csp).toEqual([]);
+  });
 });

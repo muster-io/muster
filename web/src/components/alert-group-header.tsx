@@ -6,7 +6,8 @@
 // system's reason; the Owner, the end of a Snooze ("No end" too) and who set it (C-10.FR-13), a deleted user named
 // "(deactivated)"; the badge "Unclaimed" (C-17.FR-3) and the next ack timeout notice or Reminder from next_notice, in
 // the user's time zone with the time left on hover (C-17.FR-9); the Teams with the rule that brought each (C-25.FR-6);
-// the Guide link beside the title (C-21.FR-11). Status
+// the Guide link beside the title (C-21.FR-11); the Assignees with their Teams, and after an acknowledgement "Acknowledged
+// by @ivan · Escalation chains stopped" (C-32.FR-18, C-09.FR-11). Status
 // and urgency are words, never only a colour. The title and summary come from alert labels and annotations, so they
 // show as text only. The list shares the status, the Urgent mark and the badge "Unclaimed".
 
@@ -20,16 +21,18 @@ import type {
   ActorRef,
   AlertGroup,
   AlertGroupStatus,
+  Assignee,
   EntityRef,
   NextNotice,
   ResolvedBy,
+  UserRef,
 } from "../api/gen/model";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
 import { PageTitle } from "./docs-link";
 import { reasonLabel, severityLabel } from "./integration-alerts";
 import { DateTime, Duration, formatElapsed, useNow } from "./relative-time";
-import { TeamsLine } from "./team-membership";
+import { TeamsLine, teamNameText } from "./team-membership";
 import { cn } from "./ui/utils";
 
 export function statusLabel(t: TFunction, status: AlertGroupStatus): string {
@@ -169,7 +172,38 @@ function actorName(t: TFunction, actor: Pick<ActorRef, "name" | "deactivated">):
   return actor.deactivated ? t("alertGroups.deactivated", { name: actor.name }) : actor.name;
 }
 
-/** The Owner and the Snooze of an Alert Group: "Owner: Alice", "Snoozed until …" or "Snoozed with no end", "Snoozed by …". */
+/** A person as the chains name them: "@ivan", or the name of a person without a login; "(deactivated)" once deleted. */
+export function handleText(
+  t: TFunction,
+  user: Pick<UserRef, "name" | "login" | "deactivated">,
+): string {
+  const text = user.login !== undefined && user.login !== "" ? `@${user.login}` : user.name;
+  return user.deactivated ? t("alertGroups.deactivated", { name: text }) : text;
+}
+
+/** An Assignee with their Team: "@ivan (devops)", or "@ivan" when no Team owns the chain. */
+export function assigneeText(t: TFunction, assignee: Assignee): string {
+  const person = handleText(t, assignee.user);
+  return assignee.team === null
+    ? person
+    : t("alertGroups.assignees.withTeam", { person, team: teamNameText(t, assignee.team) });
+}
+
+/** The Assignees of an Alert Group as one line: "@ivan (devops), @petr (payments)". */
+export function assigneesText(t: TFunction, assignees: readonly Assignee[]): string {
+  return assignees.map((a) => assigneeText(t, a)).join(", ");
+}
+
+/** Whether the Alert Group had Escalation chains that are stopped now: an acknowledgement, Snooze or Resolve stopped them. */
+export function chainsStopped(group: AlertGroup): boolean {
+  return group.escalation_chains.some((c) => c.state === "stopped");
+}
+
+/**
+ * The Owner and the Snooze of an Alert Group: "Owner: Alice", "Snoozed until …" or "Snoozed with no end", "Snoozed by …".
+ * An acknowledged Alert Group whose chains were stopped by it reads "Acknowledged by @ivan · Escalation chains stopped",
+ * the Owner without a Team.
+ */
 function Ownership({ group }: { group: AlertGroup }) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
@@ -177,11 +211,17 @@ function Ownership({ group }: { group: AlertGroup }) {
   if (group.owner === undefined && !snoozed) {
     return null;
   }
+  const stopped = group.status === "acknowledged" && chainsStopped(group);
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
       {group.owner !== undefined && (
         <p className="font-medium wrap-anywhere" data-testid="alert-group-owner">
-          {t("alertGroups.owner", { name: actorName(t, group.owner) })}
+          {stopped
+            ? t("alertGroups.acknowledgedByStopped", {
+                name: handleText(t, group.owner),
+                stopped: t("alertGroups.chains.stoppedNote"),
+              })
+            : t("alertGroups.owner", { name: actorName(t, group.owner) })}
         </p>
       )}
       {snoozed && (
@@ -267,6 +307,11 @@ export function AlertGroupHeader({ group }: { group: AlertGroup }) {
           </p>
         )}
         <Ownership group={group} />
+        {group.assignees.length > 0 && (
+          <p className="text-sm wrap-anywhere" data-testid="alert-group-assignees">
+            {t("alertGroups.assignees.line", { list: assigneesText(t, group.assignees) })}
+          </p>
+        )}
         <TeamsLine entries={group.teams} testId="alert-group-teams" />
         <NextNoticeLine notice={group.next_notice} />
       </div>

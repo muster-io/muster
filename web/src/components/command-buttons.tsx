@@ -232,7 +232,17 @@ function CommandDialog({
  * The bar of Commands on the Alert Group page. A Viewer, whose allowed_commands is empty, sees nothing. An open dialog
  * and a refusal stay when the Alert Group, read again, offers no Command any more.
  */
-export function CommandButtons({ group }: { group: AlertGroup }) {
+export function CommandButtons({
+  group,
+  only,
+  dialogMark = false,
+}: {
+  group: AlertGroup;
+  /** The Commands to offer when not all: the Home page's rows take Acknowledge and Snooze. */
+  only?: readonly ButtonCommand[];
+  /** Marks the buttons that open a dialog with "…", as "Snooze…". */
+  dialogMark?: boolean;
+}) {
   const { t } = useTranslation();
   const me = useSession()?.user.id;
   const bar = useRef<HTMLDivElement>(null);
@@ -243,7 +253,9 @@ export function CommandButtons({ group }: { group: AlertGroup }) {
     }
   });
   const newer = newerAlertGroup(group);
-  const commands = buttonCommands(group).filter((c) => c !== "unresolve" || newer === undefined);
+  const commands = buttonCommands(group)
+    .filter((c) => c !== "unresolve" || newer === undefined)
+    .filter((c) => only === undefined || only.includes(c));
   const { command, busy, press, dialog } = state;
   if (commands.length === 0 && newer === undefined && dialog === null && !command.isError) {
     return null;
@@ -273,7 +285,11 @@ export function CommandButtons({ group }: { group: AlertGroup }) {
             onClick={() => press(c)}
             data-testid={`command-${c}`}
           >
-            <span className="truncate">{commandLabel(t, c, group.owner, me)}</span>
+            <span className="truncate">
+              {dialogMark && c === "snooze"
+                ? t("commands.buttons.snoozeDialog")
+                : commandLabel(t, c, group.owner, me)}
+            </span>
           </Button>
         ))}
         {newer !== undefined && (

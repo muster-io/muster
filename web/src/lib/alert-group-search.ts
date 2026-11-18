@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The view of the Alert Group list in the URL (C-09.FR-13, C-10.FR-13, C-13.FR-12, C-17.FR-3): tab, filters (the Owner, the Team,
+// The view of the Alert Group list in the URL (C-09.FR-13, C-10.FR-13, C-13.FR-12, C-17.FR-3): tab, filters (the Owner, the
+// Assignee (C-32.FR-18), the Team,
 // "Unclaimed", "Snoozed with no end" and "Delivery problem" among them), time range, search, label columns and sort as
 // typed search parameters, so that a view is shared as a link. The list route validates them before its page loads,
 // so this module stays small: it loads with the application.
@@ -21,6 +22,9 @@ import {
 /** The Owner filter of "Mine" and of nobody; any other value is a user's public_id. */
 export const OWNER_ME = "me";
 export const OWNER_NONE = "none";
+
+/** The Assignee filter of the signed-in User; any other value is a user's public_id. */
+export const ASSIGNEE_ME = "me";
 
 /** The status tabs; Open (firing, acknowledged and snoozed) when the URL names none. */
 export const ALERT_GROUP_TABS = [
@@ -85,6 +89,7 @@ export const alertGroupSearchSchema = z.object({
   reopened: z.boolean().optional().catch(undefined),
   label: strings,
   owner: text,
+  assignee: text,
   team: text,
   unclaimed: z.literal(true).optional().catch(undefined),
   snoozed_no_end: z.literal(true).optional().catch(undefined),
@@ -109,6 +114,7 @@ export const FILTER_KEYS = [
   "reopened",
   "label",
   "owner",
+  "assignee",
   "team",
   "unclaimed",
   "snoozed_no_end",
@@ -160,6 +166,7 @@ export function countParams(search: AlertGroupSearch, now: number): GetAlertGrou
     reopened: search.reopened,
     label: search.label,
     owner: search.owner,
+    assignee: search.assignee,
     team: search.team,
     unclaimed: search.unclaimed,
     snoozed_no_end: search.snoozed_no_end,

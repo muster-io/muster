@@ -26,6 +26,7 @@ import type { Session } from "../api/gen/model";
 import i18n from "../i18n";
 import {
   type AlertGroupSearch,
+  activeFilterCount,
   alertGroupSearchSchema,
   compact,
   countParams,
@@ -41,6 +42,11 @@ const ROUTES = [
 const INTEGRATIONS = [
   { id: "NT0000000000AM", name: "prod-am" },
   { id: "NT0000000000LB", name: "lab" },
+];
+
+const DIRECTORY = [
+  { id: "SR0000000IVAN", name: "Ivan", login: "ivan", deactivated: false },
+  { id: "SR0000000PETR", name: "Petr", login: "petr", deactivated: false },
 ];
 
 const TEAMS = [
@@ -74,6 +80,9 @@ beforeEach(async () => {
     }
     if (url.pathname === "/api/v1/integrations") {
       return Promise.resolve(json(200, { items: INTEGRATIONS, next_cursor: null }));
+    }
+    if (url.pathname === "/api/v1/user-directory") {
+      return Promise.resolve(json(200, { items: DIRECTORY, next_cursor: null }));
     }
     const labels = url.searchParams.getAll("label");
     const bad = labels.findIndex((l) => l.includes("["));
@@ -225,6 +234,17 @@ describe("search parameters", () => {
     expect(compact(listParams(one, 0))).toEqual({ team: "TM0000000000PA" });
   });
 
+  test("keep the Assignee filter in the URL and send it to the list and the counts", () => {
+    const search = alertGroupSearchSchema.parse(defaultParseSearch("?assignee=me"));
+    expect(search).toEqual({ assignee: "me" });
+    expect(defaultStringifySearch(search)).toBe("?assignee=me");
+    expect(compact(countParams(search, 0))).toEqual({ assignee: "me" });
+    expect(compact(listParams(search, 0))).toEqual({ assignee: "me" });
+    const one = alertGroupSearchSchema.parse(defaultParseSearch("?assignee=SR0000000IVAN"));
+    expect(compact(listParams(one, 0))).toEqual({ assignee: "SR0000000IVAN" });
+    expect(activeFilterCount(one)).toBe(1);
+  });
+
   test("keep the Unclaimed filter in the URL and send it to the list and the counts", () => {
     const search = alertGroupSearchSchema.parse(defaultParseSearch("?unclaimed=true"));
     expect(search).toEqual({ unclaimed: true });
@@ -320,6 +340,30 @@ describe("AlertGroupFilters", () => {
     await toggle.click();
     await expect.poll(() => searchOf(router)).toEqual({});
     await expect.element(screen.getByRole("checkbox", { name: "Unclaimed" })).not.toBeChecked();
+  });
+
+  test("the Assignee filter keeps me or a User in the URL, in English and Russian", async () => {
+    const { router, screen } = await renderAt("/alert-groups");
+    const select = screen.getByLabelText("Assignee", { exact: true });
+    const filter = screen.getByTestId("filter-assignee");
+    await expect.element(filter.getByRole("option", { name: "Ivan (ivan)" })).toBeInTheDocument();
+    await select.selectOptions("me");
+    await expect.poll(() => searchOf(router)).toEqual({ assignee: "me" });
+    expect(router.state.location.searchStr).toBe("?assignee=me");
+    await expect.element(select).toHaveValue("me");
+    await select.selectOptions("Petr (petr)");
+    await expect.poll(() => searchOf(router)).toEqual({ assignee: "SR0000000PETR" });
+    await screen.getByRole("button", { name: "Clear filters" }).click();
+    await expect.poll(() => searchOf(router)).toEqual({});
+    await expect.element(select).toHaveValue("");
+    await i18n.changeLanguage("ru");
+    await expect.element(screen.getByLabelText("Назначенный", { exact: true })).toBeInTheDocument();
+    await expect.element(filter.getByRole("option", { name: "я" })).toBeInTheDocument();
+  });
+
+  test("a new router shows the Assignee filter from the URL", async () => {
+    const { screen } = await renderAt("/alert-groups?assignee=me");
+    await expect.element(screen.getByLabelText("Assignee", { exact: true })).toHaveValue("me");
   });
 
   test("the Team filter and the My Teams quick filter keep team in the URL", async () => {

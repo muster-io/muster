@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // The filters of the Alert Group list (C-09.FR-13, C-10.FR-13, C-13.FR-12, C-17.FR-3): Route and Integration (several
-// of each), Severity level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner,
+// of each), Severity level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner, the
+// Assignee (C-32.FR-18),
 // "Unclaimed", "Snoozed with no end", "Delivery problem", the Team (C-25.FR-2) and label Matchers; on a desktop also the label columns. All
 // combine, and all live in the URL. The pickers are native selects (D250); a picker that takes several values adds each
 // chosen one as a chip that removes it again. The "Unclaimed" quick filter beside the list sets the same value.
@@ -21,6 +22,7 @@ import { useListIntegrations } from "../api/gen/endpoints/integrations/integrati
 import { useListRoutes } from "../api/gen/endpoints/routes/routes";
 import { ResolveReason, ResolverKind, SeverityLevel } from "../api/gen/model";
 import {
+  ASSIGNEE_ME,
   type AlertGroupSearch,
   FILTER_KEYS,
   activeFilterCount,
@@ -31,7 +33,7 @@ import { useCan } from "./app-shell";
 import { reasonLabel, severityLabel } from "./integration-alerts";
 import { LabelColumnsPicker } from "./label-columns-picker";
 import { LabelMatchersInput } from "./label-matchers-input";
-import { OwnerFilter } from "./owner-filter";
+import { OwnerFilter, UserFilter } from "./owner-filter";
 import { MY_TEAMS, TeamFilter } from "./team-filter";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
@@ -162,6 +164,30 @@ export function severityChoices(t: TFunction): Choice[] {
   }));
 }
 
+/**
+ * The Assignee filter (C-32.FR-18): anyone, "me" (assignee=me) or a User of the directory, sent as the User's public_id.
+ * Only the open Alert Groups where that User is an Assignee are listed.
+ */
+export function AssigneeFilter({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (next: string | undefined) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <UserFilter
+      value={value}
+      onChange={onChange}
+      label={t("alertGroups.filters.assignee")}
+      searchLabel={t("alertGroups.filters.assigneeSearch")}
+      specials={[{ value: ASSIGNEE_ME, label: t("alertGroups.filters.me") }]}
+      testId="filter-assignee"
+    />
+  );
+}
+
 export interface AlertGroupFiltersProps {
   search: AlertGroupSearch;
   onChange: (patch: Partial<AlertGroupSearch>) => void;
@@ -281,6 +307,7 @@ export function AlertGroupFilters({
         onChange={(next) => onChange({ reopened: fromFlag(next) })}
       />
       <OwnerFilter value={search.owner} onChange={(owner) => onChange({ owner })} />
+      <AssigneeFilter value={search.assignee} onChange={(assignee) => onChange({ assignee })} />
       <TeamFilter value={search.team} onChange={(team) => onChange({ team })} />
       <div className="flex items-start gap-2">
         <input
