@@ -3320,6 +3320,9 @@ and the API, timers, and every other Destination.</p>
   Destination check, so its next delivery is the probe.</li>
 <li><strong>A new Alert Group is created and shown in Muster</strong> as usual, but its first Publication waits. Its ack timeout does not
   start until it is published, so a Route whose only Destinations are Broken sends no notices.</li>
+<li><strong>A Page of an <a href="../escalation-chains/#undelivered-pages">Escalation chain</a> does not wait.</strong> Its Thread reply in the
+  Broken Destination is withheld, also one that was waiting when the Destination became Broken, and is never sent: the
+  person counts as not delivered there at once, and the chain goes on.</li>
 </ul>
 <h2 id="recovery">Recovery<a class="headerlink" href="#recovery" title="Permanent link">&para;</a></h2>
 <p>The Broken state ends when <strong>any</strong> of these succeeds:</p>

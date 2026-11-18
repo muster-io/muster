@@ -3723,7 +3723,9 @@ with <code>gateway_deleted</code>; a person it would call who has no confirmed c
   Destination was <a href="../broken-destinations/">Broken</a>, was sent through a bridge with their Mention left out for length,
   or was never sent because its Root message — a first Publication,
   or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
-  the Destination recovers.</li>
+  the Destination recovers. A reply queued before its Destination became Broken, such as one whose own attempt made
+  it Broken, is withheld too as soon as the Destination is Broken: the Page does not wait for the recovery, and still
+  reaches the people that its other, delivered replies mentioned.</li>
 </ul>
 <p>A call through a Notification gateway that ends Not delivered records it too, with the reason of the call
 (<a href="#calls-through-a-notification-gateway">Calls through a Notification gateway</a>).</p>
