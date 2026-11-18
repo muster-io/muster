@@ -218,11 +218,18 @@ Chain of the Route Infrastructure · On-call of devops Main · normal
   mention neither, the step makes no reply there; where it can reply in none of the chain's Destinations, as when the
   only one is a Telegram channel, it records `escalation_step_skipped` with `no_mention_possible`.
 - **The Timeline.** Each Page records the Loud lifecycle event `paged`, of the kind `escalation`, with its people,
-  its chain and its step; outgoing webhooks in events mode receive it as every event
+  its chain and its step; outgoing webhooks in events mode receive it as every event, with its people as data
   ([Events](../outgoing-webhooks/events.md)).
 
-In this version a Page by Mention replies in Mattermost and Slack Destinations. Telegram and Bridge Destinations and
-outgoing webhooks take Pages in a later version: until then a chain makes no Thread reply there.
+A Page by Mention replies in Mattermost, Slack and Telegram Destinations and through Bridges; in Telegram the reply
+is a comment under the channel post in the discussion group, as every Thread reply. An outgoing webhook in the template
+mode takes the Page through its "reply in thread" request, and one without that request takes none. One in the events
+mode has no Root message and takes no reply: it receives `paged` as an event, and only when the Page replies in
+another Destination of the chain. A chain whose only Destinations are outgoing webhooks in the events mode records no
+`paged`: a Page of people records `page_not_delivered` with `no_root_message`, and a step "Page the whole Team"
+`escalation_step_skipped` with `no_mention_possible`. A step "Page the whole Team" never replies in Telegram, which
+mentions no group and no one for everyone in the chat, and through a Bridge only when its bridge declares group
+mentions, for a Team mention, or the word for everyone in its `everyone_mentions`.
 
 ## How a Page reaches a person
 
@@ -234,8 +241,23 @@ delivered: @petr has no linked Mattermost account" instead, which mentions nobod
 |---|---|---|
 | Mattermost | a Thread reply with `@username` | they have an Account link for the Connection |
 | Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection |
-| Telegram, Bridge, outgoing webhooks | from a later version | — |
+| Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group |
+| Bridge | a Thread reply with a Mention marker | they have an Account link for the Connection and the bridge declares `native_mentions` |
+| Outgoing webhook, events mode | the event `paged`, with the people as `mentions` data, when the Page replies in another Destination of the chain | the receiver acts on it |
+| Outgoing webhook, template mode | the "reply in thread" request, when it has one | the receiver acts on it |
 | Notification gateway | a call to the confirmed contact, from a later version | the gateway reaches them, whatever the messengers do |
+
+In Telegram the reply reads "Step 1: Ivan, you are needed" with Ivan as a link that mentions him, and in a bridge
+"Step 1: [@Ivan](muster-mention:m1), you are needed" with his entry in the envelope's `mentions`
+([Rendering the envelope](../messengers/write-a-bridge.md#rendering-the-envelope)). A Mention in Telegram rings only a
+member of the discussion group: the creator of the group, anonymous in it, who muted it is not rung. A bridge without
+`native_mentions` shows a linked person's marker as their plain name, which rings nobody, so the Page is not delivered
+to them through that Destination: when no other Destination of the chain reaches them, it records
+`page_not_delivered` with `not_delivered`. An outgoing webhook takes every person of the Page as data, linked or not,
+and the Team of a step "Page the whole Team" by its slug and name; the template mode gives them to the "reply in
+thread" request as `.Mentions`, with `.Event` `paged` ([Template mode](../outgoing-webhooks/templates.md#mentions)).
+One whose "reply in thread" request was removed after the Page was queued sends nothing, and that reply ends Not
+delivered.
 
 !!! warning "At night, only a Notification gateway is reliable"
     Whether a Mention in a Thread pushes a notification to a phone is still to be verified for Mattermost and Slack.

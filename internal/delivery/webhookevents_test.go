@@ -513,6 +513,78 @@ func (e *eventsEnv) drain(t *testing.T) {
 	}
 }
 
+// TestWebhookEventsPaged is C-15.FR-2 and C-15.FR-11 revised for L2 with C-32.FR-11: paged reaches an events-mode
+// Destination as an event, Loud, with the people of its Page as user targets of its mentions — or the Team of a
+// page_team step as a team target by its slug and name, or everyone in the chat by its token — and never the
+// Destination's Mention entries, which are not resolved for it; a Team that cannot be read fails the change.
+func TestWebhookEventsPaged(t *testing.T) {
+	const team = 7
+	for _, c := range []struct {
+		name string
+		page *groups.Page
+		want string
+	}{
+		{"people", &groups.Page{ID: 1, Users: []groups.PagedUser{{ID: 4, PublicID: "SRAAAAAAAAAAIV", Name: "Ivan",
+			Login: "ivan"}, {ID: 5, PublicID: "SRAAAAAAAAAAPE", Name: "Petr", Login: "petr"}}},
+			"user:SRAAAAAAAAAAIV/Ivan/ivan,user:SRAAAAAAAAAAPE/Petr/petr"},
+		{"the whole Team", &groups.Page{ID: 2, Team: &groups.PageTeam{ID: team}}, "team:payments/Payments"},
+		{"everyone", &groups.Page{ID: 3, Everyone: "here"}, "everyone:here"},
+		{"a Team deleted for good", &groups.Page{ID: 4, Team: &groups.PageTeam{ID: 99}}, ""},
+		{"without its Page", nil, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := &fakeMentioner{}
+			e := newEventsEnv(t, m)
+			e.db.teamRefs = map[int64]dbgen.ListEntryTeamsRow{team: {ID: team, PublicID: "TMAAAAAAAAAAA7",
+				Name: "Payments", Slug: "payments"}}
+			e.enqueue(t, e.group(groups.StatusFiring, "t"), groups.System, groups.Recorded{Seq: 3,
+				Event: groups.EventPaged, Variant: groups.VariantAny, Loudness: groups.Loud,
+				Mentions: []groups.Mention{groups.MentionPaged}, Page: c.page})
+			e.drain(t)
+			if len(e.sender.calls) != 1 || len(m.reqs) != 0 {
+				t.Fatalf("calls %d, mentions resolved %d", len(e.sender.calls), len(m.reqs))
+			}
+			var b stubBody
+			if err := json.Unmarshal(e.sender.calls[0].Body, &b); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, x := range b.Mentions {
+				switch {
+				case x.User != nil:
+					got = append(got, x.Kind+":"+x.User.PublicID+"/"+x.User.Name+"/"+x.User.Login)
+				case x.Team != nil:
+					got = append(got, x.Kind+":"+x.Team.Slug+"/"+x.Team.Name)
+				default:
+					got = append(got, x.Kind+":"+x.Everyone)
+				}
+			}
+			if b.Event != "paged" || !b.Notify || strings.Join(got, ",") != c.want {
+				t.Errorf("body %+v, mentions %v", b, got)
+			}
+		})
+	}
+	// Two events-mode Destinations read the Team of the Page once.
+	e := newEventsEnv(t, &fakeMentioner{})
+	e.db.teamRefs = map[int64]dbgen.ListEntryTeamsRow{team: {ID: team, Name: "Payments", Slug: "payments"}}
+	e.db.dests[19] = &fakeDest{id: 19, publicID: "DSAAAAAAAAAA19", name: "hook-2", typ: delivery.TypeWebhook,
+		mode: "events", health: "healthy", limit: 600, per: 60}
+	e.db.routeDests[routeID] = []int64{destWH, 19}
+	e.enqueue(t, e.group(groups.StatusFiring, "t"), groups.System, groups.Recorded{Seq: 3, Event: groups.EventPaged,
+		Variant: groups.VariantAny, Loudness: groups.Loud, Page: &groups.Page{ID: 2, Team: &groups.PageTeam{ID: team}}})
+	if len(e.db.webhookEvents) != 2 || e.db.calls["ListEntryTeams"] != 1 {
+		t.Errorf("%d events, %d reads of the team", len(e.db.webhookEvents), e.db.calls["ListEntryTeams"])
+	}
+	e = newEventsEnv(t, &fakeMentioner{})
+	e.db.fail["ListEntryTeams"] = errBoom
+	if err := e.svc.Enqueue(t.Context(), fakeTx{}, groups.Rendering{Group: e.group(groups.StatusFiring, "t"),
+		Actor: groups.System, Events: []groups.Recorded{{Seq: 3, Event: groups.EventPaged, Variant: groups.VariantAny,
+			Loudness: groups.Loud, Page: &groups.Page{ID: 2, Team: &groups.PageTeam{ID: team}}}}}); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a team that cannot be read: %v", err)
+	}
+}
+
 // TestWebhookEventsEveryRow is C-15.FR-2 and AC-11: every row of the lifecycle event tables produces exactly one
 // events-mode request whose event is the row's name and whose notify its loudness, Quiet rows and rows with nothing to
 // show in a messenger included, with version 1 and the event's number as sequence; delivery events are never sent.
@@ -535,6 +607,10 @@ func TestWebhookEventsEveryRow(t *testing.T) {
 			if row.Event == groups.EventEscalationWebhook {
 				// It goes to the Destination of its step only, here the Route's own.
 				ev.Destination = &groups.JoinedDestination{ID: destWH, PublicID: "DSAAAAAAAAAAEV", Type: "webhook"}
+			}
+			if row.Event == groups.EventPaged {
+				// Its people are its Mentions (TestWebhookEventsPaged).
+				ev.Page = &groups.Page{ID: 1, Users: []groups.PagedUser{{ID: 4, PublicID: "SRAAAAAAAAAAIV"}}}
 			}
 			e.enqueue(t, e.group(groups.StatusFiring, "t"), actor, ev)
 			if len(e.db.webhookEvents) != 1 {

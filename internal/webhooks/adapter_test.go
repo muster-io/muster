@@ -480,6 +480,44 @@ func TestTemplateFailures(t *testing.T) {
 	}
 }
 
+// TestTemplatePage is C-32.FR-11 for an outgoing webhook in the template mode: a Page goes through "reply in thread"
+// as the Loud event paged with its people — and the Team or the token of a page_team step — as .Mentions, which
+// `mention` writes as plain text; a Destination whose request was removed since sends nothing and the Page's reply is
+// not delivered.
+func TestTemplatePage(t *testing.T) {
+	e := newAdapterEnv(t)
+	c := chatConfig(e.url)
+	c.ReplyInThread.Body = str(`{"event":{{ .Event | toJson }},"notify":{{ .Notify }},"who":[` +
+		`{{ range $i, $m := .Mentions }}{{ if $i }},{{ end }}{{ mention $m | toJson }}{{ end }}]}`)
+	e.templateMode(c)
+	page := templateCall("firing", map[string]string{"id": "m1", "thread": "t1"}, true)
+	page.Webhook.Event, page.Webhook.ThreadOpened = "paged", true
+	page.Targets = []mentions.Target{
+		{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "SRAAAAAAAAAAIV", Name: "Ivan", Login: "ivan"}},
+		{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "SRAAAAAAAAAAPE", Name: "Petr", Login: "petr"}},
+		{Kind: mentions.TargetTeam, Team: &mentions.TeamTarget{Slug: "payments", Name: "Payments"}},
+		{Kind: mentions.TargetEveryone, Everyone: "here"}}
+	out := e.a.Reply(t.Context(), page, delivery.Root{}, delivery.Message{})
+	if out.Kind != delivery.OutcomeOK || out.Request != RequestReplyInThread || len(e.ep.reqs) != 1 ||
+		e.ep.reqs[0].URL.Path != "/chat/ops/threads/t1/messages" ||
+		string(e.ep.bodies[0]) != `{"event":"paged","notify":true,"who":["@ivan","@petr","payments","@here"]}` {
+		t.Fatalf("page %+v %s", out, e.ep.bodies)
+	}
+	// "reply in thread" removed after the Page was queued: nothing is sent, and the reply is not delivered, so that the
+	// Page reaches nobody; another reply without that request is simply not sent.
+	c.ReplyInThread = nil
+	e.templateMode(c)
+	if out := e.a.Reply(t.Context(), page, delivery.Root{}, delivery.Message{}); out.Kind != delivery.OutcomeUnknown ||
+		out.Request != RequestReplyInThread || out.Error == "" || out.Rendered || len(e.ep.reqs) != 1 {
+		t.Errorf("a Page without reply in thread %+v", out)
+	}
+	page.Webhook.Event = "alerts_added"
+	if out := e.a.Reply(t.Context(), page, delivery.Root{}, delivery.Message{}); out.Kind != delivery.OutcomeOK ||
+		len(e.ep.reqs) != 1 {
+		t.Errorf("another reply without reply in thread %+v", out)
+	}
+}
+
 // TestTemplateStorm is C-15.FR-3 and C-11.FR-6: a Storm summary renders .Storm and no Alert Group; a template that
 // reads the Alert Group of a summary is a template error.
 func TestTemplateStorm(t *testing.T) {

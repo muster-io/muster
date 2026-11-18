@@ -27,13 +27,16 @@ import (
 // Group had: EnsureDelivery appends them and never removes one. So a source keeps the Destinations its entries
 // reached before the Alert Group's level fell, as their Root messages stay (C-26.FR-4), and never owns one whose Root
 // message only another source's entry brought, such as a shared channel that another Team names for any level and it
-// only for critical, while the level is below critical. A Page by Mention replies in Mattermost and Slack; Telegram
-// and Bridge Destinations and outgoing webhooks take Pages from S-177, so until then a chain makes no Thread reply
-// there. They still count as having the Root message when the targets are chosen: a Team whose Destinations with it
-// are all of those does not fall back to the Route's, so a step never rings another team's chat.
+// only for critical, while the level is below critical. A Page by Mention replies in Mattermost, Slack, Telegram — in
+// the discussion group, as every Thread reply (C-14.FR-3) — and through Bridges, and an outgoing webhook takes it
+// through its "reply in thread" request (C-32.FR-11). One without that request takes no Page, but still counts as
+// having the Root message when the targets are chosen: a Team whose Destinations with it are all of those does not
+// fall back to the Route's, so a step never rings another team's chat. An outgoing webhook in the events mode has no
+// Root message: it takes paged as an event (webhookevents.go).
 
-// pageTypes are the Destination types a Page by Mention replies in.
-var pageTypes = []string{TypeMattermost, TypeSlack}
+// pageTypes are the Destination types a Page by Mention replies in; an outgoing webhook only with a "reply in thread"
+// request.
+var pageTypes = []string{TypeMattermost, TypeSlack, TypeTelegram, TypeBridge, TypeWebhook}
 
 // pageQueries are the queries of the Pages by Mention.
 type pageQueries interface {
@@ -46,22 +49,45 @@ type pageQueries interface {
 	ListEndedPages(ctx context.Context, arg dbgen.ListEndedPagesParams) ([]dbgen.ListEndedPagesRow, error)
 }
 
-// pageRoot is a Destination where the Alert Group has its Root message.
+// pageRoot is a Destination where the Alert Group has its Root message: its type, its Connection and what that can
+// mention (C-28.FR-2), whether it is Broken and, for an outgoing webhook, whether it has a "reply in thread" request.
 type pageRoot struct {
 	id         int64
 	typ        string
 	connection *int64
+	conn       mentions.Connection
 	broken     bool
+	replies    bool
+}
+
+// pageRootOf is the pageRoot of a row of ListPageRoots.
+func pageRootOf(x dbgen.ListPageRootsRow) pageRoot {
+	r := pageRoot{id: x.ID, typ: x.Type, connection: int8Of(x.ConnectionID), broken: x.Health == healthBroken,
+		replies: x.WebhookReplies, conn: mentions.Connection{Type: x.Type, UsergroupsRead: x.UsergroupsRead,
+			GroupMentions: x.GroupMentions, NativeMentions: x.NativeMentions, Messenger: x.Messenger,
+			Everyone: x.EveryoneMentions}}
+	if r.connection != nil {
+		r.conn.ID = *r.connection
+	}
+	return r
+}
+
+// pages reports whether a Page by Mention replies in the Destination: one of pageTypes, an outgoing webhook only with
+// a "reply in thread" request.
+func (r pageRoot) pages() bool {
+	return slices.Contains(pageTypes, r.typ) && (r.typ != TypeWebhook || r.replies)
 }
 
 // PageTargets is groups.PageTargets: the Destinations of a run that can carry a Page of the Alert Group g, read in
 // the dispatcher's transaction tx after the lock of g (C-32.FR-8, FR-9). The Destinations where g has its Root
 // message, of any type, each with the entries that own it (owners): those that name it now, of the Route and, where it
 // delivers to the Teams, of the Teams of g, whose source reached its delivery; of those, the Destinations chosen by
-// chooseTargets; then of those the Destinations of a type that replies with Pages, and for a page_team step only those
-// whose Connection can mention the Team — a Team mention for it — or the token for everyone in the chat (C-28.FR-2).
-// Each target lists the people of the Page with an Account link in its Identity space, and whether it is Broken, which
-// withholds its reply (C-11.FR-19). Reads only: the Enqueue of the same change locks the deliveries.
+// chooseTargets; then of those the Destinations that reply with Pages (pageRoot.pages), and for a page_team step only
+// those whose Connection can mention the Team — a Team mention for it — or the token for everyone in the chat, as
+// mentions.Can says with what the Connection can mention (C-28.FR-2): never Telegram, a bridge only with the group
+// mentions or the token it declares, an outgoing webhook always, as data. Each target lists the people of the Page
+// it reaches and those it names by the plain name (linkPeople), and whether it is Broken, which withholds its reply
+// (C-11.FR-19). Reads only: the Enqueue of the same change locks the deliveries.
 func (s *Service) PageTargets(ctx context.Context, tx groups.DBTX, g *groups.Group, r groups.PageRequest) (
 	[]groups.PageTarget, error) {
 	q := s.store.queries(tx)
@@ -87,7 +113,7 @@ func (s *Service) PageTargets(ctx context.Context, tx groups.DBTX, g *groups.Gro
 	byID := map[int64]pageRoot{}
 	owned := make([]routing.Reached, 0, len(roots))
 	for _, x := range roots {
-		byID[x.ID] = pageRoot{id: x.ID, typ: x.Type, connection: int8Of(x.ConnectionID), broken: x.Health == healthBroken}
+		byID[x.ID] = pageRootOf(x)
 		var d entryDelivery
 		if err := json.Unmarshal(x.Entries, &d.reaching); err != nil {
 			return nil, fmt.Errorf("read the entries of alert group #%d in destination %d: %w", g.Number, x.ID, err)
@@ -100,7 +126,7 @@ func (s *Service) PageTargets(ctx context.Context, tx groups.DBTX, g *groups.Gro
 	out := make([]groups.PageTarget, 0, len(chosen))
 	for _, c := range chosen {
 		root := byID[c.DestinationID]
-		if !slices.Contains(pageTypes, root.typ) {
+		if !root.pages() {
 			continue
 		}
 		if r.Team != 0 || r.Everyone != "" {
@@ -176,13 +202,20 @@ func chooseTargets(sources []groups.PageSource, reached []routing.Reached, roote
 	return out
 }
 
-// canMention reports whether the Destination's Connection can mention what a page_team step Pages (C-28.FR-2): the
-// Team by a Team mention for the Connection that it can carry now, or the token for everyone in the chat.
+// canMention reports whether the Destination's Connection can mention what a page_team step Pages (C-28.FR-2), as
+// mentions.Can says with what the Connection can mention: the token for everyone in the chat, or the Team — by a Team
+// mention for the Connection that it can carry now, and in an outgoing webhook as data.
 func (s *Service) canMention(ctx context.Context, tx groups.DBTX, root pageRoot, r groups.PageRequest) (bool, error) {
 	if r.Everyone != "" {
-		ok, _ := mentions.Can(root.typ, mentions.Connection{},
+		ok, _ := mentions.Can(root.typ, root.conn,
 			mentions.EntryTarget{Kind: mentions.TargetEveryone, Everyone: r.Everyone})
 		return ok, nil
+	}
+	if ok, _ := mentions.Can(root.typ, root.conn, mentions.EntryTarget{Kind: mentions.TargetTeam}); !ok {
+		return false, nil
+	}
+	if root.typ == TypeWebhook {
+		return true, nil
 	}
 	if s.teamMentions == nil || root.connection == nil {
 		return false, nil
@@ -194,8 +227,10 @@ func (s *Service) canMention(ctx context.Context, tx groups.DBTX, root pageRoot,
 	return ok, nil
 }
 
-// linkPeople sets on each target the people with an Account link in its Identity space (mentions.IdentitySpace): its
-// reply mentions them.
+// linkPeople sets on each target the people its reply reaches (C-32.FR-11, C-18.FR-4): those with an Account link in
+// its Identity space (mentions.IdentitySpace), whom it mentions, and every person in an outgoing webhook, which takes
+// them as data. Through a bridge whose stored info does not declare native_mentions, or has none, the people with an
+// Account link are Named instead: the bridge shows the plain name, which reaches nobody (C-22.FR-16).
 func (s *Service) linkPeople(ctx context.Context, q queries, targets []groups.PageTarget, roots map[int64]pageRoot,
 	people []int64) error {
 	if len(people) == 0 || len(targets) == 0 {
@@ -208,17 +243,30 @@ func (s *Service) linkPeople(ctx context.Context, q queries, targets []groups.Pa
 			spaces = append(spaces, sp)
 		}
 	}
-	links, err := q.ListPageLinks(ctx, dbgen.ListPageLinksParams{OrgID: s.orgID, UserIds: people, Spaces: spaces})
-	if err != nil {
-		return fmt.Errorf("read the account links of the people of a page: %w", err)
+	var links []dbgen.ListPageLinksRow
+	if len(spaces) > 0 {
+		var err error
+		if links, err = q.ListPageLinks(ctx, dbgen.ListPageLinksParams{OrgID: s.orgID, UserIds: people,
+			Spaces: spaces}); err != nil {
+			return fmt.Errorf("read the account links of the people of a page: %w", err)
+		}
 	}
 	for i := range targets {
 		r := roots[targets[i].DestinationID]
+		if r.typ == TypeWebhook {
+			targets[i].Linked = slices.Clone(people)
+			continue
+		}
 		space := mentions.IdentitySpace(r.typ, r.connection)
 		for _, id := range people {
-			if slices.ContainsFunc(links, func(l dbgen.ListPageLinksRow) bool {
+			if !slices.ContainsFunc(links, func(l dbgen.ListPageLinksRow) bool {
 				return l.UserID == id && l.IdentitySpace == space
 			}) {
+				continue
+			}
+			if r.typ == TypeBridge && !r.conn.NativeMentions {
+				targets[i].Named = append(targets[i].Named, id)
+			} else {
 				targets[i].Linked = append(targets[i].Linked, id)
 			}
 		}

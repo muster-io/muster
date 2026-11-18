@@ -3,16 +3,29 @@
  * Do not edit manually.
  */
 import type { EntityRef } from './entityRef';
+import type { PageImportance } from './pageImportance';
 import type { PageNotDeliveredReason } from './pageNotDeliveredReason';
+import type { WebhookChainRef } from './webhookChainRef';
 import type { WebhookUser } from './webhookUser';
 
 /**
- * A Page as an outgoing webhook event names it, on `page_not_delivered`.
+ * A Page as an outgoing webhook event names it, on `paged` and `page_not_delivered`.
  */
 export interface WebhookPage {
-  /** The people the Page names. */
+  /** The people the Page names; empty for a step "Page the whole Team". */
   users: WebhookUser[];
   /** The Notification gateway of a call; null for a Page by Mention. */
   gateway: EntityRef | null;
+  /** Why the Page was not delivered, on `page_not_delivered`; null on `paged`. */
   reason: PageNotDeliveredReason | null;
+  /** The Escalation chain whose step made the Page; null for a Page that no step of a chain made, and once the chain was deleted. */
+  chain: WebhookChainRef | null;
+  /**
+     * The number of that step in its chain; null when no step of a chain made the Page, and kept when the chain was deleted.
+     * @minimum 1
+     * @nullable
+     */
+  step: number | null;
+  /** How the step Paged its people; null for a step "Page the whole Team" and a call through a Notification gateway. */
+  importance: PageImportance | null;
 }

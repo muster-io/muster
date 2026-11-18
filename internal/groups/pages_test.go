@@ -79,7 +79,7 @@ func (f *fakeDB) LockPage(_ context.Context, arg dbgen.LockPageParams) (dbgen.Lo
 		return dbgen.LockPageRow{}, pgx.ErrNoRows
 	}
 	return dbgen.LockPageRow{ID: p.id, AlertGroupID: p.AlertGroupID, State: p.State, StepNumber: p.StepNumber,
-		Team: p.TeamID.Valid || p.Everyone.Valid, EscalationRunID: p.EscalationRunID,
+		Team: p.TeamID.Valid || p.Everyone.Valid, Importance: p.Importance.String, EscalationRunID: p.EscalationRunID,
 		ChainID: pgtype.Int8{Int64: 5, Valid: true}, ChainPublicID: "EC0000000000PA", ChainName: "payments"}, nil
 }
 
@@ -323,6 +323,51 @@ func TestMentionPageNotDelivered(t *testing.T) {
 	}
 	if n := metrics.Pages.With("", "mention", "not_delivered").Get() - deleted; n != 0 {
 		t.Errorf("muster_pages_total of a deleted chain +%d", n)
+	}
+}
+
+// TestPageNamedByThePlainName is C-32.FR-10 and FR-11 for a bridge without native_mentions: a person whom every reply
+// names by the plain name, which reaches nobody, records page_not_delivered not_delivered at once, not
+// no_account_link, while a person linked in another Destination stays pending; the page_not_delivered of a step,
+// at once or once the replies ended, carries the importance of the Page as paged does.
+func TestPageNamedByThePlainName(t *testing.T) {
+	h, g, targets, renders := pageHarness(t)
+	targets.targets = []PageTarget{{DestinationID: 11, Source: PageSourceRoute, Named: []int64{owner, bobID}},
+		{DestinationID: 12, Source: PageSourceRoute, Linked: []int64{bobID}}}
+	err := h.step(t, g, ChainProgress{Changed: true, Pages: []StepPage{{ChainEntry: paymentsStep,
+		Sources: []PageSource{{Kind: PageSourceRoute}}, People: []int64{owner, bobID}, Importance: "important"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.escalationEntries(g); !slices.Equal(got, []string{"paged//alice/bob",
+		"page_not_delivered/not_delivered/alice"}) {
+		t.Fatalf("entries %v", got)
+	}
+	p := h.db.pages.list[0]
+	if p.State != PagePending || p.users[0].outcome != PageNotDelivered || p.users[0].reason != PageRepliesFailed ||
+		p.users[1].outcome != PagePending {
+		t.Fatalf("page %+v %+v %+v", p, p.users[0], p.users[1])
+	}
+	importance := func(r Rendering) []string {
+		var out []string
+		for _, e := range r.Events {
+			if e.Page != nil {
+				out = append(out, string(e.Event)+"/"+e.Page.Importance)
+			}
+		}
+		return out
+	}
+	if got := importance((*renders)[len(*renders)-1]); !slices.Equal(got, []string{"paged/important",
+		"page_not_delivered/important"}) {
+		t.Errorf("importance %v", got)
+	}
+	after, err := h.svc.SettlePage(t.Context(), nil, g.ID, PageOutcome{Page: p.id, Ended: true, Delivered: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after(t.Context())
+	if got := importance((*renders)[len(*renders)-1]); !slices.Equal(got, []string{"page_not_delivered/important"}) {
+		t.Errorf("importance once the replies ended %v", got)
 	}
 }
 

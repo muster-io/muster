@@ -2254,11 +2254,23 @@ WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
 -- its chains may reply under (C-32.FR-8): a delivery with a message that has not ended, or whose first Publication is
 -- on its way — the chains start with the first Publication in one Destination, often before the others — and that no
 -- Storm holds, with the type, the Connection and the health of its Destination, and the entries that reached the
--- delivery, which tell the sources that own it (where.go).
+-- delivery, which tell the sources that own it (where.go); whether an outgoing webhook has a "reply in thread"
+-- request, and what the Connection can mention (C-28.FR-2): whether the last check of a Slack Connection found
+-- usergroups:read, and from a Bridge's stored info whether it declares group mentions and native mentions — neither
+-- while no info was read —, the role messenger and which mentions of everyone, as GetMentionConnection reads them.
 -- name: ListPageRoots :many
-SELECT d.id, d.type, d.connection_id, d.health, x.entries
+SELECT d.id, d.type, d.connection_id, d.health, x.entries,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
+       coalesce(c.slack_usergroups_read, false)::boolean AS usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       coalesce(c.bridge_info->'capabilities'->'native_mentions' = 'true'::jsonb, false)::boolean AS native_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger,
+       (CASE jsonb_typeof(c.bridge_info->'capabilities'->'everyone_mentions')
+            WHEN 'array' THEN ARRAY(SELECT jsonb_array_elements_text(c.bridge_info->'capabilities'->'everyone_mentions'))
+            ELSE '{}'::text[] END)::text[] AS everyone_mentions
 FROM deliveries x
 JOIN destinations d ON d.org_id = x.org_id AND d.id = x.destination_id
+LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
 WHERE x.org_id = @org_id AND x.alert_group_id = @alert_group_id::bigint AND x.held_by_storm_id IS NULL
   AND (x.message_id IS NOT NULL OR (x.state = 'pending' AND x.published_at IS NULL))
   AND x.state NOT IN ('withheld', 'deleted_in_messenger', 'retired') AND NOT x.desired_retire
@@ -2272,11 +2284,12 @@ FROM account_links
 WHERE org_id = @org_id AND user_id = ANY(@user_ids::bigint[]) AND identity_space = ANY(@spaces::text[]);
 
 -- GetPageReply reads what the Thread reply of a Page says (C-32.FR-9): the step, the importance and the next Mention of
--- the rule, a later Mention, the Team or the token of a page_team step, the Schedule of a page_on_call step with its
--- Team, and the Team of "Chain of the Team".
+-- the rule, a later Mention, the Team, with its slug for an outgoing webhook, or the token of a page_team step, the
+-- Schedule of a page_on_call step with its Team, and the Team of "Chain of the Team".
 -- name: GetPageReply :one
 SELECT p.step_number, coalesce(p.importance, '')::text AS importance, coalesce(p.again_seconds, 0)::integer AS again_seconds,
        p.again, coalesce(p.everyone, '')::text AS everyone, p.team_id, coalesce(t.name, '')::text AS team_name,
+       coalesce(t.slug, '')::text AS team_slug,
        coalesce(s.name, '')::text AS schedule_name, coalesce(st.name, '')::text AS schedule_team_name,
        coalesce(ct.name, '')::text AS chain_team_name, (p.schedule_id IS NOT NULL)::boolean AS on_call
 FROM pages p
@@ -2287,10 +2300,13 @@ LEFT JOIN teams ct ON ct.org_id = p.org_id AND ct.id = p.chain_team_id
 WHERE p.org_id = @org_id AND p.id = @id;
 
 -- ListPageReplyUsers lists the people of a Page by id, with the username, the messenger's user
--- id and the display name of their Account link in the Identity space, empty without one.
+-- id and the display name of their Account link in the Identity space, empty without one, and the reason the Page
+-- recorded for them when it was queued, empty for none: no_account_link when they had no Account link in any of its
+-- Destinations' Identity spaces.
 -- name: ListPageReplyUsers :many
 SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username,
-       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name
+       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name,
+       coalesce(pu.reason, '')::text AS reason
 FROM page_users pu
 JOIN users u ON u.org_id = pu.org_id AND u.id = pu.user_id
 LEFT JOIN account_links al ON al.org_id = pu.org_id AND al.user_id = pu.user_id

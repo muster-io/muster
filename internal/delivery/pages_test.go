@@ -27,23 +27,27 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 )
 
-// The people of the Pages of the fixtures: ivan, linked in the Identity space of the Mattermost Connection, and petr,
-// linked nowhere.
+// The people of the Pages of the fixtures: ivan, linked in the Identity space of the Mattermost Connection, and petr
+// and carol, linked nowhere.
 const (
-	ivanID = 41
-	petrID = 42
-	pageID = 900
+	ivanID  = 41
+	petrID  = 42
+	carolID = 43
+	pageID  = 900
 )
 
 // fakePageDB are the Pages of the fake database: what each reply says, its people, the Account links and the state of
-// each Page, which the settler ends, and how many times the Pages to settle were listed.
+// each Page, which the settler ends, how many times the Pages to settle were listed, what the Connection of each
+// Destination can mention, as ListPageRoots reads it, and the reason each person's Page recorded when it was queued.
 type fakePageDB struct {
-	pages  map[int64]dbgen.GetPageReplyRow
-	people map[int64][]int64
-	links  []dbgen.ListPageLinksRow
-	state  map[int64]string
-	group  map[int64]int64
-	lists  int
+	pages   map[int64]dbgen.GetPageReplyRow
+	people  map[int64][]int64
+	links   []dbgen.ListPageLinksRow
+	state   map[int64]string
+	group   map[int64]int64
+	lists   int
+	caps    map[int64]dbgen.ListPageRootsRow
+	reasons map[int64]string
 }
 
 func (p *fakePageDB) init() {
@@ -58,8 +62,9 @@ var zeroWidth = string(rune(0x200b))
 
 // pagePeople names the people of the fixtures.
 var pagePeople = map[int64]dbgen.ListPageReplyUsersRow{
-	ivanID: {ID: ivanID, PublicID: "SRAAAAAAAAAAIV", Name: "Ivan", Login: "ivan"},
-	petrID: {ID: petrID, PublicID: "SRAAAAAAAAAAPE", Name: "Petr", Login: "petr"},
+	ivanID:  {ID: ivanID, PublicID: "SRAAAAAAAAAAIV", Name: "Ivan", Login: "ivan"},
+	petrID:  {ID: petrID, PublicID: "SRAAAAAAAAAAPE", Name: "Petr", Login: "petr"},
+	carolID: {ID: carolID, PublicID: "SRAAAAAAAAAACA", Name: "Carol", Login: "carol"},
 }
 
 func (f *fakeDB) ListPageRoots(_ context.Context, arg dbgen.ListPageRootsParams) ([]dbgen.ListPageRootsRow, error) {
@@ -82,8 +87,11 @@ func (f *fakeDB) ListPageRoots(_ context.Context, arg dbgen.ListPageRootsParams)
 		if entries == nil {
 			entries = []byte("[]")
 		}
+		c := f.pageDB.caps[ds.id]
 		out = append(out, dbgen.ListPageRootsRow{ID: ds.id, Type: ds.typ, ConnectionID: nullInt(ds.connection),
-			Health: ds.health, Entries: entries})
+			Health: ds.health, Entries: entries, WebhookReplies: ds.typ == delivery.TypeWebhook && !ds.noReplies,
+			UsergroupsRead: c.UsergroupsRead, GroupMentions: c.GroupMentions, NativeMentions: c.NativeMentions,
+			Messenger: c.Messenger || ds.typ != delivery.TypeBridge, EveryoneMentions: c.EveryoneMentions})
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListPageRootsRow) int { return int(a.ID - b.ID) })
 	return out, nil
@@ -127,6 +135,7 @@ func (f *fakeDB) ListPageReplyUsers(_ context.Context, arg dbgen.ListPageReplyUs
 	var out []dbgen.ListPageReplyUsersRow
 	for _, id := range f.pageDB.people[arg.PageID] {
 		u := pagePeople[id]
+		u.Reason = f.pageDB.reasons[id]
 		for _, l := range f.pageDB.links {
 			if l.UserID == id && l.IdentitySpace == arg.IdentitySpace {
 				u.Username, u.ExternalID = u.Login, "u-"+u.Login
@@ -574,9 +583,9 @@ func TestPageStaysOpenUntilEveryReplyEnded(t *testing.T) {
 
 // TestPageTargets is C-32.FR-8, C-32.AC-1 and AC-16 through the queries: a Route's chain Pages in the Route's
 // Destinations with the Root message, a Team's chain in the Team's and, without one of them with a Root message, in
-// the Route's; a Team whose Destinations with the Root message all take no Page yet (Telegram) makes no reply and does
-// not fall back to the Route's; a chain of both in the union; a page_team step only where the Connection can mention
-// the Team or the token; each target with the people linked in its Identity space and whether it is Broken.
+// the Route's; a Team whose only Destination with the Root message is a Telegram channel Pages there; a chain of both
+// in the union; a page_team step only where the Connection can mention the Team or the token, never in Telegram nor in
+// Slack without usergroups:read; each target with the people linked in its Identity space and whether it is Broken.
 func TestPageTargets(t *testing.T) {
 	e, _ := pageEnv(t)
 	e.db.routes[routeID] = fakeRoute{language: "en", toTeams: true}
@@ -624,15 +633,16 @@ func TestPageTargets(t *testing.T) {
 	}{
 		{"the Route's chain", groups.PageRequest{Sources: route, People: people}, []string{"11/route/41"}},
 		{"a Team's chain", groups.PageRequest{Sources: []groups.PageSource{{Kind: groups.PageSourceTeam, TeamID: 3}},
-			People: people}, []string{"13/team/42/withheld"}},
+			People: people}, []string{"13/team/42/withheld", "14/team"}},
 		{"a Team whose only Destination with the Root message is a Telegram channel",
 			groups.PageRequest{Sources: []groups.PageSource{{Kind: groups.PageSourceTeam, TeamID: 4}}, People: people},
-			nil},
+			[]string{"14/team"}},
 		{"a Team without a Destination of its own with the Root message",
 			groups.PageRequest{Sources: []groups.PageSource{{Kind: groups.PageSourceTeam, TeamID: 5}}, People: people},
 			[]string{"11/team/41"}},
 		{"both", groups.PageRequest{Sources: []groups.PageSource{{Kind: groups.PageSourceRoute},
-			{Kind: groups.PageSourceTeam, TeamID: 3}}, People: people}, []string{"11/route/41", "13/team/42/withheld"}},
+			{Kind: groups.PageSourceTeam, TeamID: 3}}, People: people},
+			[]string{"11/route/41", "13/team/42/withheld", "14/team"}},
 		{"the Team mention", groups.PageRequest{Sources: []groups.PageSource{{Kind: groups.PageSourceRoute},
 			{Kind: groups.PageSourceTeam, TeamID: 3}}, Team: 3}, []string{"11/route"}},
 		{"another Team", groups.PageRequest{Sources: route, Team: 4}, nil},
@@ -647,11 +657,11 @@ func TestPageTargets(t *testing.T) {
 	// holds does not.
 	team3 := groups.PageRequest{Sources: []groups.PageSource{{Kind: groups.PageSourceTeam, TeamID: 3}}, People: people}
 	e.db.deliveries[len(e.db.deliveries)-2].messageID, e.db.deliveries[len(e.db.deliveries)-2].state = nil, "pending"
-	if got := targets(team3); !slices.Equal(got, []string{"13/team/42/withheld"}) {
+	if got := targets(team3); !slices.Equal(got, []string{"13/team/42/withheld", "14/team"}) {
 		t.Errorf("on its way: %v", got)
 	}
 	e.db.deliveries[len(e.db.deliveries)-2].heldBy = 9
-	if got := targets(team3); got != nil {
+	if got := targets(team3); !slices.Equal(got, []string{"14/team"}) {
 		t.Errorf("held, the Telegram channel still with its Root message: %v", got)
 	}
 	e.db.deliveries[len(e.db.deliveries)-1].heldBy = 9
@@ -819,5 +829,190 @@ func testPageTargetsAfterTheLevelFell(t *testing.T) {
 	if got := targets(groups.PageRequest{Sources: []groups.PageSource{{Kind: groups.PageSourceRoute}},
 		People: []int64{ivanID}}); !slices.Equal(got, []int64{destMM}) {
 		t.Errorf("B: the Route's chain Pages in %v, want its critical channel %d", got, destMM)
+	}
+}
+
+// The Destinations of the Pages beyond Mattermost and Slack: a Telegram channel, a Bridge whose bridge declares
+// native_mentions, @here and group mentions, one whose bridge declares none of them, and an outgoing webhook in the
+// template mode without "reply in thread"; destWH has it.
+const (
+	destPageTG       = 14
+	destPageBridge   = 16
+	destPagePlain    = 17
+	destPageNoReply  = 18
+	connPageBridge   = 7
+	connPagePlain    = 8
+	spacePageBridge  = "bridge:7"
+	spacePagePlain   = "bridge:8"
+	spacePageTG      = "telegram"
+	publicPagePlain  = "DSAAAAAAAAAA17"
+	publicPageBridge = "DSAAAAAAAAAA16"
+)
+
+// pageEnvOfAll is pageEnv with the Route's Destinations Mattermost, the webhook, Telegram, both Bridges and the
+// webhook without "reply in thread", each with the Alert Group's Root message, and ivan linked in every Identity
+// space; petr is linked through the Bridge without native_mentions only.
+func pageEnvOfAll(t *testing.T) (*env, *fakeSettler) {
+	t.Helper()
+	e, s := pageEnv(t)
+	bridge, plain := int64(connPageBridge), int64(connPagePlain)
+	e.db.dests[destPageTG] = &fakeDest{id: destPageTG, publicID: "DSAAAAAAAAAA14", name: "tg",
+		typ: delivery.TypeTelegram, health: "healthy", limit: 600, per: 60}
+	e.db.dests[destPageBridge] = &fakeDest{id: destPageBridge, publicID: publicPageBridge, name: "bridge",
+		typ: delivery.TypeBridge, connection: &bridge, health: "healthy", limit: 600, per: 60}
+	e.db.dests[destPagePlain] = &fakeDest{id: destPagePlain, publicID: publicPagePlain, name: "plain",
+		typ: delivery.TypeBridge, connection: &plain, health: "healthy", limit: 600, per: 60}
+	e.db.dests[destPageNoReply] = &fakeDest{id: destPageNoReply, publicID: "DSAAAAAAAAAA18", name: "no-reply",
+		typ: delivery.TypeWebhook, health: "healthy", limit: 600, per: 60, noReplies: true}
+	e.db.pageDB.caps = map[int64]dbgen.ListPageRootsRow{
+		destPageBridge: {GroupMentions: true, NativeMentions: true, Messenger: true, EveryoneMentions: []string{"here"}},
+		destPagePlain:  {Messenger: true},
+	}
+	e.db.pageDB.links = append(e.db.pageDB.links, dbgen.ListPageLinksRow{UserID: ivanID, IdentitySpace: spacePageTG},
+		dbgen.ListPageLinksRow{UserID: ivanID, IdentitySpace: spacePageBridge},
+		dbgen.ListPageLinksRow{UserID: ivanID, IdentitySpace: spacePagePlain},
+		dbgen.ListPageLinksRow{UserID: petrID, IdentitySpace: spacePagePlain})
+	e.db.routeDests[routeID] = []int64{destMM, destWH, destPageTG, destPageBridge, destPagePlain, destPageNoReply}
+	id := "m"
+	for i, d := range []int64{destWH, destPageTG, destPageBridge, destPagePlain, destPageNoReply} {
+		e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: int64(80 + i), dest: d, group: groupID,
+			state: "delivered", messageID: &id})
+	}
+	return e, s
+}
+
+// pageTargetsOf are the targets of r in the env as destination/source/L linked/N named.
+func pageTargetsOf(t *testing.T, e *env, r groups.PageRequest) []string {
+	t.Helper()
+	got, err := e.svc.PageTargets(t.Context(), nil, e.group(groups.StatusFiring, "a"), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, x := range got {
+		s := strconv.FormatInt(x.DestinationID, 10) + "/" + x.Source
+		for _, u := range x.Linked {
+			s += "/L" + strconv.FormatInt(u, 10)
+		}
+		for _, u := range x.Named {
+			s += "/N" + strconv.FormatInt(u, 10)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// TestPageTargetsBeyondMattermost is C-32.FR-8, FR-9, FR-11 and C-18.FR-4 for Telegram, Bridges and outgoing
+// webhooks: a chain Pages in the Threads of its Telegram and Bridge Destinations as in Mattermost, each with the people
+// linked in its Identity space; through a bridge without native_mentions a linked person is Named, not reached; an
+// outgoing webhook with "reply in thread" takes every person as data, one without it takes no Page; a page_team step
+// Pages Telegram never, a Bridge only with what its bridge declares, and an outgoing webhook always.
+func TestPageTargetsBeyondMattermost(t *testing.T) {
+	e, _ := pageEnvOfAll(t)
+	route := []groups.PageSource{{Kind: groups.PageSourceRoute}}
+	for _, c := range []struct {
+		name string
+		r    groups.PageRequest
+		want []string
+	}{
+		{"people", groups.PageRequest{Sources: route, People: []int64{ivanID, petrID}},
+			[]string{"11/route/L41", "12/route/L41/L42", "14/route/L41", "16/route/L41", "17/route/N41/N42"}},
+		{"the whole Team", groups.PageRequest{Sources: route, Team: 3}, []string{"11/route", "12/route"}},
+		{"@here", groups.PageRequest{Sources: route, Everyone: "here"}, []string{"11/route", "12/route", "16/route"}},
+		{"@all", groups.PageRequest{Sources: route, Everyone: "all"}, []string{"11/route", "12/route"}},
+	} {
+		if got := pageTargetsOf(t, e, c.r); !slices.Equal(got, c.want) {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	// A bridge whose info was never read declares nothing (C-22.FR-16, as mentions.Resolve and the reach of S-171
+	// read it): its linked people are Named, decided now for the reply to render.
+	delete(e.db.pageDB.caps, destPagePlain)
+	if got := pageTargetsOf(t, e, groups.PageRequest{Sources: route, People: []int64{ivanID}}); !slices.Contains(got,
+		"17/route/N41") {
+		t.Errorf("a bridge whose info was never read: %v", got)
+	}
+	// Without any Identity space among them, only the outgoing webhook has its people, and no link is read.
+	e.db.routeDests[routeID] = []int64{destWH}
+	e.db.fail["ListPageLinks"] = errors.New("boom")
+	if got := pageTargetsOf(t, e, groups.PageRequest{Sources: route, People: []int64{petrID}}); !slices.Equal(got,
+		[]string{"12/route/L42"}) {
+		t.Errorf("the webhook alone: %v", got)
+	}
+}
+
+// TestPageRepliesBeyondMattermost is C-32.FR-9 and FR-11 for Bridges and outgoing webhooks: through a bridge without
+// native_mentions the reply still names a linked person by their marker, which the bridge shows as the plain name,
+// inside the Lead, while it reaches nobody — its Page reports no one reached — and names a person without a link in
+// "Page not delivered"; an outgoing webhook's "reply in thread" carries paged with every person and the Team of a
+// page_team step as data. The reply renders what the Page decided when it was queued: a bridge whose info declares
+// native_mentions only once the Page was queued, as when it was first read by the Publication there, still names the
+// people it Named by their marker and reaches none of them; and a person the Page recorded as linked nowhere, who
+// linked their account through a bridge with native_mentions since, gets no Mention there.
+func TestPageRepliesBeyondMattermost(t *testing.T) {
+	e, s := pageEnvOfAll(t)
+	e.w.Adapters[delivery.TypeBridge] = e.rec
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID, petrID, carolID)
+	e.addPage(901, dbgen.GetPageReplyRow{StepNumber: 2, TeamID: pgtype.Int8{Int64: 3, Valid: true},
+		TeamName: "Payments", TeamSlug: "payments"})
+	e.db.pageDB.reasons = map[int64]string{carolID: groups.PageNoAccountLink}
+	g := e.group(groups.StatusFiring, "a")
+	e.enqueue(t, g, groups.System,
+		pagedEvent(2, pageID, groups.PageTarget{DestinationID: destPagePlain, Source: groups.PageSourceRoute,
+			Named: []int64{ivanID, petrID}}, groups.PageTarget{DestinationID: destWH, Source: groups.PageSourceRoute,
+			Linked: []int64{ivanID, petrID}}, groups.PageTarget{DestinationID: destPageBridge,
+			Source: groups.PageSourceRoute, Linked: []int64{ivanID}}),
+		pagedEvent(3, 901, groups.PageTarget{DestinationID: destWH, Source: groups.PageSourceRoute}))
+	// Since the Page was queued, the plain bridge's info was read and declares native_mentions, and carol linked her
+	// account through the bridge with native_mentions.
+	e.db.pageDB.caps[destPagePlain] = dbgen.ListPageRootsRow{NativeMentions: true, Messenger: true}
+	e.db.pageDB.links = append(e.db.pageDB.links, dbgen.ListPageLinksRow{UserID: carolID,
+		IdentitySpace: spacePageBridge})
+	e.rounds(t)
+	var got []string
+	for _, c := range e.replies() {
+		var names []string
+		for _, tg := range c.Targets {
+			switch {
+			case tg.User != nil:
+				names = append(names, tg.Kind+":"+tg.User.Login+"/"+tg.User.ExternalID)
+			case tg.Team != nil:
+				names = append(names, tg.Kind+":"+tg.Team.Slug+"/"+tg.Team.Name)
+			}
+		}
+		lead, event := "", ""
+		if c.Message.Lead != nil {
+			lead = c.Message.Lead.Before + "…" + c.Message.Lead.After
+		}
+		if c.Webhook != nil {
+			event = c.Webhook.Event
+		}
+		got = append(got, c.Destination.PublicID+"|"+event+"|"+strings.Join(names, ",")+"|"+lead+"|"+
+			strings.ReplaceAll(c.Message.Text(), zeroWidth, ""))
+	}
+	slices.Sort(got)
+	carol := "Page not delivered: @carol has no linked Bridge account\n"
+	want := []string{
+		"DSAAAAAAAAAA12|paged|team:payments/Payments||",
+		"DSAAAAAAAAAA12|paged|user:ivan/,user:petr/||",
+		publicPageBridge + "||user:ivan/u-ivan|Step 1: …, you are needed|" +
+			"Page not delivered: @petr has no linked Bridge account\n" + carol +
+			"Chain of the Route payments · @ivan, @petr, @carol · normal",
+		publicPagePlain + "||user:ivan/u-ivan,user:petr/u-petr|Step 1: …, you are needed|" + carol +
+			"Chain of the Route payments · @ivan, @petr, @carol · normal",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("replies\n%q\nwant\n%q", got, want)
+	}
+	for _, o := range s.outcomes {
+		if o.Page == pageID && o.Ended && !slices.Equal(slices.Sorted(slices.Values(o.Reached)),
+			[]int64{ivanID, petrID}) {
+			t.Errorf("the replies reach %+v", o)
+		}
+	}
+	for _, r := range e.db.replies {
+		if r.page == pageID && r.dest == destPagePlain && len(r.pagedUsers) != 0 {
+			t.Errorf("the reply through the plain bridge reaches %v", r.pagedUsers)
+		}
 	}
 }

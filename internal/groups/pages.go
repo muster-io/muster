@@ -21,8 +21,8 @@ import (
 // Page is a Page as the Timeline entry of an event of the kind escalation names it (C-32.FR-19): the people it names,
 // the Notification gateway of a call, nil for a Page by Mention, and the reason a Page was not delivered. groups knows
 // no package of Paging (S-169); the callers fill it. A paged by Mention also carries its pages row, the Destinations
-// its Thread replies go to, which delivery fans the event out into (C-32.FR-8), the Team or the token of a page_team
-// step and the importance of a Page of people.
+// its Thread replies go to, which delivery fans the event out into (C-32.FR-8), and the Team or the token of a
+// page_team step; it and the page_not_delivered of a Page by Mention carry the importance of a Page of people.
 type Page struct {
 	Users      []PagedUser
 	Gateway    *PageGateway
@@ -169,11 +169,15 @@ type PageRequest struct {
 
 // PageTarget is a Destination a Page writes a Thread reply in (C-32.FR-8, FR-9): the Destination, whether it is one of
 // the Route or of a Team of the chain (PageSourceRoute, PageSourceTeam), the people of the Page with an Account link in
-// its Identity space, whom its reply mentions, and whether its reply is withheld, as while it is Broken (C-11.FR-19).
+// its Identity space, whom its reply mentions — every person for an outgoing webhook, which takes them as data —,
+// those with an Account link whom its reply names by the plain name, which reaches none of them, as a bridge without
+// native_mentions does (C-32.FR-11, C-22.FR-16), and whether its reply is withheld, as while it is Broken
+// (C-11.FR-19).
 type PageTarget struct {
 	DestinationID int64
 	Source        string
 	Linked        []int64
+	Named         []int64
 	Withheld      bool
 }
 
@@ -289,16 +293,20 @@ func pagedOf(users []PagedUser, ids []int64) []PagedUser {
 
 // outcomeOf is the outcome of a person of a new Page and its reason: not delivered for no_root_message without a
 // Destination, for no_account_link when no Destination's Identity space has their Account link, and for
-// not_delivered when every reply that would mention them is withheld; pending otherwise, until the replies end.
+// not_delivered when every reply that would mention them is withheld or names them by the plain name, which reaches
+// nobody (PageTarget.Named); pending otherwise, until the replies end.
 func outcomeOf(id int64, targets []PageTarget) (string, string) {
 	if len(targets) == 0 {
 		return PageNotDelivered, PageNoRootMessage
 	}
 	linked, open := false, false
 	for _, t := range targets {
-		if slices.Contains(t.Linked, id) {
+		switch {
+		case slices.Contains(t.Linked, id):
 			linked = true
 			open = open || !t.Withheld
+		case slices.Contains(t.Named, id):
+			linked = true
 		}
 	}
 	switch {
@@ -393,7 +401,7 @@ func (t chainSteps) page(ctx context.Context, q Queries, g *Group, p StepPage, c
 	for _, reason := range []string{PageNoRootMessage, PageNoAccountLink, PageRepliesFailed} {
 		if ids := byReason[reason]; len(ids) > 0 {
 			c.add(entry{Event: EventPageNotDelivered, Reason: reason, Chain: &chain,
-				Page: &Page{Users: pagedOf(users, ids), Reason: reason, ID: id}})
+				Page: &Page{Users: pagedOf(users, ids), Reason: reason, ID: id, Importance: p.Importance}})
 		}
 	}
 	return nil
@@ -454,7 +462,7 @@ func (t pageSettled) apply(ctx context.Context, q Queries, g *Group, c *change) 
 		chain := ChainEntry{Run: p.EscalationRunID.Int64, Chain: p.ChainID.Int64, ChainPublicID: p.ChainPublicID,
 			ChainName: p.ChainName, Step: int(p.StepNumber)}
 		c.add(entry{Event: EventPageNotDelivered, Reason: PageRepliesFailed, Chain: &chain,
-			Page: &Page{Users: users, Reason: PageRepliesFailed, ID: p.ID}})
+			Page: &Page{Users: users, Reason: PageRepliesFailed, ID: p.ID, Importance: p.Importance}})
 	}
 	n, err := q.CountPageUsers(ctx, dbgen.CountPageUsersParams{OrgID: t.orgID, PageID: p.ID})
 	if err != nil {

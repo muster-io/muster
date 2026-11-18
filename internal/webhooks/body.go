@@ -35,8 +35,8 @@ type Body struct {
 	// Destination is set only on destination_joined, the Destination the Alert Group joined (C-15.FR-2, C-26.FR-5),
 	// and on escalation_webhook, the outgoing webhook Destination its step sent to (C-32.FR-13).
 	Destination *DestinationRef `json:"destination,omitempty"`
-	// Page is set only on page_not_delivered: the people of the Page, its Notification gateway and the reason
-	// (C-15.FR-2, C-30.FR-7).
+	// Page is set only on paged and page_not_delivered: the people of the Page, its Notification gateway, the reason
+	// of a page_not_delivered, and the chain, the step and the importance (C-15.FR-2, C-30.FR-7, C-32.FR-11).
 	Page *Page `json:"page,omitempty"`
 	// Escalation is set only on escalation_step_skipped, the chain, the step, the reason, and the person of a skip of
 	// a person (C-15.FR-2, C-32.FR-14), and on escalation_webhook, the chain and the step (C-32.FR-13).
@@ -45,12 +45,16 @@ type Body struct {
 	Test bool `json:"test,omitempty"`
 }
 
-// Page is the Page of a page_not_delivered (WebhookPage): the people it names, the Notification gateway of a call,
-// null for a Page by Mention, and the reason.
+// Page is the Page of a paged or a page_not_delivered (WebhookPage): the people it names, the Notification gateway of
+// a call, null for a Page by Mention, the reason, null on paged, and the chain and the step that made it and its
+// importance, each null when it has none.
 type Page struct {
-	Users   []User    `json:"users"`
-	Gateway *RouteRef `json:"gateway"`
-	Reason  *string   `json:"reason"`
+	Users      []User    `json:"users"`
+	Gateway    *RouteRef `json:"gateway"`
+	Reason     *string   `json:"reason"`
+	Chain      *RouteRef `json:"chain"`
+	Step       *int      `json:"step"`
+	Importance *string   `json:"importance"`
 }
 
 // EscalationStep is the step of an escalation_step_skipped or an escalation_webhook (WebhookEscalationStep): its chain,
@@ -215,8 +219,9 @@ func (s *Service) eventBodies(ctx context.Context, q bodyQueries, in delivery.Ev
 			e.Event.Event == groups.EventEscalationWebhook) {
 			b.Destination = &DestinationRef{ID: d.PublicID, Name: d.Name, Type: d.Type}
 		}
-		if p := e.Event.Page; p != nil && e.Event.Event == groups.EventPageNotDelivered {
-			b.Page = pageOf(p)
+		if p := e.Event.Page; p != nil && (e.Event.Event == groups.EventPageNotDelivered ||
+			e.Event.Event == groups.EventPaged) {
+			b.Page = pageOf(p, e.Event.Chain)
 		}
 		if c := e.Event.Chain; c != nil && (e.Event.Event == groups.EventEscalationStepSkipped ||
 			e.Event.Event == groups.EventEscalationWebhook) {
@@ -226,8 +231,9 @@ func (s *Service) eventBodies(ctx context.Context, q bodyQueries, in delivery.Ev
 	}, nil
 }
 
-// pageOf is the Page of a page_not_delivered as the body names it.
-func pageOf(p *groups.Page) *Page {
+// pageOf is the Page of a paged or a page_not_delivered as the body names it, with the chain and the step c of the
+// event, nil for none, and a chain deleted since as null.
+func pageOf(p *groups.Page, c *groups.ChainEntry) *Page {
 	out := &Page{Users: make([]User, len(p.Users))}
 	for i, u := range p.Users {
 		out.Users[i] = User{ID: u.PublicID, Name: u.Name, Login: u.Login}
@@ -238,6 +244,17 @@ func pageOf(p *groups.Page) *Page {
 	if p.Reason != "" {
 		reason := p.Reason
 		out.Reason = &reason
+	}
+	if c != nil && c.Step > 0 {
+		step := c.Step
+		out.Step = &step
+		if c.ChainPublicID != "" {
+			out.Chain = &RouteRef{ID: c.ChainPublicID, Name: c.ChainName}
+		}
+	}
+	if p.Importance != "" {
+		importance := p.Importance
+		out.Importance = &importance
 	}
 	return out
 }

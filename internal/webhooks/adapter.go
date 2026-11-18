@@ -371,13 +371,21 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, _ string, _ deliv
 // Reply sends "reply in thread" of the template mode for a lifecycle event whose messenger form is a Thread reply, with
 // the latest Desired state; "open thread", when the Destination has one, runs first once per Root message and adds the
 // values it extracts, which the reply reads. A failure of "open thread" is the outcome and sends no reply; once it ran,
-// the outcome says so whatever the reply came to. Without "reply in thread" nothing is sent.
+// the outcome says so whatever the reply came to. Without "reply in thread" nothing is sent. A Page by Mention goes
+// through it as the event paged, Loud, with its people — or the Team or the token of a page_team step — as
+// `.Mentions` (C-32.FR-11); delivery queues no Page for a Destination without that request, and a Page whose request
+// was removed since it was queued is an unknown outcome, which ends Not delivered, so that it reaches nobody.
 func (a *Adapter) Reply(ctx context.Context, c delivery.Call, _ delivery.Root, _ delivery.Message) delivery.Outcome {
 	t, out, ok := a.templateTarget(ctx, c)
 	if !ok {
 		return out
 	}
 	if t.template.ReplyInThread == nil {
+		if c.Webhook.Event == string(groups.EventPaged) {
+			// The request was removed after the Page was queued: nothing reaches its people (C-32.FR-10).
+			return delivery.Outcome{Kind: delivery.OutcomeUnknown, Request: RequestReplyInThread,
+				Error: "the destination has no reply in thread request for the page"}
+		}
 		return delivery.Outcome{Kind: delivery.OutcomeOK}
 	}
 	d := a.data(c, t)
