@@ -320,7 +320,9 @@ change of the chain while a run goes on, the rows of C-32.AC-18, and `E2E_REPLIC
 - For S-155, downtime: a firing that comes late makes every step whose wait is over in one go, each recorded at the
   time it was due. Once steps Page, the Pages of the steps missed during downtime should collapse, as C-17's
   `notices_missed` collapses overdue notices, rather than ring once per missed step; this story implements no
-  collapse.
+  collapse. Since #594 such a firing Pages each person, Team or everyone once: a step that would Page only whom it
+  already Paged at an earlier due time waits, from then, as long as it would have after those Pages on time, and the
+  steps after it wait with it; calls and webhooks are made each time.
 - The Working hours and the On-call of a step are read through the step's transaction, which holds the Alert Group's
   lock (`escalation.workingHoursOn`, `(*schedules.Service).OnCallAtIn`).
 - The steps of runs are details of their Alert Group (C-09.FR-16): the retention of the details deletes them, and

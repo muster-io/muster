@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/muster-io/muster/internal/escalation/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/mentions"
@@ -554,5 +556,117 @@ func TestPosition(t *testing.T) {
 		if got != c.want {
 			t.Errorf("index %d %s: %q, want %q", c.index, c.state, got, c.want)
 		}
+	}
+}
+
+// TestLateFiringPagesOnce is #594: a firing that comes late, after downtime, Pages each person, Team or everyone once:
+// a step that would Page only whom the firing already Paged at an earlier due time waits there, from now, for the
+// spacing it would have had on time, rather than Paging them again within seconds; a step that Pages someone else is
+// made, a call or a step that Pages nobody it can name is made, and steps with no wait between them are made as they
+// are.
+func TestLateFiringPagesOnce(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		steps []dbgen.SnapshotStepsRow
+		late  time.Duration
+		made  []int
+		index int32
+		next  time.Duration // the timer after the firing, from now; 0 for a run that ran out
+		setup func(e *runsEnv)
+	}{
+		{"unequal waits", []dbgen.SnapshotStepsRow{people(22), wait(3600), people(21), wait(60), people(22)},
+			2 * time.Hour, []int{1, 3}, 4, 61 * time.Minute, nil},
+		{"both again, the shortest spacing", []dbgen.SnapshotStepsRow{people(22), wait(300), people(21), wait(300),
+			people(22, 21)}, time.Hour, []int{1, 3}, 4, 5 * time.Minute, nil},
+		{"a call after a wait", []dbgen.SnapshotStepsRow{people(22), wait(300), call(22)}, 30 * time.Minute,
+			[]int{1, 3}, 3, 0, nil},
+		{"a Schedule in a gap after a wait", []dbgen.SnapshotStepsRow{people(21), wait(300), page(schedMain)},
+			30 * time.Minute, []int{1}, 3, 0, func(e *runsEnv) { e.onCalls.onCall[schedMain] = 0 }},
+		{"an On-call nobody reads", []dbgen.SnapshotStepsRow{page(schedMain), wait(300), page(schedMain)},
+			30 * time.Minute, []int{1, 3}, 3, 0, func(e *runsEnv) { e.runs.onCalls = nil }},
+		{"the same person after a wait", []dbgen.SnapshotStepsRow{people(22), wait(300), people(22)}, 30 * time.Minute,
+			[]int{1}, 2, 5 * time.Minute, nil},
+		{"another person after a wait", []dbgen.SnapshotStepsRow{people(22), wait(300), people(21)}, 30 * time.Minute,
+			[]int{1, 3}, 3, 0, nil},
+		{"someone new among them", []dbgen.SnapshotStepsRow{people(22), wait(300), people(22, 21)}, 30 * time.Minute,
+			[]int{1, 3}, 3, 0, nil},
+		{"the On-call, then the same person", []dbgen.SnapshotStepsRow{page(schedMain), wait(300), people(21)},
+			30 * time.Minute, []int{1}, 2, 5 * time.Minute, nil},
+		{"the Team again", []dbgen.SnapshotStepsRow{team(), wait(600), team()}, time.Hour, []int{1}, 2,
+			10 * time.Minute, nil},
+		{"a repeat late many times", []dbgen.SnapshotStepsRow{people(22), wait(300), repeat(1, 50)}, 10 * time.Hour,
+			[]int{1}, 0, 5 * time.Minute, nil},
+		{"two people, then each again", []dbgen.SnapshotStepsRow{people(22), wait(300), people(21), wait(300),
+			people(22), people(21)}, time.Hour, []int{1, 3}, 4, 10 * time.Minute, nil},
+		{"no wait between", []dbgen.SnapshotStepsRow{people(22), people(22)}, time.Hour, []int{1, 2}, 2, 0, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newRunsEnv(t)
+			pages := &recordingPages{made: func(st StepRef) StepMade {
+				return StepMade{Pages: []groups.StepPage{{ChainEntry: groups.ChainEntry{Step: st.Number}}}}
+			}}
+			e.runs.pages = pages
+			if c.setup != nil {
+				c.setup(e)
+			}
+			e.chain(1, "devops", false, c.steps...)
+			e.source(1, 0, ConditionAny)
+			e.start(t, groups.ChainStart{All: true})
+			run := e.q.runs[0]
+			e.clock.Set(t0.Add(c.late))
+			e.fire(t, run.id)
+			var made []int
+			for _, st := range pages.steps {
+				made = append(made, st.Number)
+			}
+			p := e.groups.progress[len(e.groups.progress)-1]
+			if !slices.Equal(made, c.made) || len(p.Pages) != len(c.made) || run.stepIndex != c.index {
+				t.Fatalf("made %v with %d pages, at %d; want %v at %d", made, len(p.Pages), run.stepIndex, c.made,
+					c.index)
+			}
+			if c.next == 0 {
+				if run.state != RunRanOut {
+					t.Errorf("state %s, want ran out", run.state)
+				}
+				return
+			}
+			now := e.clock.Now()
+			if run.state != RunRunning || !e.q.timers[run.id].Equal(now.Add(c.next)) {
+				t.Fatalf("state %s, timer %v, want %v", run.state, e.q.timers[run.id], now.Add(c.next))
+			}
+			// The step that waited is made at the end of that wait.
+			e.clock.Set(now.Add(c.next))
+			e.fire(t, run.id)
+			if got := pages.steps[len(c.made)].Number; got != int(c.index)+1 {
+				t.Errorf("then made step %d, want %d", got, c.index+1)
+			}
+		})
+	}
+}
+
+func call(ids ...int64) dbgen.SnapshotStepsRow {
+	return dbgen.SnapshotStepsRow{Kind: KindCall, CallTarget: pgtype.Text{String: CallPeople, Valid: true},
+		UserIds: ids}
+}
+
+// TestLateFiringSkipsOnce:a step that waits in a late firing records nothing yet, so the person it skips is skipped
+// once, when the step is made.
+func TestLateFiringSkipsOnce(t *testing.T) {
+	e := newRunsEnv(t)
+	e.runs.pages = &recordingPages{}
+	e.chain(1, "devops", false, people(22, 23), wait(300), people(22, 23))
+	e.source(1, 0, ConditionAny)
+	e.start(t, groups.ChainStart{All: true})
+	run := e.q.runs[0]
+	e.clock.Set(t0.Add(time.Hour))
+	e.fire(t, run.id)
+	if got := e.skips(); !slices.Equal(got, []string{"1 viewer vic"}) || !slices.Equal(e.made(),
+		[]string{"1 made", "2 made"}) {
+		t.Fatalf("skips %v, steps %v", got, e.made())
+	}
+	e.clock.Set(e.q.timers[run.id])
+	e.fire(t, run.id)
+	if got := e.skips(); !slices.Equal(got, []string{"1 viewer vic", "3 viewer vic"}) || run.state != RunRanOut {
+		t.Errorf("skips %v, state %s", got, run.state)
 	}
 }
