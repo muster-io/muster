@@ -1626,7 +1626,7 @@ func probeTelegramAdapter(ctx context.Context, svc *connections.Service, clocks 
 	errs = append(errs, probeTester(ctx, &telegram.Tester{Adapter: a, Path: path, Renderer: probeRenderer(clocks),
 		Real: clocks.Real}, dest))
 	res, err := svc.CheckTelegramChannel(ctx, destinations.TelegramChannelCheck{Connection: publicID,
-		Destination: &dest.ID, ChannelID: "@probe", People: []telegram.GroupPerson{{UserID: 1, TelegramID: 4242}}})
+		ChannelID: "@probe", People: []telegram.GroupPerson{{UserID: 1, TelegramID: 4242}}})
 	errs = append(errs, err, errors.New(string(res.Check.Outcome.Error)))
 	for _, st := range res.Check.Steps {
 		errs = append(errs, errors.New(st.Message))

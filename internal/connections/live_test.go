@@ -167,6 +167,7 @@ func TestLive(t *testing.T) {
 		t.Run("telegram", e.telegram)
 		t.Run("telegramDestinations", e.telegramDestinations)
 		t.Run("telegramGroupPeople", e.telegramGroupPeople)
+		t.Run("telegramCheckLimiter", e.telegramCheckLimiter)
 		t.Run("bridge_event_claim", e.bridgeEventClaim)
 		t.Run("slack", e.slack)
 	})
@@ -470,8 +471,8 @@ func (e *liveEnv) telegramDestinations(t *testing.T) {
 // telegramGroupPeople is the step discussion_group_members of C-27.FR-8 on the real store and the real limiters: a
 // Telegram Destination with the default limiter, 10 requests a minute, of a Team with 10 active people linked to
 // Telegram and a disabled one; "Check" asks getChatMember about each active person — not the disabled one — although
-// the Destination's bucket would last for 6 requests after the steps of C-14.FR-14, since the step takes its tokens
-// from the Connection's bucket alone; the people the fake answers 400 PARTICIPANT_ID_INVALID are absent, and the
+// the Destination's bucket holds 10 tokens, since the check takes its tokens from the Connection's bucket alone; the
+// people the fake answers 400 PARTICIPANT_ID_INVALID are absent, and the
 // Destination stores them, but not once a save moved it to another group than the one the check read.
 func (e *liveEnv) telegramGroupPeople(t *testing.T) {
 	ctx := t.Context()
@@ -549,10 +550,10 @@ func (e *liveEnv) telegramGroupPeople(t *testing.T) {
 	if len(asked) != 10 || slices.ContainsFunc(asked, func(b string) bool { return strings.Contains(b, "9011") }) {
 		t.Errorf("asked about %d people: %v", len(asked), asked)
 	}
-	var tokens float64
-	if err := e.d.Pool.QueryRow(ctx, `SELECT tokens FROM rate_limit_buckets WHERE subject_kind = 'destination'
-		AND subject_id = $1`, d.ID).Scan(&tokens); err != nil || tokens < 5.5 {
-		t.Errorf("the Destination's bucket after the check: %v tokens, %v", tokens, err)
+	// A bucket is created full on its first use, which a check is not.
+	if n := e.count(t, `SELECT count(*) FROM rate_limit_buckets WHERE subject_kind = 'destination' AND subject_id = $1
+		AND tokens < 10`, d.ID); n != 0 {
+		t.Errorf("the check took tokens of the Destination's bucket")
 	}
 	if n := e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND cardinality(telegram_absent_user_ids) = 5
 		AND telegram_members_checked_at IS NOT NULL`, d.ID); n != 1 {
@@ -604,6 +605,82 @@ func (e *liveEnv) telegramGroupPeople(t *testing.T) {
 	if n := e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND telegram_absent_user_ids = '{42}'`,
 		d.ID); n != 1 {
 		t.Error("a check of another group than the stored one overwrote the members")
+	}
+}
+
+// telegramCheckLimiter is C-14.FR-14 on the real limiters: the requests of a Telegram Destination's check post nothing,
+// so they take no token of the Destination's bucket, which counts its sends and edits (F-016), only of the
+// Connection's. Three "Check"s within a minute of a Destination with the default limiter, 10 a minute, all pass, and
+// neither they nor a save leave the Destination's bucket lower; a Destination whose deliveries took every token
+// still checks, and its deliveries keep the token that refills next.
+func (e *liveEnv) telegramCheckLimiter(t *testing.T) {
+	ctx := t.Context()
+	f := faketelegram.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	c, err := e.conns.Create(ctx, by, connections.Input{Type: connections.TypeTelegram, Name: "live-tg-check-limiter",
+		BotAPIBaseURL: f.URL(), UpdateMode: connections.ModeLongPolling, BotToken: keyring.Replace("777001:live-lim"),
+		Limiter: connections.Limiter{Limit: 1000, PerSeconds: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dby := destinations.Requester{Actor: by.Actor, Transport: by.Transport}
+	in := destinations.Input{Type: destinations.TypeTelegram, Name: "live-tg-check-limiter", Mentions: quiet(),
+		Limiter:  destinations.Limiter{Limit: 10, PerSeconds: 60},
+		Telegram: &destinations.TelegramInput{Connection: c.PublicID, ChannelID: "@muster_alerts"}}
+	d, err := e.dests.Create(ctx, dby, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The business clock stands still, so the Destination's bucket refills nothing while the checks run.
+	set := func(kind string, id int64, tokens float64) {
+		t.Helper()
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO rate_limit_buckets (subject_kind, subject_id, org_id, tokens,
+				refilled_at) VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (subject_kind, subject_id) DO UPDATE SET tokens = excluded.tokens,
+				refilled_at = excluded.refilled_at`, kind, id, e.orgID, tokens, e.business.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bucket := func(tokens float64) { t.Helper(); set("destination", d.ID, tokens) }
+	read := func(kind string, id int64) float64 {
+		t.Helper()
+		var n float64
+		if err := e.d.Pool.QueryRow(ctx, `SELECT tokens FROM rate_limit_buckets WHERE subject_kind = $1
+			AND subject_id = $2`, kind, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	tokens := func() float64 { t.Helper(); return read("destination", d.ID) }
+	bucket(10)
+	set("connection", c.ID, 1000)
+	for i := range 3 {
+		if res, err := e.dests.Check(ctx, d.PublicID); err != nil || !res.OK {
+			t.Fatalf("check %d = %+v, %v", i+1, res, err)
+		}
+	}
+	if n := tokens(); n != 10 {
+		t.Errorf("the Destination's bucket after three checks: %v tokens, want 10", n)
+	}
+	// The checks are limited all the same: by the Connection, whose bucket they took from.
+	if n := read("connection", c.ID); n >= 1000 {
+		t.Errorf("the Connection's bucket after three checks: %v tokens, want fewer than 1000", n)
+	}
+	if _, err := e.dests.Update(ctx, dby, d.PublicID, nil, in); err != nil {
+		t.Fatalf("save = %v", err)
+	}
+	if n := tokens(); n != 10 {
+		t.Errorf("the Destination's bucket after a save: %v tokens, want 10", n)
+	}
+	bucket(0)
+	if res, err := e.dests.Check(ctx, d.PublicID); err != nil || !res.OK {
+		t.Fatalf("a check of a Destination without tokens = %+v, %v", res, err)
+	}
+	if n := tokens(); n != 0 {
+		t.Errorf("the Destination's bucket after a check without tokens: %v tokens, want 0", n)
 	}
 }
 

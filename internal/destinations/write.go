@@ -381,15 +381,14 @@ type MattermostChecker interface {
 	CheckChannel(ctx context.Context, c ChannelCheck) (ChannelChecked, error)
 }
 
-// TelegramChannelCheck is the Destination check of a Telegram channel through the Connection Connection (public_id):
-// of the saved Destination Destination (its id) when it exists, so that its limiter applies, else of the Connection
-// alone. Members are the people whose membership of the discussion group its step discussion_group_members reads
-// (C-27.FR-8), none before the Destination exists, since no Team names it yet.
+// TelegramChannelCheck is the Destination check of a Telegram channel through the Connection Connection (public_id),
+// limited by that Connection alone, whether or not the Destination exists: its requests post nothing, and the
+// Destination's limiter counts sends and edits (C-14.FR-2). People are those whose membership of the discussion group
+// its step discussion_group_members reads (C-27.FR-8), none before the Destination exists, since no Team names it yet.
 type TelegramChannelCheck struct {
-	Connection  string
-	Destination *int64
-	ChannelID   string
-	People      []telegram.GroupPerson
+	Connection string
+	ChannelID  string
+	People     []telegram.GroupPerson
 }
 
 // TelegramChannelChecked is the result of a TelegramChannelCheck: the id of the Connection and the check.
@@ -1144,8 +1143,8 @@ func created(d Destination, err error) (Destination, error) {
 
 // Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3,
 // C-24.FR-3); a non-nil version must be its current one (If-Match). Saving runs the Destination check as Create does,
-// limited by the Destination; a passing check of a Broken Destination ends its Broken state (C-13.FR-10, C-14.FR-14).
-// An update that changes nothing writes nothing.
+// limited by the Destination (a Telegram Destination's by its Connection alone); a passing check of a Broken Destination
+// ends its Broken state (C-13.FR-10, C-14.FR-14). An update that changes nothing writes nothing.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Destination,
 	error) {
 	d, err := s.update(ctx, r, publicID, version, in)
@@ -1271,10 +1270,11 @@ type CheckResult struct {
 }
 
 // Check runs the Destination check of the Destination publicID from checkDestination (C-13.FR-10, C-14.FR-14,
-// C-22.FR-3, C-24.FR-3) on the interactive path, limited by the Destination: each check with its result. A passing
-// check of a Broken Destination ends its Broken state. A Bridge or Slack Destination's check keeps no channel name it
-// reads: a save does. A Telegram Destination's check that passes keeps what its step discussion_group_members saw of
-// the people of its Teams (C-27.FR-8), with them in the item's AbsentUsers.
+// C-22.FR-3, C-24.FR-3) on the interactive path, limited by the Destination (a Telegram Destination's by its
+// Connection alone): each check with its result. A passing check of a Broken Destination ends its Broken state. A
+// Bridge or Slack Destination's check keeps no channel name it reads: a save does. A Telegram Destination's check that
+// passes keeps what its step discussion_group_members saw of the people of its Teams (C-27.FR-8), with them in the
+// item's AbsentUsers.
 // A type without a Destination check here is a *FieldError check_not_supported. Its requests are recorded as the kind
 // destination_check with the Destination under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
@@ -1301,7 +1301,7 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 			return CheckResult{}, err
 		}
 		res, err := s.writer.Telegram.CheckTelegramChannel(ctx, TelegramChannelCheck{Connection: *d.Connection,
-			Destination: &d.ID, ChannelID: deref(d.TelegramChannelID), People: members})
+			ChannelID: deref(d.TelegramChannelID), People: members})
 		if err != nil {
 			return CheckResult{}, err
 		}
@@ -1453,7 +1453,7 @@ func (s *Service) checkTelegram(ctx context.Context, in Input, destinationID *in
 	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	t := in.Telegram
 	res, err := s.writer.Telegram.CheckTelegramChannel(ctx, TelegramChannelCheck{Connection: t.Connection,
-		Destination: destinationID, ChannelID: t.ChannelID, People: members})
+		ChannelID: t.ChannelID, People: members})
 	if errors.Is(err, ErrUnknownConnection) {
 		return TelegramChannelChecked{}, unknownTelegramConnection()
 	}
@@ -1621,7 +1621,7 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 }
 
 // updateTelegram replaces the configured fields of the Telegram Destination before, already validated, once its
-// Destination check passed, limited by the Destination, and keeps what the check found; a passing check of a Broken
+// Destination check passed, through its Connection, and keeps what the check found; a passing check of a Broken
 // Destination ends its Broken state. An update that changes nothing, and whose check found the same, writes only what
 // the check saw of the members of the discussion group (C-27.FR-8).
 func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destination, in Input) (Destination,

@@ -677,7 +677,7 @@ func TestTelegramTarget(t *testing.T) {
 }
 
 // TestCheckTelegramChannel is the Destination check of a Telegram Destination being saved (C-14.FR-2, FR-14): through
-// the Connection on the interactive path, limited by the Destination once it exists and by the Connection before.
+// the Connection on the interactive path, limited by the Connection alone, since none of its requests posts to a chat.
 func TestCheckTelegramChannel(t *testing.T) {
 	e := newTGEnv(t)
 	c, err := e.svc.Create(t.Context(), by, e.input("tg", connections.ModeLongPolling))
@@ -696,31 +696,29 @@ func TestCheckTelegramChannel(t *testing.T) {
 	if err := e.tg.SetMember(faketelegram.GroupID, 5001, faketelegram.Member{Status: faketelegram.StatusMember}); err != nil {
 		t.Fatal(err)
 	}
-	// The steps of C-14.FR-14 are limited by the Destination; the members step by the Connection alone, so that it
-	// takes no token of the Destination's bucket.
+	// Every request, the steps of C-14.FR-14 and the members step alike, is limited by the Connection alone, so that a
+	// check takes no token of the Destination's bucket, which counts its sends and edits (F-016).
 	subjects := len(e.path.subjects)
-	dest := int64(4)
 	res, err = e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
-		Destination: &dest, ChannelID: "@muster_alerts", People: []telegram.GroupPerson{{UserID: 1, TelegramID: 5001},
+		ChannelID: "@muster_alerts", People: []telegram.GroupPerson{{UserID: 1, TelegramID: 5001},
 			{UserID: 2, TelegramID: 5002}}})
 	if absent, _, ok := res.Check.GroupPeople(); err != nil || !ok || !slices.Equal(absent, []int64{2}) ||
 		len(e.path.subjects)-subjects != 6 {
 		t.Fatalf("members = %v %v, %v, %d requests", absent, ok, err, len(e.path.subjects)-subjects)
 	}
 	for i, s := range e.path.subjects[subjects:] {
-		if byDestination := s.Destination != nil && s.Destination.ID == 4; byDestination != (i < 4) ||
-			(i >= 4 && (s.Connection == nil || *s.Connection != c.ID)) {
+		if s.Destination != nil || s.NoLimiter || s.Connection == nil || *s.Connection != c.ID {
 			t.Errorf("request %d limited by %+v", i, s)
 		}
 	}
 	subjects = len(e.path.subjects)
 	res, err = e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
-		Destination: &dest, ChannelID: "@no_comments"})
+		ChannelID: "@no_comments"})
 	if err != nil || res.Check.OK() || len(e.path.subjects) == subjects {
 		t.Fatalf("no comments = %+v, %v", res, err)
 	}
-	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination == nil || s.Destination.ID != 4 ||
-		s.Destination.Type != connections.TypeTelegram {
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination != nil || s.Connection == nil ||
+		*s.Connection != c.ID {
 		t.Fatalf("subject = %+v", s)
 	}
 	mm := e.create(t, "mm")
