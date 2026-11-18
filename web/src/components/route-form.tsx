@@ -36,6 +36,7 @@ import {
   matchersOf,
   sentRows,
 } from "./matcher-builder";
+import { RouteChains, CHAIN_ENTRIES_MAX, chainRowsOf } from "./route-chains";
 import { RouteDeliveryPreview } from "./route-delivery-preview";
 import {
   ENTRIES_MAX,
@@ -122,6 +123,14 @@ const formSchema = z
         }),
       )
       .max(ENTRIES_MAX, "out_of_range"),
+    chain_entries: z
+      .array(
+        z.object({
+          chain_id: z.string(),
+          severity_condition: z.enum(SEVERITY_CONDITIONS),
+        }),
+      )
+      .max(CHAIN_ENTRIES_MAX, "out_of_range"),
     deliver_to_teams: z.boolean(),
     run_team_chains: z.boolean(),
     snooze_durations: z.array(z.number().int().min(1)),
@@ -177,6 +186,7 @@ export function formValues(base: RouteInput, route?: Route): FormValues {
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
     destination_entries: entriesOf(base),
+    chain_entries: chainRowsOf(base),
     deliver_to_teams: base.deliver_to_teams ?? false,
     run_team_chains: base.run_team_chains ?? true,
     snooze_durations: sortedDurations(base.policy.snooze_durations_seconds),
@@ -209,6 +219,7 @@ export function inputOf(
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
     destination_entries: v.destination_entries.map((e) => ({ ...e })),
+    chain_entries: v.chain_entries.map((e) => ({ ...e })),
     deliver_to_teams: v.deliver_to_teams,
     run_team_chains: v.run_team_chains,
     own_message_labels: v.labels.own,
@@ -340,6 +351,7 @@ export function RouteForm({
   const [serverDestinationErrors, setServerDestinationErrors] = useState<Record<string, string>>(
     {},
   );
+  const [serverChainErrors, setServerChainErrors] = useState<Record<string, string>>({});
   const [unmatched, setUnmatched] = useState<string[]>([]);
   // A label name typed in the Group key field: Save and Preview take it as if it had been added.
   const [keyDraft, setKeyDraft] = useState("");
@@ -409,6 +421,7 @@ export function RouteForm({
     onMutate: () => {
       setUnmatched([]);
       setServerDestinationErrors({});
+      setServerChainErrors({});
       setSnoozeError(undefined);
       setTemplateErrors({});
       setLanguageError(undefined);
@@ -427,6 +440,16 @@ export function RouteForm({
       applyFieldProblem(err, sent);
       const byDestination = destinationErrors(err.errors ?? [], input.destination_entries ?? []);
       setServerDestinationErrors(byDestination);
+      const byChain: Record<string, string> = {};
+      for (const item of err.errors ?? []) {
+        const match = /^\/chain_entries\/(\d+)(?:\/chain_id)?$/.exec(item.pointer);
+        const chainId =
+          match?.[1] === undefined ? undefined : input.chain_entries?.[Number(match[1])]?.chain_id;
+        if (chainId !== undefined && byChain[chainId] === undefined) {
+          byChain[chainId] = item.code;
+        }
+      }
+      setServerChainErrors(byChain);
       const rest: string[] = [];
       const byTemplate: Partial<Record<MessageTemplate, ProblemError[]>> = {};
       for (const item of err.errors ?? []) {
@@ -481,6 +504,9 @@ export function RouteForm({
         ) {
           // Shown at the Destination it is about; the focus goes to the section's picker.
           document.getElementById(`${ID}-destinations-add`)?.focus();
+        } else if (item.pointer.startsWith("/chain_entries")) {
+          // Shown at the chain it is about; the focus goes to the section's picker.
+          document.getElementById(`${ID}-chains-add`)?.focus();
         } else if (item.pointer === "/deliver_to_teams") {
           form.setError("deliver_to_teams", { type: item.code, message: item.code });
         } else if (item.pointer === "/run_team_chains") {
@@ -579,6 +605,14 @@ export function RouteForm({
             {route?.owning_team?.name ?? t("teams.owner.none")}
           </span>
         </ReadOnlyField>
+        <RouteChains
+          id={`${ID}-chains`}
+          value={chainRowsOf(base)}
+          known={route?.chains}
+          destinationCount={entriesOf(base).length}
+          deliverToTeams={base.deliver_to_teams ?? false}
+          readOnly
+        />
         <div className="flex flex-col gap-1">
           <span id={`${ID}-group-key-title`} className="text-sm font-medium">
             {t("routes.fields.groupKey")}
@@ -848,6 +882,32 @@ export function RouteForm({
         id={`${ID}-severity`}
         minimumSeverity={form.register("minimum_severity")}
         error={errors.minimum_severity?.message}
+        chains={
+          <Controller
+            control={form.control}
+            name="chain_entries"
+            render={({ field }) => (
+              <RouteChains
+                id={`${ID}-chains`}
+                value={field.value}
+                known={route?.chains}
+                destinationCount={entries.length}
+                deliverToTeams={deliverToTeams}
+                errors={serverChainErrors}
+                onChange={(next) => {
+                  setServerChainErrors((prev) =>
+                    Object.fromEntries(
+                      Object.entries(prev).filter(([chainId]) =>
+                        next.some((e) => e.chain_id === chainId),
+                      ),
+                    ),
+                  );
+                  field.onChange(next);
+                }}
+              />
+            )}
+          />
+        }
         owningTeam={{
           value: owningTeamId,
           current: route?.owning_team,

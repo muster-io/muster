@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // A Team (C-25.FR-3, FR-4, FR-5, FR-9; C-25.AC-10): its name, slug and description, "Which Alerts belong to this Team",
-// "Destinations of the Team", "People", "Identity provider groups" and "Working hours". Each section saves on its own. The page keeps the version of the Team it was read at (and moves it on
+// "Destinations of the Team", "Escalation chain of the Team" (C-32.FR-2), "People", "Identity provider groups" and
+// "Working hours". Each section saves on its own. The page keeps the version of the Team it was read at (and moves it on
 // with each of its own saves), sends it as If-Match with every other field as read, and says so when a newer version
 // arrives, so a save over a newer version shows a conflict instead of overwriting it, as the OIDC settings do.
 // Without teams:write the page only shows the Team.
@@ -33,6 +34,7 @@ import {
 import { DocsLink, PageTitle } from "../components/docs-link";
 import { TeamOnCallNow } from "../components/on-call-now";
 import { TeamAlertRules } from "../components/team-alert-rules";
+import { TeamChains } from "../components/team-chains";
 import { TeamDestinations } from "../components/team-destinations";
 import { TeamForm } from "../components/team-form";
 import { TeamMentionsEditor } from "../components/team-mentions-editor";
@@ -397,6 +399,27 @@ function DestinationsSection({ session, canWrite }: { session: TeamBase; canWrit
   );
 }
 
+/** "Escalation chain of the Team": the chains the Team names with their conditions, saved on their own. */
+function ChainsSection({ session, canWrite }: { session: TeamBase; canWrite: boolean }) {
+  const { t } = useTranslation();
+  const save = useTeamSave(session);
+  return (
+    <Section
+      id="team-chains-section"
+      title={t("teams.chains.title")}
+      docs={
+        <DocsLink to="field.route_chains" kind="learn_more" about={t("docs.fields.routeChains")} />
+      }
+    >
+      <TeamChains
+        team={session.base}
+        canWrite={canWrite}
+        save={(chain_entries) => save.mutateAsync({ chain_entries })}
+      />
+    </Section>
+  );
+}
+
 /** "How to mention the Team": the Team mention of each Connection, saved on its own. */
 function MentionsSection({ session, canWrite }: { session: TeamBase; canWrite: boolean }) {
   const { t } = useTranslation();
@@ -689,6 +712,7 @@ export function TeamDetails({ team, reload }: { team: Team; reload: () => void }
       {canSchedules && <TeamSchedules teamId={team.id} />}
       <AlertRules session={session} canWrite={canWrite} />
       <DestinationsSection session={session} canWrite={canWrite} />
+      <ChainsSection session={session} canWrite={canWrite} />
       <MentionsSection session={session} canWrite={canWrite} />
       <TeamPeople teamId={team.id} canWrite={canWrite} />
       <IdpGroups session={session} canWrite={canWrite} />

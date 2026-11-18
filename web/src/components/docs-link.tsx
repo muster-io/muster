@@ -74,6 +74,7 @@ export type PageDocsKey = Extract<DocsKey, `page.${string}`>;
 const GUIDE_ABOUT = {
   "page.alert_groups": (t) => t("docs.guides.alertGroups"),
   "page.alert_group": (t) => t("docs.guides.alertGroup"),
+  "page.escalation_chain": (t) => t("docs.guides.escalationChain"),
   "page.integrations": (t) => t("docs.guides.integrations"),
   "page.stored_snapshot": (t) => t("docs.guides.storedSnapshots"),
   "page.routes": (t) => t("docs.guides.routes"),

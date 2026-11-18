@@ -21,6 +21,7 @@ files_touched:
   - web/src/components/route-chains.tsx
   - web/src/components/route-chains.test.tsx
   - web/src/components/route-form.tsx
+  - web/src/components/route-severity-and-owner.tsx
   - web/src/components/route-list.tsx
   - web/src/components/team-chains.tsx
   - web/src/components/team-chains.test.tsx
@@ -31,6 +32,8 @@ files_touched:
   - web/src/components/docs-link.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
+  - web/src/test/fixtures/escalation-chains.tsx
+  - web/e2e/support.ts
   - web/e2e/escalation-chains.spec.ts
   - web/e2e/routes.spec.ts
   - web/e2e/teams.spec.ts

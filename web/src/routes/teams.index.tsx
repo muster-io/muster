@@ -126,6 +126,7 @@ function TeamsPage() {
   const { t } = useTranslation();
   const canWrite = useCan("teams:write");
   const canSchedules = useCan("schedules:read");
+  const canChains = useCan("escalation-chains:read");
   return (
     <RequirePermission permission="teams:read">
       <div className="flex flex-col gap-6">
@@ -138,6 +139,11 @@ function TeamsPage() {
             {canSchedules && (
               <Link to="/schedules" className={buttonVariants({ variant: "outline" })}>
                 {t("teams.schedules.all")}
+              </Link>
+            )}
+            {canChains && (
+              <Link to="/escalation-chains" className={buttonVariants({ variant: "outline" })}>
+                {t("teams.chains.allChains")}
               </Link>
             )}
             {canWrite && (
