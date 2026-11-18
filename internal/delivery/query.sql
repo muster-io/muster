@@ -1529,7 +1529,8 @@ WHERE org_id = @org_id AND id = @id;
 -- that left (retired) or was never published there (withheld) is published afresh, Quiet as @loud, held by the active
 -- Storm @held_by_storm_id when one holds the Alert Group, its earlier release by configuration forgotten
 -- (published_by_configuration); one whose final edit still waits keeps its Root message and is edited to the current
--- state instead.
+-- state instead, at once, or when it waits out the backoff of a counted Transient error (attempts > 0) at that time or
+-- a later wait set since (C-11.FR-8).
 -- name: RejoinDelivery :execrows
 UPDATE deliveries
 SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE message_id END,
@@ -1554,48 +1555,70 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     configuration_only       = false,
     held_by_storm_id         = CASE WHEN state IN ('retired', 'withheld') THEN sqlc.narg('held_by_storm_id')::bigint END,
     state                    = 'pending',
-    next_attempt_at          = @now,
+    next_attempt_at          = CASE
+                                   WHEN state = 'pending' AND attempts > 0 THEN greatest(next_attempt_at, @now)
+                                   ELSE @now
+                               END,
     updated_at               = @now
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND destination_id = @destination_id
   AND (state IN ('retired', 'withheld') OR desired_retire);
 
 -- RetireDeliveries gives deliveries of open Alert Groups whose Destination no entry names any more their final edit
 -- (C-11.FR-14, C-26.FR-6): a published Root message is edited once more, and one never published there is withheld.
--- It returns the deliveries it changed; one that ended meanwhile is left as it is.
+-- The final edit is due at once, or, for a delivery that waits out the backoff of a counted Transient error
+-- (attempts > 0), at that time or a later wait set since (C-11.FR-8), as in RetireGroupDeliveries and
+-- RetireDestinationDeliveries. It returns the deliveries it changed; one that ended meanwhile is left as it is.
 -- name: RetireDeliveries :many
 UPDATE deliveries
 SET state            = CASE WHEN published_at IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
     desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
     configuration_only = false,
     held_by_storm_id = NULL,
-    next_attempt_at  = @now,
+    next_attempt_at  = CASE
+                           WHEN state = 'pending' AND attempts > 0
+                                AND NOT (published_at IS NULL AND publication_started_at IS NULL)
+                               THEN greatest(next_attempt_at, @now)
+                           ELSE @now
+                       END,
     updated_at       = @now
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]) AND NOT desired_retire
   AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
 RETURNING id;
 
 -- RetireGroupDeliveries gives the deliveries of an Alert Group in the Destinations other than @keep their final edit:
--- it moved to a Route they are not Destinations of (C-09.FR-19).
+-- it moved to a Route they are not Destinations of (C-09.FR-19). The final edit is due as in RetireDeliveries, so an
+-- Alert Group that moves back and forth does not cut short the backoff of a Transient error.
 -- name: RetireGroupDeliveries :many
 UPDATE deliveries
 SET state            = CASE WHEN published_at IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
     desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
     configuration_only = false,
     held_by_storm_id = NULL,
-    next_attempt_at  = @now,
+    next_attempt_at  = CASE
+                           WHEN state = 'pending' AND attempts > 0
+                                AND NOT (published_at IS NULL AND publication_started_at IS NULL)
+                               THEN greatest(next_attempt_at, @now)
+                           ELSE @now
+                       END,
     updated_at       = @now
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND destination_id <> ALL(@keep::bigint[])
   AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
 RETURNING id;
 
--- RetireDestinationDeliveries gives the deliveries of the open Alert Groups in a deleted Destination their final edit.
+-- RetireDestinationDeliveries gives the deliveries of the open Alert Groups in a deleted Destination their final edit,
+-- due as in RetireDeliveries.
 -- name: RetireDestinationDeliveries :many
 UPDATE deliveries d
 SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
     desired_retire   = NOT (d.published_at IS NULL AND d.publication_started_at IS NULL),
     configuration_only = false,
     held_by_storm_id = NULL,
-    next_attempt_at  = @now,
+    next_attempt_at  = CASE
+                           WHEN d.state = 'pending' AND d.attempts > 0
+                                AND NOT (d.published_at IS NULL AND d.publication_started_at IS NULL)
+                               THEN greatest(d.next_attempt_at, @now)
+                           ELSE @now
+                       END,
     updated_at       = @now
 FROM alert_groups g
 WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND g.org_id = @org_id AND g.id = d.alert_group_id
