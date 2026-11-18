@@ -344,6 +344,10 @@ When every replica was down, the next Leader reads the "alive" mark, records the
 Alert Groups. Timers that came due during the downtime fire once, collapsed. For a while the web UI says Muster is
 recovering.
 
+An Escalation chain that fell behind catches up at once but Pages each person, Team or everyone only once. A step
+that would Page someone again waits, from then, as long as it would have waited on time, and the steps after it wait
+with it. Calls and outgoing webhooks are still made for every step.
+
 ## The session connection
 
 The Leader lock and the `LISTEN` connections need a real session. If the main database connection goes through PgBouncer

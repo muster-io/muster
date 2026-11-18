@@ -3372,6 +3372,9 @@ when no replica has led for 2 minutes; see <a href="../runbooks/MusterNoLeader/"
 <p>When every replica was down, the next Leader reads the "alive" mark, records the period, and adds a Timeline entry to open
 Alert Groups. Timers that came due during the downtime fire once, collapsed. For a while the web UI says Muster is
 recovering.</p>
+<p>An Escalation chain that fell behind catches up at once but Pages each person, Team or everyone only once. A step
+that would Page someone again waits, from then, as long as it would have waited on time, and the steps after it wait
+with it. Calls and outgoing webhooks are still made for every step.</p>
 <h2 id="the-session-connection">The session connection<a class="headerlink" href="#the-session-connection" title="Permanent link">&para;</a></h2>
 <p>The Leader lock and the <code>LISTEN</code> connections need a real session. If the main database connection goes through PgBouncer
 in transaction mode, set <code>MUSTER_DATABASE_SESSION_HOST</code> and <code>MUSTER_DATABASE_SESSION_PORT</code> (in the chart,
