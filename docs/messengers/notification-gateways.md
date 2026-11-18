@@ -128,16 +128,19 @@ Audit log. Deleting a User erases their contacts and codes, and the Audit log th
 
 ## How calls are made
 
-A call is one notification through a gateway to one person, about one or more Alert Groups. Escalation chains and
-Notification rules make calls in a later release; until then `muster dev` queues them with `POST /_dev/gateway-calls`
-on its internal listener.
+A call is one notification through a gateway to one person, about one or more Alert Groups. Escalation chains make
+calls with their steps "Call through a Notification gateway", and Notification rules with their call actions
+([Calls through a Notification gateway](../concepts/escalation-chains.md#calls-through-a-notification-gateway));
+`muster dev` also queues one by hand with `POST /_dev/gateway-calls` on its internal listener.
 
 - The first call to a person through a gateway goes at once. The Pages to the same person through the same gateway
   that come due while a call to them waits, is being retried, or within 60 seconds (`gateway.combine_window`) after
   the previous call ended — accepted or not — go together in the next call, once those 60 seconds have passed.
-- Right before its first attempt, a call drops the Alert Groups that were acknowledged, snoozed or resolved meanwhile;
-  a call left without any is not sent. From its first attempt on, a call keeps its Alert Groups and its text, and
-  takes no more.
+- Right before its first attempt, a call drops the Alert Groups on which the chain or the rule that Paged has stopped
+  — acknowledged, snoozed or resolved meanwhile, or whose chain started over —; a call left without any is not sent.
+  From its first attempt on, a call keeps its Alert Groups and its text, and takes no more.
+- A call that the gateway accepted makes the person an Assignee of the chain that called, as a delivered Mention
+  does.
 - The text names each Alert Group by number, title and Severity level and says how to acknowledge, in the language
   of the person's profile: "Muster: 1 Alert Group needs you. #42 DiskFull, critical. Press 1 to acknowledge." Its
   action data names the call and fits in 64 bytes however many Alert Groups it is about.
@@ -156,7 +159,7 @@ on its internal listener.
   deleted before the call went (`gateway_deleted`) and one that comes due while the gateway is Broken
   (`gateway_broken`). Each of its Alert Groups records
   `page_not_delivered` in its Timeline, of the kind **Escalation chains**, naming the person, the gateway and the
-  reason; outgoing webhooks in events mode receive it.
+  reason, and the chain and the step that called; outgoing webhooks in events mode receive it.
 - A gateway that answers a call with a Fatal error, or whose call used up its retry budget, becomes
   [Broken](#broken-gateways).
 

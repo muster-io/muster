@@ -81,10 +81,11 @@ func (ConnectionLimiter) HoldConnection(ctx context.Context, d DBTX, orgID, conn
 	return delivery.HoldConnection(ctx, d, orgID, connection, until)
 }
 
-// PageRecorder records page_not_delivered on Alert Groups through the dispatcher, in the transaction tx of the end of
-// a call; *groups.Service implements it.
+// PageRecorder records how a call ended for the Pages that joined it and its Alert Groups through the dispatcher, in
+// the transaction tx of the end of the call (PageReached, PageNotDelivered): an Assignee for an accepted call,
+// page_not_delivered for one Not delivered (C-32.FR-12, C-30.FR-7); *groups.Service implements it.
 type PageRecorder interface {
-	PageNotDelivered(ctx context.Context, tx groups.DBTX, ids []int64, p groups.Page) (func(context.Context), error)
+	SettleCall(ctx context.Context, tx groups.DBTX, o groups.CallOutcome) (func(context.Context), error)
 }
 
 // Sender is the gateway sender of one replica for the Organization OrgID.
@@ -254,7 +255,7 @@ func (s *Sender) Round(ctx context.Context) (time.Duration, error) {
 // call is a claimed call that its preparation found due: the row as it was read under its lease, the Alert Groups it
 // is about, and what its attempt sends — its contact, and its text and language — or, when it cannot be sent, the
 // reason it ends Not delivered with: the gateway was deleted or is no Notification gateway any more, or the person
-// has no confirmed contact at it.
+// has no confirmed contact at it; or, when every Alert Group of it stopped, that it ends dropped.
 type call struct {
 	row      dbgen.GetLeasedCallRow
 	groups   []dbgen.ListCallGroupsRow
@@ -263,8 +264,24 @@ type call struct {
 	language string
 	// data is the action data signed at the first attempt, empty for a call that a replica of an earlier version
 	// started, whose attempts are signed with the active key each.
-	data   string
-	unsent string
+	data    string
+	unsent  string
+	dropped bool
+	// firstAttempt is when the call made its first attempt, this one for a call that waited (business clock).
+	firstAttempt time.Time
+}
+
+// outcome is how c ended for its Pages: accepted, Not delivered with reason, or dropped without a reason.
+func (c *call) outcome(accepted bool, reason string) groups.CallOutcome {
+	o := groups.CallOutcome{Call: c.row.ID, Accepted: accepted, Reason: reason, FirstAttempt: c.firstAttempt,
+		User: groups.PagedUser{ID: c.row.UserID, PublicID: c.row.UserPublicID, Name: c.row.UserName,
+			Login: c.row.UserLogin},
+		Gateway: groups.PageGateway{ID: c.row.ConnectionID, PublicID: c.row.ConnectionPublicID,
+			Name: c.row.ConnectionName}}
+	for _, g := range c.groups {
+		o.Groups = append(o.Groups, g.ID)
+	}
+	return o
 }
 
 // key is the Idempotency-Key of the call, the same for each of its attempts.
@@ -273,16 +290,14 @@ func (c call) key() string { return "calls/" + c.row.PublicID }
 // attempt prepares the claimed call r and, when it is due, sends it and records the outcome; a failure is logged and
 // the call is attempted again once its lease runs out.
 func (s *Sender) attempt(ctx context.Context, r dbgen.ClaimDueCallsRow) {
-	c, logs, err := s.prepare(ctx, r)
+	c, err := s.prepare(ctx, r)
 	switch {
-	case err != nil:
-	case c == nil:
-		logs.run(ctx)
+	case err != nil, c == nil:
+	case c.dropped:
+		err = s.drop(ctx, c)
 	case c.unsent != "":
-		logs.run(ctx)
 		err = s.notDelivered(ctx, c, c.unsent, 0, delivery.Outcome{})
 	default:
-		logs.run(ctx)
 		err = s.send(ctx, c)
 	}
 	if err != nil && ctx.Err() == nil {
@@ -290,29 +305,20 @@ func (s *Sender) attempt(ctx context.Context, r dbgen.ClaimDueCallsRow) {
 	}
 }
 
-// logs are the lines to log once the transaction that recorded them committed.
-type logs []func(ctx context.Context)
-
-func (l logs) run(ctx context.Context) {
-	for _, f := range l {
-		f(ctx)
-	}
-}
-
 // prepare re-reads the claimed call r in a short transaction, under the person's lock and while its lease is still
-// held, and returns it when it is due to be sent now. Before the first attempt it drops the Alert Groups that stopped
-// and ends a call left without any dropped, unsent; at the first attempt it keeps the person's confirmed contact, the
-// text in the language of their profile and the Alert Groups, and takes no more. A call being retried whose Alert
-// Groups all stopped ends dropped. Without a limiter token of the gateway's Connection the call waits until one is due
+// held, and returns it when it is due to be sent now. Before the first attempt it drops the Alert Groups whose chain
+// or rule stopped, by the stop check of each (ListCallGroups), and returns a call left without any to end dropped,
+// unsent (drop); at the first attempt it keeps the person's confirmed contact, the text in the language of their
+// profile and the Alert Groups, and takes no more. A call being retried whose Alert Groups all stopped is returned to
+// end dropped too. Without a limiter token of the gateway's Connection the call waits until one is due
 // plus SenderTokenMargin, which is no attempt. A call through a gateway deleted meanwhile, or that is no Notification
 // gateway any more, is returned to end Not delivered with gateway_deleted (C-30.FR-9), one through a Broken gateway
 // with gateway_broken (C-30.FR-8), and one to a person without a confirmed contact with no_confirmed_contact. Nothing
 // is returned when the lease ran out or the call ended.
-func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, logs, error) {
+func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, error) {
 	var c *call
-	var after logs
 	err := s.Store.InCallTx(ctx, func(tx DBTX, q CallQueries) error {
-		c, after = nil, nil
+		c = nil
 		if err := s.lockPerson(ctx, q, r.ConnectionID, r.UserID); err != nil {
 			return err
 		}
@@ -330,33 +336,18 @@ func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, 
 			return fmt.Errorf("read the alert groups of the call %s: %w", row.PublicID, err)
 		}
 		now := s.Lease.Clocks.Business.Now().UTC()
-		live := slices.DeleteFunc(slices.Clone(gs), func(g dbgen.ListCallGroupsRow) bool {
-			return StopNotFiring.stopped(g.Status)
-		})
-		if row.State == CallWaiting && len(live) < len(gs) {
-			var ids []int64
-			for _, g := range gs {
-				if !slices.ContainsFunc(live, func(l dbgen.ListCallGroupsRow) bool { return l.ID == g.ID }) {
-					ids = append(ids, g.ID)
-				}
-			}
-			if err := q.DropCallItems(ctx, dbgen.DropCallItemsParams{OrgID: s.OrgID, CallID: row.ID,
-				AlertGroupIds: ids, Now: now}); err != nil {
-				return fmt.Errorf("drop the stopped alert groups of the call %s: %w", row.PublicID, err)
-			}
-		}
+		live := slices.DeleteFunc(slices.Clone(gs), func(g dbgen.ListCallGroupsRow) bool { return g.Stopped })
 		if len(live) == 0 {
 			// Every Alert Group stopped: before the first attempt the call is never sent; a call being retried
-			// ends its retries.
-			ok, err := s.end(ctx, q, row, dbgen.EndCallParams{State: CallDropped}, now)
-			if err != nil || !ok {
+			// ends its retries. The end settles its Pages, which locks their Alert Groups before the person's lock,
+			// in a transaction of its own (drop).
+			c = &call{row: row, groups: gs, dropped: true}
+			return nil
+		}
+		if row.State == CallWaiting && len(live) < len(gs) {
+			if err := s.dropStopped(ctx, q, row, gs, now); err != nil {
 				return err
 			}
-			after = append(after, func(ctx context.Context) {
-				s.Log.Log(ctx, logging.GatewayCallDropped, logging.F("call", row.PublicID),
-					logging.F("connection", row.ConnectionPublicID), logging.F("attempts", row.Attempts))
-			})
-			return nil
 		}
 		// From its first attempt a call keeps its Alert Groups: page_not_delivered names them all.
 		kept := gs
@@ -364,7 +355,11 @@ func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, 
 			kept = live
 		}
 		next := &call{row: row, groups: kept, contact: row.Contact.String, text: row.Text.String,
-			language: row.Language.String, data: row.ActionData.String}
+			language: row.Language.String, data: row.ActionData.String, firstAttempt: row.FirstAttemptAt.Time.UTC()}
+		if row.State == CallWaiting {
+			// This preparation makes the first attempt (StartCall).
+			next.firstAttempt = now
+		}
 		if !row.Contact.Valid {
 			next.unsent = groups.PageNoConfirmedContact
 		}
@@ -428,9 +423,100 @@ func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, 
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return c, after, nil
+	return c, nil
+}
+
+// dropStopped drops from the waiting call row, before its first attempt, those of its Alert Groups gs that stopped.
+func (s *Sender) dropStopped(ctx context.Context, q CallQueries, row dbgen.GetLeasedCallRow,
+	gs []dbgen.ListCallGroupsRow, now time.Time) error {
+	var ids []int64
+	for _, g := range gs {
+		if g.Stopped {
+			ids = append(ids, g.ID)
+		}
+	}
+	if err := q.DropCallItems(ctx, dbgen.DropCallItemsParams{OrgID: s.OrgID, CallID: row.ID, AlertGroupIds: ids,
+		Now: now}); err != nil {
+		return fmt.Errorf("drop the stopped alert groups of the call %s: %w", row.PublicID, err)
+	}
+	return nil
+}
+
+// errChanged is a call whose Alert Groups changed between its preparation and its end: the transaction rolls back
+// and a later round prepares the call again.
+var errChanged = errors.New("the call changed")
+
+// drop ends the call c dropped, unsent, once every one of its Alert Groups stopped (C-30.FR-4): before its first
+// attempt the call is never sent, and a call being retried ends its retries. In one transaction in the lock order of
+// calls.go it settles the Pages that joined it, which end without being made for anyone, locking their Alert Groups
+// first; then it takes the person's lock and the call, and ends it only when its lease is still held and its Alert
+// Groups all stopped still — a Page may have joined it meanwhile —, else nothing changes.
+func (s *Sender) drop(ctx context.Context, c *call) error {
+	o := c.outcome(false, "")
+	o.Groups = nil
+	var recorded func(context.Context)
+	errLost := errors.New("the lease of the call was lost")
+	err := s.Store.InCallTx(ctx, func(tx DBTX, q CallQueries) error {
+		recorded = nil
+		var err error
+		if s.Pages != nil {
+			if recorded, err = s.Pages.SettleCall(ctx, tx, o); err != nil {
+				return fmt.Errorf("settle the pages of the dropped call %s: %w", c.row.PublicID, err)
+			}
+		}
+		if err := s.lockPerson(ctx, q, c.row.ConnectionID, c.row.UserID); err != nil {
+			return err
+		}
+		row, err := q.GetLeasedCall(ctx, dbgen.GetLeasedCallParams{OrgID: s.OrgID, ID: c.row.ID, Owner: s.Lease.Owner,
+			Now: s.Lease.Clocks.Real.Now().UTC()})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errLost
+		}
+		if err != nil {
+			return fmt.Errorf("read the call: %w", err)
+		}
+		gs, err := q.ListCallGroups(ctx, dbgen.ListCallGroupsParams{OrgID: s.OrgID, CallID: row.ID})
+		if err != nil {
+			return fmt.Errorf("read the alert groups of the call %s: %w", row.PublicID, err)
+		}
+		if slices.ContainsFunc(gs, func(g dbgen.ListCallGroupsRow) bool { return !g.Stopped }) {
+			return errChanged
+		}
+		now := s.Lease.Clocks.Business.Now().UTC()
+		if row.State == CallWaiting && len(gs) > 0 {
+			if err := s.dropStopped(ctx, q, row, gs, now); err != nil {
+				return err
+			}
+		}
+		ok, err := s.end(ctx, q, row, dbgen.EndCallParams{State: CallDropped}, now)
+		if err == nil && !ok {
+			return errLost
+		}
+		return err
+	})
+	switch {
+	case errors.Is(err, errLost):
+		return nil
+	case errors.Is(err, errChanged):
+		// The lease is given back, so that the next round prepares the call at once with what joined it.
+		_, err := s.Store.RescheduleCall(ctx, dbgen.RescheduleCallParams{OrgID: s.OrgID, ID: c.row.ID,
+			Owner: s.Lease.Owner, At: s.Lease.Clocks.Business.Now().UTC()})
+		if err != nil {
+			return fmt.Errorf("reschedule the call %s: %w", c.row.PublicID, err)
+		}
+		s.Wake()
+		return nil
+	case err != nil:
+		return err
+	}
+	if recorded != nil {
+		recorded(ctx)
+	}
+	s.Log.Log(ctx, logging.GatewayCallDropped, logging.F("call", c.row.PublicID),
+		logging.F("connection", c.row.ConnectionPublicID), logging.F("attempts", c.row.Attempts))
+	return nil
 }
 
 // lockPerson takes the lock of the calls of the User userID through the gateway connection.
@@ -527,14 +613,7 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 	now := s.Lease.Clocks.Business.Now().UTC()
 	switch out.Kind {
 	case delivery.OutcomeOK:
-		return s.Store.InCallTx(ctx, func(_ DBTX, q CallQueries) error {
-			if err := s.lockPerson(ctx, q, c.row.ConnectionID, c.row.UserID); err != nil {
-				return err
-			}
-			_, err := s.end(ctx, q, c.row, dbgen.EndCallParams{State: CallAccepted, Attempted: 1,
-				NotificationID: nonEmpty(out.MessageID)}, now)
-			return err
-		})
+		return s.accepted(ctx, c, out, now)
 	case delivery.OutcomeRetryAfter:
 		// A wait counts no attempt, but its time counts toward the time budget of delivery.transient_budget: a gateway
 		// that keeps asking to wait ends the call Not delivered, and the Pages waiting behind it go.
@@ -584,6 +663,40 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 	return s.notDelivered(ctx, c, groups.PageCallUnknown, 1, out)
 }
 
+// accepted ends the call c accepted by the gateway's answer out at now, and settles the Pages that joined it: each
+// reaches its person, who becomes an Assignee of its chain, as by a delivered Mention (PageReached, C-32.FR-12). In
+// one transaction in the lock order of calls.go: the dispatcher locks the Alert Groups, then the person's lock and the
+// call are taken. A call whose lease went to another replica meanwhile changes nothing: the transaction rolls back.
+func (s *Sender) accepted(ctx context.Context, c *call, out delivery.Outcome, now time.Time) error {
+	var recorded func(context.Context)
+	errLost := errors.New("the lease of the call was lost")
+	err := s.Store.InCallTx(ctx, func(tx DBTX, q CallQueries) error {
+		recorded = nil
+		var err error
+		if s.Pages != nil {
+			if recorded, err = s.Pages.SettleCall(ctx, tx, c.outcome(true, "")); err != nil {
+				return fmt.Errorf("settle the pages of the call %s: %w", c.row.PublicID, err)
+			}
+		}
+		if err := s.lockPerson(ctx, q, c.row.ConnectionID, c.row.UserID); err != nil {
+			return err
+		}
+		ok, err := s.end(ctx, q, c.row, dbgen.EndCallParams{State: CallAccepted, Attempted: 1,
+			NotificationID: nonEmpty(out.MessageID)}, now)
+		if err == nil && !ok {
+			return errLost
+		}
+		return err
+	})
+	if errors.Is(err, errLost) {
+		return nil
+	}
+	if err == nil && recorded != nil {
+		recorded(ctx)
+	}
+	return err
+}
+
 // breakAfter makes the gateway of the call c Broken with cause and the error of out, once the end of c at ended, which
 // ended with err, was recorded; with an error, or without Broken, it returns err. As the reconciliation does, it
 // breaks nothing when the gateway's last Broken state ended at or after ended, as an end that a probe or a check made
@@ -603,7 +716,8 @@ func (s *Sender) breakAfter(ctx context.Context, c *call, cause string, out deli
 }
 
 // notDelivered ends the call c Not delivered with reason, counting attempted attempts, and records page_not_delivered
-// on each of its Alert Groups naming the person and the gateway, in one transaction in the lock order of calls.go:
+// on each of its Alert Groups naming the person and the gateway — for the Page that joined it, with its chain and its
+// step, leaving the Assignees as they were (PageNotDelivered, C-30.FR-7) —, in one transaction in the lock order of calls.go:
 // the dispatcher locks the Alert Groups, then the person's lock and the call are taken. A call whose lease went to
 // another replica meanwhile changes nothing: the transaction rolls back, page_not_delivered with it.
 func (s *Sender) notDelivered(ctx context.Context, c *call, reason string, attempted int64,
@@ -614,13 +728,7 @@ func (s *Sender) notDelivered(ctx context.Context, c *call, reason string, attem
 // notDeliveredAt is notDelivered with the end of the call at now, on the business clock.
 func (s *Sender) notDeliveredAt(ctx context.Context, c *call, reason string, attempted int64,
 	out delivery.Outcome, now time.Time) error {
-	ids := make([]int64, len(c.groups))
-	for i, g := range c.groups {
-		ids[i] = g.ID
-	}
-	page := groups.Page{Users: []groups.PagedUser{{ID: c.row.UserID, PublicID: c.row.UserPublicID,
-		Name: c.row.UserName, Login: c.row.UserLogin}}, Gateway: &groups.PageGateway{ID: c.row.ConnectionID,
-		PublicID: c.row.ConnectionPublicID, Name: c.row.ConnectionName}, Reason: reason}
+	o := c.outcome(false, reason)
 	p := dbgen.EndCallParams{State: CallNotDelivered, Reason: nonEmpty(reason), Attempted: attempted}
 	if class := callOutcome(out.Kind); out.Kind != "" && out.Kind != delivery.OutcomeOK {
 		p.ErrorClass, p.Error = nonEmpty(class), nonEmpty(string(out.Error))
@@ -639,7 +747,7 @@ func (s *Sender) notDeliveredAt(ctx context.Context, c *call, reason string, att
 			}
 		}
 		var err error
-		if recorded, err = s.Pages.PageNotDelivered(ctx, tx, ids, page); err != nil {
+		if recorded, err = s.Pages.SettleCall(ctx, tx, o); err != nil {
 			return fmt.Errorf("record page_not_delivered of the call %s: %w", c.row.PublicID, err)
 		}
 		if err := s.lockPerson(ctx, q, c.row.ConnectionID, c.row.UserID); err != nil {

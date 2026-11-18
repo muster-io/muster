@@ -667,8 +667,8 @@ func (c *Clock) OffsetSeconds() int64 {
 
 // GatewayCallsPath is where the internal listener serves, in development mode only, the hook that queues calls through
 // a Notification gateway for the live checks (C-30.FR-4): POST {"user_id", "connection_id", "alert_group_ids"} queues
-// a Page of each Alert Group to the User through the gateway, as a Notification rule's call would, until S-157 makes
-// calls.
+// a Page of each Alert Group to the User through the gateway by hand, as a Notification rule's call would, beside the
+// calls that Escalation chains and Notification rules make.
 const GatewayCallsPath = "/_dev/gateway-calls"
 
 // maxDevCallGroups bounds the Alert Groups of one request of the hook.

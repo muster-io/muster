@@ -2648,12 +2648,14 @@ func (probeKeys) VerifyPrefix(keyring.Purpose, string, []byte, []byte) (bool, er
 
 func (probeKeys) KeyIDs() []string { return []string{"k-0123456789abcdef"} }
 
-// probePages records the reasons of page_not_delivered.
+// probePages records the reasons of page_not_delivered of the calls that ended Not delivered.
 type probePages struct{ reasons []string }
 
-func (p *probePages) PageNotDelivered(_ context.Context, _ groups.DBTX, _ []int64, page groups.Page) (
-	func(context.Context), error) {
-	p.reasons = append(p.reasons, page.Reason)
+func (p *probePages) SettleCall(_ context.Context, _ groups.DBTX, o groups.CallOutcome) (func(context.Context),
+	error) {
+	if !o.Accepted && o.Reason != "" {
+		p.reasons = append(p.reasons, o.Reason)
+	}
 	return nil, nil
 }
 

@@ -13,27 +13,46 @@ import (
 )
 
 const addCallItem = `-- name: AddCallItem :exec
-INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at)
-VALUES ($1, $2, $3, $4::timestamptz)
-ON CONFLICT (call_id, alert_group_id) DO UPDATE SET dropped_at = NULL, queued_at = EXCLUDED.queued_at
-WHERE gateway_call_items.org_id = $1 AND gateway_call_items.dropped_at IS NOT NULL
+INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at, escalation_run_id, notification_rule_run_id,
+                                page_id)
+VALUES ($1, $2, $3, $4::timestamptz, $5,
+        $6, $7)
+ON CONFLICT (call_id, alert_group_id) DO UPDATE
+SET dropped_at = NULL,
+    queued_at = CASE WHEN gateway_call_items.dropped_at IS NULL THEN gateway_call_items.queued_at
+                     ELSE EXCLUDED.queued_at END,
+    escalation_run_id = coalesce(EXCLUDED.escalation_run_id, gateway_call_items.escalation_run_id),
+    notification_rule_run_id = CASE WHEN EXCLUDED.escalation_run_id IS NULL
+                                    THEN gateway_call_items.notification_rule_run_id
+                                    ELSE EXCLUDED.notification_rule_run_id END,
+    page_id = coalesce(EXCLUDED.page_id, gateway_call_items.page_id)
+WHERE gateway_call_items.org_id = $1
 `
 
 type AddCallItemParams struct {
-	OrgID        int64
-	CallID       int64
-	AlertGroupID int64
-	Now          time.Time
+	OrgID                 int64
+	CallID                int64
+	AlertGroupID          int64
+	Now                   time.Time
+	EscalationRunID       pgtype.Int8
+	NotificationRuleRunID pgtype.Int8
+	PageID                pgtype.Int8
 }
 
-// AddCallItem adds an Alert Group to a waiting call; one it is about already stays as it is, and one dropped from it
-// while it waited — a preparation that dropped it and then found no limiter token — is queued again.
+// AddCallItem adds an Alert Group to a waiting call with the Page that queued it and the stop check that Page passed:
+// the run of its chain and the rule run of a call action, none for the hook of muster dev. One it is about already
+// takes the Page and the stop check of this later Page, as a chain that started over and Paged again — a later Page of
+// the hook, without them, keeps those of the last Page that had them; one dropped from it while it waited — a
+// preparation that dropped it and then found no limiter token — is queued again.
 func (q *Queries) AddCallItem(ctx context.Context, arg AddCallItemParams) error {
 	_, err := q.db.Exec(ctx, addCallItem,
 		arg.OrgID,
 		arg.CallID,
 		arg.AlertGroupID,
 		arg.Now,
+		arg.EscalationRunID,
+		arg.NotificationRuleRunID,
+		arg.PageID,
 	)
 	return err
 }
@@ -759,6 +778,33 @@ func (q *Queries) GetGateway(ctx context.Context, arg GetGatewayParams) (GetGate
 	return i, err
 }
 
+const getGatewayByID = `-- name: GetGatewayByID :one
+SELECT id, public_id, name
+FROM connections
+WHERE org_id = $1 AND id = $2 AND type = 'bridge' AND deleted_at IS NULL
+  AND bridge_info->'roles' @> '["gateway"]'::jsonb
+`
+
+type GetGatewayByIDParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetGatewayByIDRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// GetGatewayByID reads the Notification gateway by internal id, which is not deleted and still declares the role
+// gateway: the gateway of a call step.
+func (q *Queries) GetGatewayByID(ctx context.Context, arg GetGatewayByIDParams) (GetGatewayByIDRow, error) {
+	row := q.db.QueryRow(ctx, getGatewayByID, arg.OrgID, arg.ID)
+	var i GetGatewayByIDRow
+	err := row.Scan(&i.ID, &i.PublicID, &i.Name)
+	return i, err
+}
+
 const getGatewayState = `-- name: GetGatewayState :one
 SELECT id, (gateway_broken_since IS NOT NULL)::boolean AS broken
 FROM connections
@@ -787,7 +833,8 @@ func (q *Queries) GetGatewayState(ctx context.Context, arg GetGatewayStateParams
 
 const getLeasedCall = `-- name: GetLeasedCall :one
 SELECT g.id, g.public_id, g.connection_id, g.user_id, g.state, g.critical, g.language, g.text, g.attempts,
-       g.first_failed_at, g.action_data, c.public_id AS connection_public_id, c.name AS connection_name,
+       g.first_failed_at, g.first_attempt_at, g.action_data, c.public_id AS connection_public_id,
+       c.name AS connection_name,
        (c.deleted_at IS NULL AND c.type = 'bridge' AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false))::boolean
            AS gateway,
        (c.gateway_broken_since IS NOT NULL OR coalesce(g.next_attempt_at < c.gateway_recovered_at, false))::boolean
@@ -821,6 +868,7 @@ type GetLeasedCallRow struct {
 	Text               pgtype.Text
 	Attempts           int64
 	FirstFailedAt      pgtype.Timestamptz
+	FirstAttemptAt     pgtype.Timestamptz
 	ActionData         pgtype.Text
 	ConnectionPublicID string
 	ConnectionName     string
@@ -860,6 +908,7 @@ func (q *Queries) GetLeasedCall(ctx context.Context, arg GetLeasedCallParams) (G
 		&i.Text,
 		&i.Attempts,
 		&i.FirstFailedAt,
+		&i.FirstAttemptAt,
 		&i.ActionData,
 		&i.ConnectionPublicID,
 		&i.ConnectionName,
@@ -1063,9 +1112,13 @@ func (q *Queries) InsertWaitingCall(ctx context.Context, arg InsertWaitingCallPa
 }
 
 const listCallGroups = `-- name: ListCallGroups :many
-SELECT a.id, a.public_id, a.number, a.title, a.severity_level, a.status
+SELECT a.id, a.public_id, a.number, a.title, a.severity_level, a.status,
+       (a.status <> 'firing' OR coalesce(r.state = 'stopped' OR r.generation <> a.chain_generation, false)
+        OR coalesce(rr.state = 'stopped', false))::boolean AS stopped
 FROM gateway_call_items i
 JOIN alert_groups a ON a.org_id = i.org_id AND a.id = i.alert_group_id
+LEFT JOIN escalation_runs r ON r.org_id = i.org_id AND r.id = i.escalation_run_id
+LEFT JOIN notification_rule_runs rr ON rr.org_id = i.org_id AND rr.id = i.notification_rule_run_id
 WHERE i.org_id = $1 AND i.call_id = $2 AND i.dropped_at IS NULL
 ORDER BY a.number, a.id
 `
@@ -1082,9 +1135,14 @@ type ListCallGroupsRow struct {
 	Title         string
 	SeverityLevel string
 	Status        string
+	Stopped       bool
 }
 
-// ListCallGroups lists the Alert Groups a call is about, without those dropped before its first attempt, by number.
+// ListCallGroups lists the Alert Groups a call is about, without those dropped before its first attempt, by number,
+// each with whether the chain or the rule that Paged has stopped on it (C-30.FR-4), the stop check its item keeps: the
+// Alert Group is no longer firing — acknowledged, snoozed or resolved —; the run of its chain stopped, or is of an
+// earlier start of its chains, which a start-over left as it was when it had run out; or the rule run of a call
+// action stopped.
 func (q *Queries) ListCallGroups(ctx context.Context, arg ListCallGroupsParams) ([]ListCallGroupsRow, error) {
 	rows, err := q.db.Query(ctx, listCallGroups, arg.OrgID, arg.CallID)
 	if err != nil {
@@ -1101,10 +1159,47 @@ func (q *Queries) ListCallGroups(ctx context.Context, arg ListCallGroupsParams) 
 			&i.Title,
 			&i.SeverityLevel,
 			&i.Status,
+			&i.Stopped,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCallableUsers = `-- name: ListCallableUsers :many
+SELECT user_id
+FROM gateway_contacts
+WHERE org_id = $1 AND connection_id = $2 AND user_id = ANY($3::bigint[])
+  AND confirmed_at IS NOT NULL
+ORDER BY user_id
+`
+
+type ListCallableUsersParams struct {
+	OrgID        int64
+	ConnectionID int64
+	UserIds      []int64
+}
+
+// ListCallableUsers lists those of the Users user_ids who have a confirmed contact at the Notification gateway, whom
+// a Page through it may call.
+func (q *Queries) ListCallableUsers(ctx context.Context, arg ListCallableUsersParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listCallableUsers, arg.OrgID, arg.ConnectionID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

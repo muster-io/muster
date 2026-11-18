@@ -76,7 +76,9 @@ const EventAssigneesChanged Event = "assignees_changed"
 // Notification rule, Pages people, a Team or everyone in the chat by Mention — Loud with the Mention paged, of the
 // Timeline kind escalation, a Thread reply in the Threads of its chain's Destinations (C-32.FR-8). Its entry names
 // the people in paged_user_ids, or the Team of a page_team step in team_id and its token in page_everyone, and the
-// importance of a Page of people in page_importance. A Page through a Notification gateway comes with S-157.
+// importance of a Page of people in page_importance. A Page by a call through a Notification gateway (VariantCall,
+// C-30.FR-4) is Quiet, without Mentions, nothing in a messenger: the gateway calls; its entry names the person and
+// the gateway in gateway_connection_id.
 const EventPaged Event = "paged"
 
 // ReachEvents are the lifecycle events by which the Destinations an Alert Group reaches can grow (C-26.FR-4, FR-5): a
@@ -134,7 +136,8 @@ const (
 type Variant string
 
 // The variants of the rows of C-09.FR-22 and C-10.FR-15; VariantAny is an event with a single row. unacknowledged
-// has two: by the Command Unacknowledge, and when its Owner is disabled or deleted.
+// has two: by the Command Unacknowledge, and when its Owner is disabled or deleted. paged has two: by Mention, and by a
+// call through a Notification gateway (VariantCall).
 const (
 	VariantAny           Variant = ""
 	VariantFiring        Variant = "firing"
@@ -144,6 +147,7 @@ const (
 	VariantRemovesNone   Variant = "removes_none"
 	VariantCommand       Variant = "command"
 	VariantOwnerReleased Variant = "owner_released"
+	VariantCall          Variant = "call"
 )
 
 // Row is one row of the lifecycle event table: its event and variant, its Timeline kind, loudness and Mentions.
@@ -198,6 +202,7 @@ var Table = []Row{
 	{EventAutoUnacknowledged, VariantAny, KindStatus, Loud, []Mention{MentionOwner}},
 	{EventNoticesMissed, VariantAny, KindTimers, Loud, nil},
 	{EventPaged, VariantAny, KindEscalation, Loud, []Mention{MentionPaged}},
+	{EventPaged, VariantCall, KindEscalation, Quiet, nil},
 	{EventPageNotDelivered, VariantAny, KindEscalation, Quiet, nil},
 	{EventEscalationStepSkipped, VariantAny, KindEscalation, Quiet, nil},
 	{EventEscalationWebhook, VariantAny, KindEscalation, Quiet, nil},

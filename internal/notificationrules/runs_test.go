@@ -152,20 +152,9 @@ func (f *fakeRunQueries) SaveRuleRun(_ context.Context, arg dbgen.SaveRuleRunPar
 	return nil
 }
 
-// fakeCalls records the calls of the rule runs.
-type fakeCalls struct {
-	calls []string
-	err   error
-}
-
-func (c *fakeCalls) QueueCall(_ context.Context, _ DBTX, _, _ int64, gateway string) error {
-	c.calls = append(c.calls, gateway)
-	return c.err
-}
-
 // runsOver are the runs of the rules over the fake at the manual clock.
-func runsOver(q *fakeRunQueries, c *clock.Manual, calls CallPages) *Runs {
-	r := New(Config{OrgID: 1}).Runs(RunsConfig{Business: c, TimersChannel: "muster_timers", Calls: calls})
+func runsOver(q *fakeRunQueries, c *clock.Manual) *Runs {
+	r := New(Config{OrgID: 1}).Runs(RunsConfig{Business: c, TimersChannel: "muster_timers"})
 	r.queries = func(DBTX) runQueries { return q }
 	return r
 }
@@ -177,7 +166,7 @@ func runsOver(q *fakeRunQueries, c *clock.Manual, calls CallPages) *Runs {
 func TestRuleRuns(t *testing.T) {
 	c := clock.NewManual(runsT0)
 	q := newFakeRunQueries()
-	r := runsOver(q, c, nil)
+	r := runsOver(q, c)
 	normal, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 501, Step: 1, Importance: "normal",
 		Users: []int64{21}})
 	if err != nil {
@@ -243,7 +232,7 @@ func TestRuleRunStops(t *testing.T) {
 			clk := clock.NewManual(runsT0)
 			q := newFakeRunQueries()
 			q.runState = c.runState
-			r := runsOver(q, clk, nil)
+			r := runsOver(q, clk)
 			if _, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 501, Step: 1, Importance: ImportanceImportant,
 				Users: []int64{21}}); err != nil {
 				t.Fatal(err)
@@ -270,7 +259,7 @@ func TestMissedMentions(t *testing.T) {
 		Important: []byte(`[{"kind":"mention"},{"kind":"wait","wait_seconds":300},{"kind":"mention"},` +
 			`{"kind":"wait","wait_seconds":300},{"kind":"mention"},{"kind":"wait","wait_seconds":600},` +
 			`{"kind":"mention"}]`)}
-	r := runsOver(q, c, nil)
+	r := runsOver(q, c)
 	started, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 501, Step: 1, Importance: ImportanceImportant,
 		Users: []int64{21}})
 	if err != nil || started.AgainSeconds != 300 {
@@ -325,7 +314,7 @@ func TestRuleRunsAgain(t *testing.T) {
 			for i, w := range c.waits {
 				q.rules[int64(21+i)] = dbgen.GetRulesRow{State: StateCustom, Normal: rule(w), Important: rule(w)}
 			}
-			started, err := runsOver(q, clock.NewManual(runsT0), nil).Start(t.Context(), nil, Start{Group: 9,
+			started, err := runsOver(q, clock.NewManual(runsT0)).Start(t.Context(), nil, Start{Group: 9,
 				Run: 501, Step: 1, Importance: ImportanceImportant, Users: []int64{21, 22, 23}})
 			if err != nil || len(started.Mentioned) != 3 || started.AgainSeconds != c.want {
 				t.Errorf("%+v %v, want again %d", started, err, c.want)
@@ -337,7 +326,7 @@ func TestRuleRunsAgain(t *testing.T) {
 	q.rules[21] = dbgen.GetRulesRow{State: StateCustom, Normal: []byte(`[{"kind":"mention"}]`),
 		Important: []byte(`[{"kind":"call","gateway_id":"CN0000000000GW"},{"kind":"wait","wait_seconds":300},` +
 			`{"kind":"mention"},{"kind":"wait","wait_seconds":300},{"kind":"mention"}]`)}
-	r := runsOver(q, c, nil)
+	r := runsOver(q, c)
 	if _, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 501, Step: 1, Importance: ImportanceImportant,
 		Users: []int64{21}}); err != nil {
 		t.Fatal(err)
@@ -363,29 +352,52 @@ func mustRule(t *testing.T, raw []byte) []Action {
 	return r
 }
 
-// TestRuleRunCalls: the call actions of a rule go to CallPages, at once and after a wait; without it none is made.
+// TestRuleRunCalls is the call actions of C-31.FR-3 and C-31.AC-6: the calls that come due at the start are returned
+// with their person and rule run, beside the Mentions — an important rule "Call" Mentions and calls at once —, and a
+// call after a wait comes with the Due of its rule run, without a Mention; the calls overdue after an outage are each
+// still made, while the Mentions overdue collapse into one.
 func TestRuleRunCalls(t *testing.T) {
 	c := clock.NewManual(runsT0)
 	q := newFakeRunQueries()
 	q.rules[21] = dbgen.GetRulesRow{State: StateCustom, Normal: []byte(`[{"kind":"call","gateway_id":"CN0000000000G1"},` +
 		`{"kind":"wait","wait_seconds":60},{"kind":"call","gateway_id":"CN0000000000G1"}]`),
-		Important: []byte(`[{"kind":"mention"}]`)}
-	calls := &fakeCalls{}
-	r := runsOver(q, c, calls)
+		Important: []byte(`[{"kind":"call","gateway_id":"CN0000000000G1"},{"kind":"mention"}]`)}
+	r := runsOver(q, c)
 	started, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 501, Step: 1, Importance: "normal",
 		Users: []int64{21}})
-	if err != nil || len(started.Mentioned) != 0 || len(calls.calls) != 1 {
-		t.Fatalf("%+v %v %v", started, err, calls.calls)
+	if err != nil || len(started.Mentioned) != 0 ||
+		!slices.Equal(started.Calls, []Call{{User: 21, RuleRun: 70, Gateway: "CN0000000000G1"}}) {
+		t.Fatalf("%+v %v", started, err)
 	}
 	c.Advance(time.Minute)
-	if due, err := r.Advance(t.Context(), nil, 70, runsT0.Add(time.Minute), true); err != nil || due != nil ||
-		len(calls.calls) != 2 {
-		t.Errorf("%+v %v %v", due, err, calls.calls)
+	due, err := r.Advance(t.Context(), nil, 70, runsT0.Add(time.Minute), true)
+	if err != nil || due == nil || due.Mention || !slices.Equal(due.Calls, []string{"CN0000000000G1"}) ||
+		due.RuleRun != 70 || due.User != 21 {
+		t.Errorf("%+v %v", due, err)
 	}
-	calls.err = errors.New("boom")
-	if _, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 502, Step: 1, Importance: "normal",
-		Users: []int64{21}}); err == nil {
-		t.Error("a failing call: no error")
+	started, err = r.Start(t.Context(), nil, Start{Group: 9, Run: 502, Step: 3, Importance: ImportanceImportant,
+		Users: []int64{21}})
+	if err != nil || !slices.Equal(started.Mentioned, []int64{21}) || len(started.Calls) != 1 ||
+		started.Calls[0].RuleRun != 71 {
+		t.Errorf("important with a call: %+v %v", started, err)
+	}
+
+	q = newFakeRunQueries()
+	q.rules[21] = dbgen.GetRulesRow{State: StateCustom, Normal: []byte(`[{"kind":"mention"},` +
+		`{"kind":"wait","wait_seconds":60},{"kind":"call","gateway_id":"CN0000000000G1"},{"kind":"mention"},` +
+		`{"kind":"wait","wait_seconds":60},{"kind":"call","gateway_id":"CN0000000000G2"},{"kind":"mention"}]`),
+		Important: []byte(`[{"kind":"mention"}]`)}
+	c = clock.NewManual(runsT0)
+	r = runsOver(q, c)
+	if _, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 503, Step: 1, Importance: "normal",
+		Users: []int64{21}}); err != nil {
+		t.Fatal(err)
+	}
+	c.Advance(time.Hour)
+	due, err = r.Advance(t.Context(), nil, 70, runsT0.Add(time.Minute), true)
+	if err != nil || due == nil || !due.Mention ||
+		!slices.Equal(due.Calls, []string{"CN0000000000G1", "CN0000000000G2"}) {
+		t.Errorf("overdue: %+v %v", due, err)
 	}
 }
 
@@ -397,22 +409,22 @@ func TestRuleRunFailures(t *testing.T) {
 		"NotifyRuleTimers"} {
 		q := newFakeRunQueries()
 		q.fail[name] = errBoom
-		if _, err := runsOver(q, clock.NewManual(runsT0), nil).Start(t.Context(), nil, start); !errors.Is(err, errBoom) {
+		if _, err := runsOver(q, clock.NewManual(runsT0)).Start(t.Context(), nil, start); !errors.Is(err, errBoom) {
 			t.Errorf("start %s: %v", name, err)
 		}
 	}
 	q := newFakeRunQueries()
 	q.rules[22] = dbgen.GetRulesRow{Normal: []byte(`{`)}
-	if _, err := runsOver(q, clock.NewManual(runsT0), nil).Start(t.Context(), nil, Start{Users: []int64{22}}); err == nil {
+	if _, err := runsOver(q, clock.NewManual(runsT0)).Start(t.Context(), nil, Start{Users: []int64{22}}); err == nil {
 		t.Error("a broken rule: no error")
 	}
 	q.rules[22] = dbgen.GetRulesRow{Normal: []byte(`[]`), Important: []byte(`{`)}
-	if _, err := runsOver(q, clock.NewManual(runsT0), nil).Start(t.Context(), nil, Start{Users: []int64{22}}); err == nil {
+	if _, err := runsOver(q, clock.NewManual(runsT0)).Start(t.Context(), nil, Start{Users: []int64{22}}); err == nil {
 		t.Error("a broken important rule: no error")
 	}
 	for _, name := range []string{"StopRuleRuns", "DeleteRuleTimers"} {
 		q := newFakeRunQueries()
-		r := runsOver(q, clock.NewManual(runsT0), nil)
+		r := runsOver(q, clock.NewManual(runsT0))
 		if _, err := r.Start(t.Context(), nil, start); err != nil {
 			t.Fatal(err)
 		}
@@ -425,7 +437,7 @@ func TestRuleRunFailures(t *testing.T) {
 		"DeleteRuleTimers", "GetRuleRunGroup"} {
 		clk := clock.NewManual(runsT0)
 		q := newFakeRunQueries()
-		r := runsOver(q, clk, nil)
+		r := runsOver(q, clk)
 		important := Start{Group: 9, Run: 501, Step: 1, Importance: ImportanceImportant, Users: []int64{21}}
 		if name == "UpsertRuleTimer" || name == "NotifyRuleTimers" {
 			q.rules[21] = dbgen.GetRulesRow{Normal: []byte(`[]`), Important: []byte(`[{"kind":"wait","wait_seconds":60},` +
@@ -448,7 +460,7 @@ func TestRuleRunFailures(t *testing.T) {
 		}
 	}
 	q = newFakeRunQueries()
-	r := runsOver(q, clock.NewManual(runsT0), nil)
+	r := runsOver(q, clock.NewManual(runsT0))
 	if _, ok, err := r.Group(t.Context(), nil, 99); ok || err != nil {
 		t.Errorf("a missing rule run: %v %v", ok, err)
 	}

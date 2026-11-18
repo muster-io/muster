@@ -648,6 +648,9 @@ func runPagesOf(r escalation.ChainRun) string {
 			if p.Everyone != "" {
 				b.WriteString("/everyone:" + p.Everyone)
 			}
+			if p.Gateway != nil {
+				b.WriteString("/gw:" + p.Gateway.Name)
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -658,8 +661,9 @@ func runPagesOf(r escalation.ChainRun) string {
 // the run made its Pages by Mention, by the run step they carry — a Page of a step's first Mentions its own, a later
 // Mention of a Notification rule that of its rule run, so on the step that started the rule — with their people,
 // the Team or the word for everyone of a Page of a Team, and their outcome and reason; a Page or a rule run written
-// before migration 0050, without a run step, goes to the latest step of its number made at or before it; a call is no
-// Page of this version's runs; and the Pages of an Alert Group whose details are removed are hidden with its steps.
+// before migration 0050, without a run step, goes to the latest step of its number made at or before it; a call
+// through a Notification gateway is a Page of its step with its gateway; and the Pages of an Alert Group whose details
+// are removed are hidden with its steps.
 func TestIntegrationRunPages(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := setupRuns(t, s)
@@ -719,8 +723,10 @@ func TestIntegrationRunPages(t *testing.T) {
 			var id int64
 			if err := e.d.Pool.QueryRow(ctx, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id,
 				notification_rule_run_id, step_number, kind, team_id, everyone, state, reason, created_at, ended_at,
-				run_step_seq) VALUES ($1, $2, $3, $4::bigint, $5, $6, $7::bigint, $8::text, $9::text, $10::text,
-				$11::timestamptz, CASE WHEN $9::text = 'pending' THEN NULL ELSE $11::timestamptz END, $12::integer)
+				run_step_seq, gateway_connection_id) VALUES ($1, $2, $3, $4::bigint, $5, $6, $7::bigint, $8::text,
+				$9::text, $10::text, $11::timestamptz, CASE WHEN $9::text = 'pending' THEN NULL ELSE $11::timestamptz END,
+				$12::integer, CASE WHEN $6::text = 'call' THEN (SELECT id FROM connections WHERE org_id = $1
+				AND public_id = 'CN0000000000G1') END)
 				RETURNING id`, e.orgID, p.group,
 				p.run, p.rule, p.step, p.kind, p.team, p.everyone, p.state, p.reason, t0.Add(p.at),
 				p.seq).Scan(&id); err != nil {
@@ -777,11 +783,13 @@ func TestIntegrationRunPages(t *testing.T) {
 				cols = append(cols, fmt.Sprintf("%d/%d/%s", row.StepNumber, row.RunStepSeq.Int32, row.StepAt.Sub(t0)))
 			}
 		}
-		if got := strings.Join(cols, " "); got != "1/1/0s 1/0/1m0s 3/3/10m0s 3/3/10m0s 3/3/10m0s 3/3/10m0s 3/0/10m0s" {
+		if got := strings.Join(cols, " "); got !=
+			"1/1/0s 1/1/0s 1/0/1m0s 3/3/10m0s 3/3/10m0s 3/3/10m0s 3/3/10m0s 3/0/10m0s" {
 			t.Errorf("the rows of the pages %s", got)
 		}
 		runs := read()
-		want := "1/made: mention/delivered//petr/vic mention/delivered//petr\n" +
+		// A call through a Notification gateway is a Page of its step too, with its gateway.
+		want := "1/made: mention/delivered//petr/vic call/delivered//petr/gw:gateway mention/delivered//petr\n" +
 			"2/made:\n" +
 			"3/made: mention/pending//petr mention/delivered//team:payments mention/not_delivered//everyone:here " +
 			"mention/not_delivered/no_account_link/petr mention/delivered//petr\n"

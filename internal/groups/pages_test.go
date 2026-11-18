@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -19,11 +20,12 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 )
 
-// fakePage is a pages row with its people.
+// fakePage is a pages row with its people and, for a call, the call it joined.
 type fakePage struct {
 	dbgen.InsertPageParams
 	id    int64
 	users []*fakePageUser
+	call  int64
 }
 
 // fakePageUser is a page_users row.
@@ -41,6 +43,12 @@ type fakePages struct {
 	owningTeams map[int64]int64
 	ruleSeqs    map[int64]int32
 	assignees   []*fakeAssignee
+	// superseded are when a later start of the chains superseded runs, runEnded and ruleEnded when runs and rule runs
+	// ended, and ruleStates the states of rule runs, running when absent.
+	superseded map[int64]time.Time
+	runEnded   map[int64]time.Time
+	ruleEnded  map[int64]time.Time
+	ruleStates map[int64]string
 }
 
 func (p *fakePages) byID(id int64) *fakePage {
@@ -86,10 +94,22 @@ func (f *fakeDB) LockPage(_ context.Context, arg dbgen.LockPageParams) (dbgen.Lo
 	}
 	state := cmp.Or(f.pages.runStates[p.EscalationRunID.Int64], "running")
 	team, ok := f.pages.owningTeams[p.EscalationRunID.Int64]
-	return dbgen.LockPageRow{ID: p.id, AlertGroupID: p.AlertGroupID, State: p.State, StepNumber: p.StepNumber,
+	// A run is of the current start of the chains unless superseded says when a later one began.
+	superseded, ok2 := f.pages.superseded[p.EscalationRunID.Int64]
+	if !ok2 {
+		superseded = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	}
+	ended := func(m map[int64]time.Time, id int64) pgtype.Timestamptz {
+		at, ok := m[id]
+		return pgtype.Timestamptz{Time: at, Valid: ok}
+	}
+	return dbgen.LockPageRow{ID: p.id, AlertGroupID: p.AlertGroupID, Kind: p.Kind, State: p.State, StepNumber: p.StepNumber,
 		Team: p.TeamID.Valid || p.Everyone.Valid, Importance: p.Importance.String, EscalationRunID: p.EscalationRunID,
 		ChainID: pgtype.Int8{Int64: 5, Valid: true}, ChainPublicID: "EC0000000000PA", ChainName: "payments",
-		RunState: state, OwningTeamID: pgtype.Int8{Int64: team, Valid: ok}, RunStepSeq: f.pages.runStep(p)}, nil
+		RunState: state, OwningTeamID: pgtype.Int8{Int64: team, Valid: ok}, RunStepSeq: f.pages.runStep(p),
+		RuleRunState: f.pages.ruleStates[p.NotificationRuleRunID.Int64],
+		RunEndedAt:   ended(f.pages.runEnded, p.EscalationRunID.Int64), RunSupersededAt: superseded,
+		RuleRunEndedAt: ended(f.pages.ruleEnded, p.NotificationRuleRunID.Int64)}, nil
 }
 
 // runStep is the run step of the Page p, as LockPage reads it: that of the rule run of a later Mention of a rule, else
@@ -124,6 +144,37 @@ func (f *fakeDB) ReachPageUsers(_ context.Context, arg dbgen.ReachPageUsersParam
 
 func (f *fakeDB) MissPageUsers(_ context.Context, arg dbgen.MissPageUsersParams) ([]int64, error) {
 	return f.pageUsers("MissPageUsers", arg.PageID, nil, PageNotDelivered, PageRepliesFailed)
+}
+
+func (f *fakeDB) MissCallPageUsers(_ context.Context, arg dbgen.MissCallPageUsersParams) ([]int64, error) {
+	return f.pageUsers("MissCallPageUsers", arg.PageID, nil, PageNotDelivered, arg.Reason.String)
+}
+
+func (f *fakeDB) SetPageCall(_ context.Context, arg dbgen.SetPageCallParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("SetPageCall"); err != nil {
+		return err
+	}
+	if p := f.pages.byID(arg.ID); p != nil && p.Kind == PageKindCall {
+		p.call = arg.GatewayCallID.Int64
+	}
+	return nil
+}
+
+func (f *fakeDB) ListCallPages(_ context.Context, arg dbgen.ListCallPagesParams) ([]dbgen.ListCallPagesRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListCallPages"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListCallPagesRow
+	for _, p := range f.pages.list {
+		if p.call == arg.GatewayCallID.Int64 && p.State == PagePending {
+			out = append(out, dbgen.ListCallPagesRow{ID: p.id, AlertGroupID: p.AlertGroupID})
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeDB) CountPageUsers(_ context.Context, arg dbgen.CountPageUsersParams) (dbgen.CountPageUsersRow, error) {

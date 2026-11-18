@@ -1408,7 +1408,9 @@ every event of that kind in the L2 lifecycle event table — `paged`, `page_not_
 C-32 record their events without a new version; and `timeline_entries_transport_v4_check` with `gateway`, in the same
 three transactions. It added `paged_user_ids` (`users.id` of the people a Page names) and `gateway_connection_id`
 (`connections.id` of the Notification gateway of a call), without foreign keys; the reason of `page_not_delivered` is
-`reason`. The dispatcher records `page_not_delivered` for a call that ended Not delivered ([4.17](#417-notification-gateways)).
+`reason`. The dispatcher records `page_not_delivered` for a call that ended Not delivered ([4.17](#417-notification-gateways)),
+with the run, the chain and the step of its Page from 0051, and the Quiet `paged` of a call step or a call action of a
+rule, its person in `paged_user_ids` and its gateway in `gateway_connection_id`.
 Migration 0047 added `escalation_run_id`, `escalation_chain_id` and `step_number`, the run, the chain and the number of
 the step of an event of an Escalation chain such as `escalation_step_skipped`, whose reason is `reason` and whose
 person, for a skip of a person, is `paged_user_ids` ([4.18](#418-paging)); without foreign keys, as the chain may be
@@ -1986,7 +1988,17 @@ stored `info` declares the role `gateway`; it has no table of its own.
 - **`gateway_call_items`** (migration 0034) — the Alert Groups of a call, primary key `(call_id, alert_group_id)`, with
   `queued_at` and `dropped_at`, set before the first attempt for an Alert Group that stopped, which the call is then not
   about. Deleted with their call and with their Alert Group (`ON DELETE CASCADE`, `gateway_call_items_alert_group_idx`
-  on `(alert_group_id)`).
+  on `(alert_group_id)`). From migration 0051 (C-30.FR-4, C-32.FR-3, C-31.FR-3) an item keeps the Page that queued it,
+  `page_id` (`ON DELETE CASCADE`, `gateway_call_items_page_idx`), and the stop check that Page passed: the run of its
+  chain, `escalation_run_id`, and for a call action of a Notification rule its rule run, `notification_rule_run_id`
+  (both `ON DELETE SET NULL`, `gateway_call_items_run_idx` and `gateway_call_items_rule_run_idx`, partial on not
+  null). The Alert Group has stopped for the item when it is no longer firing, when that run is `stopped` or of an
+  earlier `generation` than the Alert Group's `chain_generation` — a start-over leaves a run that had run out as it
+  was —, or when that rule run is `stopped`; a run that ran out has not stopped, so a call step that is the last step
+  of its chain still calls. An item of an earlier binary, or of the hook of `muster dev`, has none of them and stops
+  only when its Alert Group is no longer firing. When another Page of the same Alert Group joins the call, as after a
+  start-over of its chain, the item takes the Page and the stop check of that latest Page; one dropped is queued
+  again.
 
 ### 4.18 Paging
 
@@ -2083,7 +2095,22 @@ Serves C-31 (from 0.2.0, migration 0037) and C-32 (migration 0046); [ADR-0018](.
   `notification_rule_runs_run_idx` on `(escalation_run_id)` finds the rule runs that the stop of a run stops and serves
   the cascade of its deletion; `notification_rule_runs_group_idx` the cascade of the Alert Group's.
 - **`pages`** (migration 0049, C-32.FR-9, FR-10, FR-19) — a Page by Mention of a step or of a later action of a rule
-  (`kind` `mention`; `call` from S-157): the Alert Group (`ON DELETE CASCADE`), the run of the chain and, for a later
+  (`kind` `mention`), or, from migration 0051, a call through a Notification gateway of a call step or of a call
+  action of a rule (`kind` `call`, C-32.FR-3, C-31.FR-3), which names one person, its gateway in
+  `gateway_connection_id` — exactly for a call (`pages_gateway_check`; Connections are only soft-deleted, so its
+  foreign key never acts) — and the call it joined in `gateway_call_id` (`ON DELETE SET NULL` once the ended call is
+  pruned, `pages_gateway_call_idx` on `(gateway_call_id) WHERE gateway_call_id IS NOT NULL`, which also finds the
+  Pages the end of a call settles). A call is `pending` until its call ends, then `delivered` when the gateway
+  accepted it, `not_delivered` with the reason of the call when it ended Not delivered, and `not_delivered` without a
+  reason, its person still `pending`, when the call was not made for its Alert Group: dropped before its first attempt,
+  or dropped whole, as the chain or the rule that Paged stopped first. The rule run of a call action is named on its
+  Page from the first action on. `pages_reason_v2_check` (0051) adds the reasons of a call to those of a Page by
+  Mention. During the mixed-version window of a rolling update, a call that a replica of a binary before 0051 sends
+  ends without settling its Pages and without the stop checks of its items: those Pages stay `pending` and make no
+  Assignee. And the delivery worker of such a replica, whose `ListEndedPages` does not filter by `kind`, settles the
+  Pages of calls of a 0051 binary as Pages by Mention within a round: it ends them `not_delivered` with the reason
+  `not_delivered`, records a wrong `page_not_delivered`, counts them with the kind `mention`, and an accepted call then
+  makes no Assignee. The fields of a Page by Mention: the Alert Group (`ON DELETE CASCADE`), the run of the chain and, for a later
   Mention, the rule run, the `step_number`, the Team (`team_id`) or the token (`everyone`) of a page_team step
   (`pages_target_check`), the `importance` of a Page of people, the Schedule of a page_on_call step (`ON DELETE SET
   NULL`, `pages_schedule_idx` on `(schedule_id) WHERE schedule_id IS NOT NULL`; a later Mention of a rule reads it
@@ -2094,12 +2121,15 @@ Serves C-31 (from 0.2.0, migration 0037) and C-32 (migration 0046); [ADR-0018](.
   optional `reason` (`pages_ended_check`, `pages_state_reason_check`). `pages_pending_idx` on `(org_id, id) WHERE state =
   'pending'` finds the Pages whose replies the delivery worker settles; `pages_run_idx`, `pages_group_idx` and
   `pages_rule_run_idx` serve "How it went" and the cascades. `groups` writes the Page when its dispatcher records
-  `paged`, and its outcome when delivery reports what the replies did (`SettlePage`). `run_step_seq` (migration 0050)
+  `paged`, and its outcome when delivery reports what the replies did (`SettlePage`) or, for a call, when the gateway
+  sender reports how its call ended (`SettleCall`); delivery settles only Pages by Mention. `run_step_seq` (migration 0050)
   is the `seq` of the run step that made the first Mentions of a step, null on a later Mention of a rule, whose rule
   run carries it, and on a Page of an earlier binary ([4.9](#49-alert-groups-alerts-inside-them-and-the-timeline)).
 - **`page_users`** (migration 0049) — the people a Page names, primary key `(page_id, user_id)`, each with an
   `outcome`, `pending`, `delivered` once a delivered reply mentioned them, or `not_delivered` with its `reason`
   (`no_root_message`, `no_account_link`, `not_delivered`; `page_users_outcome_reason_check`); they go with their Page.
+  The person of a call is `delivered` once the gateway accepted it and `not_delivered` with the reason of the call
+  when it ended Not delivered (`page_users_reason_v2_check`, migration 0051).
 
 The Permissions `escalation-chains:read`, for every Role, and `escalation-chains:write`, for Admins, and their
 allocation are reference data of migration 0046, as in 0025.
@@ -2429,10 +2459,14 @@ by id (the dispatcher's lock, with what its re-render step locks after it), then
 that person's `gateway_calls` by id — the call that ends before the call waiting behind it — then
 `gateway_call_items`, then the gateway's `rate_limit_buckets`. A Page runs in its caller's transaction after the Alert
 Groups that transaction holds, takes the advisory lock and then joins the waiting call or inserts one; a caller takes
-every Alert Group it locks before its first Page. The preparation of an attempt takes the advisory lock, the call,
-drops the stopped items and takes the limiter token, reading the Alert Groups' status unlocked; the end of a call Not
-delivered records `page_not_delivered` through the dispatcher first and then takes the advisory lock and the call, in
-one transaction; every other outcome takes no Alert Group. Explicit locks of `gateway_calls` are `FOR NO KEY UPDATE`,
+every Alert Group it locks before its first Page: the dispatcher's `ChainStep` queues the calls of a step's Pages after
+its dispatches. A transaction that Pages several people takes their advisory locks in the order of the gateway's
+Connection and then the User, so that two steps calling the same people never wait for each other's locks. The preparation of an attempt takes the advisory lock, the call, drops the stopped items and takes the
+limiter token, reading the Alert Groups' status and their runs unlocked; the end of a call — accepted, Not delivered,
+or dropped once every Alert Group of it stopped — settles the Pages that joined it through the dispatcher first
+(`SettleCall`: the Assignees of an accepted call, `page_not_delivered` of one Not delivered) and then takes the
+advisory lock and the call, in one transaction; a drop that then finds an Alert Group firing again rolls back and makes
+the call due at once. Explicit locks of `gateway_calls` are `FOR NO KEY UPDATE`,
 since the foreign-key check of a new item takes `FOR KEY SHARE` on its call. The test
 `TestNotDeliveredAgainstPageLockOrder` (`internal/gateways`) shows the deadlock (40P01) the reversed order makes.
 

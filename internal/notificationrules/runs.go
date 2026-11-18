@@ -20,7 +20,8 @@ import (
 
 // The runs of Notification rules (C-31.FR-3). When a step Pages a person normally or importantly, Muster runs that
 // rule for them as it is at that moment (Effective): a Mention action is a Page by Mention of the step in its chain's
-// Threads, a call action a call through a Notification gateway (CallPages, from S-157), a wait delays the next action.
+// Threads, a call action a call through a Notification gateway, which the runs return (Started.Calls, Due.Calls) and
+// internal/escalation queues through internal/gateways as a Page of the step, a wait delays the next action.
 // The actions with no wait between them come due together, and the first actions of the people one step Pages that
 // come due together are one Page naming them all. A wait is a timers row of the kind notification_rule_action whose
 // subject is the rule run (schema.md §4.10), set by this package's own upsert and never by UpsertTimer, which any
@@ -45,10 +46,12 @@ const (
 	RunStopped = "stopped"
 )
 
-// CallPages queues a call action of a rule run through its Notification gateway for the person on the Alert Group
-// (C-30.FR-4): S-157 implements it; until then a call action is not made.
-type CallPages interface {
-	QueueCall(ctx context.Context, tx DBTX, groupID, userID int64, gatewayID string) error
+// Call is a call action of a rule run that came due: the person, the rule run, and its Notification gateway by
+// public_id (C-31.FR-3, C-30.FR-4).
+type Call struct {
+	User    int64
+	RuleRun int64
+	Gateway string
 }
 
 // runQueries are the queries of the rule runs, in the dispatcher's transaction.
@@ -71,20 +74,17 @@ type Runs struct {
 	clock   clock.Clock
 	channel string
 	queries func(DBTX) runQueries
-	calls   CallPages
 }
 
-// RunsConfig is what the runs need: the business clock, the channel that wakes the timer workers, and the calls of
-// S-157, nil until then.
+// RunsConfig is what the runs need: the business clock and the channel that wakes the timer workers.
 type RunsConfig struct {
 	Business      clock.Clock
 	TimersChannel string
-	Calls         CallPages
 }
 
 // Runs returns the runs of the rules of s.
 func (s *Service) Runs(cfg RunsConfig) *Runs {
-	return &Runs{orgID: s.cfg.OrgID, clock: cfg.Business, channel: cfg.TimersChannel, calls: cfg.Calls,
+	return &Runs{orgID: s.cfg.OrgID, clock: cfg.Business, channel: cfg.TimersChannel,
 		queries: func(d DBTX) runQueries { return dbgen.New(d) }}
 }
 
@@ -102,10 +102,12 @@ type Start struct {
 
 // Started is what the start of the rule runs made at once: the people whose rule Mentioned them at once, in their
 // order, and the wait until their next Mentions when every one of them has a rule whose next Mention follows after
-// the same wait, 0 otherwise: the one Page that names them all says "again in N min" only when it holds for each.
+// the same wait, 0 otherwise: the one Page that names them all says "again in N min" only when it holds for each; and
+// the call actions that came due at once, each a Page of its own.
 type Started struct {
 	Mentioned    []int64
 	AgainSeconds int
+	Calls        []Call
 }
 
 // made is what the actions of a rule run from a position did: how many Mentions it made, the gateways of the calls,
@@ -176,8 +178,8 @@ func actionsOf(s Set, importance string) []Action {
 
 // Start starts the run of each person's rule of the step's importance, in the dispatcher's transaction tx after the
 // lock of the Alert Group (C-31.FR-3): the rule as it is now (Effective), its actions due at once made — the Mentions
-// returned, for one Page of the step naming everyone they Mention, and the calls handed to CallPages — and its timer
-// at the end of its first wait; a rule that ran out is done.
+// returned, for one Page of the step naming everyone they Mention, and the calls returned, each with its rule run —
+// and its timer at the end of its first wait; a rule that ran out is done.
 func (r *Runs) Start(ctx context.Context, tx DBTX, s Start) (Started, error) {
 	q := r.queries(tx)
 	now := r.clock.Now().UTC()
@@ -208,8 +210,8 @@ func (r *Runs) Start(ctx context.Context, tx DBTX, s Start) (Started, error) {
 			}
 			timers = true
 		}
-		if err := r.call(ctx, tx, s.Group, user, m.calls); err != nil {
-			return Started{}, err
+		for _, gw := range m.calls {
+			out.Calls = append(out.Calls, Call{User: user, RuleRun: id, Gateway: gw})
 		}
 		if m.mentions > 0 {
 			if len(out.Mentioned) == 0 {
@@ -226,19 +228,6 @@ func (r *Runs) Start(ctx context.Context, tx DBTX, s Start) (Started, error) {
 		}
 	}
 	return out, nil
-}
-
-// call hands the calls of a person's rule to CallPages; none is made until S-157 wires it.
-func (r *Runs) call(ctx context.Context, tx DBTX, group, user int64, gateways []string) error {
-	if r.calls == nil {
-		return nil
-	}
-	for _, gw := range gateways {
-		if err := r.calls.QueueCall(ctx, tx, group, user, gw); err != nil {
-			return fmt.Errorf("queue the call of user %d: %w", user, err)
-		}
-	}
-	return nil
 }
 
 // StopForGroup stops the rule runs of the Alert Group groupID that still run, and deletes their timers, in the
@@ -278,10 +267,13 @@ type Source struct {
 	TeamID int64  `json:"team_id,omitempty"`
 }
 
-// Due is a Mention of a rule run after a wait that Advance made: the person, the run of the chain with its chain,
-// sources and owning Team, the step with its importance and Schedule, and whether the rule run Mentioned the person
-// before, which makes it a later Mention, "again".
+// Due is what a rule run made after a wait (Advance): the person, the run of the chain with its chain, sources and
+// owning Team, the step with its importance and Schedule; Mention when it made a Mention, and whether the rule run
+// Mentioned the person before, which makes it a later Mention, "again"; and the gateways of the call actions it made,
+// by public_id, each a Page of its own.
 type Due struct {
+	Mention       bool
+	Calls         []string
 	Again         bool
 	RuleRun       int64
 	User          int64
@@ -302,7 +294,8 @@ type Due struct {
 // claimed, so that a second replica firing the same action changes nothing. A rule run whose Alert Group is no longer
 // firing, or whose chain's run stopped, as a replica of an earlier version may leave it, is stopped then. Otherwise it
 // makes the actions due — the overdue Mentions after an outage as one — sets the timer at the next wait, or ends the
-// rule run after its last action, and returns the Mention to Page, nil when it made none.
+// rule run after its last action, and returns the Mention and the calls to Page, each call overdue by then included,
+// nil when it made none.
 func (r *Runs) Advance(ctx context.Context, tx DBTX, id int64, deadline time.Time, firing bool) (*Due, error) {
 	q := r.queries(tx)
 	run, err := q.LockRuleRun(ctx, dbgen.LockRuleRunParams{OrgID: r.orgID, ID: id})
@@ -340,13 +333,11 @@ func (r *Runs) Advance(ctx context.Context, tx DBTX, id int64, deadline time.Tim
 			return nil, fmt.Errorf("wake the timer workers: %w", err)
 		}
 	}
-	if err := r.call(ctx, tx, run.AlertGroupID, run.UserID, m.calls); err != nil {
-		return nil, err
-	}
-	if m.mentions == 0 {
+	if m.mentions == 0 && len(m.calls) == 0 {
 		return nil, nil
 	}
-	d := &Due{RuleRun: run.ID, User: run.UserID, Run: run.EscalationRunID, Chain: run.ChainID,
+	d := &Due{Mention: m.mentions > 0, Calls: m.calls, RuleRun: run.ID, User: run.UserID, Run: run.EscalationRunID,
+		Chain:         run.ChainID,
 		ChainPublicID: run.ChainPublicID, ChainName: run.ChainName, OwningTeam: run.OwningTeamID,
 		Step: int(run.StepNumber), Importance: run.Importance, Schedule: run.ScheduleID,
 		Again: mentionedBefore(actions, int(run.Position))}

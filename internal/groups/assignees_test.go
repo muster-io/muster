@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/groups/dbgen"
+	"github.com/muster-io/muster/internal/metrics"
 )
 
 // fakeAssignee is an alert_group_assignees row.
@@ -629,5 +631,321 @@ func TestAssigneeFailures(t *testing.T) {
 	h.db.fail["ListTimelineChains"] = errBoom
 	if _, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 50}); !errors.Is(err, errBoom) {
 		t.Errorf("timeline names: %v", err)
+	}
+}
+
+// fakeQueue is the queue of calls of the call Pages: it records the Pages it queued, joins each to the call call and
+// counts its log lines.
+type fakeQueue struct {
+	pages  []int64
+	call   int64
+	logged int
+	err    error
+}
+
+func (q *fakeQueue) queue(_ context.Context, _ DBTX, page int64) (int64, func(context.Context), error) {
+	q.pages = append(q.pages, page)
+	return q.call, func(context.Context) { q.logged++ }, q.err
+}
+
+// callStep makes the step of the run runID on g a call of the person through the gateway gatewayID, joined to the
+// call that q gives, and returns the id of its Page.
+func (h *harness) callStep(t *testing.T, g *dbgen.LockGroupsRow, step int, q *fakeQueue, person int64) int64 {
+	t.Helper()
+	p := StepPage{ChainEntry: ChainEntry{Run: runID, Chain: 5, ChainPublicID: "EC0000000000PA", ChainName: "payments",
+		Step: step}, People: []int64{person}, RunStepSeq: step,
+		Call: &StepCall{Gateway: PageGateway{ID: gatewayID, PublicID: "CN00000000GW01", Name: "Gateway"},
+			Queue: q.queue}}
+	if err := h.step(t, g, ChainProgress{Pages: []StepPage{p}}); err != nil {
+		t.Fatal(err)
+	}
+	return h.db.pages.list[len(h.db.pages.list)-1].id
+}
+
+// settleCall reports how a call ended, as the gateway sender does, and runs what it returns.
+func (h *harness) settleCall(t *testing.T, o CallOutcome) {
+	t.Helper()
+	h.clock.Advance(time.Second)
+	after, err := h.svc.SettleCall(t.Context(), nil, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after(t.Context())
+}
+
+// TestAssigneesByCalls is C-32.FR-3, FR-10, FR-12, C-30.FR-4, FR-7 and C-32.AC-11 for the Pages by a call through a
+// Notification gateway: a call step writes a Page of the kind call of one person and records the Quiet paged with the
+// person and the gateway, which writes no Thread reply, and queues the call after its dispatch; a call that the
+// gateway accepted reaches the person, who becomes an Assignee of the chain, replacing those of an earlier step as a
+// delivered Mention does, and counts as delivered; one that ended Not delivered records page_not_delivered with the
+// chain, the step, the gateway and the reason, and leaves the Assignees as they were; a call dropped as its chain
+// stopped, and a Page whose Alert Group a call dropped before its first attempt, end without a record; an Alert Group
+// that a call of the hook of muster dev was about records page_not_delivered without a chain.
+func TestAssigneesByCalls(t *testing.T) {
+	h, g, renders := assigneeHarness(t)
+	h.db.users[owner] = dbgen.ListUserRefsRow{ID: owner, PublicID: "SRAAAAAAAAAAA9", Name: "Alice", Login: "alice",
+		Status: "active"}
+	gw := PageGateway{ID: gatewayID, PublicID: "CN00000000GW01", Name: "Gateway"}
+	user := func(id int64) PagedUser { return PagedUser{ID: id} }
+	step1 := h.page(t, g, runID, 1, 0, owner)
+	h.reach(t, g, step1, owner)
+
+	delivered := metrics.Pages.With("EC0000000000PA", "call", "delivered").Get()
+	notDelivered := metrics.Pages.With("EC0000000000PA", "call", "not_delivered").Get()
+	q := &fakeQueue{call: 501}
+	*renders = nil
+	step2 := h.callStep(t, g, 2, q, bobID)
+	p := h.db.pages.byID(step2)
+	if p.Kind != PageKindCall || p.GatewayConnectionID.Int64 != gatewayID || p.State != PagePending || p.call != 501 ||
+		len(p.users) != 1 || p.users[0].id != bobID || p.users[0].outcome != PagePending || p.RunStepSeq.Int32 != 2 {
+		t.Fatalf("the call page %+v %+v", p, p.users)
+	}
+	if !slices.Equal(q.pages, []int64{step2}) || q.logged != 1 {
+		t.Errorf("queued %v, logged %d", q.pages, q.logged)
+	}
+	var paged *fakeEntry
+	for _, e := range h.entriesOf(g) {
+		if e.Event.String == string(EventPaged) && e.GatewayConnectionID.Valid {
+			paged = e
+		}
+	}
+	if paged == nil || paged.Loudness.String != string(Quiet) || len(paged.Mentions) != 0 ||
+		!slices.Equal(paged.PagedUserIds, []int64{bobID}) || paged.StepNumber.Int32 != 2 ||
+		paged.EscalationRunID.Int64 != runID {
+		t.Fatalf("paged of the call %+v", paged)
+	}
+	if r := *renders; len(r) != 1 || len(r[0].Events) != 1 || r[0].Events[0].Variant != VariantCall ||
+		r[0].Events[0].Loudness != Quiet || r[0].Events[0].Page.Gateway == nil || len(r[0].Events[0].Page.Targets) != 0 {
+		t.Errorf("the rendering of the call %+v", r)
+	}
+
+	// The gateway accepted the call: bob replaces alice, as step 2 is later than step 1.
+	h.settleCall(t, CallOutcome{Call: 501, Accepted: true, Groups: []int64{g.ID}, User: user(bobID), Gateway: gw})
+	if got := h.assignees(g); !slices.Equal(got, []string{"pay:bob"}) {
+		t.Fatalf("after an accepted call: %v", got)
+	}
+	if p.State != PageDelivered || p.users[0].outcome != PageDelivered {
+		t.Errorf("the accepted page %+v %+v", p.InsertPageParams, p.users[0])
+	}
+	if n := metrics.Pages.With("EC0000000000PA", "call", "delivered").Get() - delivered; n != 1 {
+		t.Errorf("%d delivered calls counted", n)
+	}
+	// Settled again, it changes nothing.
+	h.settleCall(t, CallOutcome{Call: 501, Accepted: true, Groups: []int64{g.ID}, User: user(bobID), Gateway: gw})
+
+	// Step 3 calls carol, and the call ends Not delivered: page_not_delivered with the chain and the step, no change
+	// of the Assignees.
+	q.call = 502
+	step3 := h.callStep(t, g, 3, q, carolID)
+	before := len(h.assigneeChanges(t, g))
+	h.settleCall(t, CallOutcome{Call: 502, Reason: PageCallRefused, Groups: []int64{g.ID}, User: user(carolID),
+		Gateway: gw})
+	if got := h.assignees(g); !slices.Equal(got, []string{"pay:bob"}) || len(h.assigneeChanges(t, g)) != before {
+		t.Fatalf("after a call not delivered: %v", got)
+	}
+	var missed *fakeEntry
+	for _, e := range h.entriesOf(g) {
+		if e.Event.String == string(EventPageNotDelivered) {
+			missed = e
+		}
+	}
+	if missed == nil || missed.Reason.String != PageCallRefused || missed.StepNumber.Int32 != 3 ||
+		missed.EscalationRunID.Int64 != runID || missed.GatewayConnectionID.Int64 != gatewayID ||
+		!slices.Equal(missed.PagedUserIds, []int64{carolID}) {
+		t.Fatalf("page_not_delivered %+v", missed)
+	}
+	if p := h.db.pages.byID(step3); p.State != PageNotDelivered || p.Reason.String != PageCallRefused ||
+		p.users[0].reason != PageCallRefused {
+		t.Errorf("the page not delivered %+v %+v", p.InsertPageParams, p.users[0])
+	}
+	if n := metrics.Pages.With("EC0000000000PA", "call", "not_delivered").Get() - notDelivered; n != 1 {
+		t.Errorf("%d calls not delivered counted", n)
+	}
+
+	// A call dropped whole, and a Page whose Alert Group an accepted call dropped before its first attempt, end
+	// without a record.
+	entries := len(h.entriesOf(g))
+	q.call = 503
+	step4 := h.callStep(t, g, 4, q, owner)
+	q.call = 504
+	step5 := h.callStep(t, g, 5, q, carolID)
+	entries += 2
+	h.settleCall(t, CallOutcome{Call: 503, User: user(owner), Gateway: gw})
+	h.settleCall(t, CallOutcome{Call: 504, Accepted: true, User: user(carolID), Gateway: gw})
+	for _, id := range []int64{step4, step5} {
+		if p := h.db.pages.byID(id); p.State != PageNotDelivered || p.Reason.Valid || p.users[0].outcome != PagePending {
+			t.Errorf("the dropped page %d %+v", id, p.InsertPageParams)
+		}
+	}
+	if got := len(h.entriesOf(g)); got != entries || !slices.Equal(h.assignees(g), []string{"pay:bob"}) {
+		t.Errorf("dropped calls recorded %v", h.events(g))
+	}
+	if n := metrics.Pages.With("EC0000000000PA", "call", "not_delivered").Get() - notDelivered; n != 1 {
+		t.Errorf("dropped calls counted: %d", n)
+	}
+
+	// A call of the hook, without a Page, records page_not_delivered without a chain.
+	h.settleCall(t, CallOutcome{Call: 999, Reason: PageCallBudgetUsed, Groups: []int64{g.ID, 4242},
+		User: user(owner), Gateway: gw})
+	last := h.entriesOf(g)[len(h.entriesOf(g))-1]
+	if last.Event.String != string(EventPageNotDelivered) || last.EscalationRunID.Valid ||
+		last.Reason.String != PageCallBudgetUsed {
+		t.Errorf("the hook's call %+v", last.InsertTimelineEntryParams)
+	}
+
+	for _, o := range []CallOutcome{{Call: 1, Reason: "rang_out", User: user(owner)}, {Call: 1}} {
+		if _, err := h.svc.SettleCall(t.Context(), nil, o); err == nil {
+			t.Errorf("%+v was settled", o)
+		}
+	}
+	for _, name := range []string{"ListCallPages", "LockGroups", "LockPage", "ReachPageUsers", "MissCallPageUsers",
+		"EndPage"} {
+		q.call = 600
+		id := h.callStep(t, g, 6, q, bobID)
+		h.db.fail[name] = errBoom
+		o := CallOutcome{Call: 600, Accepted: name != "MissCallPageUsers", Groups: []int64{g.ID}, User: user(bobID),
+			Gateway: gw}
+		if !o.Accepted {
+			o.Reason = PageCallRefused
+		}
+		if _, err := h.svc.SettleCall(t.Context(), nil, o); !errors.Is(err, errBoom) {
+			t.Errorf("%s failing: %v", name, err)
+		}
+		delete(h.db.fail, name)
+		h.db.pages.byID(id).State = PageDelivered
+	}
+}
+
+// TestCallStepFailures: a call names one person and its gateway, and a call whose queue or whose record of the call
+// fails fails the step.
+func TestCallStepFailures(t *testing.T) {
+	h, g, _ := assigneeHarness(t)
+	q := &fakeQueue{call: 501}
+	call := &StepCall{Gateway: PageGateway{ID: gatewayID}, Queue: q.queue}
+	for _, p := range []StepPage{{People: []int64{owner, bobID}, Call: call}, {People: []int64{owner},
+		Call: &StepCall{Gateway: PageGateway{ID: gatewayID}}}, {People: []int64{owner}, Call: &StepCall{Queue: q.queue}}} {
+		p.ChainEntry = ChainEntry{Run: runID, Step: 1}
+		if err := h.step(t, g, ChainProgress{Pages: []StepPage{p}}); err == nil {
+			t.Errorf("%+v was made", p)
+		}
+	}
+	q.err = errBoom
+	if err := h.step(t, g, ChainProgress{Pages: []StepPage{{ChainEntry: ChainEntry{Run: runID, Step: 1},
+		People: []int64{owner}, Call: call}}}); !errors.Is(err, errBoom) {
+		t.Errorf("a failing queue: %v", err)
+	}
+	q.err = nil
+	for _, name := range []string{"SetPageCall", "InsertPage", "InsertPageUser"} {
+		h.db.fail[name] = errBoom
+		if err := h.step(t, g, ChainProgress{Pages: []StepPage{{ChainEntry: ChainEntry{Run: runID, Step: 1},
+			People: []int64{owner}, Call: call}}}); !errors.Is(err, errBoom) {
+			t.Errorf("%s failing: %v", name, err)
+		}
+		delete(h.db.fail, name)
+	}
+	// A person who no longer exists is called by nobody.
+	n := len(h.db.pages.list)
+	if err := h.step(t, g, ChainProgress{Pages: []StepPage{{ChainEntry: ChainEntry{Run: runID, Step: 1},
+		People: []int64{4242}, Call: call}}}); err != nil || len(h.db.pages.list) != n {
+		t.Errorf("a person who is gone: %v", err)
+	}
+	// A person skipped by id alone, as a call skips one without a confirmed contact, is named for the webhooks.
+	var renders []Rendering
+	h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		renders = append(renders, r)
+		return nil
+	})
+	skip := StepSkip{ChainEntry: ChainEntry{Run: runID, Step: 2}, Reason: SkipNoConfirmedContact,
+		Person: &PagedUser{ID: bobID}}
+	if err := h.step(t, g, ChainProgress{Skips: []StepSkip{skip}}); err != nil || len(renders) != 1 ||
+		renders[0].Events[0].Page.Users[0].Login != "bob" || renders[0].Events[0].Reason != SkipNoConfirmedContact {
+		t.Errorf("a skip named by id: %v %+v", err, renders)
+	}
+	h.db.fail["ListUserRefs"] = errBoom
+	if err := h.step(t, g, ChainProgress{Skips: []StepSkip{skip}}); !errors.Is(err, errBoom) {
+		t.Errorf("a failing name: %v", err)
+	}
+}
+
+// TestCallsOfStoppedChains: a Page of the kind call whose own run stopped, whose run a later start of the chains
+// superseded, or whose rule run stopped, at or before the call's first attempt — as the earlier Page of a chain that
+// started over and Paged again into the same call — ends not_delivered without a reason, records nothing and is not
+// counted, whether the call was accepted or ended Not delivered; a Page whose run was acknowledged after the first
+// attempt, during the retries, was called about and is settled like the Page of the current run.
+func TestCallsOfStoppedChains(t *testing.T) {
+	for _, accepted := range []bool{true, false} {
+		h, g, _ := assigneeHarness(t)
+		q := &fakeQueue{call: 501}
+		stopped, older, rule, current, late := h.callStep(t, g, 1, q, bobID), h.callStep(t, g, 2, q, bobID),
+			h.callStep(t, g, 3, q, bobID), h.callStep(t, g, 4, q, bobID), h.callStep(t, g, 5, q, bobID)
+		first := h.clock.Now().Add(time.Minute)
+		h.db.pages.byID(rule).NotificationRuleRunID = pgtype.Int8{Int64: 71, Valid: true}
+		h.db.pages.ruleStates = map[int64]string{71: "stopped"}
+		h.db.pages.ruleEnded = map[int64]time.Time{71: first.Add(-time.Second)}
+		h.db.pages.byID(stopped).EscalationRunID = pgtype.Int8{Int64: devopsRun, Valid: true}
+		h.db.pages.byID(late).EscalationRunID = pgtype.Int8{Int64: 93, Valid: true}
+		h.db.pages.runStates = map[int64]string{devopsRun: "stopped", 93: "stopped"}
+		h.db.pages.runEnded = map[int64]time.Time{devopsRun: first, 93: first.Add(time.Second)}
+		h.db.pages.byID(older).EscalationRunID = pgtype.Int8{Int64: 92, Valid: true}
+		h.db.pages.superseded = map[int64]time.Time{92: first.Add(-time.Minute)}
+		outcome, counted := "delivered", metrics.Pages.With("EC0000000000PA", "call", "delivered")
+		o := CallOutcome{Call: 501, Accepted: true, Groups: []int64{g.ID}, User: PagedUser{ID: bobID},
+			Gateway: PageGateway{ID: gatewayID}, FirstAttempt: first}
+		if !accepted {
+			o.Accepted, o.Reason = false, PageCallRefused
+			outcome, counted = "not_delivered", metrics.Pages.With("EC0000000000PA", "call", "not_delivered")
+		}
+		before := counted.Get()
+		h.settleCall(t, o)
+		for _, id := range []int64{stopped, older, rule} {
+			if p := h.db.pages.byID(id); p.State != PageNotDelivered || p.Reason.Valid {
+				t.Errorf("accepted %t: the page %d of a stopped chain %+v", accepted, id, p.InsertPageParams)
+			}
+		}
+		for _, id := range []int64{current, late} {
+			if p := h.db.pages.byID(id); p.State != outcome {
+				t.Errorf("accepted %t: the page %d that was called about %+v", accepted, id, p.InsertPageParams)
+			}
+		}
+		if n := counted.Get() - before; n != 2 {
+			t.Errorf("accepted %t: %d calls counted", accepted, n)
+		}
+		n := 0
+		for _, e := range h.entriesOf(g) {
+			if e.Event.String == string(EventPageNotDelivered) {
+				n++
+			}
+		}
+		if want := map[bool]int{true: 0, false: 2}[accepted]; n != want {
+			t.Errorf("accepted %t: %d page_not_delivered", accepted, n)
+		}
+	}
+}
+
+// TestCallQueueOrder: the calls of one step are queued by gateway and then person, whatever the order of its Pages,
+// so that two steps calling the same people take their locks in one order.
+func TestCallQueueOrder(t *testing.T) {
+	h, g, _ := assigneeHarness(t)
+	q := &fakeQueue{call: 501}
+	page := func(gateway, person int64) StepPage {
+		return StepPage{ChainEntry: ChainEntry{Run: runID, Step: 1}, People: []int64{person},
+			Call: &StepCall{Gateway: PageGateway{ID: gateway}, Queue: q.queue}}
+	}
+	if err := h.step(t, g, ChainProgress{Pages: []StepPage{page(gatewayID+1, owner), page(gatewayID, carolID),
+		page(gatewayID, bobID), page(gatewayID+1, bobID)}}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, id := range q.pages {
+		p := h.db.pages.byID(id)
+		got = append(got, fmt.Sprintf("%d/%d", p.GatewayConnectionID.Int64, p.users[0].id))
+	}
+	want := []string{fmt.Sprintf("%d/%d", gatewayID, bobID), fmt.Sprintf("%d/%d", gatewayID, carolID),
+		fmt.Sprintf("%d/%d", gatewayID+1, owner), fmt.Sprintf("%d/%d", gatewayID+1, bobID)}
+	if owner > bobID {
+		want[2], want[3] = want[3], want[2]
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("queued %v, want %v", got, want)
 	}
 }

@@ -18,6 +18,23 @@ FROM connections
 WHERE org_id = @org_id AND public_id = @public_id AND type = 'bridge' AND deleted_at IS NULL
   AND bridge_info->'roles' @> '["gateway"]'::jsonb;
 
+-- GetGatewayByID reads the Notification gateway by internal id, which is not deleted and still declares the role
+-- gateway: the gateway of a call step.
+-- name: GetGatewayByID :one
+SELECT id, public_id, name
+FROM connections
+WHERE org_id = @org_id AND id = @id AND type = 'bridge' AND deleted_at IS NULL
+  AND bridge_info->'roles' @> '["gateway"]'::jsonb;
+
+-- ListCallableUsers lists those of the Users user_ids who have a confirmed contact at the Notification gateway, whom
+-- a Page through it may call.
+-- name: ListCallableUsers :many
+SELECT user_id
+FROM gateway_contacts
+WHERE org_id = @org_id AND connection_id = @connection_id AND user_id = ANY(@user_ids::bigint[])
+  AND confirmed_at IS NOT NULL
+ORDER BY user_id;
+
 -- ConfirmedContact reads the confirmed contact of a User at a Notification gateway that is not deleted, the one that
 -- is called.
 -- name: ConfirmedContact :one
@@ -263,13 +280,26 @@ UPDATE gateway_calls
 SET critical = true
 WHERE org_id = @org_id AND id = @id AND state = 'waiting';
 
--- AddCallItem adds an Alert Group to a waiting call; one it is about already stays as it is, and one dropped from it
--- while it waited — a preparation that dropped it and then found no limiter token — is queued again.
+-- AddCallItem adds an Alert Group to a waiting call with the Page that queued it and the stop check that Page passed:
+-- the run of its chain and the rule run of a call action, none for the hook of muster dev. One it is about already
+-- takes the Page and the stop check of this later Page, as a chain that started over and Paged again — a later Page of
+-- the hook, without them, keeps those of the last Page that had them; one dropped from it while it waited — a
+-- preparation that dropped it and then found no limiter token — is queued again.
 -- name: AddCallItem :exec
-INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at)
-VALUES (@org_id, @call_id, @alert_group_id, @now::timestamptz)
-ON CONFLICT (call_id, alert_group_id) DO UPDATE SET dropped_at = NULL, queued_at = EXCLUDED.queued_at
-WHERE gateway_call_items.org_id = @org_id AND gateway_call_items.dropped_at IS NOT NULL;
+INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at, escalation_run_id, notification_rule_run_id,
+                                page_id)
+VALUES (@org_id, @call_id, @alert_group_id, @now::timestamptz, sqlc.narg('escalation_run_id'),
+        sqlc.narg('notification_rule_run_id'), sqlc.narg('page_id'))
+ON CONFLICT (call_id, alert_group_id) DO UPDATE
+SET dropped_at = NULL,
+    queued_at = CASE WHEN gateway_call_items.dropped_at IS NULL THEN gateway_call_items.queued_at
+                     ELSE EXCLUDED.queued_at END,
+    escalation_run_id = coalesce(EXCLUDED.escalation_run_id, gateway_call_items.escalation_run_id),
+    notification_rule_run_id = CASE WHEN EXCLUDED.escalation_run_id IS NULL
+                                    THEN gateway_call_items.notification_rule_run_id
+                                    ELSE EXCLUDED.notification_rule_run_id END,
+    page_id = coalesce(EXCLUDED.page_id, gateway_call_items.page_id)
+WHERE gateway_call_items.org_id = @org_id;
 
 -- NotifyCalls wakes the gateway senders of every replica once the transaction commits.
 -- name: NotifyCalls :exec
@@ -305,7 +335,8 @@ RETURNING c.id, c.public_id, c.connection_id, c.user_id, c.critical,
 -- when the lease ran out or went to another replica, or the call ended.
 -- name: GetLeasedCall :one
 SELECT g.id, g.public_id, g.connection_id, g.user_id, g.state, g.critical, g.language, g.text, g.attempts,
-       g.first_failed_at, g.action_data, c.public_id AS connection_public_id, c.name AS connection_name,
+       g.first_failed_at, g.first_attempt_at, g.action_data, c.public_id AS connection_public_id,
+       c.name AS connection_name,
        (c.deleted_at IS NULL AND c.type = 'bridge' AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false))::boolean
            AS gateway,
        (c.gateway_broken_since IS NOT NULL OR coalesce(g.next_attempt_at < c.gateway_recovered_at, false))::boolean
@@ -320,11 +351,19 @@ WHERE g.org_id = @org_id AND g.id = @id AND g.state IN ('waiting', 'sending') AN
   AND g.lease_until > @now::timestamptz
 FOR NO KEY UPDATE OF g;
 
--- ListCallGroups lists the Alert Groups a call is about, without those dropped before its first attempt, by number.
+-- ListCallGroups lists the Alert Groups a call is about, without those dropped before its first attempt, by number,
+-- each with whether the chain or the rule that Paged has stopped on it (C-30.FR-4), the stop check its item keeps: the
+-- Alert Group is no longer firing — acknowledged, snoozed or resolved —; the run of its chain stopped, or is of an
+-- earlier start of its chains, which a start-over left as it was when it had run out; or the rule run of a call
+-- action stopped.
 -- name: ListCallGroups :many
-SELECT a.id, a.public_id, a.number, a.title, a.severity_level, a.status
+SELECT a.id, a.public_id, a.number, a.title, a.severity_level, a.status,
+       (a.status <> 'firing' OR coalesce(r.state = 'stopped' OR r.generation <> a.chain_generation, false)
+        OR coalesce(rr.state = 'stopped', false))::boolean AS stopped
 FROM gateway_call_items i
 JOIN alert_groups a ON a.org_id = i.org_id AND a.id = i.alert_group_id
+LEFT JOIN escalation_runs r ON r.org_id = i.org_id AND r.id = i.escalation_run_id
+LEFT JOIN notification_rule_runs rr ON rr.org_id = i.org_id AND rr.id = i.notification_rule_run_id
 WHERE i.org_id = @org_id AND i.call_id = @call_id AND i.dropped_at IS NULL
 ORDER BY a.number, a.id;
 

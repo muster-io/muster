@@ -368,6 +368,10 @@ func escalationRunPageOf(p escalation.RunPageView) gen.EscalationRunPage {
 	if p.Everyone != "" {
 		out.Everyone.Set(gen.PageEveryone(p.Everyone))
 	}
+	out.Gateway.SetNull()
+	if g := p.Gateway; g != nil {
+		out.Gateway.Set(gen.EntityRef{Id: g.PublicID, Name: g.Name})
+	}
 	out.Reason.SetNull()
 	if p.Reason != "" {
 		out.Reason.Set(gen.PageNotDeliveredReason(p.Reason))

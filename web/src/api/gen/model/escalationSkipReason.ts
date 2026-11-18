@@ -4,7 +4,7 @@
  */
 
 /**
- * Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
+ * Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`), or for a step "Call through a Notification gateway" or a call action of a Notification rule whose gateway was deleted or is no Notification gateway any more (`gateway_deleted`), or for a person it would call who has no confirmed contact there (`no_confirmed_contact`), with the person in `paged_users` (C-32.FR-14, C-30.FR-9, C-31.FR-3). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
  * @nullable
  */
 export type EscalationSkipReason = typeof EscalationSkipReason[keyof typeof EscalationSkipReason] | null;
@@ -19,4 +19,6 @@ export const EscalationSkipReason = {
   destination_deleted: 'destination_deleted',
   webhook_events_required: 'webhook_events_required',
   no_mention_possible: 'no_mention_possible',
+  gateway_deleted: 'gateway_deleted',
+  no_confirmed_contact: 'no_confirmed_contact',
 } as const;

@@ -4,11 +4,12 @@
  */
 
 /**
- * `mention`, a Page by Mention in the Threads of the chain's Destinations. Later versions add kinds (calls through a Notification gateway); clients show an unknown one as it is.
+ * `mention`, a Page by Mention in the Threads of the chain's Destinations; `call`, a call through a Notification gateway to the confirmed contact of its person (C-30.FR-4), from a step "Call through a Notification gateway" or a call action of a Notification rule. Later versions add kinds; clients show an unknown one as it is.
  */
 export type EscalationRunPageKind = typeof EscalationRunPageKind[keyof typeof EscalationRunPageKind];
 
 
 export const EscalationRunPageKind = {
   mention: 'mention',
+  call: 'call',
 } as const;

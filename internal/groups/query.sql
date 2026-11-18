@@ -1778,18 +1778,42 @@ SELECT id, public_id, name
 FROM connections
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
 
--- InsertPage writes a Page by Mention of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18):
--- pending until its Thread replies end, or ended at once, as not_delivered for no_root_message; the first Mentions of
--- a step carry the seq of its run step.
+-- InsertPage writes a Page of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18): by Mention,
+-- pending until its Thread replies end, or ended at once, as not_delivered for no_root_message; or a call through the
+-- Notification gateway gateway_connection_id, pending until its call ends. The first Mentions of a step and the calls
+-- of a call step carry the seq of its run step.
 -- name: InsertPage :one
 INSERT INTO pages (org_id, alert_group_id, escalation_run_id, notification_rule_run_id, step_number, kind, team_id,
                    everyone, importance, schedule_id, chain_team_id, again_seconds, again, state, reason, created_at,
-                   ended_at, run_step_seq)
+                   ended_at, run_step_seq, gateway_connection_id)
 VALUES (@org_id, @alert_group_id, sqlc.narg('escalation_run_id'), sqlc.narg('notification_rule_run_id'),
-        @step_number, 'mention', sqlc.narg('team_id'), sqlc.narg('everyone'), sqlc.narg('importance'),
+        @step_number, @kind, sqlc.narg('team_id'), sqlc.narg('everyone'), sqlc.narg('importance'),
         sqlc.narg('schedule_id'), sqlc.narg('chain_team_id'), sqlc.narg('again_seconds'), @again, @state,
-        sqlc.narg('reason'), @now, sqlc.narg('ended_at'), sqlc.narg('run_step_seq'))
+        sqlc.narg('reason'), @now, sqlc.narg('ended_at'), sqlc.narg('run_step_seq'),
+        sqlc.narg('gateway_connection_id'))
 RETURNING id;
+
+-- SetPageCall records the call through a Notification gateway that a Page of the kind call joined, whose end settles
+-- it.
+-- name: SetPageCall :exec
+UPDATE pages
+SET gateway_call_id = @gateway_call_id
+WHERE org_id = @org_id AND id = @id AND kind = 'call';
+
+-- ListCallPages lists the pending Pages that joined the call gateway_call_id, with their Alert Groups, in id order.
+-- name: ListCallPages :many
+SELECT id, alert_group_id
+FROM pages
+WHERE org_id = @org_id AND gateway_call_id = @gateway_call_id AND state = 'pending'
+ORDER BY id;
+
+-- MissCallPageUsers marks not_delivered, with the reason of its call, the person of a Page of the kind call still
+-- pending once the call ended Not delivered.
+-- name: MissCallPageUsers :many
+UPDATE page_users
+SET outcome = 'not_delivered', reason = @reason
+WHERE org_id = @org_id AND page_id = @page_id AND outcome = 'pending'
+RETURNING user_id;
 
 -- InsertPageUser writes a person a Page names with their outcome and its reason.
 -- name: InsertPageUser :exec
@@ -1800,13 +1824,20 @@ VALUES (@org_id, @page_id, @user_id, @outcome, sqlc.narg('reason'));
 -- step that made it, the importance of a Page of people, empty for none, the state and the owning Team of the run,
 -- which its Assignees take, and run_step_seq, the run step whose Page it is (C-32.FR-12): that of the rule run of a
 -- later Mention of a rule, which the step that started it made, else the Page's own; null for a Page or a rule run
--- written before migration 0050.
+-- written before migration 0050. The state of the rule run, when the run and the rule run ended and when a later
+-- start of the chains superseded the run — the start of its first run — tell whether the chain or the rule of a call
+-- stopped before the call's first attempt; empty, null and 9999-12-31 for none.
 -- name: LockPage :one
-SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
+SELECT p.id, p.alert_group_id, p.kind, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
        coalesce(p.importance, '')::text AS importance,
        p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
        coalesce(r.chain_name, '')::text AS chain_name, coalesce(r.state, '')::text AS run_state, r.owning_team_id,
-       coalesce(rr.run_step_seq, p.run_step_seq) AS run_step_seq
+       coalesce(rr.run_step_seq, p.run_step_seq) AS run_step_seq,
+       coalesce(rr.state, '')::text AS rule_run_state,
+       r.ended_at AS run_ended_at, rr.ended_at AS rule_run_ended_at,
+       coalesce((SELECT min(n.started_at) FROM escalation_runs n
+                 WHERE n.org_id = r.org_id AND n.alert_group_id = r.alert_group_id
+                   AND n.generation > r.generation), '9999-12-31 00:00:00+00')::timestamptz AS run_superseded_at
 FROM pages p
 LEFT JOIN escalation_runs r ON r.org_id = p.org_id AND r.id = p.escalation_run_id
 LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id

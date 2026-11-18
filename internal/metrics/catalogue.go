@@ -568,8 +568,10 @@ var (
 
 // Pages counts the Pages of Escalation chains once each ended, by chain, kind and outcome (C-32.FR-19): a Page by
 // Mention is delivered once a delivered Thread reply mentioned one of its people — for a Team or everyone in the chat,
-// once one of its replies was delivered — and not delivered otherwise; calls are counted from S-157. A Page whose chain
-// was deleted before it ended is not counted.
+// once one of its replies was delivered — and not delivered otherwise; a call through a Notification gateway is
+// delivered once the gateway accepted it and not delivered once it ended Not delivered; one not made because its
+// chain or rule stopped before the call's first attempt, and every Page of a call dropped whole, before or during its
+// retries, is not counted. A Page whose chain was deleted before it ended is not counted.
 var Pages = newCounter(Definition{
 	Name: "muster_pages_total",
 	Help: "Pages of Escalation chains and Notification rules, one per Page once it ended, by the chain, the kind " +

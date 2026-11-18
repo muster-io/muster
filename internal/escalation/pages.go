@@ -22,7 +22,8 @@ import (
 // its run started, by default, else the first Team that named the chain — by its Team mention, or everyone in the chat
 // by the token, in those of its chain's Destinations whose Connection can mention it, and is skipped with
 // no_mention_possible when none can. Each Page is a groups.StepPage, which the dispatcher records as paged and fans out
-// into Thread replies. A call step and a rule's call actions make no call until S-157.
+// into Thread replies. A call step and the call actions of the rules are Pages by a call through a Notification
+// gateway (calls.go).
 
 // RuleRuns are the runs of the Notification rules: (*notificationrules.Runs).
 type RuleRuns interface {
@@ -38,21 +39,25 @@ type Pages struct {
 	onCalls OnCalls
 	rules   RuleRuns
 	targets groups.PageTargets
+	calls   Calls
 	clock   clock.Clock
 }
 
 // PagesConfig is what the Pages need: the On-call of Schedules, the runs of the Notification rules, where a Page can
-// go — delivery's PageTargets, for a page_team step — and the business clock.
+// go — delivery's PageTargets, for a page_team step —, the queue of calls through Notification gateways, without which
+// nobody is called, and the business clock.
 type PagesConfig struct {
 	OnCalls  OnCalls
 	Rules    RuleRuns
 	Targets  groups.PageTargets
+	Calls    Calls
 	Business clock.Clock
 }
 
 // NewPages returns the Pages of cfg.
 func NewPages(cfg PagesConfig) *Pages {
-	return &Pages{onCalls: cfg.OnCalls, rules: cfg.Rules, targets: cfg.Targets, clock: cfg.Business}
+	return &Pages{onCalls: cfg.OnCalls, rules: cfg.Rules, targets: cfg.Targets, calls: cfg.Calls,
+		clock: cfg.Business}
 }
 
 // pageSources are the sources of a run as the Pages name them.
@@ -113,6 +118,8 @@ func (p *Pages) MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, r
 		people = []int64{seg.User.ID}
 		page.Schedule = step.ScheduleID
 	case KindPagePeople:
+	case KindCall:
+		return p.callStep(ctx, tx, g, page, step, people)
 	default:
 		return StepMade{}, nil
 	}
@@ -124,11 +131,19 @@ func (p *Pages) MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, r
 	if err != nil {
 		return StepMade{}, err
 	}
-	if len(started.Mentioned) == 0 {
-		return StepMade{}, nil
+	page.Importance = step.Importance
+	var made StepMade
+	if len(started.Mentioned) > 0 {
+		mention := page
+		mention.People, mention.AgainSeconds = started.Mentioned, started.AgainSeconds
+		made.Pages = append(made.Pages, mention)
 	}
-	page.People, page.Importance, page.AgainSeconds = started.Mentioned, step.Importance, started.AgainSeconds
-	return StepMade{Pages: []groups.StepPage{page}}, nil
+	for _, c := range started.Calls {
+		if err := p.ruleCall(ctx, tx, g, page, c, &made); err != nil {
+			return StepMade{}, err
+		}
+	}
+	return made, nil
 }
 
 // StopRules stops the rule runs of the Alert Group groupID that still run (StepPages): its chains stopped or started
@@ -152,7 +167,8 @@ type RuleDispatcher interface {
 // through the dispatcher (ChainStep), then lets the rule run make its actions due (notificationrules.Advance), which
 // does nothing for a rule run that no longer runs or whose timer moved, and stops one whose Alert Group is no longer
 // firing. A Mention it made is a Page of the step recorded as paged, "again" when the rule run Mentioned the person
-// before. It returns what to run once tx committed.
+// before, and each call it made a Page of the step by a call, or a skip of the person when its gateway or their
+// contact there is gone (ruleCall). It returns what to run once tx committed.
 func (p *Pages) FireRule(ctx context.Context, d RuleDispatcher, tx groups.DBTX, id int64, deadline time.Time) (
 	func(context.Context), error) {
 	if p.rules == nil {
@@ -174,6 +190,16 @@ func (p *Pages) FireRule(ctx context.Context, d RuleDispatcher, tx groups.DBTX, 
 		for _, s := range due.Sources {
 			page.Sources = append(page.Sources, groups.PageSource{Kind: s.Kind, TeamID: s.TeamID})
 		}
-		return groups.ChainProgress{Pages: []groups.StepPage{page}, Changed: true}, nil
+		var made StepMade
+		if due.Mention {
+			made.Pages = append(made.Pages, page)
+		}
+		for _, gw := range due.Calls {
+			c := notificationrules.Call{User: due.User, RuleRun: due.RuleRun, Gateway: gw}
+			if err := p.ruleCall(ctx, tx, g, page, c, &made); err != nil {
+				return groups.ChainProgress{}, err
+			}
+		}
+		return groups.ChainProgress{Pages: made.Pages, Skips: made.Skips, Changed: true}, nil
 	})
 }

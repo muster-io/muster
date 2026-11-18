@@ -2902,7 +2902,7 @@ func (q *Queries) ListDestinationsByID(ctx context.Context, arg ListDestinations
 const listEndedPages = `-- name: ListEndedPages :many
 SELECT p.id, p.alert_group_id
 FROM pages p
-WHERE p.org_id = $1 AND p.state = 'pending' AND p.id > $2::bigint
+WHERE p.org_id = $1 AND p.state = 'pending' AND p.id > $2::bigint AND p.kind = 'mention'
   AND NOT EXISTS (SELECT 1
                   FROM thread_replies r
                   WHERE r.org_id = p.org_id AND r.page_id = p.id AND r.state IN ('collecting', 'pending'))
@@ -2923,7 +2923,7 @@ type ListEndedPagesRow struct {
 
 // ListEndedPages lists, in id order after @after, the Pages still pending none of whose Thread replies is still to be
 // sent, which the delivery worker settles: their replies were sent, ended Not delivered or were withheld, as when their
-// Destination is Broken (C-32.FR-10).
+// Destination is Broken (C-32.FR-10). A Page of the kind call has no replies: the end of its call settles it.
 func (q *Queries) ListEndedPages(ctx context.Context, arg ListEndedPagesParams) ([]ListEndedPagesRow, error) {
 	rows, err := q.db.Query(ctx, listEndedPages, arg.OrgID, arg.After, arg.Lim)
 	if err != nil {

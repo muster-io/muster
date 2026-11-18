@@ -104,13 +104,14 @@ func TestEscalationChainRunsAPI(t *testing.T) {
 	// The Pages of each step (C-32.AC-17, FR-18): people with their outcome and reason, a Team, a word for everyone,
 	// none for a skipped step.
 	for _, want := range []string{
-		`"pages":[{"everyone":null,"kind":"mention","outcome":"delivered","reason":null,"team":null,` +
+		`"pages":[{"everyone":null,"gateway":null,"kind":"mention","outcome":"delivered","reason":null,"team":null,` +
 			`"users":[{"deactivated":false,"id":"` + bobPublicID + `","login":"petr","name":"Petr"}]},` +
-			`{"everyone":null,"kind":"mention","outcome":"not_delivered","reason":"no_account_link","team":null,` +
-			`"users":[{"deactivated":true,"id":"` + bobPublicID + `","login":"petr","name":"Petr"}]}]`,
-		`"pages":[{"everyone":null,"kind":"mention","outcome":"pending","reason":null,` +
+			`{"everyone":null,"gateway":null,"kind":"mention","outcome":"not_delivered","reason":"no_account_link",` +
+			`"team":null,"users":[{"deactivated":true,"id":"` + bobPublicID + `","login":"petr","name":"Petr"}]}]`,
+		`"pages":[{"everyone":null,"gateway":null,"kind":"mention","outcome":"pending","reason":null,` +
 			`"team":{"deleted":false,"id":"` + teamID + `","name":"Payments","slug":"payments"},"users":[]},` +
-			`{"everyone":"here","kind":"mention","outcome":"delivered","reason":null,"team":null,"users":[]}]`,
+			`{"everyone":"here","gateway":null,"kind":"mention","outcome":"delivered","reason":null,"team":null,` +
+			`"users":[]}]`,
 		`"outcome":"skipped","pages":[]`,
 	} {
 		if !strings.Contains(string(a.body), want) {

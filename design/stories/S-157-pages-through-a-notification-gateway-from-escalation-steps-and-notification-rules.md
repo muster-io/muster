@@ -8,28 +8,50 @@ depends_on: [S-149, S-156, S-168, S-173, S-178]
 covers: [C-32.FR-3, C-32.FR-10, C-32.FR-11, C-32.FR-12, C-32.FR-14, C-32.AC-7, C-30.FR-4, C-30.FR-7, C-30.FR-9, C-31.FR-3, C-31.AC-2, C-31.AC-6]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0044_gateway_pages.up.sql
-  - internal/db/migrations/0044_gateway_pages.down.sql
+  - internal/db/migrations/0051_gateway_pages.up.sql
+  - internal/db/migrations/0051_gateway_pages.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/escalation/calls.go
   - internal/escalation/calls_test.go
   - internal/escalation/engine.go
+  - internal/escalation/pages.go
+  - internal/escalation/pages_test.go
+  - internal/escalation/runs.go
+  - internal/escalation/runs_test.go
+  - internal/escalation/runs_integration_test.go
+  - internal/escalation/query.sql
   - internal/notificationrules/runs.go
   - internal/notificationrules/runs_test.go
   - internal/gateways/calls.go
+  - internal/gateways/calls_test.go
   - internal/gateways/sender.go
+  - internal/gateways/sender_test.go
   - internal/gateways/calls_integration_test.go
   - internal/gateways/query.sql
   - internal/groups/pages.go
-  - internal/groups/assignees.go
+  - internal/groups/pages_test.go
+  - internal/groups/escalation.go
+  - internal/groups/events.go
+  - internal/groups/query.sql
   - internal/groups/assignees_test.go
   - internal/groups/events_test.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/delivery/webhookevents.go
+  - internal/delivery/query.sql
+  - internal/api/escalationchains.go
+  - internal/api/escalationruns_test.go
+  - internal/archlint/secretleak.go
+  - internal/devmode/devmode.go
+  - internal/metrics/catalogue.go
   - internal/runtime/runtime.go
   - test/e2e/gateway_pages_test.go
   - docs/concepts/escalation-chains.md
   - docs/concepts/notification-rules.md
+  - docs/messengers/notification-gateways.md
+  - AGENTS.md
 acceptance:
   - "[C-31.FR-3, C-31.AC-2, C-31.AC-6, C-30.FR-4] An important Page of a person whose rule is \"Call\" Mentions them in the Thread and calls their confirmed contact through the fake gateway at once; a person without a confirmed contact at that gateway gets the Mentions, and the Timeline records the call action skipped with the reason `no_confirmed_contact` (`runs_test.go`, `gateway_pages_test.go`)."
   - "[C-32.FR-3, C-30.FR-4] A `call` step calls the On-call of its Schedule, or each person it names, through its gateway, as a call of the queue of S-148 with combining; each call records the Quiet `paged` (Timeline kind `escalation`, nothing in a messenger) naming the person and the gateway, and writes nothing in any Thread (`calls_test.go`)."
@@ -65,24 +87,31 @@ issue: 446
 - **Spec** (`api/openapi.yaml`): `EscalationSkipReason` gains `gateway_deleted` and `no_confirmed_contact`;
   `EscalationRun.steps[].pages[]` (S-178) gains the `kind` `call` with its `gateway`; `TimelineEscalationEntry` names the
   `gateway` of a call's `paged`.
-- **Schema** (migration `0044_gateway_pages`, expand only; `schema.md` §4.17, §4.18): `gateway_call_items` gains
-  `escalation_run_id` (FK, `ON DELETE SET NULL`), `notification_rule_run_id` (FK, `ON DELETE SET NULL`) and `page_id`
-  (FK `pages`, cascade); `pages` gains `gateway_connection_id`. The down migration drops them.
-- **Packages**: as S-169 and S-155 state them; `escalation` and `notificationrules` import `gateways`, which imports
-  `groups` and `delivery` and none of them.
+- **Schema** (migration `0051_gateway_pages`, expand only; `schema.md` §4.9, §4.17, §4.18, §5): `gateway_call_items`
+  gains `escalation_run_id` (FK, `ON DELETE SET NULL`), `notification_rule_run_id` (FK, `ON DELETE SET NULL`) and
+  `page_id` (FK `pages`, cascade); `pages` gains `gateway_connection_id` (exactly for a call, `pages_gateway_check`)
+  and `gateway_call_id` (FK `gateway_calls`, `ON DELETE SET NULL`), the call the Page joined, whose end settles it;
+  the reason CHECKs of `pages` and `page_users` take the reasons of a call (`_v2`). The down migration drops them.
+- **Packages**: as S-169 and S-155 state them; `escalation` imports `gateways`, which imports `groups` and `delivery`
+  and none of them. `notificationrules` cannot import `gateways` (`gateways` → `groups` → `organization` →
+  `notificationrules`): its runs return the call actions that came due, and `escalation` queues them.
 - **Escalation** (`internal/escalation/calls.go`, `engine.go`): the `call` step through the `StepPages` of S-169 — the
   On-call of its Schedule at the business clock's now or each person it names who may still be Paged; for each, the
-  Command `Page` of the kind `call`, which records the Quiet `paged`, and `gateways.Page` with the run's stop check:
-  the run is still running in the same generation.
-- **Notification rules** (`internal/notificationrules/runs.go`): the `CallPages` of S-155 is wired to `gateways.Page`
-  in the runtime; a call action is a Page of the kind `call` through the
-  action's gateway with the rule run's stop check; skipped with its reason when the gateway is gone or the person has no
-  confirmed contact there.
-- **Gateways** (`internal/gateways/calls.go`, `sender.go`): the stop check of an item is the one its Page passed; an
-  accepted call dispatches the Command `PageReached` to `groups` for its Alert Groups' Pages, and a call that ends
-  Not delivered `PageNotDelivered` with the chain and the step.
-- **Groups** (`internal/groups/pages.go`, `assignees.go`): `paged` of a call (Quiet, kind `escalation`); the Assignees
-  of C-32.FR-12 from accepted calls, like delivered Mentions (S-168).
+  Command `Page` of the kind `call`, which records the Quiet `paged`, and its `groups.StepCall`, which `ChainStep`
+  runs after its dispatches to queue the call through `gateways.Queue` with the run's stop check: the run has not
+  stopped and is of the current start of the chains (a run that ran out has not stopped).
+- **Notification rules** (`internal/notificationrules/runs.go`): the `CallPages` of S-155 gives way to the calls that
+  `Start` and `Advance` return (`Started.Calls`, `Due.Calls`), which `escalation` makes Pages of the kind `call`
+  through the action's gateway with the rule run's stop check, queued through `gateways` that the runtime wires into
+  the Pages; skipped with its reason when the gateway is gone or the person has no confirmed contact there.
+- **Gateways** (`internal/gateways/calls.go`, `sender.go`): the stop check of an item is the one its latest Page
+  passed; the end of every call — accepted, Not delivered or dropped — settles the Pages that joined it through
+  `groups.SettleCall` in the transaction of the end, before the person's lock: the system transitions PageReached for
+  an accepted call and PageNotDelivered, with the chain and the step, for one Not delivered.
+- **Groups** (`internal/groups/pages.go`, `escalation.go`): `paged` of a call (Quiet, kind `escalation`); `SettleCall`,
+  which makes the Assignees of C-32.FR-12 from accepted calls through the `reachAssignees` of S-168, like delivered
+  Mentions, records `page_not_delivered` for calls Not delivered, and ends silently the Pages whose chain or rule
+  stopped at or before the call's first attempt.
 - **Metric**: `muster_pages_total{chain,kind="call",outcome}`, registered by S-155.
 - **Settings**: `gateway.combine_window`, `delivery.transient_budget`.
 - **Log events**: none new; the queue's are S-148's.
@@ -92,10 +121,10 @@ issue: 446
 ## Steps
 
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up.
-2. Write the `CallPages` of steps and the call actions of rules with their skips. Check: `calls_test.go`,
+2. Write the call Pages of steps and the call actions of rules with their skips. Check: `calls_test.go`,
    `runs_test.go`.
 3. Pass the stop checks and the outcomes through the queue; make Assignees of accepted calls. Check:
-   `calls_integration_test.go`, `assignees_test.go`, `events_test.go`.
+   `calls_integration_test.go`, `sender_test.go`, `assignees_test.go`, `events_test.go`.
 4. Write `test/e2e/gateway_pages_test.go` and the documentation. Check: the Verification below; `make docs-check`.
 
 ## Verification
@@ -136,7 +165,29 @@ None.
 - Suggested commit: `feat(escalation): page people through notification gateways from steps and rules`.
 - A call writes nothing in a Thread (C-32.FR-9); the Thread reply of the same step, when there is one, already names the
   person.
-- Migration `0044` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- The migration is `0051`, not the `0044` of the story map: `0045` to `0050` were taken by stories merged earlier,
+  and a story merged out of that order renumbers its migration (S-167's Notes).
+- Corrections of the implementation: `files_touched` gains the files the contract reaches without naming them —
+  `escalation`'s `pages.go`, `runs.go` (the `StepMade` skips of people) and `query.sql` ("How it went" lists calls),
+  `groups`' `escalation.go` (`ChainStep` queues the calls after its dispatches), `events.go` (the Quiet `paged` of a
+  call, `VariantCall`) and `query.sql`, `delivery`'s table row of that `paged`, its settling of Pages by Mention only
+  and its webhook Mentions of Loud Pages only, the handler of "How it went", the probe of lint 5, the fakes and tests
+  of those packages, and the texts that the hook of `muster dev` queues calls "until S-157" (AGENTS.md, the gateway
+  guide, `devmode.go`, the metric's comment); `internal/groups/assignees.go` needs no change, as an accepted call
+  reaches the Assignees through the `reachAssignees` of S-168.
+- A call that the chain or the rule stopped before it was made for its Alert Group ends its Page `not_delivered`
+  without a reason and records nothing: no `page_not_delivered`, no count in `muster_pages_total`. When a later Page
+  of the same Alert Group joins the waiting call, as a chain that started over and Pages again, the item takes the
+  latest Page's stop check (a Page of the hook of `muster dev`, without one, keeps it), and the earlier Page, whose
+  run started over, ends the same way as a stopped one. "Before it was made" means at or before the call's first
+  attempt (`gateway_calls.first_attempt_at`): a Page is not made when its run's `ended_at`, as `stopped`, the start of
+  the first run of a later start of the chains, or its rule run's `ended_at`, as `stopped`, is at or before that
+  attempt; a stop after it, such as an Acknowledge during the retries of a call that another Alert Group keeps going,
+  leaves the Page made and settled. A call dropped whole — every Alert Group of it stopped, before its first attempt
+  or during its retries — leaves all its Pages not made and uncounted. A start-over
+  after the first attempt therefore settles the earlier Page too, since the call was made about it, and the Page of
+  the new run joins the next call. The calls of one step are queued by gateway and person, so
+  that the advisory locks of two steps calling the same people never deadlock.
 
 ## Coverage
 

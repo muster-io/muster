@@ -17,7 +17,7 @@ import type { TimelineLifecycleFields } from './timelineLifecycleFields';
 import type { UserRef } from './userRef';
 
 /**
- * An event of Escalation chains and Pages (C-32), such as `paged` for a Page by Mention, with its people and `importance`, or the `team` or the word for `everyone` of a `page_team` step, `page_not_delivered` for a call through a Notification gateway or a Page by Mention that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
+ * An event of Escalation chains and Pages (C-32), such as `paged` for a Page by Mention, with its people and `importance`, or the `team` or the word for `everyone` of a `page_team` step, `paged` for a call through a Notification gateway, Quiet, with its person and its `gateway` (C-30.FR-4), `page_not_delivered` for a call through a Notification gateway or a Page by Mention that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
  */
 export type TimelineEscalationEntry = TimelineEntryBase & TimelineLifecycleFields & ({
   kind: TimelineEscalationEntryKind;

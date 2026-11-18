@@ -20,6 +20,7 @@ import (
 type fakeRuleRuns struct {
 	starts    []notificationrules.Start
 	mentioned func(ids []int64) []int64
+	calls     func(s notificationrules.Start) []notificationrules.Call
 	again     int
 	stopped   []int64
 	group     int64
@@ -37,6 +38,9 @@ func (f *fakeRuleRuns) Start(_ context.Context, _ notificationrules.DBTX, s noti
 	out := notificationrules.Started{Mentioned: s.Users, AgainSeconds: f.again}
 	if f.mentioned != nil {
 		out.Mentioned = f.mentioned(s.Users)
+	}
+	if f.calls != nil {
+		out.Calls = f.calls(s)
 	}
 	return out, nil
 }
@@ -173,7 +177,7 @@ func TestMakeStep(t *testing.T) {
 func TestFireRule(t *testing.T) {
 	rules := &fakeRuleRuns{group: 9, due: &notificationrules.Due{RuleRun: 70, User: 21, Run: 501, Chain: 1,
 		ChainPublicID: "EC000000000001", ChainName: "devops", OwningTeam: 7, Step: 3, Importance: ImportanceImportant,
-		Schedule: 11, Sources: []notificationrules.Source{{Kind: SourceRoute}}, Again: true}}
+		Schedule: 11, Sources: []notificationrules.Source{{Kind: SourceRoute}}, Again: true, Mention: true}}
 	p := NewPages(PagesConfig{Rules: rules, Business: clock.NewManual(t0)})
 	d := &fakeDispatcher{group: &groups.Group{ID: 9, Status: groups.StatusFiring}}
 	after, err := p.FireRule(t.Context(), d, nil, 70, t0)
