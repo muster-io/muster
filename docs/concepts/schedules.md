@@ -239,7 +239,14 @@ A Mention of the On-call notifies them only where it reaches them. For each segm
 On-call, `getScheduleOnCall` lists a warning `unreachable` for each [Destination of their
 Team](routing-to-teams.md) that a Mention of the person cannot reach, whatever its Severity condition, with the
 Destination, its `messenger` and the `reason`; `getOnCallNow` lists the same, for the On-call now, in `unreachable`.
-The warning changes nothing that Muster sends: it says ahead of time what a Mention would not do.
+The warnings also cover the Destinations of the [Escalation chains](escalation-chains.md) that Page the Schedule: a
+chain with a step that Pages its On-call writes in the Threads of the Destinations of the Routes and Teams that name it
+([Where chains Page](escalation-chains.md#where-chains-page)), so each of those Destinations is warned about too, with
+the same reasons, whatever its Severity condition; a Destination that the Team and a chain both name is listed once. A
+step that calls the On-call through a Notification gateway writes nothing in a Thread and adds no Destination. When
+none of a Team's Destinations has the Root message of an Alert Group, the Team's chain Pages at run time in the
+Route's Destinations instead; which Route that is depends on the Alert Group, so the warnings do not cover that
+fallback. The warning changes nothing that Muster sends: it says ahead of time what a Mention would not do.
 
 `no_account_link`
 :   The person has no Account link where the Destination posts: a Mattermost, Slack or Bridge Destination needs a link
@@ -267,9 +274,12 @@ The warning changes nothing that Muster sends: it says ahead of time what a Ment
 The check of a Telegram Destination — on save, on **Check** and in `muster doctor`, which prints the people it found
 outside the group without recording them — asks Telegram, with `getChatMember`, about every active person of the Teams
 that name the Destination who has a Telegram Account link and is not a Viewer (a disabled User or a Viewer is never
-On-call), and lists those outside the group in its item **Members of the discussion group**, which always passes. It
-makes one request per person, one after the other, limited by the Connection's limiter, not by the Destination's, as
-it sends nothing to the chat; on save and on **Check** it stops after 10 seconds
+On-call), and lists those outside the group in its item **Members of the discussion group**, which always passes. On
+save and on **Check** it also asks about the people with a Telegram Account link whom a chain Paging in the
+Destination can Page: those in a Rotation layer of a Schedule whose On-call a step of the chain Pages by Mention (a
+`page_on_call` step; a step that calls the On-call does not count), or with an Override of it that has not ended. It
+makes one request per person, once for a person of both, one after the other, limited by the Connection's limiter,
+not by the Destination's, as it sends nothing to the chat; on save and on **Check** it stops after 10 seconds
 (`destination.telegram.group_people_budget`), and `muster doctor` paces its requests at the Connection's limiter and
 stops after as long. A Team with hundreds of linked people may so leave some unasked.
 

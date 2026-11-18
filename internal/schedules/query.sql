@@ -410,6 +410,42 @@ LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
 WHERE td.org_id = @org_id AND td.team_id = ANY(@team_ids::bigint[]) AND d.deleted_at IS NULL
 ORDER BY td.team_id, lower(d.name), d.id;
 
+-- ListChainReach reads, for each of the Schedules @schedule_ids, the Destinations that are not deleted in whose
+-- Threads the Escalation chains that Page it write (C-27.FR-8, C-32.FR-8): those of the Routes and of the Teams that
+-- are not deleted and name a chain with a page_on_call step on the Schedule — a Route's chain Pages in the Route's
+-- Destinations and a Team's chain in the Team's, every condition included, as delivery.PageTargets finds them for a
+-- run —, each once by Schedule and the Destination's name, with what ListTeamReach reads of each. A call of the
+-- On-call through a Notification gateway writes nothing in a Thread (C-32.FR-9), so its step adds no Destination.
+-- schedules imports no package of Paging, so it reads the chains itself.
+-- name: ListChainReach :many
+SELECT x.schedule_id::bigint AS schedule_id, d.id, d.public_id, d.name, d.type, d.health, d.broken_since,
+       d.broken_reason, d.connection_id,
+       coalesce(d.webhook_mode, '')::text AS webhook_mode,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean
+           AS reply_in_thread,
+       coalesce(c.bridge_info -> 'capabilities' -> 'native_mentions' = 'true'::jsonb, false)::boolean
+           AS native_mentions,
+       coalesce(d.telegram_absent_user_ids, '{}')::bigint[] AS telegram_absent_user_ids
+FROM (SELECT st.schedule_id, rd.destination_id
+      FROM escalation_steps st
+      JOIN route_escalation_chains rc ON rc.org_id = st.org_id AND rc.chain_id = st.chain_id
+      JOIN routes r ON r.org_id = rc.org_id AND r.id = rc.route_id
+      JOIN route_destinations rd ON rd.org_id = rc.org_id AND rd.route_id = rc.route_id
+      WHERE st.org_id = @org_id AND st.schedule_id = ANY(@schedule_ids::bigint[])
+        AND st.kind = 'page_on_call' AND r.deleted_at IS NULL
+      UNION
+      SELECT st.schedule_id, td.destination_id
+      FROM escalation_steps st
+      JOIN team_escalation_chains tc ON tc.org_id = st.org_id AND tc.chain_id = st.chain_id
+      JOIN teams t ON t.org_id = tc.org_id AND t.id = tc.team_id
+      JOIN team_destinations td ON td.org_id = tc.org_id AND td.team_id = tc.team_id
+      WHERE st.org_id = @org_id AND st.schedule_id = ANY(@schedule_ids::bigint[])
+        AND st.kind = 'page_on_call' AND t.deleted_at IS NULL) x
+JOIN destinations d ON d.org_id = @org_id AND d.id = x.destination_id
+LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.deleted_at IS NULL
+ORDER BY x.schedule_id, lower(d.name), d.id;
+
 -- ListAccountLinkSpaces reads the Identity spaces in which the Users @user_ids have an Account link (C-27.FR-8).
 -- name: ListAccountLinkSpaces :many
 SELECT user_id, identity_space

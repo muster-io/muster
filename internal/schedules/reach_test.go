@@ -24,6 +24,11 @@ func (s *fakeStore) ListTeamReach(context.Context, dbgen.ListTeamReachParams) ([
 	return nil, s.err("ListTeamReach")
 }
 
+// ListChainReach of the fake store has no chain that Pages a Schedule; reachStore gives their Destinations.
+func (s *fakeStore) ListChainReach(context.Context, dbgen.ListChainReachParams) ([]dbgen.ListChainReachRow, error) {
+	return nil, s.err("ListChainReach")
+}
+
 // ListAccountLinkSpaces of the fake store has no Account links; reachStore gives them.
 func (s *fakeStore) ListAccountLinkSpaces(context.Context, dbgen.ListAccountLinkSpacesParams) (
 	[]dbgen.ListAccountLinkSpacesRow, error) {
@@ -40,9 +45,26 @@ func (s *fakeStore) ListGatewayReachUsers(context.Context, dbgen.ListGatewayReac
 type reachStore struct {
 	*fakeStore
 	dests   []dbgen.ListTeamReachRow
+	chains  []dbgen.ListChainReachRow
 	links   []dbgen.ListAccountLinkSpacesRow
 	gateway []int64
 	asked   []dbgen.ListTeamReachParams
+	chained []dbgen.ListChainReachParams
+}
+
+func (s *reachStore) ListChainReach(_ context.Context, arg dbgen.ListChainReachParams) ([]dbgen.ListChainReachRow,
+	error) {
+	if err := s.err("ListChainReach"); err != nil {
+		return nil, err
+	}
+	s.chained = append(s.chained, arg)
+	var out []dbgen.ListChainReachRow
+	for _, d := range s.chains {
+		if arg.OrgID == orgID && slices.Contains(arg.ScheduleIds, d.ScheduleID) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 func (s *reachStore) ListGatewayReachUsers(_ context.Context, arg dbgen.ListGatewayReachUsersParams) ([]int64, error) {
@@ -295,7 +317,8 @@ func TestOnCallUnreachable(t *testing.T) {
 		t.Errorf("a Team without Destinations = %+v, %v", unreachableOf(res), err)
 	}
 
-	for _, name := range []string{"ListTeamReach", "ListAccountLinkSpaces", "ListGatewayReachUsers"} {
+	for _, name := range []string{"ListTeamReach", "ListChainReach", "ListAccountLinkSpaces",
+		"ListGatewayReachUsers"} {
 		store.fail[name] = errBoom
 		if _, err := svc.OnCall(ctx, sc.PublicID, nil, nil); !errors.Is(err, errBoom) ||
 			!strings.Contains(err.Error(), "read the") {
@@ -305,11 +328,123 @@ func TestOnCallUnreachable(t *testing.T) {
 	}
 }
 
+// chainDests are the Destinations of the chains that Page the Schedule schedule, as ListChainReach reads them: from
+// the chain of the Route "Infrastructure", infra-notice through the Mattermost Connection, Broken; from the chain of
+// the Team ops, tg-ops, a Telegram channel whose check saw olga outside its discussion group; and payments-notice,
+// which payments names too and a chain Pages in as well. other is a Destination of a chain that Pages another
+// Schedule.
+func chainDests(schedule int64) []dbgen.ListChainReachRow {
+	return []dbgen.ListChainReachRow{
+		{ScheduleID: schedule, ID: 60, PublicID: "DS000000000IN1", Name: "infra-notice", Type: "mattermost",
+			Health: "broken", BrokenSince: pgtype.Timestamptz{Time: t0, Valid: true},
+			BrokenReason: pgtype.Text{String: "404", Valid: true}, ConnectionID: conn(connMattermost)},
+		{ScheduleID: schedule, ID: 50, PublicID: "DS000000000PN1", Name: "payments-notice", Type: "mattermost",
+			Health: "healthy", ConnectionID: conn(connMattermost)},
+		{ScheduleID: schedule, ID: 61, PublicID: "DS00000000TGOP", Name: "tg-ops", Type: "telegram", Health: "healthy",
+			ConnectionID: conn(connTelegram), TelegramAbsentUserIds: []int64{olga.ID}},
+		{ScheduleID: schedule + 1000, ID: 62, PublicID: "DS00000000OTHR", Name: "other", Type: "mattermost",
+			Health: "healthy", ConnectionID: conn(connMattermost)},
+	}
+}
+
+// TestOnCallUnreachableChains is C-27.FR-8 for the chains that Page a Schedule (C-32.FR-8): besides the Destinations
+// of payments, its warnings unreachable name those of the Route's and the Team's chains that Page it, with the same
+// reasons — petr, without a Mattermost or Telegram Account link, in infra-notice (Mattermost, its health kept) and
+// tg-ops (no_account_link); olga, linked in both, in tg-ops only, whose check saw her outside its discussion group
+// (not_in_discussion_group) — each Destination once although payments and a chain both name payments-notice, all of
+// them by name, and none of a chain that Pages another Schedule. "On call now" marks the same, the reach read once for
+// the main Schedules.
+func TestOnCallUnreachableChains(t *testing.T) {
+	links := []dbgen.ListAccountLinkSpacesRow{{UserID: olga.ID, IdentitySpace: "mattermost:31"},
+		{UserID: olga.ID, IdentitySpace: "telegram"}}
+	svc, store, c := newReachService(t, reachDests(), links)
+	ctx := t.Context()
+	sc, err := svc.Create(ctx, admin, reachInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.chains = chainDests(sc.ID)
+	to := utc("2026-10-30T00:00:00Z")
+	res, err := svc.OnCall(ctx, sc.PublicID, nil, &to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := func(s string) string { return s + "T00:00:00Z" }
+	petrDay := func(dest, messenger string) reachWarning {
+		return reachWarning{"petr", dest, messenger, ReachNoAccountLink, "Days", "", rfc(t0), day("2026-10-29")}
+	}
+	want := []reachWarning{petrDay("infra-notice", "mattermost"), petrDay("payments-notice", "mattermost"),
+		petrDay("tg-ops", "telegram"), petrDay("tg-payments", "telegram"),
+		{"olga", "tg-ops", "telegram", ReachNotInDiscussionGroup, "Days", "", day("2026-10-29"), rfc(to)}}
+	if got := unreachableOf(res); !slices.Equal(got, want) {
+		t.Errorf("unreachable = %+v\nwant %+v", got, want)
+	}
+	for _, w := range res.Warnings {
+		if w.Kind == WarningUnreachable && w.Unreachable.Destination.Name == "infra-notice" &&
+			(w.Unreachable.Destination.Health != "broken" || w.Unreachable.Destination.BrokenReason == nil ||
+				*w.Unreachable.Destination.BrokenReason != "404" || w.Unreachable.Destination.BrokenSince == nil ||
+				w.Unreachable.Destination.PublicID != "DS000000000IN1") {
+			t.Errorf("the Destination of a chain's warning = %+v", w.Unreachable.Destination)
+		}
+	}
+	if n := len(store.chained); n != 1 || !slices.Equal(store.chained[0].ScheduleIds, []int64{sc.ID}) {
+		t.Errorf("the chains' reach read %+v", store.chained)
+	}
+
+	list, err := svc.OnCallNow(ctx, 0)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("on call now = %+v, %v", list, err)
+	}
+	var marks []string
+	for _, u := range list[1].Unreachable {
+		marks = append(marks, u.Destination.Name+"/"+u.Messenger+"/"+u.Reason)
+	}
+	if list[1].Team.Slug != "payments" || strings.Join(marks, " ") != "infra-notice/mattermost/no_account_link "+
+		"payments-notice/mattermost/no_account_link tg-ops/telegram/no_account_link "+
+		"tg-payments/telegram/no_account_link" {
+		t.Errorf("petr now in %s = %v", list[1].Team.Slug, marks)
+	}
+	if n := len(store.chained); n != 2 || !slices.Equal(store.chained[1].ScheduleIds, []int64{sc.ID}) {
+		t.Errorf("the chains' reach read %+v", store.chained)
+	}
+	c.Set(utc("2026-10-29T12:00:00Z"))
+	if list, err = svc.OnCallNow(ctx, 0); err != nil || len(list[1].Unreachable) != 1 ||
+		list[1].Unreachable[0].Reason != ReachNotInDiscussionGroup {
+		t.Errorf("olga now = %+v, %v", list[1].Unreachable, err)
+	}
+	store.fail["ListChainReach"] = errBoom
+	if _, err := svc.OnCallNow(ctx, 0); !errors.Is(err, errBoom) {
+		t.Errorf("ListChainReach fails = %v", err)
+	}
+}
+
+// TestReachOnlyChains: a Team without Destinations of its own is warned about those of the chains that Page its
+// Schedule, by name.
+func TestReachOnlyChains(t *testing.T) {
+	svc, store, _ := newReachService(t, nil, nil)
+	r, err := svc.readReach(t.Context(), store, map[int64]int64{7: 2}, map[int64]bool{petr.ID: true})
+	if err != nil || len(r.schedules[7]) != 0 {
+		t.Fatalf("reach without chains = %+v, %v", r, err)
+	}
+	store.chains = chainDests(7)
+	r, err = svc.readReach(t.Context(), store, map[int64]int64{7: 2}, map[int64]bool{petr.ID: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, u := range r.unreachable(7, petr.ID) {
+		names = append(names, u.Destination.Name)
+	}
+	if !slices.Equal(names, []string{"infra-notice", "payments-notice", "tg-ops"}) {
+		t.Errorf("unreachable = %v", names)
+	}
+}
+
 // TestUnreachableWithoutPeople: a Result with only gaps reads no reach, and neither does a Team without a Schedule.
 func TestUnreachableWithoutPeople(t *testing.T) {
 	svc, store, _ := newReachService(t, reachDests(), nil)
-	r, err := svc.readReach(t.Context(), store, map[int64]bool{1: true}, map[int64]bool{})
-	if err != nil || len(r.teams) != 0 || len(store.asked) != 0 {
+	r, err := svc.readReach(t.Context(), store, map[int64]int64{7: 1}, map[int64]bool{})
+	if err != nil || len(r.schedules) != 0 || len(store.asked) != 0 || len(store.chained) != 0 {
 		t.Errorf("reach of nobody = %+v, %v, asked %d", r, err, len(store.asked))
 	}
 	if got := unreachableWarnings(Result{Segments: []Segment{{Start: t0, End: t0.Add(time.Hour)}}}, 1, r); len(got) != 0 {

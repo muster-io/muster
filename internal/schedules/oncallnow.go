@@ -18,8 +18,9 @@ import (
 
 // TeamOnCall is a Team in "On call now" (C-27.FR-9): its main Schedule, nil for a Team without one, with the segment
 // of its Result at the business clock's now and the one that follows within schedule.gap_view, nil when the current
-// one lasts beyond it. A segment without a person is a gap. Unreachable are the Destinations of the Team that a
-// Mention of the current On-call cannot reach (C-27.FR-8), empty in a gap and without a main Schedule.
+// one lasts beyond it. A segment without a person is a gap. Unreachable are the Destinations of the Team, and those
+// in whose Threads the chains that Page the main Schedule write, that a Mention of the current On-call cannot reach
+// (C-27.FR-8), empty in a gap and without a main Schedule.
 type TeamOnCall struct {
 	Team     TeamRef
 	Schedule *Schedule
@@ -31,9 +32,9 @@ type TeamOnCall struct {
 }
 
 // OnCallNow lists every Team that is not deleted by name — or with memberID those of that User, "My Teams" — each with
-// the On-call of its main Schedule now, until when, what follows and the Destinations of the Team that cannot mention
-// them (C-27.FR-8, FR-9). The Results of the main Schedules are computed together, from the business clock's now over
-// schedule.gap_view, and the reach of their On-calls is read once.
+// the On-call of its main Schedule now, until when, what follows and the Destinations of the Schedule's reach that
+// cannot mention them (C-27.FR-8, FR-9). The Results of the main Schedules are computed together, from the business
+// clock's now over schedule.gap_view, and the reach of their On-calls is read once.
 func (s *Service) OnCallNow(ctx context.Context, memberID int64) ([]TeamOnCall, error) {
 	p := dbgen.ListOnCallTeamsParams{OrgID: s.orgID}
 	if memberID != 0 {
@@ -69,13 +70,13 @@ func (s *Service) OnCallNow(ctx context.Context, memberID int64) ([]TeamOnCall, 
 	if err != nil {
 		return nil, err
 	}
-	teams, people := map[int64]bool{}, map[int64]bool{}
+	scheds, people := map[int64]int64{}, map[int64]bool{}
 	for j, sc := range mains {
 		if u := res[j].Segments[0].User; u != nil {
-			teams[sc.Team.ID], people[u.ID] = true, true
+			scheds[sc.ID], people[u.ID] = sc.Team.ID, true
 		}
 	}
-	r, err := s.readReach(ctx, s.store, teams, people)
+	r, err := s.readReach(ctx, s.store, scheds, people)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func (s *Service) OnCallNow(ctx context.Context, memberID int64) ([]TeamOnCall, 
 		sc, segs := mains[j], res[j].Segments
 		out[i].Schedule, out[i].Current = &sc, &segs[0]
 		if u := segs[0].User; u != nil {
-			out[i].Unreachable = r.unreachable(sc.Team.ID, u.ID)
+			out[i].Unreachable = r.unreachable(sc.ID, u.ID)
 		}
 		cur := run(segs, 0)
 		if cur == len(segs) {

@@ -439,6 +439,85 @@ func (q *Queries) InsertWebhookDestination(ctx context.Context, arg InsertWebhoo
 	return id, err
 }
 
+const listChainPagedTelegramPeople = `-- name: ListChainPagedTelegramPeople :many
+SELECT u.id, u.public_id, u.name, u.login, al.external_id
+FROM users u
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id AND al.identity_space = 'telegram'
+WHERE u.org_id = $1 AND u.status = 'active' AND u.role <> 'viewer'
+  AND EXISTS (SELECT 1
+              FROM escalation_steps st
+              WHERE st.org_id = $1 AND st.kind = 'page_on_call'
+                AND (EXISTS (SELECT 1
+                             FROM route_escalation_chains rc
+                             JOIN routes r ON r.org_id = rc.org_id AND r.id = rc.route_id AND r.deleted_at IS NULL
+                             JOIN route_destinations rd ON rd.org_id = rc.org_id AND rd.route_id = rc.route_id
+                             WHERE rc.org_id = $1 AND rc.chain_id = st.chain_id
+                               AND rd.destination_id = $2)
+                     OR EXISTS (SELECT 1
+                                FROM team_escalation_chains tc
+                                JOIN teams t ON t.org_id = tc.org_id AND t.id = tc.team_id AND t.deleted_at IS NULL
+                                JOIN team_destinations td ON td.org_id = tc.org_id AND td.team_id = tc.team_id
+                                WHERE tc.org_id = $1 AND tc.chain_id = st.chain_id
+                                  AND td.destination_id = $2))
+                AND (EXISTS (SELECT 1
+                             FROM rotation_layer_users lu
+                             JOIN rotation_layers l ON l.org_id = lu.org_id AND l.id = lu.rotation_layer_id
+                             WHERE lu.org_id = $1 AND l.schedule_id = st.schedule_id AND lu.user_id = u.id)
+                     OR EXISTS (SELECT 1
+                                FROM schedule_overrides o
+                                WHERE o.org_id = $1 AND o.schedule_id = st.schedule_id AND o.user_id = u.id
+                                  AND o.ends_at > $3::timestamptz)))
+ORDER BY lower(u.name), u.id
+`
+
+type ListChainPagedTelegramPeopleParams struct {
+	OrgID         int64
+	DestinationID int64
+	Now           time.Time
+}
+
+type ListChainPagedTelegramPeopleRow struct {
+	ID         int64
+	PublicID   string
+	Name       string
+	Login      string
+	ExternalID string
+}
+
+// ListChainPagedTelegramPeople lists the active Users who are not Viewers, with a Telegram Account link — the
+// Identity space telegram, which every Telegram Connection shares, so the Destination's Connection among them — and
+// the Telegram user id of the link, whom a chain Paging in the Destination can Page through a Schedule (C-27.FR-8,
+// C-32.FR-8): those in a Rotation layer of a Schedule, or taking an Override of it that ends after @now, the business
+// clock's now, that a page_on_call step names in a chain that a Route or a Team that is not deleted and names the
+// Destination names, by name; a call of the On-call through a Notification gateway writes nothing in a Thread
+// (C-32.FR-9). Beside ListTelegramGroupPeople, the people whose membership of the discussion group the Destination
+// check reads.
+func (q *Queries) ListChainPagedTelegramPeople(ctx context.Context, arg ListChainPagedTelegramPeopleParams) ([]ListChainPagedTelegramPeopleRow, error) {
+	rows, err := q.db.Query(ctx, listChainPagedTelegramPeople, arg.OrgID, arg.DestinationID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChainPagedTelegramPeopleRow{}
+	for rows.Next() {
+		var i ListChainPagedTelegramPeopleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Login,
+			&i.ExternalID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDestinationInfo = `-- name: ListDestinationInfo :many
 SELECT public_id, name, type
 FROM destinations
