@@ -21,7 +21,12 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.description, g.status,
        o.week_start, o.severity_label, o.team_label, o.instance_labels,
        coalesce(ou.name, '')::text AS owner_name,
        coalesce(su.name, ss.name, '')::text AS snoozed_by_name,
-       coalesce(ru.name, rs.name, '')::text AS resolved_by_name
+       coalesce(ru.name, rs.name, '')::text AS resolved_by_name,
+       (g.status = 'acknowledged'
+        AND EXISTS (SELECT 1
+                    FROM escalation_runs er
+                    WHERE er.org_id = g.org_id AND er.alert_group_id = g.id AND er.generation = g.chain_generation
+                      AND er.stop_command = 'acknowledge'))::boolean AS chains_stopped
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -40,6 +45,18 @@ FROM alert_group_teams gt
 JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
 WHERE gt.org_id = @org_id AND gt.alert_group_id = @alert_group_id
 ORDER BY gt.joined_at, gt.team_id;
+
+-- ListRenderAssignees lists the Assignees of an Alert Group, which item 7 of its Root message names before an
+-- acknowledgement (C-29.FR-1, C-32.FR-12): each person by id and display name with the name of the owning Team of
+-- their chain, empty for none, by name and then Team, so that the line does not change with the order in which the
+-- chains started or their replies were delivered.
+-- name: ListRenderAssignees :many
+SELECT a.user_id, u.name, coalesce(t.name, '')::text AS team_name
+FROM alert_group_assignees a
+JOIN users u ON u.org_id = a.org_id AND u.id = a.user_id
+LEFT JOIN teams t ON t.org_id = a.org_id AND t.id = a.team_id
+WHERE a.org_id = @org_id AND a.alert_group_id = @alert_group_id
+ORDER BY u.name, a.user_id, team_name, a.escalation_run_id;
 
 -- GetGroupIDByPublicID reads the internal id of an Alert Group by its public_id, for a preview.
 -- name: GetGroupIDByPublicID :one

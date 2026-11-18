@@ -142,6 +142,8 @@ type View struct {
 	// NextNotice is its next ack timeout notice or Reminder, nil when none is scheduled (C-17.FR-9).
 	Unclaimed  bool
 	NextNotice *NextNotice
+	// Assignees are its Assignees, by chain in the order the runs started (C-32.FR-12, FR-18).
+	Assignees []Assignee
 	// ownerID is the Owner's id, stillFiring the Alerts still firing in it, routeDeleted whether its Route was
 	// deleted and reminderPending whether a Reminder waits for the Owner's answer, which allowed_commands needs.
 	ownerID         int64
@@ -299,6 +301,11 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 		return View{}, err
 	}
 	v.Teams = orNoTeams(teams[r.ID])
+	assignees, err := s.groupAssignees(ctx, []int64{r.ID})
+	if err != nil {
+		return View{}, err
+	}
+	v.Assignees = orNoTeams(assignees[r.ID])
 	return v, nil
 }
 
@@ -593,6 +600,10 @@ type TimelineEntry struct {
 	Chain     *ChainRef
 	ChainName string
 	Step      *int
+	// Assignees are the Assignees after an assignees_changed (C-32.FR-12), none once cleared; assignees are those of
+	// its row, which entryAssignees names.
+	Assignees []Assignee
+	assignees []assigneeRecord
 	position  TimelinePosition
 	// teamID is the id of Team, which entryTeams names, destinationID the id of Destination, which entryDestinations
 	// names, and gatewayID the id of Gateway, which entryGateways names.
@@ -702,6 +713,9 @@ func (s *Service) Timeline(ctx context.Context, publicID string, f TimelineFilte
 	if err := s.entryChains(ctx, out.Entries); err != nil {
 		return TimelinePage{}, err
 	}
+	if err := s.entryAssignees(ctx, out.Entries); err != nil {
+		return TimelinePage{}, err
+	}
 	return out, nil
 }
 
@@ -756,6 +770,11 @@ func (s *Service) entries(ctx context.Context, gid int64, asc bool, kinds []stri
 			e.PagedUsers = make([]*ActorRef, len(r.PagedUserIds))
 			for i, id := range r.PagedUserIds {
 				e.PagedUsers[i] = &ActorRef{Kind: "user", id: id}
+			}
+		}
+		if len(r.Assignees) > 0 {
+			if err := json.Unmarshal(r.Assignees, &e.assignees); err != nil {
+				return nil, fmt.Errorf("read the assignees of timeline entry %s: %w", r.PublicID, err)
 			}
 		}
 		e.Owner, e.PreviousOwner = userRef(r.OwnerUserID), userRef(r.PreviousOwnerUserID)

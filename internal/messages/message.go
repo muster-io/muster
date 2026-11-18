@@ -106,8 +106,18 @@ type Message struct {
 	Buttons           []Button              `json:"buttons"`
 	SnoozeSeconds     []int64               `json:"snooze_seconds,omitempty"`
 	Owner             string                `json:"owner,omitempty"`
-	// FooterMention is the user of the footer as an adapter writes them in its markup, and FooterName their Muster
-	// display name made safe, which a footer cut by shortening keeps instead; WithFooterIn sets both for the layout,
+	// FooterPeople are, for a footer that names several people — the Assignees before an acknowledgement
+	// (C-29.FR-1, C-32.FR-12) — the people per identity space where one of them has an Account link, in the order of
+	// the footer's tokens, a person without a link there empty; FooterUsers holds the one user of any other footer.
+	FooterPeople map[string][]FooterUser `json:"footer_people,omitempty"`
+	// Assignees are the Assignees the footer names before an acknowledgement, in its order, each with the owning Team
+	// of their chain, made safe, and ChainsStopped marks the footer of an acknowledgement that stopped running chains;
+	// both are set only in CommonMark, for a bridge's layout (C-29.FR-8), as Owner is.
+	Assignees     []Person `json:"assignees,omitempty"`
+	ChainsStopped bool     `json:"chains_stopped,omitempty"`
+	// FooterMention is the people of the footer as an adapter writes them in its markup, in the order of the footer's
+	// tokens and joined by FooterSep — empty for a person it names by name — and FooterName their Muster display names
+	// made safe and joined alike, which a footer cut by shortening keeps instead; WithFooterIn sets both for the layout,
 	// and neither is stored.
 	FooterMention string `json:"-"`
 	FooterName    string `json:"-"`
@@ -151,10 +161,71 @@ type FooterUser struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
+// Person is a person a footer names, the Assignees: their Muster display name and the name of the owning Team of
+// their chain, empty for none, both made safe.
+type Person struct {
+	Name string `json:"name"`
+	Team string `json:"team,omitempty"`
+}
+
 // FooterUserToken is the name of the trusted Mention token that stands for the user in the footer of an identity space
 // where they have an Account link (C-12.FR-12). The `mention` function of templates never writes it, and neutral text
-// never carries a token, so only Muster's own footer has one.
+// never carries a token, so only Muster's own footer has one. A footer that names several people has one token per
+// person, the first without a group and the others with their position as the group (FooterToken).
 const FooterUserToken = "user"
+
+// FooterSep joins the Mentions and the names of the people of a footer in FooterMention and FooterName.
+const FooterSep = "\x1f"
+
+// FooterToken is the token of the i-th person of a footer.
+func FooterToken(i int) string {
+	if i == 0 {
+		return templates.MentionToken(templates.Token{Name: FooterUserToken})
+	}
+	return templates.MentionToken(templates.Token{Name: FooterUserToken, Group: strconv.Itoa(i)})
+}
+
+// footerIndex is the position of the person a token of a footer stands for, false for another token.
+func footerIndex(tk templates.Token) (int, bool) {
+	if tk.Name != FooterUserToken {
+		return 0, false
+	}
+	if tk.Group == "" {
+		return 0, true
+	}
+	i, err := strconv.Atoi(tk.Group)
+	return i, err == nil && i > 0
+}
+
+// part is the i-th of the parts of s joined by FooterSep, empty when there is none.
+func part(s string, i int) string {
+	parts := strings.Split(s, FooterSep)
+	if i < len(parts) {
+		return parts[i]
+	}
+	return ""
+}
+
+// FooterNamed is the footer of m with each of its people by their Muster display name, as a footer that mentions
+// nobody shows them: what a footer cut by shortening keeps, and the layout's notice.
+func (m Message) FooterNamed() string {
+	return templates.ReplaceTokens(m.Footer, func(tk templates.Token) string {
+		i, _ := footerIndex(tk)
+		return part(m.FooterName, i)
+	})
+}
+
+// FooterPeopleIn are the people of the footer in the identity space space, in the order of its tokens: the footer's
+// several people, or its one user, with an Account link there; none in a space where nobody it names has one.
+func (m Message) FooterPeopleIn(space string) []FooterUser {
+	if p, ok := m.FooterPeople[space]; ok {
+		return p
+	}
+	if u, ok := m.FooterUsers[space]; ok {
+		return []FooterUser{u}
+	}
+	return nil
+}
 
 // FooterIn is the footer in an identity space — "telegram", "mattermost:<connection>", "slack:<connection>" or
 // "bridge:<connection>" — with the token of the user it names when they have an Account link there, otherwise the
@@ -167,26 +238,42 @@ func (m Message) FooterIn(space string) string {
 }
 
 // WithFooterIn is m with the footer of the identity space space as its only footer, for an adapter to lay out
-// (C-12.FR-12): a user with an Account link there is written by mention, the adapter's own Mention of them in its
-// markup — or their name escaped for it where it cannot mention them — and by their Muster display name when mention
-// is nil or writes nothing. A message without footers by identity space is returned as it is, so that calling
-// WithFooterIn again changes nothing.
+// (C-12.FR-12): each person with an Account link there is written by mention, the adapter's own Mention of them in its
+// markup — or their name escaped for it where it cannot mention them — in the order of the footer's tokens, and by
+// their Muster display name when mention is nil or writes nothing. A message without footers by identity space is
+// returned as it is, so that calling WithFooterIn again changes nothing.
 func (m Message) WithFooterIn(space string, mention func(mentions.User) string) Message {
-	if m.Footers == nil && m.FooterUsers == nil {
+	if m.Footers == nil && m.FooterUsers == nil && m.FooterPeople == nil {
 		return m
 	}
+	people := m.FooterPeopleIn(space)
 	cp := m
-	cp.Footer, cp.Footers, cp.FooterUsers, cp.FooterMention = m.FooterIn(space), nil, nil, ""
-	u, ok := m.FooterUsers[space]
-	cp.FooterName = Value(u.Name)
-	if ok && mention != nil {
-		cp.FooterMention = mention(mentions.User{Name: u.Name, Username: u.Username, ExternalID: u.ExternalID,
-			DisplayName: u.DisplayName})
+	cp.Footer, cp.Footers, cp.FooterUsers, cp.FooterPeople = m.FooterIn(space), nil, nil, nil
+	names, written := make([]string, len(people)), make([]string, len(people))
+	mentioned := false
+	for i, u := range people {
+		names[i] = Value(u.Name)
+		if mention != nil && (u.Username != "" || u.ExternalID != "") {
+			written[i] = mention(mentions.User{Name: u.Name, Username: u.Username, ExternalID: u.ExternalID,
+				DisplayName: u.DisplayName})
+		}
+		mentioned = mentioned || written[i] != ""
 	}
-	if cp.FooterMention == "" {
-		cp.Footer, cp.FooterName = templates.ReplaceTokens(cp.Footer, func(templates.Token) string {
-			return cp.FooterName
-		}), ""
+	cp.Footer = templates.ReplaceTokens(cp.Footer, func(tk templates.Token) string {
+		i, ok := footerIndex(tk)
+		switch {
+		case !ok:
+			return ""
+		case i < len(people) && written[i] != "":
+			return FooterToken(i)
+		case i < len(people):
+			return names[i]
+		}
+		return ""
+	})
+	cp.FooterMention, cp.FooterName = "", ""
+	if mentioned {
+		cp.FooterMention, cp.FooterName = strings.Join(written, FooterSep), strings.Join(names, FooterSep)
 	}
 	return cp
 }
@@ -197,31 +284,39 @@ func (m Message) WithFooterIn(space string, mention func(mentions.User) string) 
 // A message without footers by identity space, or without one for space, keeps only Footer, which names the user by
 // their Muster display name.
 func (m Message) OnlyFooterIn(space string) Message {
-	if m.Footers == nil && m.FooterUsers == nil {
+	if m.Footers == nil && m.FooterUsers == nil && m.FooterPeople == nil {
 		return m
 	}
 	cp := m
-	cp.Footers, cp.FooterUsers = nil, nil
+	cp.Footers, cp.FooterUsers, cp.FooterPeople = nil, nil, nil
 	if f, ok := m.Footers[space]; ok {
 		cp.Footers = map[string]string{space: f}
 	}
 	if u, ok := m.FooterUsers[space]; ok {
 		cp.FooterUsers = map[string]FooterUser{space: u}
 	}
+	if p, ok := m.FooterPeople[space]; ok {
+		cp.FooterPeople = map[string][]FooterUser{space: p}
+	}
 	return cp
 }
 
-// FooterText is the footer of m laid out by esc: its text escaped as a whole, and the token of its user — which
-// survives the escaping of every markup — then the Mention that WithFooterIn chose, as it is.
+// FooterText is the footer of m laid out by esc: its text escaped as a whole, and the token of each of its people —
+// which survives the escaping of every markup — then the Mention that WithFooterIn chose for them, as it is.
 func (m Message) FooterText(esc func(string) string) string {
-	token := templates.MentionToken(templates.Token{Name: FooterUserToken})
+	var people []int
 	s := templates.ReplaceTokens(m.Footer, func(tk templates.Token) string {
-		if tk.Name == FooterUserToken {
-			return token
+		if i, ok := footerIndex(tk); ok {
+			people = append(people, i)
+			return FooterToken(i)
 		}
 		return ""
 	})
-	return strings.ReplaceAll(esc(s), token, m.FooterMention)
+	s = esc(s)
+	for _, i := range people {
+		s = strings.ReplaceAll(s, FooterToken(i), part(m.FooterMention, i))
+	}
+	return s
 }
 
 // Heading is #N and the title of the Alert Group, linked to its page.

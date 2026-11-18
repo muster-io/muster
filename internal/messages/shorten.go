@@ -6,8 +6,6 @@ package messages
 import (
 	"strings"
 	"unicode/utf8"
-
-	"github.com/muster-io/muster/internal/templates"
 )
 
 // Shortening (C-29.FR-6, C-12.FR-11): a message laid out longer than the length limit an adapter declares loses, in
@@ -90,10 +88,10 @@ func Shorten(m Message, limit int, markup Markup) (Message, bool) {
 	if m.Heading != nil && m.Heading.Title != "" && !fits() {
 		m.Heading.Title = cutEnd(m.Heading.Title, Length(m, markup)-limit)
 	}
-	// A footer too long with the Mention of its user names them by their Muster display name, and is cut only then,
-	// so that no token and no markup is ever cut.
+	// A footer too long with the Mentions of its people names them by their Muster display names, and is cut only
+	// then, so that no token and no markup is ever cut.
 	if m.FooterMention != "" && !fits() {
-		m.Footer = templates.ReplaceTokens(m.Footer, func(templates.Token) string { return m.FooterName })
+		m.Footer = m.FooterNamed()
 		m.FooterMention, m.FooterName = "", ""
 	}
 	if m.Footer != "" && !fits() {

@@ -2759,18 +2759,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (49)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (50)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":49`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":50`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":49`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":50`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2786,10 +2786,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (49)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (50)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":49`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":50`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -5185,6 +5185,94 @@ func TestIntegrationPages(t *testing.T) {
 			t.Errorf("after down: %d CHECKs of 0047 and 0001", got)
 		}
 		if err := e.mm.Migrate(49); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationAssignees runs 0050 over a database at 49 with an Alert Group, a run of a chain owned by a Team and
+// two people: up adds alert_group_assignees, one row per run and person with the index of the filter, the Assignees of
+// the Timeline and the run step of Pages and rule runs, null on the rows before it; the rows cascade from the run and
+// from the Alert Group; down removes all of it, and up runs again.
+func TestIntegrationAssignees(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 49)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000AS', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', true, 900,
+				false, 60, 60, false, '2026-11-18', '2026-11-18'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000AS', 1, id, '{alertname}', '{}', sha256('g'), 't', '{}', '{}', '{}', 'firing',
+				'warning', false, '2026-11-18', '2026-11-18'
+			FROM routes`)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000DV', 'DevOps', 'devops', '2026-11-18', '2026-11-18' FROM organizations`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, u.public_id, u.login, u.login, 'responder', 'local', 'active', '2026-11-18', '2026-11-18'
+			FROM organizations, (VALUES ('SR0000000000JV', 'ivan'), ('SR0000000000PE', 'petr')) AS u (public_id, login)`)
+		e.exec(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, owning_team_id, sources,
+			steps, state, generation, started_at)
+			SELECT g.org_id, 'ER0000000000AS', g.id, 'devops', t.id, '[{"kind":"route"}]', '[]', 'running', 1,
+				'2026-11-18'
+			FROM alert_groups g, teams t`)
+		e.exec(t, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id, step_number, kind, importance, state,
+			created_at)
+			SELECT org_id, alert_group_id, id, 1, 'mention', 'normal', 'pending', '2026-11-18' FROM escalation_runs`)
+		e.step(t, 1)
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'alert_group_assignees_user_idx'`); got != 1 {
+			t.Errorf("%d indexes of the filter", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pages WHERE run_step_seq IS NULL`); got != 1 {
+			t.Errorf("%d pages of an earlier version without a run step", got)
+		}
+		e.exec(t, `INSERT INTO notification_rule_runs (org_id, alert_group_id, escalation_run_id, step_number, user_id,
+			importance, actions, state, started_at, run_step_seq)
+			SELECT r.org_id, r.alert_group_id, r.id, 1, u.id, 'normal', '[]', 'running', '2026-11-18', 2
+			FROM escalation_runs r, users u WHERE u.login = 'ivan'`)
+		assignee := `INSERT INTO alert_group_assignees (org_id, alert_group_id, escalation_run_id, step_number,
+			run_step_seq, user_id, team_id, since)
+			SELECT r.org_id, r.alert_group_id, r.id, 1, 1, u.id, r.owning_team_id, '2026-11-18'
+			FROM escalation_runs r, users u WHERE u.login = `
+		e.exec(t, assignee+`'ivan'`)
+		e.exec(t, assignee+`'petr'`)
+		_, err := e.d.Pool.Exec(t.Context(), assignee+`'ivan'`)
+		var pe *pgconn.PgError
+		if !errors.As(err, &pe) || pe.ConstraintName != "alert_group_assignees_pkey" {
+			t.Errorf("a person twice in one run: %v", err)
+		}
+		e.exec(t, `CREATE TABLE timeline_entries_p202611 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00')`)
+		e.exec(t, `INSERT INTO timeline_entries (org_id, public_id, alert_group_id, at, kind, event, event_seq,
+			loudness, mentions, actor_kind, transport, assignees)
+			SELECT org_id, 'TE0000000000AS', id, '2026-11-18', 'escalation', 'assignees_changed', 1, 'quiet', '{}',
+				'system', 'system', '[{"user_id": 1}]'
+			FROM alert_groups`)
+		e.exec(t, `DELETE FROM escalation_runs`)
+		if got := e.count(t, `SELECT count(*) FROM alert_group_assignees`); got != 0 {
+			t.Errorf("after the run's deletion: %d assignees left", got)
+		}
+		e.exec(t, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name, sources, steps, state,
+			generation, started_at)
+			SELECT org_id, 'ER0000000000AT', id, 'devops', '[{"kind":"route"}]', '[]', 'running', 1, '2026-11-18'
+			FROM alert_groups`)
+		e.exec(t, assignee+`'ivan'`)
+		e.exec(t, `DELETE FROM alert_groups`)
+		if got := e.count(t, `SELECT count(*) FROM alert_group_assignees`); got != 0 {
+			t.Errorf("after the alert group's deletion: %d assignees left", got)
+		}
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM information_schema.tables WHERE table_name =
+			'alert_group_assignees'`) + e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE (table_name = 'timeline_entries' AND column_name = 'assignees')
+			   OR (table_name IN ('pages', 'notification_rule_runs') AND column_name = 'run_step_seq')`); got != 0 {
+			t.Errorf("after down: %d tables and columns left", got)
+		}
+		if err := e.mm.Migrate(50); err != nil {
 			t.Errorf("up again: %v", err)
 		}
 	})

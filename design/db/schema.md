@@ -236,7 +236,7 @@ and the Alert Groups each Storm counts, `storm_alert_groups` (0043), and the Esc
 `escalation_steps` and `escalation_step_users`, with the chains of Routes and Teams, `route_escalation_chains` and
 `team_escalation_chains` (0046), and the runs of the chains, `escalation_runs` and `escalation_run_steps` (0047), and
 the Pages with their people and the runs of the Notification rules, `pages`, `page_users` and `notification_rule_runs`
-(0049), which makes 90 tables.
+(0049), and the Assignees of Alert Groups, `alert_group_assignees` (0050), which makes 91 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -254,7 +254,7 @@ the Pages with their people and the runs of the Notification rules, `pages`, `pa
 | Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
 | Paging | `notification_rules`, `escalation_chains`, `escalation_steps`, `escalation_step_users`, `escalation_runs`, `escalation_run_steps`, `notification_rule_runs`, `pages`, `page_users` | notificationrules, its rule runs in the dispatcher's transaction; users deletes a deleted user's row through the Notification rules; escalation, the runs in the dispatcher's transaction; `groups` deletes `escalation_run_steps` in the retention of the details, and writes `pages` and `page_users`, a Page as its dispatcher records it and its outcome as delivery reports it | `notification_rules` with "Reset to the Organization's rules" or the User's deletion; steps with their chain; run steps with the details (`retention.alert_details`, by the Leader task `alert_group_retention`); runs, rule runs and Pages with their Alert Group |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
-| Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
+| Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, `alert_group_assignees`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days; Assignees only while firing |
 | Timers and Storms | `timers`, `storms`, `storm_alert_groups` | `groups`, timers, delivery, escalation (the timers of runs), notificationrules (the timers of rule runs); `storm_alert_groups` delivery, as a Storm starts and joins | queue rows deleted when done; `storm_alert_groups` with its Storm or its Alert Group; the timer of a run or a rule run with its run |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
 | Request log | `request_log` | requestlog | newest `request_log.max_records` per owner and `request_log.max_age`; batched `DELETE` every minute |
@@ -1416,7 +1416,31 @@ deleted since and the entries outlive the runs. Migration 0049 added `page_every
 whole Team" for everyone in the chat, and `page_importance`, `normal` or `important`, of a Page by Mention of people,
 on its `paged` and its `page_not_delivered` (S-177);
 the Team of such a step is `team_id` (S-118), and the people of a Page of people `paged_user_ids`. Neither has a
-CHECK or a foreign key: the Timeline keeps what the Page was.
+CHECK or a foreign key: the Timeline keeps what the Page was. Migration 0050 added `assignees`, the Assignees after an
+`assignees_changed` as a JSON array of `{user_id, team_id, run_id, since}` by internal ids, `[]` once Acknowledge,
+Snooze or Resolve cleared them, null on every other entry; without a foreign key, as the people, Teams and runs may be
+deleted since.
+
+**`alert_group_assignees`** (migration 0050) holds the Assignees of an Alert Group (C-32.FR-12): one row per run of
+an Escalation chain and person — `org_id`, `alert_group_id` (cascade), `escalation_run_id` (cascade), `step_number`
+of the step that reached them, `user_id`, `team_id` (the owning Team of the chain when its run started, null for
+none) and `since` — with the primary key `(alert_group_id, escalation_run_id, user_id)` and the index
+`alert_group_assignees_user_idx (org_id, user_id, alert_group_id)` of the list's and the counts' filter Assignee.
+`run_step_seq` is the `seq` of the `escalation_run_steps` row of the step whose reach made the chain's Assignees.
+Migration 0050 also gave `pages` and `notification_rule_runs` a `run_step_seq`: escalation passes the seq a step is
+recorded with — one more than the run's steps before it — to the Page of its first Mentions and to the rule runs it
+starts, whose later Mentions belong to it, and `LockPage` reads the rule run's, else the Page's. It orders the steps of
+a run, repeated ones and those one firing makes at one time included: a reach by a greater seq replaces the chain's
+Assignees, one by the same seq — another reply, or a later Mention of that step's rules — adds to them, and one by a
+smaller seq — a late reply, or a later Mention of the rule of a step a later step replaced — changes nothing. A Page
+or a rule run of an earlier binary has no seq: its reach adds only to a run without Assignees, or whose Assignees have
+none either, and a reach with a seq replaces Assignees without one. Only `groups` writes the table, through the dispatcher
+(lint 2): the outcome of a Page (`SettlePage`) adds and replaces rows while the Alert Group is firing and its run is
+not stopped, and the change that makes it stop being firing — Acknowledge, Snooze or Resolve — deletes them in its
+transaction; so the table holds the Assignees of firing Alert Groups only, and the reads, the outgoing webhook data
+and the filter also require the Alert Group to be firing, so that rows a replica without 0050 left after an
+acknowledgement never show; and the cascades from a run or an Alert Group scan few rows; a Team is only soft-deleted,
+so the `SET NULL` of `team_id` never acts. A chain that runs out keeps its rows.
 Delivery events are not stored
 here; the Timeline endpoint merges `delivery_events` by time as the kind `delivery`
 ([ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md)), and Notes as the kind `notes`. One index,
@@ -2053,7 +2077,9 @@ Serves C-31 (from 0.2.0, migration 0037) and C-32 (migration 0046); [ADR-0018](.
   `step_number`, the person, the `importance`, the `actions` the rule had when the run started, the `position` of its
   next action and its `state`, `running`, `done` after its last action or `stopped` with the run of its chain
   (`notification_rule_runs_ended_check`: `ended_at` exactly when it no longer runs). Its wait is a timer of the kind
-  `notification_rule_action` whose subject is the rule run ([4.10](#410-timers-and-storms)).
+  `notification_rule_action` whose subject is the rule run ([4.10](#410-timers-and-storms)). `run_step_seq` (migration
+  0050) is the `seq` of the run step that started it, which its later Mentions belong to for the Assignees
+  ([4.9](#49-alert-groups-alerts-inside-them-and-the-timeline)); null for a rule run of an earlier binary.
   `notification_rule_runs_run_idx` on `(escalation_run_id)` finds the rule runs that the stop of a run stops and serves
   the cascade of its deletion; `notification_rule_runs_group_idx` the cascade of the Alert Group's.
 - **`pages`** (migration 0049, C-32.FR-9, FR-10, FR-19) — a Page by Mention of a step or of a later action of a rule
@@ -2068,7 +2094,9 @@ Serves C-31 (from 0.2.0, migration 0037) and C-32 (migration 0046); [ADR-0018](.
   optional `reason` (`pages_ended_check`, `pages_state_reason_check`). `pages_pending_idx` on `(org_id, id) WHERE state =
   'pending'` finds the Pages whose replies the delivery worker settles; `pages_run_idx`, `pages_group_idx` and
   `pages_rule_run_idx` serve "How it went" and the cascades. `groups` writes the Page when its dispatcher records
-  `paged`, and its outcome when delivery reports what the replies did (`SettlePage`).
+  `paged`, and its outcome when delivery reports what the replies did (`SettlePage`). `run_step_seq` (migration 0050)
+  is the `seq` of the run step that made the first Mentions of a step, null on a later Mention of a rule, whose rule
+  run carries it, and on a Page of an earlier binary ([4.9](#49-alert-groups-alerts-inside-them-and-the-timeline)).
 - **`page_users`** (migration 0049) — the people a Page names, primary key `(page_id, user_id)`, each with an
   `outcome`, `pending`, `delivered` once a delivered reply mentioned them, or `not_delivered` with its `reason`
   (`no_root_message`, `no_account_link`, `not_delivered`; `page_users_outcome_reason_check`); they go with their Page.

@@ -277,6 +277,62 @@ func (q *Queries) ListAlertGroupTeams(ctx context.Context, arg ListAlertGroupTea
 	return items, nil
 }
 
+const listAssigneeUsers = `-- name: ListAssigneeUsers :many
+SELECT DISTINCT a.user_id, al.identity_space, al.messenger, coalesce(al.username, '')::text AS username,
+       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name,
+       u.name
+FROM alert_group_assignees a
+JOIN users u ON u.org_id = a.org_id AND u.id = a.user_id
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id
+WHERE a.org_id = $1 AND a.alert_group_id = $2
+ORDER BY a.user_id, al.identity_space
+`
+
+type ListAssigneeUsersParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type ListAssigneeUsersRow struct {
+	UserID        int64
+	IdentitySpace string
+	Messenger     string
+	Username      string
+	ExternalID    string
+	DisplayName   string
+	Name          string
+}
+
+// ListAssigneeUsers lists the Account links, by identity space, of the Assignees of an Alert Group, whom item 7 of its
+// Root message names before an acknowledgement (C-29.FR-1, C-32.FR-12), as ListFooterUsers does for the footer's user.
+func (q *Queries) ListAssigneeUsers(ctx context.Context, arg ListAssigneeUsersParams) ([]ListAssigneeUsersRow, error) {
+	rows, err := q.db.Query(ctx, listAssigneeUsers, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAssigneeUsersRow{}
+	for rows.Next() {
+		var i ListAssigneeUsersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.IdentitySpace,
+			&i.Messenger,
+			&i.Username,
+			&i.ExternalID,
+			&i.DisplayName,
+			&i.Name,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFooterUsers = `-- name: ListFooterUsers :many
 SELECT al.identity_space, al.messenger, coalesce(al.username, '')::text AS username,
        coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name,

@@ -47,6 +47,8 @@ type fakeQueries struct {
 	teams  []team
 	owners map[int64]dbgen.GetEventOwnersRow
 	footer []dbgen.ListFooterUsersRow
+	// assignees are the Account links of the Assignees (AssigneeUsers).
+	assignees []dbgen.ListAssigneeUsersRow
 	// entries are the Mention entries of each Destination, conns the Connections by id, groupTeams the Teams of each
 	// Alert Group and stormTeams those of each Storm, dests the Destinations a Team's entry locks, by id.
 	entries    map[int64][]EntryInput
@@ -356,6 +358,11 @@ func (f *fakeQueries) ListLiveUserPublicIDs(_ context.Context, arg dbgen.ListLiv
 func (f *fakeQueries) ListFooterUsers(context.Context, dbgen.ListFooterUsersParams) ([]dbgen.ListFooterUsersRow,
 	error) {
 	return f.footer, f.fail["ListFooterUsers"]
+}
+
+func (f *fakeQueries) ListAssigneeUsers(context.Context, dbgen.ListAssigneeUsersParams) (
+	[]dbgen.ListAssigneeUsersRow, error) {
+	return f.assignees, f.fail["ListAssigneeUsers"]
 }
 
 // fakeOnCalls is the On-call of each Team's main Schedule: a User by id before until, nobody after it; a Team that is
@@ -684,6 +691,33 @@ func TestNames(t *testing.T) {
 	}
 	f.fail["ListFooterUsers"] = errors.New("boom")
 	if _, err := s.FooterUsers(t.Context(), nil, 5); err == nil {
+		t.Error("a failing read")
+	}
+}
+
+// TestAssigneeUsers is C-32.FR-12 and C-12.FR-12 for the Assignees: each by id, by the identity spaces of the links
+// their messenger can mention them by, as the footer's user; none without such a link.
+func TestAssigneeUsers(t *testing.T) {
+	f := newFake()
+	s := newService(f)
+	if got, err := s.AssigneeUsers(t.Context(), nil, 5); err != nil || got != nil {
+		t.Errorf("no assignees: %v %v", got, err)
+	}
+	f.assignees = []dbgen.ListAssigneeUsersRow{
+		{UserID: 1, IdentitySpace: "mattermost:3", Messenger: TypeMattermost, Username: "ivan.mm", Name: "Ivan"},
+		{UserID: 1, IdentitySpace: "telegram", Messenger: TypeTelegram, ExternalID: "7101", Name: "Ivan"},
+		{UserID: 2, IdentitySpace: "mattermost:3", Messenger: TypeMattermost, Username: " ", Name: "Petr"},
+		{UserID: 2, IdentitySpace: "bridge:4", Messenger: TypeBridge, ExternalID: "u-petr", DisplayName: " Petr\n",
+			Name: "Petr"}}
+	got, err := s.AssigneeUsers(t.Context(), nil, 5)
+	want := map[int64]map[string]User{
+		1: {"mattermost:3": {Name: "Ivan", Username: "ivan.mm"}, "telegram": {Name: "Ivan", ExternalID: "7101"}},
+		2: {"bridge:4": {Name: "Petr", ExternalID: "u-petr", DisplayName: "Petr"}}}
+	if err != nil || len(got) != len(want) || !maps.Equal(got[1], want[1]) || !maps.Equal(got[2], want[2]) {
+		t.Errorf("assignee users %+v %v, want %+v", got, err, want)
+	}
+	f.fail["ListAssigneeUsers"] = errors.New("boom")
+	if _, err := s.AssigneeUsers(t.Context(), nil, 5); err == nil {
 		t.Error("a failing read")
 	}
 }

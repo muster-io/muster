@@ -71,7 +71,7 @@ func (p *Pages) MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, r
 	people []int64) (StepMade, error) {
 	page := groups.StepPage{ChainEntry: groups.ChainEntry{Run: run.ID, Chain: run.ChainID,
 		ChainPublicID: run.ChainPublicID, ChainName: run.ChainName, Step: step.Number}, Sources: pageSources(run),
-		OwningTeam: run.OwningTeamID}
+		OwningTeam: run.OwningTeamID, RunStepSeq: step.Seq}
 	switch step.Kind {
 	case KindPageTeam:
 		page.Team, page.Everyone = step.TeamID, step.Everyone
@@ -120,7 +120,7 @@ func (p *Pages) MakeStep(ctx context.Context, tx groups.DBTX, g *groups.Group, r
 		return StepMade{}, nil
 	}
 	started, err := p.rules.Start(ctx, tx, notificationrules.Start{Group: g.ID, Run: run.ID, Step: step.Number,
-		Importance: step.Importance, Users: people})
+		Importance: step.Importance, Users: people, RunStepSeq: step.Seq})
 	if err != nil {
 		return StepMade{}, err
 	}

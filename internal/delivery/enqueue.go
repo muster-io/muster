@@ -61,6 +61,7 @@ type Row struct {
 // escalation_step_skipped show nothing in a messenger (C-30.FR-7, C-32.FR-14): outgoing webhooks in events mode receive
 // them. escalation_webhook shows nothing in a messenger either, and goes only to the outgoing webhook Destination its
 // step names, whether or not the Alert Group is delivered there (C-32.FR-13, C-15.FR-2 revised): queueEvents.
+// assignees_changed edits the Root messages Quietly, whose item 7 names the Assignees (C-32.FR-12, C-11.FR-20 revised).
 var Table = []Row{
 	{groups.EventCreated, groups.VariantAny, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup},
 		false},
@@ -90,6 +91,7 @@ var Table = []Row{
 	{groups.EventPageNotDelivered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventEscalationStepSkipped, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventEscalationWebhook, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
+	{groups.EventAssigneesChanged, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventDestinationJoined, groups.VariantFiring, FormPublication, groups.Loud,
 		[]groups.Mention{groups.MentionNewAlertGroup}, false},
 	{groups.EventDestinationJoined, groups.VariantAcknowledged, FormPublication, groups.Quiet, nil, false},

@@ -51,6 +51,10 @@ const (
 	// IvanUserID is the On-call whom the Pages of Escalation chains mention (C-32.FR-9), a member of no channel.
 	IvanUserID   = "u-ivan"
 	IvanUsername = "ivan"
+	// PetrUserID is a second On-call whom the Pages mention, of another Team, a member of no channel: two Assignees
+	// with their Teams (C-32.FR-12).
+	PetrUserID   = "u-petr"
+	PetrUsername = "petr"
 
 	TeamID   = "team-dev"
 	TeamName = "dev"
@@ -196,6 +200,7 @@ var (
 		{ID: BobUserID, Username: BobUsername, FirstName: "Bob", Roles: "system_user"},
 		{ID: DanaUserID, Username: DanaUsername, FirstName: "Dana", Roles: "system_user"},
 		{ID: IvanUserID, Username: IvanUsername, FirstName: "Ivan", Roles: "system_user"},
+		{ID: PetrUserID, Username: PetrUsername, FirstName: "Petr", Roles: "system_user"},
 	}
 	devTeam = Team{ID: TeamID, Name: TeamName, DisplayName: "Dev", Type: "O"}
 )

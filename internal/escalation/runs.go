@@ -167,8 +167,10 @@ type RunSource struct {
 }
 
 // StepRef is the step of a run that StepPages makes, as the chain had it when the run started, its Schedule by id and
-// by public_id.
+// by public_id, and Seq, the seq of the run step it is recorded as, which orders the steps of the run, repeated ones
+// included (escalation_run_steps.seq), for the Assignees (C-32.FR-12).
 type StepRef struct {
+	Seq        int
 	Number     int
 	Kind       string
 	Importance string

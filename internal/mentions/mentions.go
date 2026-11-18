@@ -146,6 +146,7 @@ type Queries interface {
 	ListMentionUsers(ctx context.Context, arg dbgen.ListMentionUsersParams) ([]dbgen.ListMentionUsersRow, error)
 	ListLiveUserPublicIDs(ctx context.Context, arg dbgen.ListLiveUserPublicIDsParams) ([]string, error)
 	ListFooterUsers(ctx context.Context, arg dbgen.ListFooterUsersParams) ([]dbgen.ListFooterUsersRow, error)
+	ListAssigneeUsers(ctx context.Context, arg dbgen.ListAssigneeUsersParams) ([]dbgen.ListAssigneeUsersRow, error)
 }
 
 // OnCalls is the On-call of a Team (C-27.FR-4), declared by its consumer; *schedules.Service implements it, and
@@ -1030,22 +1031,55 @@ func (s *Service) FooterUsers(ctx context.Context, db DBTX, groupID int64) (map[
 	}
 	var out map[string]User
 	for _, r := range rows {
-		u := User{Name: r.Name}
-		switch r.Messenger {
-		case TypeMattermost:
-			u.Username = oneLine(r.Username)
-		case TypeBridge:
-			u.Username, u.ExternalID, u.DisplayName = oneLine(r.Username), r.ExternalID, oneLine(r.DisplayName)
-		default:
-			u.ExternalID = r.ExternalID
-		}
-		if u.Username == "" && u.ExternalID == "" {
+		u, ok := footerUser(r.Name, r.Messenger, r.Username, r.ExternalID, r.DisplayName)
+		if !ok {
 			continue
 		}
 		if out == nil {
 			out = make(map[string]User, len(rows))
 		}
 		out[r.IdentitySpace] = u
+	}
+	return out, nil
+}
+
+// footerUser is a user of a footer by their Account link of the messenger: what its adapter writes them by, and
+// whether the link lets the messenger mention them.
+func footerUser(name, messenger, username, externalID, displayName string) (User, bool) {
+	u := User{Name: name}
+	switch messenger {
+	case TypeMattermost:
+		u.Username = oneLine(username)
+	case TypeBridge:
+		u.Username, u.ExternalID, u.DisplayName = oneLine(username), externalID, oneLine(displayName)
+	default:
+		u.ExternalID = externalID
+	}
+	return u, u.Username != "" || u.ExternalID != ""
+}
+
+// AssigneeUsers are the Assignees of the Alert Group groupID by id, each by the identity spaces where they have an
+// Account link their messenger can mention them by, read through db, as FooterUsers reads the footer's user: item 7
+// of the Root message names them as Mentions there (C-29.FR-1, C-32.FR-12). An Assignee without such a link is not in
+// it.
+func (s *Service) AssigneeUsers(ctx context.Context, db DBTX, groupID int64) (map[int64]map[string]User, error) {
+	rows, err := s.q(db).ListAssigneeUsers(ctx, dbgen.ListAssigneeUsersParams{OrgID: s.orgID, AlertGroupID: groupID})
+	if err != nil {
+		return nil, fmt.Errorf("read the account links of the assignees of alert group %d: %w", groupID, err)
+	}
+	var out map[int64]map[string]User
+	for _, r := range rows {
+		u, ok := footerUser(r.Name, r.Messenger, r.Username, r.ExternalID, r.DisplayName)
+		if !ok {
+			continue
+		}
+		if out == nil {
+			out = map[int64]map[string]User{}
+		}
+		if out[r.UserID] == nil {
+			out[r.UserID] = map[string]User{}
+		}
+		out[r.UserID][r.IdentitySpace] = u
 	}
 	return out, nil
 }

@@ -397,18 +397,24 @@ WHERE g.org_id = $2
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND (NOT $15::boolean
+  AND ($15::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = $15::bigint
+                         AND ga.alert_group_id = g.id)))
+  AND (NOT $16::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
-                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
-  AND ($17::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($17::bigint[])))
   AND ($18::boolean IS NULL
-       OR dp.delivery_problem = $18::boolean)
-  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
-  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
-  AND ($21::text IS NULL OR g.title ILIKE $21::text
-       OR g.summary ILIKE $21::text)
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $18::boolean)
+  AND ($19::boolean IS NULL
+       OR dp.delivery_problem = $19::boolean)
+  AND ($20::boolean IS NULL OR g.unclaimed = $20::boolean)
+  AND ($21::jsonb IS NULL OR g.common_labels @> $21::jsonb)
+  AND ($22::text IS NULL OR g.title ILIKE $22::text
+       OR g.summary ILIKE $22::text)
 GROUP BY g.status, (CASE WHEN $1::boolean THEN g.common_labels END)
 `
 
@@ -427,6 +433,7 @@ type CountGroupsParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	Assignee        pgtype.Int8
 	TeamSet         bool
 	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
@@ -460,6 +467,7 @@ func (q *Queries) CountGroups(ctx context.Context, arg CountGroupsParams) ([]Cou
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.Assignee,
 		arg.TeamSet,
 		arg.TeamIds,
 		arg.SnoozedNoEnd,
@@ -677,6 +685,25 @@ func (q *Queries) DeleteExpiredRunSteps(ctx context.Context, arg DeleteExpiredRu
 	return result.RowsAffected(), nil
 }
 
+const deleteGroupAssignees = `-- name: DeleteGroupAssignees :execrows
+DELETE FROM alert_group_assignees
+WHERE org_id = $1 AND alert_group_id = $2
+`
+
+type DeleteGroupAssigneesParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// DeleteGroupAssignees removes every Assignee of an Alert Group: Acknowledge, Snooze and Resolve clear them.
+func (q *Queries) DeleteGroupAssignees(ctx context.Context, arg DeleteGroupAssigneesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGroupAssignees, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteOpenGroupUpdate = `-- name: DeleteOpenGroupUpdate :exec
 DELETE FROM open_group_updates
 WHERE org_id = $1 AND id = $2
@@ -691,6 +718,33 @@ type DeleteOpenGroupUpdateParams struct {
 func (q *Queries) DeleteOpenGroupUpdate(ctx context.Context, arg DeleteOpenGroupUpdateParams) error {
 	_, err := q.db.Exec(ctx, deleteOpenGroupUpdate, arg.OrgID, arg.ID)
 	return err
+}
+
+const deleteRunAssigneesExcept = `-- name: DeleteRunAssigneesExcept :execrows
+DELETE FROM alert_group_assignees
+WHERE org_id = $1 AND alert_group_id = $2 AND escalation_run_id = $3
+  AND NOT (user_id = ANY($4::bigint[]))
+`
+
+type DeleteRunAssigneesExceptParams struct {
+	OrgID           int64
+	AlertGroupID    int64
+	EscalationRunID int64
+	Keep            []int64
+}
+
+// DeleteRunAssigneesExcept removes the Assignees of a run other than @keep, whom a later step replaces.
+func (q *Queries) DeleteRunAssigneesExcept(ctx context.Context, arg DeleteRunAssigneesExceptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRunAssigneesExcept,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.EscalationRunID,
+		arg.Keep,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteTimer = `-- name: DeleteTimer :exec
@@ -1474,11 +1528,11 @@ func (q *Queries) InsertNote(ctx context.Context, arg InsertNoteParams) error {
 const insertPage = `-- name: InsertPage :one
 INSERT INTO pages (org_id, alert_group_id, escalation_run_id, notification_rule_run_id, step_number, kind, team_id,
                    everyone, importance, schedule_id, chain_team_id, again_seconds, again, state, reason, created_at,
-                   ended_at)
+                   ended_at, run_step_seq)
 VALUES ($1, $2, $3, $4,
         $5, 'mention', $6, $7, $8,
         $9, $10, $11, $12, $13,
-        $14, $15, $16)
+        $14, $15, $16, $17)
 RETURNING id
 `
 
@@ -1499,10 +1553,12 @@ type InsertPageParams struct {
 	Reason                pgtype.Text
 	Now                   time.Time
 	EndedAt               pgtype.Timestamptz
+	RunStepSeq            pgtype.Int4
 }
 
 // InsertPage writes a Page by Mention of a step or of an action of a Notification rule (C-32.FR-9, schema.md §4.18):
-// pending until its Thread replies end, or ended at once, as not_delivered for no_root_message.
+// pending until its Thread replies end, or ended at once, as not_delivered for no_root_message; the first Mentions of
+// a step carry the seq of its run step.
 func (q *Queries) InsertPage(ctx context.Context, arg InsertPageParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertPage,
 		arg.OrgID,
@@ -1521,6 +1577,7 @@ func (q *Queries) InsertPage(ctx context.Context, arg InsertPageParams) (int64, 
 		arg.Reason,
 		arg.Now,
 		arg.EndedAt,
+		arg.RunStepSeq,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -1559,7 +1616,7 @@ INSERT INTO timeline_entries (
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
     period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
     paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, page_everyone,
-    page_importance
+    page_importance, assignees
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
@@ -1572,7 +1629,7 @@ VALUES (
     $31, $32, $33, $34,
     $35, $36::bigint[], $37,
     $38, $39, $40,
-    $41, $42
+    $41, $42, $43::jsonb
 )
 `
 
@@ -1619,6 +1676,7 @@ type InsertTimelineEntryParams struct {
 	StepNumber            pgtype.Int4
 	PageEveryone          pgtype.Text
 	PageImportance        pgtype.Text
+	Assignees             []byte
 }
 
 // InsertTimelineEntry records one Timeline entry: a lifecycle event or a system entry.
@@ -1666,6 +1724,7 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.StepNumber,
 		arg.PageEveryone,
 		arg.PageImportance,
+		arg.Assignees,
 	)
 	return err
 }
@@ -2231,6 +2290,56 @@ func (q *Queries) ListGroupAlerts(ctx context.Context, arg ListGroupAlertsParams
 	return items, nil
 }
 
+const listGroupAssignees = `-- name: ListGroupAssignees :many
+SELECT a.alert_group_id, a.escalation_run_id, a.user_id, a.team_id, a.since
+FROM alert_group_assignees a
+JOIN alert_groups g ON g.org_id = a.org_id AND g.id = a.alert_group_id AND g.status = 'firing'
+WHERE a.org_id = $1 AND a.alert_group_id = ANY($2::bigint[])
+ORDER BY a.alert_group_id, a.escalation_run_id, a.since, a.user_id
+`
+
+type ListGroupAssigneesParams struct {
+	OrgID         int64
+	AlertGroupIds []int64
+}
+
+type ListGroupAssigneesRow struct {
+	AlertGroupID    int64
+	EscalationRunID int64
+	UserID          int64
+	TeamID          pgtype.Int8
+	Since           time.Time
+}
+
+// ListGroupAssignees lists the Assignees of the firing ones of Alert Groups by internal ids, by chain in the order the
+// runs started, then in the order they became Assignees: only a firing Alert Group has Assignees, and the rows a
+// replica without migration 0050 left after an acknowledgement never show.
+func (q *Queries) ListGroupAssignees(ctx context.Context, arg ListGroupAssigneesParams) ([]ListGroupAssigneesRow, error) {
+	rows, err := q.db.Query(ctx, listGroupAssignees, arg.OrgID, arg.AlertGroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupAssigneesRow{}
+	for rows.Next() {
+		var i ListGroupAssigneesRow
+		if err := rows.Scan(
+			&i.AlertGroupID,
+			&i.EscalationRunID,
+			&i.UserID,
+			&i.TeamID,
+			&i.Since,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGroupFiringAlerts = `-- name: ListGroupFiringAlerts :many
 SELECT m.id, m.alert_group_id, m.alert_id, m.episode, m.starts_at, m.annotations, a.integration_id, a.fingerprint,
        a.labels, a.static_label_conflicts, a.severity_level, a.status
@@ -2431,22 +2540,28 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND (NOT $15::boolean
+  AND ($15::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = $15::bigint
+                         AND ga.alert_group_id = g.id)))
+  AND (NOT $16::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
-                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
-  AND ($17::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($17::bigint[])))
   AND ($18::boolean IS NULL
-       OR dp.delivery_problem = $18::boolean)
-  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
-  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
-  AND ($21::text IS NULL OR g.title ILIKE $21::text
-       OR g.summary ILIKE $21::text)
-  AND ($22::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) > ($22::timestamptz, $23::bigint))
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $18::boolean)
+  AND ($19::boolean IS NULL
+       OR dp.delivery_problem = $19::boolean)
+  AND ($20::boolean IS NULL OR g.unclaimed = $20::boolean)
+  AND ($21::jsonb IS NULL OR g.common_labels @> $21::jsonb)
+  AND ($22::text IS NULL OR g.title ILIKE $22::text
+       OR g.summary ILIKE $22::text)
+  AND ($23::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) > ($23::timestamptz, $24::bigint))
 ORDER BY g.last_changed_at, g.id
-LIMIT $24
+LIMIT $25
 `
 
 type ListGroupsChangedAscParams struct {
@@ -2464,6 +2579,7 @@ type ListGroupsChangedAscParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	Assignee        pgtype.Int8
 	TeamSet         bool
 	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
@@ -2531,6 +2647,7 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.Assignee,
 		arg.TeamSet,
 		arg.TeamIds,
 		arg.SnoozedNoEnd,
@@ -2643,22 +2760,28 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND (NOT $15::boolean
+  AND ($15::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = $15::bigint
+                         AND ga.alert_group_id = g.id)))
+  AND (NOT $16::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
-                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
-  AND ($17::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($17::bigint[])))
   AND ($18::boolean IS NULL
-       OR dp.delivery_problem = $18::boolean)
-  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
-  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
-  AND ($21::text IS NULL OR g.title ILIKE $21::text
-       OR g.summary ILIKE $21::text)
-  AND ($22::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) < ($22::timestamptz, $23::bigint))
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $18::boolean)
+  AND ($19::boolean IS NULL
+       OR dp.delivery_problem = $19::boolean)
+  AND ($20::boolean IS NULL OR g.unclaimed = $20::boolean)
+  AND ($21::jsonb IS NULL OR g.common_labels @> $21::jsonb)
+  AND ($22::text IS NULL OR g.title ILIKE $22::text
+       OR g.summary ILIKE $22::text)
+  AND ($23::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) < ($23::timestamptz, $24::bigint))
 ORDER BY g.last_changed_at DESC, g.id DESC
-LIMIT $24
+LIMIT $25
 `
 
 type ListGroupsChangedDescParams struct {
@@ -2676,6 +2799,7 @@ type ListGroupsChangedDescParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	Assignee        pgtype.Int8
 	TeamSet         bool
 	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
@@ -2743,6 +2867,7 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.Assignee,
 		arg.TeamSet,
 		arg.TeamIds,
 		arg.SnoozedNoEnd,
@@ -2855,22 +2980,28 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND (NOT $15::boolean
+  AND ($15::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = $15::bigint
+                         AND ga.alert_group_id = g.id)))
+  AND (NOT $16::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
-                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
-  AND ($17::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($17::bigint[])))
   AND ($18::boolean IS NULL
-       OR dp.delivery_problem = $18::boolean)
-  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
-  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
-  AND ($21::text IS NULL OR g.title ILIKE $21::text
-       OR g.summary ILIKE $21::text)
-  AND ($22::timestamptz IS NULL
-       OR (g.created_at, g.id) > ($22::timestamptz, $23::bigint))
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $18::boolean)
+  AND ($19::boolean IS NULL
+       OR dp.delivery_problem = $19::boolean)
+  AND ($20::boolean IS NULL OR g.unclaimed = $20::boolean)
+  AND ($21::jsonb IS NULL OR g.common_labels @> $21::jsonb)
+  AND ($22::text IS NULL OR g.title ILIKE $22::text
+       OR g.summary ILIKE $22::text)
+  AND ($23::timestamptz IS NULL
+       OR (g.created_at, g.id) > ($23::timestamptz, $24::bigint))
 ORDER BY g.created_at, g.id
-LIMIT $24
+LIMIT $25
 `
 
 type ListGroupsStartedAscParams struct {
@@ -2888,6 +3019,7 @@ type ListGroupsStartedAscParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	Assignee        pgtype.Int8
 	TeamSet         bool
 	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
@@ -2955,6 +3087,7 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.Assignee,
 		arg.TeamSet,
 		arg.TeamIds,
 		arg.SnoozedNoEnd,
@@ -3068,22 +3201,28 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND (NOT $15::boolean
+  AND ($15::bigint IS NULL
+       OR (g.status = 'firing'
+           AND EXISTS (SELECT 1
+                       FROM alert_group_assignees ga
+                       WHERE ga.org_id = g.org_id AND ga.user_id = $15::bigint
+                         AND ga.alert_group_id = g.id)))
+  AND (NOT $16::boolean
        OR EXISTS (SELECT 1
                   FROM alert_group_teams gt
-                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
-  AND ($17::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($17::bigint[])))
   AND ($18::boolean IS NULL
-       OR dp.delivery_problem = $18::boolean)
-  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
-  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
-  AND ($21::text IS NULL OR g.title ILIKE $21::text
-       OR g.summary ILIKE $21::text)
-  AND ($22::timestamptz IS NULL
-       OR (g.created_at, g.id) < ($22::timestamptz, $23::bigint))
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $18::boolean)
+  AND ($19::boolean IS NULL
+       OR dp.delivery_problem = $19::boolean)
+  AND ($20::boolean IS NULL OR g.unclaimed = $20::boolean)
+  AND ($21::jsonb IS NULL OR g.common_labels @> $21::jsonb)
+  AND ($22::text IS NULL OR g.title ILIKE $22::text
+       OR g.summary ILIKE $22::text)
+  AND ($23::timestamptz IS NULL
+       OR (g.created_at, g.id) < ($23::timestamptz, $24::bigint))
 ORDER BY g.created_at DESC, g.id DESC
-LIMIT $24
+LIMIT $25
 `
 
 type ListGroupsStartedDescParams struct {
@@ -3101,6 +3240,7 @@ type ListGroupsStartedDescParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	Assignee        pgtype.Int8
 	TeamSet         bool
 	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
@@ -3159,7 +3299,10 @@ type ListGroupsStartedDescRow struct {
 // with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 // and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
 // these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
-// @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null. The Delivery problem
+// @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null; @assignee the firing
+// ones where that User is an Assignee (C-32.FR-18), through alert_group_assignees_user_idx — only a firing Alert Group
+// has Assignees, and the rows a replica without migration 0050 left after an acknowledgement never show. The Delivery
+// problem
 // (C-13.FR-12) and the next notice (C-17.FR-9) are derived as in GetGroup; @unclaimed selects the Unclaimed Alert Groups
 // or the others (C-09.FR-13).
 // ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
@@ -3179,6 +3322,7 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.Assignee,
 		arg.TeamSet,
 		arg.TeamIds,
 		arg.SnoozedNoEnd,
@@ -4019,6 +4163,48 @@ func (q *Queries) ListRoutesByPublicID(ctx context.Context, arg ListRoutesByPubl
 	return items, nil
 }
 
+const listRunAssignees = `-- name: ListRunAssignees :many
+
+SELECT user_id, run_step_seq
+FROM alert_group_assignees
+WHERE org_id = $1 AND alert_group_id = $2 AND escalation_run_id = $3
+ORDER BY user_id
+`
+
+type ListRunAssigneesParams struct {
+	OrgID           int64
+	AlertGroupID    int64
+	EscalationRunID int64
+}
+
+type ListRunAssigneesRow struct {
+	UserID     int64
+	RunStepSeq pgtype.Int4
+}
+
+// The Assignees of Alert Groups (C-32.FR-12, schema.md §4.9): per run of a chain, the people its latest step Paging
+// people by name reached; only the dispatcher writes them, and only while the Alert Group is firing.
+// ListRunAssignees lists the Assignees of a run with the run step that made them.
+func (q *Queries) ListRunAssignees(ctx context.Context, arg ListRunAssigneesParams) ([]ListRunAssigneesRow, error) {
+	rows, err := q.db.Query(ctx, listRunAssignees, arg.OrgID, arg.AlertGroupID, arg.EscalationRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRunAssigneesRow{}
+	for rows.Next() {
+		var i ListRunAssigneesRow
+		if err := rows.Scan(&i.UserID, &i.RunStepSeq); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServiceAccountRefs = `-- name: ListServiceAccountRefs :many
 SELECT id, public_id, name, status
 FROM service_accounts
@@ -4355,7 +4541,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -4414,6 +4600,7 @@ type ListTimelineAscRow struct {
 	EscalationRunID       pgtype.Int8
 	EscalationChainID     pgtype.Int8
 	StepNumber            pgtype.Int4
+	Assignees             []byte
 }
 
 // ListTimelineAsc reads the Timeline entries of an Alert Group, oldest first, after a position.
@@ -4473,6 +4660,7 @@ func (q *Queries) ListTimelineAsc(ctx context.Context, arg ListTimelineAscParams
 			&i.EscalationRunID,
 			&i.EscalationChainID,
 			&i.StepNumber,
+			&i.Assignees,
 		); err != nil {
 			return nil, err
 		}
@@ -4640,7 +4828,7 @@ SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentio
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
        missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
-       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number
+       paged_user_ids, gateway_connection_id, escalation_run_id, escalation_chain_id, step_number, assignees
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -4699,6 +4887,7 @@ type ListTimelineDescRow struct {
 	EscalationRunID       pgtype.Int8
 	EscalationChainID     pgtype.Int8
 	StepNumber            pgtype.Int4
+	Assignees             []byte
 }
 
 // The Timeline merges three sources by (at, source, id): its entries (source 0), Notes (1) and delivery events (2).
@@ -4760,6 +4949,7 @@ func (q *Queries) ListTimelineDesc(ctx context.Context, arg ListTimelineDescPara
 			&i.EscalationRunID,
 			&i.EscalationChainID,
 			&i.StepNumber,
+			&i.Assignees,
 		); err != nil {
 			return nil, err
 		}
@@ -5358,10 +5548,12 @@ const lockPage = `-- name: LockPage :one
 SELECT p.id, p.alert_group_id, p.state, p.step_number, (p.team_id IS NOT NULL OR p.everyone IS NOT NULL)::boolean AS team,
        coalesce(p.importance, '')::text AS importance,
        p.escalation_run_id, r.chain_id, coalesce(c.public_id, '')::text AS chain_public_id,
-       coalesce(r.chain_name, '')::text AS chain_name
+       coalesce(r.chain_name, '')::text AS chain_name, coalesce(r.state, '')::text AS run_state, r.owning_team_id,
+       coalesce(rr.run_step_seq, p.run_step_seq) AS run_step_seq
 FROM pages p
 LEFT JOIN escalation_runs r ON r.org_id = p.org_id AND r.id = p.escalation_run_id
 LEFT JOIN escalation_chains c ON c.org_id = r.org_id AND c.id = r.chain_id
+LEFT JOIN notification_rule_runs rr ON rr.org_id = p.org_id AND rr.id = p.notification_rule_run_id
 WHERE p.org_id = $1 AND p.id = $2 AND p.alert_group_id = $3
 FOR NO KEY UPDATE OF p
 `
@@ -5383,10 +5575,16 @@ type LockPageRow struct {
 	ChainID         pgtype.Int8
 	ChainPublicID   string
 	ChainName       string
+	RunState        string
+	OwningTeamID    pgtype.Int8
+	RunStepSeq      pgtype.Int4
 }
 
 // LockPage locks a Page whose outcome its Thread replies settle, after its Alert Group, with the run, the chain and the
-// step that made it, and the importance of a Page of people, empty for none.
+// step that made it, the importance of a Page of people, empty for none, the state and the owning Team of the run,
+// which its Assignees take, and run_step_seq, the run step whose Page it is (C-32.FR-12): that of the rule run of a
+// later Mention of a rule, which the step that started it made, else the Page's own; null for a Page or a rule run
+// written before migration 0050.
 func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow, error) {
 	row := q.db.QueryRow(ctx, lockPage, arg.OrgID, arg.ID, arg.AlertGroupID)
 	var i LockPageRow
@@ -5401,6 +5599,9 @@ func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow
 		&i.ChainID,
 		&i.ChainPublicID,
 		&i.ChainName,
+		&i.RunState,
+		&i.OwningTeamID,
+		&i.RunStepSeq,
 	)
 	return i, err
 }
@@ -6326,6 +6527,42 @@ func (q *Queries) UpdateMemberships(ctx context.Context, arg UpdateMembershipsPa
 		arg.Ids,
 		arg.StartsAts,
 		arg.Annotations,
+	)
+	return err
+}
+
+const upsertAssignee = `-- name: UpsertAssignee :exec
+INSERT INTO alert_group_assignees (org_id, alert_group_id, escalation_run_id, step_number, run_step_seq, user_id,
+                                   team_id, since)
+VALUES ($1, $2, $3, $4, $5, $6,
+        $7, $8)
+ON CONFLICT (alert_group_id, escalation_run_id, user_id)
+DO UPDATE SET step_number = EXCLUDED.step_number, run_step_seq = EXCLUDED.run_step_seq
+`
+
+type UpsertAssigneeParams struct {
+	OrgID           int64
+	AlertGroupID    int64
+	EscalationRunID int64
+	StepNumber      int32
+	RunStepSeq      pgtype.Int4
+	UserID          int64
+	TeamID          pgtype.Int8
+	Since           time.Time
+}
+
+// UpsertAssignee makes a person an Assignee of a run, or moves an Assignee to the step that reached them again,
+// keeping since when they are one.
+func (q *Queries) UpsertAssignee(ctx context.Context, arg UpsertAssigneeParams) error {
+	_, err := q.db.Exec(ctx, upsertAssignee,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.EscalationRunID,
+		arg.StepNumber,
+		arg.RunStepSeq,
+		arg.UserID,
+		arg.TeamID,
+		arg.Since,
 	)
 	return err
 }

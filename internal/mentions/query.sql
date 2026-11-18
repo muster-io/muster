@@ -155,6 +155,18 @@ SELECT public_id
 FROM users
 WHERE org_id = @org_id AND status <> 'deleted' AND public_id = ANY(@public_ids::text[]);
 
+-- ListAssigneeUsers lists the Account links, by identity space, of the Assignees of an Alert Group, whom item 7 of its
+-- Root message names before an acknowledgement (C-29.FR-1, C-32.FR-12), as ListFooterUsers does for the footer's user.
+-- name: ListAssigneeUsers :many
+SELECT DISTINCT a.user_id, al.identity_space, al.messenger, coalesce(al.username, '')::text AS username,
+       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name,
+       u.name
+FROM alert_group_assignees a
+JOIN users u ON u.org_id = a.org_id AND u.id = a.user_id
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id
+WHERE a.org_id = @org_id AND a.alert_group_id = @alert_group_id
+ORDER BY a.user_id, al.identity_space;
+
 -- ListFooterUsers lists the Account links, by identity space, of the user the footer of an Alert Group names: its Owner
 -- while acknowledged, who snoozed it while snoozed, who resolved it while resolved, with the messenger, the username,
 -- the messenger's user id and the display name of each, empty without one, and the user's display name; FooterUsers

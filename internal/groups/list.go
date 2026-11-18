@@ -183,7 +183,7 @@ func (s *Service) listBatch(ctx context.Context, q query, sort Sort, after *List
 		Urgent: q.urgent, ResolvedBy: q.resolvedBy, ResolveReason: q.reason, Reopened: q.reopened,
 		Contains: q.contains, Pattern: q.pattern, OwnerSet: q.ownerSet, OwnerID: q.owner, SnoozedNoEnd: q.snoozedNoEnd,
 		DeliveryProblem: q.problem, Unclaimed: q.unclaimed, TeamSet: q.teamSet, TeamIds: q.teamIDs,
-		Lim: int32(size)} //nolint:gosec // G115: size is at most maxBatch
+		Assignee: q.assignee, Lim: int32(size)} //nolint:gosec // G115: size is at most maxBatch
 	if after != nil {
 		p.AfterAt = pgtype.Timestamptz{Time: after.At, Valid: true}
 		p.AfterID = pgtype.Int8{Int64: after.ID, Valid: true}
@@ -219,8 +219,8 @@ func (s *Service) listBatch(ctx context.Context, q query, sort Sort, after *List
 	return out, nil
 }
 
-// views turns the rows of a page into Alert Groups, naming their Integrations, their Teams, and who resolved, owns or
-// snoozed them, in one read each.
+// views turns the rows of a page into Alert Groups, naming their Integrations, their Teams, their Assignees, and who
+// resolved, owns or snoozed them, in one read each.
 func (s *Service) views(ctx context.Context, rows []listRow, retentionDays int64, now time.Time,
 	columns []string) ([]View, error) {
 	out := make([]View, 0, len(rows))
@@ -258,6 +258,10 @@ func (s *Service) views(ctx context.Context, rows []listRow, retentionDays int64
 	if err != nil {
 		return nil, err
 	}
+	assignees, err := s.groupAssignees(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for _, r := range rows {
 		v := View{PublicID: r.PublicID, Number: r.Number, Title: r.Title, Summary: textOf(r.Summary),
 			Status: Status(r.Status), Severity: organization.SeverityLevel(r.SeverityLevel), Urgent: r.Urgent,
@@ -265,7 +269,8 @@ func (s *Service) views(ctx context.Context, rows []listRow, retentionDays int64
 			LastChangedAt: r.LastChangedAt.UTC(), ResolvedAt: timeOf(r.ResolvedAt), ReopenCount: r.ReopenCount,
 			FiringCount: r.FiringAlertCount, ResolvedCount: r.ResolvedAlertCount, Integrations: []Ref{},
 			DetailsRemoved: detailsRemoved(r.ResolvedAt, retentionDays, now), Unclaimed: r.Unclaimed,
-			NextNotice: nextNoticeOf(r.NextNoticeKind, r.NextNoticeAt), Teams: orNoTeams(teams[r.ID])}
+			NextNotice: nextNoticeOf(r.NextNoticeKind, r.NextNoticeAt), Teams: orNoTeams(teams[r.ID]),
+			Assignees: orNoTeams(assignees[r.ID])}
 		for _, id := range r.IntegrationIds {
 			if ref, ok := names[id]; ok {
 				v.Integrations = append(v.Integrations, ref)

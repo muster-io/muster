@@ -188,9 +188,13 @@ func TestRuleRuns(t *testing.T) {
 		t.Fatalf("normal %+v %+v", normal, q.runs[0])
 	}
 	important, err := r.Start(t.Context(), nil, Start{Group: 9, Run: 502, Step: 3, Importance: ImportanceImportant,
-		Users: []int64{21, 22}})
+		Users: []int64{21, 22}, RunStepSeq: 6})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A rule run keeps the run step that started it, which its later Mentions belong to (C-32.FR-12); none without.
+	if q.runs[0].RunStepSeq.Valid || q.runs[1].RunStepSeq.Int32 != 6 || q.runs[2].RunStepSeq.Int32 != 6 {
+		t.Errorf("run steps %+v %+v %+v", q.runs[0].RunStepSeq, q.runs[1].RunStepSeq, q.runs[2].RunStepSeq)
 	}
 	if !slices.Equal(important.Mentioned, []int64{21, 22}) || important.AgainSeconds != 300 || len(q.timers) != 2 ||
 		!q.timers[71].Equal(runsT0.Add(5*time.Minute)) || q.runs[1].Position != 2 || q.runs[1].State != RunRunning ||

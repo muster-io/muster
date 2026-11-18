@@ -14,7 +14,7 @@ import (
 
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/links"
-	"github.com/muster-io/muster/internal/templates"
+	"github.com/muster-io/muster/internal/mentions"
 )
 
 // The default Root message (C-29.FR-1): the limits of its Alerts and the labels a new-Alert Thread reply leaves out.
@@ -40,16 +40,18 @@ func (r *Renderer) frame(src *Source, lang string, sign bool) (Message, string) 
 		Heading:    &Heading{Number: src.Number, Title: Value(src.Title), URL: url},
 		StatusWord: T(lang, "status."+src.Status, nil), Fields: fields(src, lang),
 		Links:   append([]Link{{Text: T(lang, "link.open", nil), URL: url}}, linksOf(src.Links, lang)...),
-		Notices: notices(src, lang), Footer: footer(src, lang, Value), Buttons: []Button{}}
-	token := func(string) string { return templates.MentionToken(templates.Token{Name: FooterUserToken}) }
+		Notices: notices(src, lang), Footer: footer(src, lang, named), Buttons: []Button{}}
+	token := func(i int, _ string) string { return FooterToken(i) }
 	if f := footer(src, lang, token); len(src.FooterUsers) > 0 && f != m.Footer {
 		m.Footers = make(map[string]string, len(src.FooterUsers))
 		m.FooterUsers = make(map[string]FooterUser, len(src.FooterUsers))
 		for space, u := range src.FooterUsers {
 			m.Footers[space] = f
-			m.FooterUsers[space] = FooterUser{Name: u.Name, Username: u.Username, ExternalID: u.ExternalID,
-				DisplayName: u.DisplayName}
+			m.FooterUsers[space] = footerUserOf(u)
 		}
+	}
+	if src.Status == ColourFiring {
+		assigneeFooters(&m, src, lang)
 	}
 	keyID := ""
 	for _, b := range buttons.ForStatus(src.Status, len(src.Route.SnoozeDurations)) {
@@ -127,26 +129,85 @@ func notices(src *Source, lang string) []string {
 	return out
 }
 
-// footer is item 7, until the Assignees and the Owner's Team come: who acknowledged, resolved or snoozed the Alert Group, or why the system resolved it, with the
-// user written by user from their Muster display name: the name made safe, or the trusted token of the user that an
-// adapter writes as its messenger's Mention where they have an Account link (C-12.FR-12).
-func footer(src *Source, lang string, user func(name string) string) string {
+// footer is item 7 (C-29.FR-1): before an acknowledgement the Assignees, each with the owning Team of their chain —
+// "Assignees: @ivan (devops), @petr (payments)" — otherwise who acknowledged, without a Team (P-89) and with
+// "· Escalation chains stopped" when the acknowledgement stopped running chains, snoozed or resolved the Alert Group,
+// or why the system resolved it. The i-th person is written by user from their Muster display name: the name made
+// safe, or the trusted token of the person that an adapter writes as its messenger's Mention where they have an
+// Account link (C-12.FR-12).
+func footer(src *Source, lang string, user func(i int, name string) string) string {
 	switch src.Status {
+	case ColourFiring:
+		if len(src.Assignees) == 0 {
+			return ""
+		}
+		// "{person} ({team})" reads the same in both languages, so it is no text of its own.
+		people := make([]string, len(src.Assignees))
+		for i, a := range src.Assignees {
+			people[i] = user(i, a.Name)
+			if a.Team != "" {
+				people[i] += " (" + Value(a.Team) + ")"
+			}
+		}
+		return T(lang, "footer.assignees", Args{"people": strings.Join(people, ", ")})
 	case ColourAcknowledged:
-		return T(lang, "footer.acknowledged", Args{"user": user(src.Owner)})
+		f := T(lang, "footer.acknowledged", Args{"user": user(0, src.Owner)})
+		if src.ChainsStopped {
+			f += " · " + T(lang, "footer.chainsStopped", nil)
+		}
+		return f
 	case ColourSnoozed:
 		if src.SnoozeUntil == nil {
-			return T(lang, "footer.snoozedNoEnd", Args{"user": user(src.SnoozedBy)})
+			return T(lang, "footer.snoozedNoEnd", Args{"user": user(0, src.SnoozedBy)})
 		}
-		return T(lang, "footer.snoozed", Args{"user": user(src.SnoozedBy),
+		return T(lang, "footer.snoozed", Args{"user": user(0, src.SnoozedBy),
 			"time": FullTime(*src.SnoozeUntil, src.TimeZone)})
 	case ColourResolved:
 		if src.ResolvedByKind == "user" {
-			return T(lang, "footer.resolvedBy", Args{"user": user(src.ResolvedBy)})
+			return T(lang, "footer.resolvedBy", Args{"user": user(0, src.ResolvedBy)})
 		}
 		return T(lang, "footer.resolvedAutomatically", Args{"reason": reason(lang, src.ResolveReason)})
 	}
 	return ""
+}
+
+// named writes a person of the footer by their Muster display name, made safe.
+func named(_ int, name string) string { return Value(name) }
+
+// footerUserOf is a person of a footer as the Desired state keeps them.
+func footerUserOf(u mentions.User) FooterUser {
+	return FooterUser{Name: u.Name, Username: u.Username, ExternalID: u.ExternalID, DisplayName: u.DisplayName}
+}
+
+// assigneeFooters gives the footer of the Assignees of the firing src in m one text per identity space where one of
+// them has an Account link, with the token of each such Assignee there and the name of the others, and the Assignees
+// in the order of its tokens, so that an adapter writes the linked ones as its messenger's Mentions (C-29.FR-1,
+// C-12.FR-12).
+func assigneeFooters(m *Message, src *Source, lang string) {
+	spaces := map[string]bool{}
+	for _, a := range src.Assignees {
+		for space := range a.Links {
+			spaces[space] = true
+		}
+	}
+	for space := range spaces {
+		people := make([]FooterUser, len(src.Assignees))
+		for i, a := range src.Assignees {
+			if u, ok := a.Links[space]; ok {
+				people[i] = footerUserOf(u)
+			}
+		}
+		if m.Footers == nil {
+			m.Footers, m.FooterPeople = map[string]string{}, map[string][]FooterUser{}
+		}
+		m.Footers[space] = footer(src, lang, func(i int, name string) string {
+			if _, ok := src.Assignees[i].Links[space]; ok {
+				return FooterToken(i)
+			}
+			return Value(name)
+		})
+		m.FooterPeople[space] = people
+	}
 }
 
 // reason is why the system resolved an Alert Group, in words.

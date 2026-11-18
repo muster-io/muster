@@ -54,6 +54,8 @@
   "field.started": "Started",
   "field.teams": "Teams",
   "footer.acknowledged": "Acknowledged by {user}",
+  "footer.assignees": "Assignees: {people}",
+  "footer.chainsStopped": "Escalation chains stopped",
   "footer.resolvedAutomatically": "Resolved automatically: {reason}",
   "footer.resolvedBy": "Resolved by {user}",
   "footer.snoozed": "Snoozed by {user} until {time}",

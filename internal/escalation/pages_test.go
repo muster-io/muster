@@ -86,10 +86,14 @@ func TestMakeStep(t *testing.T) {
 	p := NewPages(PagesConfig{OnCalls: &fakeOnCalls{onCall: map[string]int64{schedMain: 21, "SC00000000GAP1": 0}},
 		Rules: rules, Targets: targets, Business: clock.NewManual(t0)})
 	g := &groups.Group{ID: 9}
-	made, err := p.MakeStep(t.Context(), nil, g, pageRun, StepRef{Number: 1, Kind: KindPageOnCall,
+	made, err := p.MakeStep(t.Context(), nil, g, pageRun, StepRef{Seq: 4, Number: 1, Kind: KindPageOnCall,
 		Importance: ImportanceImportant, ScheduleID: 11, Schedule: schedMain}, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The Page and the rule runs carry the run step that made them (C-32.FR-12).
+	if len(made.Pages) != 1 || made.Pages[0].RunStepSeq != 4 || rules.starts[0].RunStepSeq != 4 {
+		t.Fatalf("run step %+v %+v", made.Pages, rules.starts)
 	}
 	if len(made.Pages) != 1 || !slices.Equal(made.Pages[0].People, []int64{21}) || made.Pages[0].Schedule != 11 ||
 		made.Pages[0].Importance != ImportanceImportant || made.Pages[0].AgainSeconds != 300 ||

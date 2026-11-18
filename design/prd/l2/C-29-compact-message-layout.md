@@ -40,9 +40,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   5. when the Alert Group has more than one Alert, its Alerts (FR-3);
   6. the notices of [reference.md](../l1/reference.md#banners-warnings-and-notices) that apply;
   7. before an acknowledgement, the Assignees with their Teams (C-32.FR-12); otherwise the footer of C-12.FR-1 —
-     "Acknowledged by {user}", with the Owner's Team (C-32.FR-12) and "· Escalation chains stopped" when the
-     acknowledgement stopped chains, "Snoozed by {user} until {time}", "Resolved by {user}" or "Resolved automatically:
-     {reason}";
+     "Acknowledged by {user}", with "· Escalation chains stopped" when the acknowledgement stopped chains, "Snoozed by
+     {user} until {time}", "Resolved by {user}" or "Resolved automatically: {reason}";
   8. the buttons of the Destination's set (C-28.FR-8);
   9. the links of C-12.FR-9, starting with "Open in Muster".
 

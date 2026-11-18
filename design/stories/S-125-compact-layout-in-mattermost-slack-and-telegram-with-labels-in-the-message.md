@@ -113,7 +113,7 @@ issue: 414
 
 - `layout` in the Bridge protocol, the Bridge adapter and the fake bridge: S-126; the bridge libraries: S-127, S-128.
 - "Labels in the message" on the Route form and the previews for every markup on the page: S-129.
-- The Assignees and the Owner's Team in item 7, with "· Escalation chains stopped": S-168. Until then item 7 is the
+- The Assignees in item 7, and "· Escalation chains stopped" after the Owner: S-168. Until then item 7 is the
   footer of L1.
 - The messages page with the layout per messenger: S-130. The visual editor of the layout: later in L2.
 
@@ -309,7 +309,7 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-29.FR-1 | partial | Mattermost, Slack and Telegram; Bridges S-126, the Assignees and the Owner's Team S-168 |
+| C-29.FR-1 | partial | Mattermost, Slack and Telegram; Bridges S-126, the Assignees S-168 |
 | C-29.FR-2 | partial | the setting, suggestions and re-render; the form is S-129 |
 | C-29.FR-3 | full | |
 | C-29.FR-4 | partial | Mattermost, Slack and Telegram; the Bridge envelope is S-126 |

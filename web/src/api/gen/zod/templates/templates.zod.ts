@@ -61,21 +61,21 @@ export const PreviewTemplateResponse = zod.object({
 })).describe('Up to `message.compact_alerts_listed` values, firing Alerts first.'),
   "total": zod.int().describe('How many Alerts the Alert Group has, so that a reader counts the ones not listed itself.')
 }),zod.null()]).describe('The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert.'),
-  "notices": zod.array(zod.string()).describe('The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names.'),
+  "notices": zod.array(zod.string()).describe('The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names, of which only "Escalation chains stopped" is a line, and the Assignees.'),
   "assignees": zod.array(zod.object({
   "name": zod.string(),
   "ref": zod.string().nullable().describe('The `ref` of the person\'s entry in the envelope\'s `mentions` where the message carries their Mention, otherwise null.'),
   "team": zod.object({
   "name": zod.string()
 }).optional()
-})).describe('The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page people.'),
+})).describe('The Assignees with the owning Teams of their chains, before an acknowledgement; empty until Escalation chains Page people, and in a preview.'),
   "owner": zod.union([zod.object({
   "name": zod.string(),
   "ref": zod.string().nullable().describe('The `ref` of the person\'s entry in the envelope\'s `mentions` where the message carries their Mention, otherwise null.'),
   "team": zod.object({
   "name": zod.string()
 }).optional()
-}),zod.null()]).describe('Who acknowledged the Alert Group, with their Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them.'),
+}),zod.null()]).describe('Who acknowledged the Alert Group, without a Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them.'),
   "links": zod.array(zod.object({
   "label": zod.string(),
   "url": zod.string()

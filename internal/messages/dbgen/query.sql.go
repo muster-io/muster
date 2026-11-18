@@ -121,7 +121,12 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.description, g.status,
        o.week_start, o.severity_label, o.team_label, o.instance_labels,
        coalesce(ou.name, '')::text AS owner_name,
        coalesce(su.name, ss.name, '')::text AS snoozed_by_name,
-       coalesce(ru.name, rs.name, '')::text AS resolved_by_name
+       coalesce(ru.name, rs.name, '')::text AS resolved_by_name,
+       (g.status = 'acknowledged'
+        AND EXISTS (SELECT 1
+                    FROM escalation_runs er
+                    WHERE er.org_id = g.org_id AND er.alert_group_id = g.id AND er.generation = g.chain_generation
+                      AND er.stop_command = 'acknowledge'))::boolean AS chains_stopped
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -180,6 +185,7 @@ type GetRenderGroupRow struct {
 	OwnerName                string
 	SnoozedByName            string
 	ResolvedByName           string
+	ChainsStopped            bool
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -237,6 +243,7 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 		&i.OwnerName,
 		&i.SnoozedByName,
 		&i.ResolvedByName,
+		&i.ChainsStopped,
 	)
 	return i, err
 }
@@ -454,6 +461,50 @@ func (q *Queries) ListRenderAlerts(ctx context.Context, arg ListRenderAlertsPara
 			&i.State,
 			&i.Total,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRenderAssignees = `-- name: ListRenderAssignees :many
+SELECT a.user_id, u.name, coalesce(t.name, '')::text AS team_name
+FROM alert_group_assignees a
+JOIN users u ON u.org_id = a.org_id AND u.id = a.user_id
+LEFT JOIN teams t ON t.org_id = a.org_id AND t.id = a.team_id
+WHERE a.org_id = $1 AND a.alert_group_id = $2
+ORDER BY u.name, a.user_id, team_name, a.escalation_run_id
+`
+
+type ListRenderAssigneesParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type ListRenderAssigneesRow struct {
+	UserID   int64
+	Name     string
+	TeamName string
+}
+
+// ListRenderAssignees lists the Assignees of an Alert Group, which item 7 of its Root message names before an
+// acknowledgement (C-29.FR-1, C-32.FR-12): each person by id and display name with the name of the owning Team of
+// their chain, empty for none, by name and then Team, so that the line does not change with the order in which the
+// chains started or their replies were delivered.
+func (q *Queries) ListRenderAssignees(ctx context.Context, arg ListRenderAssigneesParams) ([]ListRenderAssigneesRow, error) {
+	rows, err := q.db.Query(ctx, listRenderAssignees, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRenderAssigneesRow{}
+	for rows.Next() {
+		var i ListRenderAssigneesRow
+		if err := rows.Scan(&i.UserID, &i.Name, &i.TeamName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

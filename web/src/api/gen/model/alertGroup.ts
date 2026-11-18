@@ -8,6 +8,7 @@ import type { AlertGroupLink } from './alertGroupLink';
 import type { AlertGroupNotice } from './alertGroupNotice';
 import type { AlertGroupStatus } from './alertGroupStatus';
 import type { AlertGroupTeam } from './alertGroupTeam';
+import type { Assignee } from './assignee';
 import type { CommandName } from './commandName';
 import type { EntityRef } from './entityRef';
 import type { Labels } from './labels';
@@ -69,4 +70,6 @@ export interface AlertGroup {
   allowed_commands: CommandName[];
   /** The runs of the Escalation chains of the Alert Group since they last started (C-32.FR-18): one per chain, in the order they started, empty before its chains first started or where none applies. A run stays here, `ran_out` or `stopped`, until the chains start over. Changes arrive as the `alert-group` hint. */
   escalation_chains: AlertGroupChain[];
+  /** The Assignees of the Alert Group (C-32.FR-12): for each chain started on it, running or run out, the people its latest step Paging people by name reached, each with the owning Team of the chain; in the order they became Assignees, by chain. Empty before the chains reach anyone and once acknowledged, snoozed or resolved. Changes arrive as the `alert-group` hint. */
+  assignees: Assignee[];
 }

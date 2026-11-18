@@ -55,6 +55,83 @@ func TestLayoutOf(t *testing.T) {
 	}
 }
 
+// TestLayoutAssignees is C-29.FR-8, C-32.FR-12 and C-32.AC-13 for the people of the layout: before an acknowledgement the
+// Assignees in `assignees`, each with the owning Team of their chain, and their footer no notice; after an
+// acknowledgement that stopped running chains the Owner without a Team in `owner` and "Escalation chains stopped" the
+// last line of the notices, which the early return of the Owner does not swallow; without chains stopped only the
+// Owner; a shortened footer leaves the Assignees whole.
+func TestLayoutAssignees(t *testing.T) {
+	r := newRenderer(t)
+	src := source("firing", 1)
+	src.ReopenCount = 1
+	src.Assignees = []SourceAssignee{{ID: 1, Name: "Ivan", Team: "devops",
+		Links: map[string]mentions.User{"bridge:4": {Name: "Ivan", ExternalID: "u-ivan"}}}, {ID: 2, Name: "Petr"}}
+	m := r.Root(src, MarkupCommonMark).Message
+	l := LayoutOf(m.WithFooterIn("bridge:4", nil))
+	if !slices.Equal(l.Assignees, []LayoutPerson{{Name: "Ivan", Team: "devops"}, {Name: "Petr"}}) || l.Owner != nil ||
+		!slices.Equal(l.Notices, []string{"🔁 Reopened ×1"}) {
+		t.Errorf("before an acknowledgement %+v", l)
+	}
+	short := m
+	short.Footer = ""
+	if l := LayoutOf(short); len(l.Assignees) != 2 {
+		t.Errorf("a cut footer %+v", l.Assignees)
+	}
+	ack := source("acknowledged", 1)
+	ack.Owner, ack.ChainsStopped = "Ivan", true
+	l = LayoutOf(r.Root(ack, MarkupCommonMark).Message)
+	if l.Owner == nil || *l.Owner != (LayoutPerson{Name: "Ivan"}) || len(l.Assignees) != 0 ||
+		!slices.Equal(l.Notices, []string{"Escalation chains stopped"}) {
+		t.Errorf("after an acknowledgement %+v", l)
+	}
+	ack.ChainsStopped = false
+	if l := LayoutOf(r.Root(ack, MarkupCommonMark).Message); len(l.Notices) != 0 || l.Owner == nil {
+		t.Errorf("without chains stopped %+v", l)
+	}
+	ack.Route.Language, ack.ChainsStopped = LanguageRussian, true
+	if l := LayoutOf(r.Root(ack, MarkupCommonMark).Message); !slices.Equal(l.Notices,
+		[]string{"Цепочки эскалации остановлены"}) {
+		t.Errorf("in Russian %+v", l.Notices)
+	}
+}
+
+// TestLoadAssignees is C-32.FR-12 for the read of a Root message: the Assignees of a firing Alert Group with their
+// Teams and Account links, once per person and Team; none for another status; a failing read fails the load.
+func TestLoadAssignees(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 1)}
+	f.group.Assignees = []SourceAssignee{{ID: 1, Name: "Ivan", Team: "devops"}, {ID: 2, Name: "Petr", Team: "payments"},
+		{ID: 1, Name: "Ivan", Team: "devops"}, {ID: 1, Name: "Ivan", Team: "search"}}
+	r := withFake(t, f)
+	r.names = fakeNames{}
+	src, err := r.Load(t.Context(), nil, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(src.Assignees) != 3 || src.Assignees[0].Links["telegram"].ExternalID != "7101" ||
+		src.Assignees[1].Links["mattermost:3"].Username != "petr.mm" || src.Assignees[2].Team != "search" {
+		t.Errorf("assignees %+v", src.Assignees)
+	}
+	f.group.Status = "acknowledged"
+	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.Assignees != nil {
+		t.Errorf("acknowledged %+v %v", src.Assignees, err)
+	}
+	f.group.Status = "firing"
+	r.names = fakeNames{assigneesFail: errBoom}
+	if _, err := r.Load(t.Context(), nil, 9); err == nil {
+		t.Error("a failing read of the links")
+	}
+	r.names = nil
+	f.fail["ListRenderAssignees"] = errBoom
+	if _, err := r.Load(t.Context(), nil, 9); err == nil {
+		t.Error("a failing read of the assignees")
+	}
+	delete(f.fail, "ListRenderAssignees")
+	f.group.Assignees = nil
+	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.Assignees != nil {
+		t.Errorf("none %+v %v", src.Assignees, err)
+	}
+}
+
 // TestHasLayout is C-29.FR-8 and C-29.FR-5: only a Root message of Muster's compact default content has a layout; a
 // Route's own root_message template or line template, the Fallback template and a Desired state stored before the compact layout have
 // content that only the body holds, and so have none, nor does a Thread reply or a Storm summary; the preview of a

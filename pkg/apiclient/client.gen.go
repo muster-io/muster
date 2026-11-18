@@ -1522,6 +1522,7 @@ const (
 	LifecycleEventAlertResolved         LifecycleEvent = "alert_resolved"
 	LifecycleEventAlertsAdded           LifecycleEvent = "alerts_added"
 	LifecycleEventAnnotationsChanged    LifecycleEvent = "annotations_changed"
+	LifecycleEventAssigneesChanged      LifecycleEvent = "assignees_changed"
 	LifecycleEventAutoUnacknowledged    LifecycleEvent = "auto_unacknowledged"
 	LifecycleEventCreated               LifecycleEvent = "created"
 	LifecycleEventDestinationJoined     LifecycleEvent = "destination_joined"
@@ -1565,6 +1566,8 @@ func (e LifecycleEvent) Valid() bool {
 	case LifecycleEventAlertsAdded:
 		return true
 	case LifecycleEventAnnotationsChanged:
+		return true
+	case LifecycleEventAssigneesChanged:
 		return true
 	case LifecycleEventAutoUnacknowledged:
 		return true
@@ -4327,6 +4330,7 @@ const (
 	WebhookEventNameAlertResolved         WebhookEventName = "alert_resolved"
 	WebhookEventNameAlertsAdded           WebhookEventName = "alerts_added"
 	WebhookEventNameAnnotationsChanged    WebhookEventName = "annotations_changed"
+	WebhookEventNameAssigneesChanged      WebhookEventName = "assignees_changed"
 	WebhookEventNameAutoUnacknowledged    WebhookEventName = "auto_unacknowledged"
 	WebhookEventNameCreated               WebhookEventName = "created"
 	WebhookEventNameDestinationJoined     WebhookEventName = "destination_joined"
@@ -4371,6 +4375,8 @@ func (e WebhookEventName) Valid() bool {
 	case WebhookEventNameAlertsAdded:
 		return true
 	case WebhookEventNameAnnotationsChanged:
+		return true
+	case WebhookEventNameAssigneesChanged:
 		return true
 	case WebhookEventNameAutoUnacknowledged:
 		return true
@@ -4705,6 +4711,9 @@ type ActorRefKind string
 type AlertGroup struct {
 	// AllowedCommands Commands the current status allows for the caller's Permissions and identity; Acknowledge on another user's Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.
 	AllowedCommands []CommandName `json:"allowed_commands"`
+
+	// Assignees The Assignees of the Alert Group (C-32.FR-12): for each chain started on it, running or run out, the people its latest step Paging people by name reached, each with the owning Team of the chain; in the order they became Assignees, by chain. Empty before the chains reach anyone and once acknowledged, snoozed or resolved. Changes arrive as the `alert-group` hint.
+	Assignees []Assignee `json:"assignees"`
 
 	// CommonAnnotations Label names and values.
 	CommonAnnotations *Labels `json:"common_annotations,omitempty"`
@@ -5046,6 +5055,21 @@ type AlertmanagerWebhook struct {
 	// Version `"4"` from Alertmanager, `"1"` from Grafana's webhook contact point. Not read.
 	Version              *string                `json:"version,omitempty"`
 	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// Assignee A person the Escalation chain `chain` Paged last and reached (C-32.FR-12), with the owning Team of the chain, since when.
+type Assignee struct {
+	// Chain The chain, null once it was deleted.
+	Chain nullable.Nullable[EscalationChainRef] `json:"chain"`
+
+	// Since When the person became an Assignee of the chain, on the business clock.
+	Since time.Time `json:"since"`
+
+	// Team The owning Team of the chain when its run started; null when none owns it.
+	Team nullable.Nullable[TeamRef] `json:"team"`
+
+	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.
+	User UserRef `json:"user"`
 }
 
 // AuditActor defines model for AuditActor.
@@ -7387,7 +7411,7 @@ type MessageLayout struct {
 	// Alerts The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert.
 	Alerts nullable.Nullable[MessageLayoutAlerts] `json:"alerts"`
 
-	// Assignees The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page people.
+	// Assignees The Assignees with the owning Teams of their chains, before an acknowledgement; empty until Escalation chains Page people, and in a preview.
 	Assignees []MessageLayoutPerson `json:"assignees"`
 
 	// Description The `description` annotation of the first Alert that has one; empty when there is none.
@@ -7402,13 +7426,13 @@ type MessageLayout struct {
 	// Links The links, "Open in Muster" first.
 	Links []MessageLayoutLink `json:"links"`
 
-	// Notices The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names.
+	// Notices The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names, of which only "Escalation chains stopped" is a line, and the Assignees.
 	Notices []string `json:"notices"`
 
 	// Number The Alert Group's number alone, without `#`.
 	Number int `json:"number"`
 
-	// Owner Who acknowledged the Alert Group, with their Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them.
+	// Owner Who acknowledged the Alert Group, without a Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them.
 	Owner  nullable.Nullable[MessageLayoutPerson] `json:"owner"`
 	Status MessageLayoutStatus                    `json:"status"`
 
@@ -10382,11 +10406,14 @@ type TimelineEntryList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, or `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`.
+// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
 type TimelineEscalationEntry struct {
 	// Actor Who caused the entry. `system` entries carry the reason in `reason`.
 	Actor TimelineActor `json:"actor"`
-	At    time.Time     `json:"at"`
+
+	// Assignees The Assignees after the change, for `assignees_changed`; empty once Acknowledge, Snooze or Resolve cleared them.
+	Assignees *[]Assignee `json:"assignees,omitempty"`
+	At        time.Time   `json:"at"`
 
 	// Chain The Escalation chain of the event, null once it was deleted or for an event of no chain.
 	Chain nullable.Nullable[EscalationChainRef] `json:"chain,omitempty"`
@@ -10750,6 +10777,9 @@ type WebhookAlert struct {
 
 // WebhookAlertGroup The current state of the Alert Group when the event was recorded.
 type WebhookAlertGroup struct {
+	// Assignees The Assignees of the Alert Group (C-32.FR-12), each with the owning Team of their chain; empty once acknowledged, snoozed or resolved. The Owner is `owner`, named without a Team.
+	Assignees []WebhookAssignee `json:"assignees"`
+
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id     PublicId `json:"id"`
 	Number int      `json:"number"`
@@ -10776,6 +10806,13 @@ type WebhookAlertGroup struct {
 
 	// Url Link to the Alert Group page at `MUSTER_PUBLIC_URL`.
 	Url string `json:"url"`
+}
+
+// WebhookAssignee An Assignee as an outgoing webhook event names them, with the owning Team of their chain.
+type WebhookAssignee struct {
+	// Team The owning Team of the chain; null when none owns it.
+	Team nullable.Nullable[WebhookTeam] `json:"team"`
+	User WebhookUser                    `json:"user"`
 }
 
 // WebhookChainRef An Escalation chain as an outgoing webhook event names it.
@@ -11015,6 +11052,9 @@ type WorkingHours struct {
 
 // AccountLinkId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type AccountLinkId = PublicId
+
+// AgAssignee defines model for AgAssignee.
+type AgAssignee = string
 
 // AgDeliveryProblem defines model for AgDeliveryProblem.
 type AgDeliveryProblem = bool
@@ -11270,6 +11310,9 @@ type GetAlertGroupCountsParams struct {
 	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
 
+	// Assignee Only the open Alert Groups where this User is an Assignee (C-32.FR-12, FR-18), by the User's `public_id`, deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token). An Alert Group leaves it once acknowledged, snoozed or resolved. An id that names no User is `422` `unknown_id`.
+	Assignee *AgAssignee `form:"assignee,omitempty" json:"assignee,omitempty"`
+
 	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
 	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
 
@@ -11371,6 +11414,9 @@ type ListAlertGroupsParams struct {
 
 	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
+
+	// Assignee Only the open Alert Groups where this User is an Assignee (C-32.FR-12, FR-18), by the User's `public_id`, deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token). An Alert Group leaves it once acknowledged, snoozed or resolved. An id that names no User is `422` `unknown_id`.
+	Assignee *AgAssignee `form:"assignee,omitempty" json:"assignee,omitempty"`
 
 	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
 	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
@@ -21768,6 +21814,18 @@ func NewGetAlertGroupCountsRequest(server string, params *GetAlertGroupCountsPar
 
 		}
 
+		if params.Assignee != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "assignee", *params.Assignee, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.Team != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "team", *params.Team, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
@@ -22211,6 +22269,18 @@ func NewListAlertGroupsRequest(server string, params *ListAlertGroupsParams) (*h
 		if params.Owner != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "owner", *params.Owner, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Assignee != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "assignee", *params.Assignee, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {

@@ -278,6 +278,41 @@ A Page counts in `muster_pages_total{chain,kind,outcome}` once it ended: `delive
 one of its people — for a Team or everyone in the chat, once one of its replies was delivered — and `not_delivered`
 otherwise; a Page whose chain was deleted before it ended is not counted ([Metrics](../reference/metrics.md)).
 
+## Assignees
+
+Until someone acknowledges, an Alert Group shows its **Assignees**: for each chain started on it, running or run out,
+the people its latest step Paging people by name — the On-call of a Schedule or chosen people — reached, each with the
+owning Team of that chain. A person is reached once a delivered Thread reply mentions them, as the table of
+[How a Page reaches a person](#how-a-page-reaches-a-person) says for each messenger — a bridge's reply that names them
+by the plain name reaches nobody; a person a Page did not reach (see [Undelivered Pages](#undelivered-pages)) never
+becomes an Assignee.
+
+How they change, for each chain on its own:
+
+- a later step that reaches someone replaces the chain's Assignees, a repeated step included;
+- another reply of the same step, and the later Mentions of that step's rules, add to them; the later Mentions of an
+  earlier step's rules, and a reply of an earlier step that comes late, change nothing;
+- a step that reaches none of its people leaves them as they were, and a step that Pages a whole Team or everyone in
+  the chat changes nothing;
+- a chain that runs out keeps its Assignees, so an Unclaimed Alert Group still shows whom it Paged;
+- Acknowledge, Snooze and Resolve clear them all.
+
+Each change records the Quiet `assignees_changed` in the Timeline, of the kind `escalation`, with the Assignees after
+it, and edits the Root messages without notifying anyone. Nobody sets Assignees by hand, and being one gives no right
+of its own: any Responder may acknowledge, and whoever does becomes the Owner.
+
+Before an acknowledgement, item 7 of the Root message names them — "Assignees: @ivan (devops), @petr (payments)" —
+each as a Mention where their account is linked in the Destination's Identity space, by name otherwise. After an
+acknowledgement that stopped running chains it reads "Acknowledged by @ivan · Escalation chains stopped": the Owner is
+named without a Team. The `layout` that a bridge receives names the Assignees in `assignees` with the Team in `team`,
+and with the `ref` of their Mention entry in a new message to a bridge with `native_mentions`.
+
+The API reads them in `assignees` of an Alert Group (`user`, `team`, `chain`, `since`), and
+`GET /api/v1/alert-groups?assignee=me` lists the open Alert Groups where the calling User is an Assignee, by a User's
+`public_id` for anyone else, and `GET /api/v1/alert-group-counts` counts them with the same parameter; a Service
+account token gets `422` for `me`. Outgoing webhook events carry them in the
+`assignees` of `alert_group`.
+
 ## Unclaimed
 
 A chain has run out when it has passed its last step. An Alert Group with chains is Unclaimed once every chain started

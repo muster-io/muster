@@ -63,9 +63,14 @@ const EventDestinationJoined Event = "destination_joined"
 // EventPageNotDelivered is the lifecycle event of C-30.FR-7 and C-32.FR-10 (revised C-09.FR-22): a Page that reached
 // its person nowhere, here a call through a Notification gateway that ended Not delivered — Quiet, without Mentions,
 // of the Timeline kind escalation, nothing in a messenger. Its entry names the people in paged_user_ids, the gateway
-// and the reason. escalation_step_skipped and escalation_webhook are in escalation.go; assignees_changed joins the
-// table with the story that records it.
+// and the reason. escalation_step_skipped and escalation_webhook are in escalation.go.
 const EventPageNotDelivered Event = "page_not_delivered"
+
+// EventAssigneesChanged is the lifecycle event of C-32.FR-12 (revised C-09.FR-22): the Assignees of an Alert Group
+// changed — a Page reached someone, or Acknowledge, Snooze or Resolve cleared them — Quiet, without Mentions, of the
+// Timeline kind escalation, an update of the Root messages. Its entry keeps the Assignees after the change in
+// assignees (assignees.go).
+const EventAssigneesChanged Event = "assignees_changed"
 
 // EventPaged is the lifecycle event of C-32.FR-9 and FR-19 (revised C-09.FR-22): an Escalation step, or an action of a
 // Notification rule, Pages people, a Team or everyone in the chat by Mention — Loud with the Mention paged, of the
@@ -196,6 +201,7 @@ var Table = []Row{
 	{EventPageNotDelivered, VariantAny, KindEscalation, Quiet, nil},
 	{EventEscalationStepSkipped, VariantAny, KindEscalation, Quiet, nil},
 	{EventEscalationWebhook, VariantAny, KindEscalation, Quiet, nil},
+	{EventAssigneesChanged, VariantAny, KindEscalation, Quiet, nil},
 }
 
 // rowOf is the row of the event and variant; an event outside the table is a programming error.

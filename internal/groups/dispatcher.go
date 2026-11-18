@@ -4,7 +4,8 @@
 // Package groups is the Alert Group lifecycle (C-09, ADR-0003, ADR-0004, ADR-0016): grouping of newly firing Alerts,
 // the state machine with its system transitions, the Timeline with the lifecycle events, and the reads of one Alert
 // Group. Every change of an Alert Group passes through the dispatcher; only this package writes alert_groups,
-// alert_group_alerts, alert_group_teams, timeline_entries, notes and alert_group_counters (lint 2).
+// alert_group_alerts, alert_group_teams, alert_group_assignees, timeline_entries, notes and alert_group_counters
+// (lint 2).
 package groups
 
 import (
@@ -129,6 +130,7 @@ type Queries interface {
 	ListReachEntries(ctx context.Context, arg dbgen.ListReachEntriesParams) ([]dbgen.ListReachEntriesRow, error)
 	SetChainGeneration(ctx context.Context, arg dbgen.SetChainGenerationParams) error
 	pageQueries
+	assigneeQueries
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the connection or transaction the queries run on, which the re-render step writes through.
@@ -412,6 +414,8 @@ type entry struct {
 	Page *Page
 	// Chain is the run, the chain and the step of an event of an Escalation chain, such as escalation_step_skipped.
 	Chain *ChainEntry
+	// Assignees are the Assignees after an assignees_changed, none once cleared (C-32.FR-12).
+	Assignees *[]assigneeRecord
 }
 
 // change is what one transition does to a locked Alert Group: the entries it records and, for a status change, the
@@ -641,6 +645,9 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	if len(c.entries) == 0 && !c.written {
 		return nil
 	}
+	if err := d.clearAssignees(ctx, q, g, from, &c); err != nil {
+		return err
+	}
 	if joinsByAlerts(&c, g) {
 		if err := d.joinDestinations(ctx, q, g, &c); err != nil {
 			return err
@@ -790,6 +797,7 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			p.EscalationChainID = pgtype.Int8{Int64: e.Chain.Chain, Valid: e.Chain.Chain != 0}
 			p.StepNumber = pgtype.Int4{Int32: int32(e.Chain.Step), Valid: true} //nolint:gosec // G115: at most 20
 		}
+		p.Assignees = assigneesJSON(e.Assignees)
 		// The gateway of a Command through the Transport gateway names its status entry, such as acknowledged, never
 		// the other entries the same Command records.
 		if actor.Gateway != 0 && e.Page == nil && e.Event != "" && rowOf(e.Event, e.Variant).Kind == KindStatus {

@@ -1076,7 +1076,7 @@ S-129, S-130, S-168
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-29.FR-1 | S-125 (part), S-126 (part), S-168 (part) | complete | the Assignees and the Owner's Team in item 7, with "· Escalation chains stopped" (S-168) |
+| C-29.FR-1 | S-125 (part), S-126 (part), S-168 (part) | complete | the Assignees in item 7, and "· Escalation chains stopped" after the Owner (S-168) |
 | C-29.FR-2 | S-125 (part), S-129 (part) | complete |  |
 | C-29.FR-3 | S-125 | complete | P-67 stays provisional until the test environment confirms it |
 | C-29.FR-4 | S-125 (part), S-126 (part) | complete |  |
@@ -1156,7 +1156,7 @@ S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-1
 | C-32.FR-9 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram and Bridges (S-177) |
 | C-32.FR-10 | S-155 (part), S-157 (part) | complete |  |
 | C-32.FR-11 | S-155 (part), S-177 (part), S-157 (part), S-160 (part), S-161 (part) | complete | the push of Mentions in Thread replies checked by the spike S-160 |
-| C-32.FR-12 | S-168 (part), S-157 (part) | complete | P-89 confirmed with S-168; Assignees by calls S-157 |
+| C-32.FR-12 | S-168 (part), S-157 (part) | complete | P-89 decided with S-168: the Owner is named without a Team; Assignees by calls S-157 |
 | C-32.FR-13 | S-156 | complete |  |
 | C-32.FR-14 | S-169 (part), S-156 (part), S-157 (part) | complete |  |
 | C-32.FR-15 | S-169 | complete |  |

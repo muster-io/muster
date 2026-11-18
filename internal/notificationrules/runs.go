@@ -89,13 +89,15 @@ func (s *Service) Runs(cfg RunsConfig) *Runs {
 }
 
 // Start is a step that Pages people by their rules on an Alert Group: the Alert Group, the run of its chain, the
-// step, its importance and the people.
+// step, its importance and the people, and RunStepSeq, the seq of the run step that makes it, which the later Mentions
+// of the rule runs belong to (C-32.FR-12), 0 for none.
 type Start struct {
 	Group      int64
 	Run        int64
 	Step       int
 	Importance string
 	Users      []int64
+	RunStepSeq int
 }
 
 // Started is what the start of the rule runs made at once: the people whose rule Mentioned them at once, in their
@@ -190,7 +192,8 @@ func (r *Runs) Start(ctx context.Context, tx DBTX, s Start) (Started, error) {
 		m := walk(actions, 0, now, now)
 		p := dbgen.InsertRuleRunParams{OrgID: r.orgID, AlertGroupID: s.Group, EscalationRunID: s.Run,
 			StepNumber: int32(s.Step), UserID: user, Importance: s.Importance, //nolint:gosec // G115: at most 20
-			Actions: ruleJSON(actions), Position: int32(m.position), State: RunRunning, Now: now} //nolint:gosec // G115: at most MaxActions
+			Actions: ruleJSON(actions), Position: int32(m.position), State: RunRunning, Now: now, //nolint:gosec // G115: at most MaxActions
+			RunStepSeq: pgtype.Int4{Int32: int32(s.RunStepSeq), Valid: s.RunStepSeq > 0}} //nolint:gosec // G115: at most a run's steps
 		if m.next.IsZero() {
 			p.State, p.EndedAt = RunDone, pgtype.Timestamptz{Time: now, Valid: true}
 		}

@@ -43,4 +43,5 @@ export const LifecycleEvent = {
   page_not_delivered: 'page_not_delivered',
   escalation_step_skipped: 'escalation_step_skipped',
   escalation_webhook: 'escalation_webhook',
+  assignees_changed: 'assignees_changed',
 } as const;

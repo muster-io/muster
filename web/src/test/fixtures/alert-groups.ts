@@ -29,6 +29,7 @@ export function alertGroup(overrides: Partial<AlertGroup> = {}): AlertGroup {
     allowed_commands: [],
     teams: [],
     escalation_chains: [],
+    assignees: [],
     ...overrides,
   };
 }

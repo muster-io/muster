@@ -78,7 +78,7 @@ func (f *fakeQueries) GetRenderGroup(_ context.Context, arg dbgen.GetRenderGroup
 		TemplateErrorTemplate: pgtype.Text{String: f.routeErr,
 			Valid: f.routeErr != ""}, TimeZone: s.TimeZone, WorkdayStart: s.WorkdayStart, WeekStart: s.WeekStart,
 		OwnerName: s.Owner, RouteGroupKey: s.KeyLabels, MessageLabels: s.Route.MessageLabels, SeverityLabel: "severity",
-		TeamLabel: "team", InstanceLabels: s.InstanceLabels}
+		TeamLabel: "team", InstanceLabels: s.InstanceLabels, ChainsStopped: s.ChainsStopped}
 	if s.SnoozeUntil != nil {
 		row.SnoozeUntil = pgtype.Timestamptz{Time: *s.SnoozeUntil, Valid: true}
 	}
@@ -87,6 +87,17 @@ func (f *fakeQueries) GetRenderGroup(_ context.Context, arg dbgen.GetRenderGroup
 
 func (f *fakeQueries) ListRenderTeams(context.Context, dbgen.ListRenderTeamsParams) ([]string, error) {
 	return f.group.Teams, f.err("ListRenderTeams")
+}
+
+// ListRenderAssignees answers the Assignees of the group as they are, so that a person twice with one Team shows the
+// read's deduplication.
+func (f *fakeQueries) ListRenderAssignees(context.Context, dbgen.ListRenderAssigneesParams) (
+	[]dbgen.ListRenderAssigneesRow, error) {
+	var out []dbgen.ListRenderAssigneesRow
+	for _, a := range f.group.Assignees {
+		out = append(out, dbgen.ListRenderAssigneesRow{UserID: a.ID, Name: a.Name, TeamName: a.Team})
+	}
+	return out, f.err("ListRenderAssignees")
 }
 
 func (f *fakeQueries) GetGroupIDByPublicID(_ context.Context, arg dbgen.GetGroupIDByPublicIDParams) (int64, error) {
@@ -769,11 +780,18 @@ func (f *fakeLinks) RenderURL(_ context.Context, _ links.DBTX, source string, in
 }
 
 // fakeNames are the footer's user with a Mattermost and a Telegram Account link.
-type fakeNames struct{ fail error }
+type fakeNames struct{ fail, assigneesFail error }
 
 func (f fakeNames) FooterUsers(context.Context, mentions.DBTX, int64) (map[string]mentions.User, error) {
 	return map[string]mentions.User{"mattermost:3": {Name: "Alice Smith", Username: "alice.mm"},
 		"telegram": {Name: "Alice Smith", ExternalID: "7001"}}, f.fail
+}
+
+// AssigneeUsers link ivan (1) in Mattermost and Telegram and petr (2) in Mattermost only.
+func (f fakeNames) AssigneeUsers(context.Context, mentions.DBTX, int64) (map[int64]map[string]mentions.User, error) {
+	return map[int64]map[string]mentions.User{
+		1: {"mattermost:3": {Name: "Ivan", Username: "ivan.mm"}, "telegram": {Name: "Ivan", ExternalID: "7101"}},
+		2: {"mattermost:3": {Name: "Petr", Username: "petr.mm"}}}, f.assigneesFail
 }
 
 // TestLinksMentionsAndFooters (C-12.FR-1 item 9, C-12.FR-7, C-12.FR-8, C-12.FR-12): the links follow "Open in

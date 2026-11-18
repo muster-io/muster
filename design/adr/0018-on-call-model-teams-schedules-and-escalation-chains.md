@@ -213,7 +213,7 @@ by hand, and any Responder may acknowledge. Assignees are written as Mentions wh
 Owner, accepting that a new Quiet message may notify them (journal D521, D535).
 
 **One status, one acknowledgement.** One Acknowledge acknowledges the Alert Group everywhere and stops every chain on
-it; the Root message names the Owner with their Team. The buttons offer the same actions for a status in every
+it; the Root message names the Owner, without a Team. The buttons offer the same actions for a status in every
 Destination, and which of them a Destination shows is a setting of that Destination (journal D478, D508, D535). An
 acknowledgement, Owner and status per Team would change the Alert Group and its state machine (ADR-0004) and is planned
 for L3 (journal D508, D535).

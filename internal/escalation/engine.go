@@ -247,9 +247,10 @@ func (w *walk) page(ctx context.Context, st runStep, p *groups.ChainProgress) er
 		return w.record(ctx, st, OutcomeSkipped, skips[0].Reason)
 	}
 	if w.r.pages != nil {
-		made, err := w.r.pages.MakeStep(ctx, w.tx, w.g, w.ref(), StepRef{Number: st.Number, Kind: st.Kind,
-			Importance: st.Importance, ScheduleID: st.ScheduleID, Schedule: st.Schedule, TeamID: st.TeamID,
-			Everyone: st.Everyone, GatewayID: st.GatewayID}, people)
+		// The step is recorded next, after every step of the run before it: its seq is one more (InsertRunStep).
+		made, err := w.r.pages.MakeStep(ctx, w.tx, w.g, w.ref(), StepRef{Seq: int(w.made) + 1, Number: st.Number,
+			Kind: st.Kind, Importance: st.Importance, ScheduleID: st.ScheduleID, Schedule: st.Schedule,
+			TeamID: st.TeamID, Everyone: st.Everyone, GatewayID: st.GatewayID}, people)
 		if err != nil {
 			return err
 		}

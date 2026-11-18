@@ -314,6 +314,8 @@ export function entryText(
           return t("timeline.escalation.event", { event: entry.event });
         case "escalation_webhook":
           return t("timeline.escalation.event", { event: entry.event });
+        case "assignees_changed":
+          return t("timeline.escalation.event", { event: entry.event });
         default:
           return t("timeline.escalation.event", { event: entry.event });
       }
