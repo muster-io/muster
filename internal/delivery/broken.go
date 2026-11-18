@@ -23,7 +23,8 @@ import (
 // Broken in the transaction that records the outcome — health, broken_since, broken_cause, broken_reason and the first
 // probe at now plus delivery.broken_probe_interval, with the destination_broken delivery event, MusterDestinationBroken,
 // the hint destination and the alert-group hints of the Alert Groups that now wait for it. Its deliveries wait: the
-// claims skip them, new Thread replies are dropped and a first Publication whose Alert Group resolves is withheld. Every
+// claims skip them, new Thread replies are dropped, the round drops the replies of Pages still to be sent
+// (dropBrokenPages) and a first Publication whose Alert Group resolves is withheld. Every
 // replica probes the Broken Destinations that are due, in the delivery client class: the oldest waiting delivery
 // through the worker's path, else the adapter's Destination check, else, for a type without one, a mark that makes its
 // next due delivery the probe. A success makes it healthy and starts the recovery.

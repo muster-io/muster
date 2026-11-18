@@ -375,3 +375,114 @@ func TestIntegrationPageReplyLeftOut(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationBrokenPageReplies is C-32.FR-10 and C-11.FR-19 on PostgreSQL for the Page replies of a Destination
+// that became Broken after they were queued (#627): a round of a worker that settles Pages ends the reply of a Page
+// still to be sent there, and the dispatcher ends its Page not_delivered with page_not_delivered not_delivered in the
+// Timeline, without waiting for the recovery. A Page reply whose attempt another replica has in flight, under its
+// lease, is left to that replica, as are the replies that are not Pages, the Page replies of a healthy Destination and
+// those that ended, sent or Not delivered; one whose lease ran out is dropped. A second round changes nothing.
+func TestIntegrationBrokenPageReplies(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fire(t, "broken-pages", "BrokenPages/a")
+		l.round(t, l.a)
+		var group, del, alice int64
+		if err := l.d.Pool.QueryRow(ctx, `SELECT a.id, x.id, (SELECT id FROM users WHERE login = 'alice')
+			FROM alert_groups a JOIN deliveries x ON x.alert_group_id = a.id
+			WHERE a.public_id = $1 AND x.destination_id = $2`, l.group(t, "BrokenPages"), l.dests[0]).Scan(&group,
+			&del, &alice); err != nil {
+			t.Fatal(err)
+		}
+		page := func() int64 {
+			t.Helper()
+			var id int64
+			if err := l.d.Pool.QueryRow(ctx, `INSERT INTO pages (org_id, alert_group_id, step_number, kind, state,
+				importance, created_at) VALUES ($1, $2, 1, 'mention', 'pending', 'normal', $3) RETURNING id`, l.orgID,
+				group, t0).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			l.exec(t, `INSERT INTO page_users (org_id, page_id, user_id, outcome) VALUES ($1, $2, $3, 'pending')`,
+				l.orgID, id, alice)
+			return id
+		}
+		reply := func(dest int64, event string, page any, next time.Time) int64 {
+			t.Helper()
+			var id int64
+			if err := l.d.Pool.QueryRow(ctx, `INSERT INTO thread_replies (org_id, delivery_id, alert_group_id,
+				destination_id, event, event_seqs, loudness, state, next_attempt_at, created_at, page_id,
+				paged_user_ids, page_source) VALUES ($1, $2, $3, $4, $5, '{1}', 'loud', 'pending', $6, $6, $7,
+				CASE WHEN $7::bigint IS NULL THEN NULL ELSE ARRAY[$8::bigint] END,
+				CASE WHEN $7::bigint IS NULL THEN NULL ELSE 'route' END) RETURNING id`, l.orgID, del, group, dest,
+				event, next, page, alice).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		now := l.business.Now()
+		broken, inFlight, healthy := page(), page(), page()
+		brokenReply := reply(l.dests[0], "paged", broken, now)
+		leasedReply := reply(l.dests[0], "paged", inFlight, now)
+		l.exec(t, `UPDATE thread_replies SET lease_owner = 'r2', lease_until = $2 WHERE id = $1`, leasedReply,
+			l.real.Now().Add(time.Hour))
+		other := reply(l.dests[0], "reminder", nil, now)
+		healthyReply := reply(l.dests[1], "paged", healthy, now.Add(time.Hour))
+		// A reply whose lease ran out, its replica gone, is dropped; the replies of a Page that ended, sent or Not
+		// delivered, keep their state.
+		expired := page()
+		expiredReply := reply(l.dests[0], "paged", expired, now)
+		l.exec(t, `UPDATE thread_replies SET lease_owner = 'r2', lease_until = $2 WHERE id = $1`, expiredReply,
+			l.real.Now().Add(-time.Minute))
+		ended := page()
+		sentReply, failedReply := reply(l.dests[0], "paged", ended, now), reply(l.dests[0], "paged", ended, now)
+		l.exec(t, `UPDATE thread_replies SET state = 'sent' WHERE id = $1`, sentReply)
+		l.exec(t, `UPDATE thread_replies SET state = 'not_delivered' WHERE id = $1`, failedReply)
+		l.exec(t, `UPDATE pages SET state = 'delivered', ended_at = $2 WHERE id = $1`, ended, t0)
+		l.brk(t, l.dests[0])
+		w := l.worker("r1")
+		w.Pages = l.groups
+		for range 2 {
+			l.round(t, w)
+		}
+		states := func(table string, ids ...int64) []string {
+			t.Helper()
+			out := make([]string, len(ids))
+			for i, id := range ids {
+				if err := l.d.Pool.QueryRow(ctx, `SELECT state FROM `+table+` WHERE id = $1`, id).Scan(
+					&out[i]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return out
+		}
+		if got := states("thread_replies", brokenReply, leasedReply, other, healthyReply); !slices.Equal(got,
+			[]string{"dropped", "pending", "pending", "pending"}) {
+			t.Errorf("replies %v, want the page reply of the broken destination dropped and the others pending", got)
+		}
+		if got := states("pages", broken, inFlight, healthy); !slices.Equal(got,
+			[]string{"not_delivered", "pending", "pending"}) {
+			t.Errorf("pages %v, want the page of the broken destination not delivered", got)
+		}
+		if got := states("thread_replies", expiredReply, sentReply, failedReply); !slices.Equal(got,
+			[]string{"dropped", "sent", "not_delivered"}) {
+			t.Errorf("replies %v, want the one whose lease ran out dropped and the ended ones as they were", got)
+		}
+		if got := states("pages", expired, ended); !slices.Equal(got, []string{"not_delivered", "delivered"}) {
+			t.Errorf("pages %v, want the page of the expired lease not delivered and the ended one as it was", got)
+		}
+		if n := l.count(t, `SELECT count(*) FROM pages p JOIN page_users u ON u.page_id = p.id WHERE p.id = $1
+			AND p.reason = 'not_delivered' AND p.ended_at IS NOT NULL AND u.outcome = 'not_delivered'
+			AND u.reason = 'not_delivered'`, broken); n != 1 {
+			t.Errorf("%d outcomes of the page and of alice, want 1", n)
+		}
+		if n := l.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+			AND event = 'page_not_delivered' AND reason = 'not_delivered' AND paged_user_ids = ARRAY[$2::bigint]`,
+			group, alice); n != 2 {
+			t.Errorf("%d page_not_delivered entries, want 2: of the broken destination and of the expired lease", n)
+		}
+		if h, _ := l.health(t, l.dests[0]); h != "broken" {
+			t.Errorf("destination %s, want it still broken", h)
+		}
+	})
+}
