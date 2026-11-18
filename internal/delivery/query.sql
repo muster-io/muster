@@ -88,8 +88,9 @@ WHERE org_id = @org_id AND id = @id;
 
 -- EnsureDelivery creates the delivery of an Alert Group and a Destination when it is missing, held by the Storm
 -- @held_by_storm_id when one stands for it, and locks it either way; inserted tells a new one, state whether it ended
--- and held_by_storm_id whether a Storm holds it. The @entries that reach it are appended to those it has, each Route or
--- Team once with the condition it first reached it with (C-26.FR-3).
+-- and held_by_storm_id whether a Storm holds it, unpublished whether it has no Root message for Thread replies to wait
+-- for. The @entries that reach it are appended to those it has, each Route or Team once with the condition it first
+-- reached it with (C-26.FR-3).
 -- name: EnsureDelivery :one
 INSERT INTO deliveries (org_id, destination_id, alert_group_id, held_by_storm_id, state, urgent, publication_loud,
                         entries, next_attempt_at, created_at, updated_at)
@@ -102,7 +103,8 @@ DO UPDATE SET updated_at = deliveries.updated_at,
                                         FROM jsonb_array_elements(excluded.entries) AS e
                                         WHERE NOT deliveries.entries @> jsonb_build_array(e.value - 'severity_condition')),
                                        '[]'::jsonb)
-RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_storm_id, (xmax = 0)::boolean AS inserted;
+RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_storm_id,
+          (xmax = 0)::boolean AS inserted, (published_at IS NULL)::boolean AS unpublished;
 
 -- SetDesired stores a new Desired state: the next version, its text, payload and hash, the key that signed its
 -- buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
@@ -628,6 +630,15 @@ WHERE org_id = @org_id AND id = @id AND state NOT IN ('withheld', 'deleted_in_me
 UPDATE thread_replies
 SET state = 'dropped', lease_owner = NULL, lease_until = NULL
 WHERE org_id = @org_id AND delivery_id = @delivery_id AND state IN ('collecting', 'pending');
+
+-- DropPageReplies drops the Thread replies of Pages of a delivery that are still to be sent, which wait for a Root
+-- message whose Publication ended Not delivered (C-32.FR-10), and returns their Pages; the other replies keep waiting
+-- for a later Publication (C-11.FR-10).
+-- name: DropPageReplies :many
+UPDATE thread_replies
+SET state = 'dropped', lease_owner = NULL, lease_until = NULL
+WHERE org_id = @org_id AND delivery_id = @delivery_id AND page_id IS NOT NULL AND state IN ('collecting', 'pending')
+RETURNING page_id::bigint;
 
 -- SettleResolvedPublication decides the first Publication of a resolved Alert Group that is still pending (C-11.FR-11,
 -- FR-19): withheld while its Destination is Broken, so that nothing waits for it; Quiet with the late note when it

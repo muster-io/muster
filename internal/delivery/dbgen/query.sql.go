@@ -916,6 +916,41 @@ func (q *Queries) DropDueReplies(ctx context.Context, arg DropDueRepliesParams) 
 	return err
 }
 
+const dropPageReplies = `-- name: DropPageReplies :many
+UPDATE thread_replies
+SET state = 'dropped', lease_owner = NULL, lease_until = NULL
+WHERE org_id = $1 AND delivery_id = $2 AND page_id IS NOT NULL AND state IN ('collecting', 'pending')
+RETURNING page_id::bigint
+`
+
+type DropPageRepliesParams struct {
+	OrgID      int64
+	DeliveryID int64
+}
+
+// DropPageReplies drops the Thread replies of Pages of a delivery that are still to be sent, which wait for a Root
+// message whose Publication ended Not delivered (C-32.FR-10), and returns their Pages; the other replies keep waiting
+// for a later Publication (C-11.FR-10).
+func (q *Queries) DropPageReplies(ctx context.Context, arg DropPageRepliesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, dropPageReplies, arg.OrgID, arg.DeliveryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var page_id int64
+		if err := rows.Scan(&page_id); err != nil {
+			return nil, err
+		}
+		items = append(items, page_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dropPendingReplies = `-- name: DropPendingReplies :exec
 UPDATE thread_replies
 SET state = 'dropped', lease_owner = NULL, lease_until = NULL
@@ -1000,7 +1035,8 @@ DO UPDATE SET updated_at = deliveries.updated_at,
                                         FROM jsonb_array_elements(excluded.entries) AS e
                                         WHERE NOT deliveries.entries @> jsonb_build_array(e.value - 'severity_condition')),
                                        '[]'::jsonb)
-RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_storm_id, (xmax = 0)::boolean AS inserted
+RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_storm_id,
+          (xmax = 0)::boolean AS inserted, (published_at IS NULL)::boolean AS unpublished
 `
 
 type EnsureDeliveryParams struct {
@@ -1022,12 +1058,14 @@ type EnsureDeliveryRow struct {
 	State            string
 	HeldByStormID    pgtype.Int8
 	Inserted         bool
+	Unpublished      bool
 }
 
 // EnsureDelivery creates the delivery of an Alert Group and a Destination when it is missing, held by the Storm
 // @held_by_storm_id when one stands for it, and locks it either way; inserted tells a new one, state whether it ended
-// and held_by_storm_id whether a Storm holds it. The @entries that reach it are appended to those it has, each Route or
-// Team once with the condition it first reached it with (C-26.FR-3).
+// and held_by_storm_id whether a Storm holds it, unpublished whether it has no Root message for Thread replies to wait
+// for. The @entries that reach it are appended to those it has, each Route or Team once with the condition it first
+// reached it with (C-26.FR-3).
 func (q *Queries) EnsureDelivery(ctx context.Context, arg EnsureDeliveryParams) (EnsureDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, ensureDelivery,
 		arg.OrgID,
@@ -1048,6 +1086,7 @@ func (q *Queries) EnsureDelivery(ctx context.Context, arg EnsureDeliveryParams) 
 		&i.State,
 		&i.HeldByStormID,
 		&i.Inserted,
+		&i.Unpublished,
 	)
 	return i, err
 }

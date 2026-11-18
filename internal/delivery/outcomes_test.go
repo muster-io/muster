@@ -500,6 +500,7 @@ func TestOutcomeQueryFailures(t *testing.T) {
 	}{
 		{"RecordNotDelivered", deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeUnknown, "x"), false},
 		{"InsertDeliveryEvent", deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeUnknown, "x"), false},
+		{"DropPageReplies", deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeUnknown, "x"), false},
 		{"BreakDestination", deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "x"), false},
 		{"RecordDeliveryRetry", deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "x"), false},
 		{"FindBuiltinIntegration", deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "x"), false},

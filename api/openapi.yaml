@@ -15889,9 +15889,10 @@ components:
         was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent
         (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain''s Destinations has the Alert Group''s
         Root message (`no_root_message`), the person has no Account link in the Identity space of any of them
-        (`no_account_link`), or every Thread reply that would mention them ended Not delivered or was withheld while
-        its Destination was Broken (`not_delivered`). Null for the other events of the kind. Later versions add
-        reasons; clients show an unknown one as it is.'
+        (`no_account_link`), or every Thread reply that would mention them ended Not delivered, was withheld while
+        its Destination was Broken, or was never sent because its Root message ended Not delivered
+        (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown
+        one as it is.'
       enum:
       - call_refused
       - call_unknown

@@ -842,8 +842,18 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		}
 		return nil
 	}
+	// A Page reply waits for no Root message whose Publication ended Not delivered, as after the worker recorded it
+	// since the Page chose its Destinations: it is queued dropped and the round settles its Page (C-32.FR-10); the
+	// other replies wait for a later Publication (C-11.FR-10).
+	rootless := state == stateNotDelivered && row.Unpublished
 	until := timeOf(row.ThreadBatchUntil)
 	for _, rp := range how.replies {
+		if rootless && rp.event.Event == groups.EventPaged {
+			if err := q.InsertThreadReply(ctx, s.replyParams(row.ID, g.ID, d, rp, replyDropped, now)); err != nil {
+				return fmt.Errorf("drop the paged reply of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+			}
+			continue
+		}
 		var err error
 		if until, err = s.queueReply(ctx, q, row.ID, g.ID, d, rp, until, now, how.window); err != nil {
 			return fmt.Errorf("queue the %s reply of alert group #%d in %s: %w", rp.event.Event, g.Number, d.PublicID,
@@ -904,8 +914,11 @@ func ended(state string) bool {
 	return state == "withheld" || state == "deleted_in_messenger" || state == "retired"
 }
 
-// statePending is a delivery with work to do.
-const statePending = "pending"
+// statePending is a delivery with work to do, stateNotDelivered one whose last call ended Not delivered.
+const (
+	statePending      = "pending"
+	stateNotDelivered = "not_delivered"
+)
 
 // The states a Thread reply is queued in, the open batch of new Alerts, and a reply that was sent.
 const (
