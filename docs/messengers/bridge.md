@@ -232,7 +232,9 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
     `everyone`
     :   Everyone in the chat, with the symbolic name `channel`, `here`, `all` or `everyone` as `external_id` and
         `display_name`. It comes only with a name that Muster's copy of the bridge's `info` lists in
-        `everyone_mentions`.
+        `everyone_mentions`. A `{{ mention "here" }}`, `{{ mention "channel" }}` or `{{ mention "all" }}` in a
+        Route's template stays text in `body`, which notifies nobody, and adds its entry to the line of Mentions of a
+        Loud message or Thread reply, when the bridge's `info` lists it in `everyone_mentions`.
 
     A bridge that declares group mentions or a mention of everyone renders the markers of those entries as its
     messenger's mentions, `@payments_team` or `@here` for example, whether or not it has native mentions. A bridge with

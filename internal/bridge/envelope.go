@@ -33,11 +33,13 @@ import (
 // their kind (C-22.FR-16). The footer names a user linked through the Connection by a marker of
 // their own in a new message for a bridge with `native_mentions`; an edit carries no Mentions, and any other bridge
 // would show the marker's `@`, so there it names them by the link's display name (C-12.FR-12).
-// Template output keeps its trusted Mention tokens as text that notifies nobody. A Root message and a test message of
-// Muster's compact default content also carry `layout` (C-29.FR-8): the same content as plain-text data, shortened together with the body (C-29.FR-6),
-// with the Owner of an acknowledged Alert Group, without a Team (P-89), and the Assignees of a firing one, each with the
-// owning Team of their chain (C-32.FR-12), each person with the `ref` of their entry in `mentions` only where the
-// message carries their marker — a new message to a bridge with `native_mentions` — and null otherwise.
+// Template output keeps its trusted Mention tokens as text that notifies nobody; a Loud message adds its `all`,
+// `channel` and `here` tokens that the bridge declares to its Mentions, as Slack and Mattermost do (C-12.FR-8). A
+// Root message and a test message of Muster's compact default content also carry `layout` (C-29.FR-8): the same
+// content as plain-text data, shortened together with the body (C-29.FR-6), with the Owner of an acknowledged Alert
+// Group, without a Team (P-89), and the Assignees of a firing one, each with the owning Team of their chain
+// (C-32.FR-12), each person with the `ref` of their entry in `mentions` only where the message carries their marker —
+// a new message to a bridge with `native_mentions` — and null otherwise.
 
 // MinBodyLength is the protocol's floor of limits.max_body_length, in code points: the body limit when info has none.
 const MinBodyLength = 500
@@ -264,6 +266,45 @@ func leftOut(c delivery.Call, sent []gen.Mention) []string {
 	return out
 }
 
+// withTemplateTokens is c with a target of everyone in the chat for each `all`, `channel` and `here` token of the
+// template output of m, after its own targets, so that a Loud message mentions them as Slack and Mattermost do
+// (C-12.FR-8); mentionsOf keeps those that the bridge declares, once each, and the text keeps the tokens.
+func withTemplateTokens(c delivery.Call, m messages.Message) delivery.Call {
+	var extra []mentions.Target
+	for _, tk := range templateTokens(m) {
+		switch tk.Name {
+		case templates.MentionAll, templates.MentionChannel, templates.MentionHere:
+			extra = append(extra, mentions.Target{Kind: mentions.TargetEveryone, Everyone: tk.Name})
+		}
+	}
+	if len(extra) > 0 {
+		c.Targets = append(slices.Clone(c.Targets), extra...)
+	}
+	return c
+}
+
+// templateTokens are the trusted Mention tokens of the template output of m: its body, its Alert lines written by a
+// line template and its Alerts line.
+func templateTokens(m messages.Message) []templates.Token {
+	var out []templates.Token
+	if m.Body != nil {
+		out = append(out, templates.Tokens(m.Body.Text)...)
+	}
+	if m.Alerts != nil {
+		for _, l := range m.Alerts.Lines {
+			if l.Markup != "" {
+				out = append(out, templates.Tokens(l.Text)...)
+			}
+		}
+	}
+	if m.AlertsLine != nil {
+		for _, l := range m.AlertsLine.Lines {
+			out = append(out, templates.Tokens(l.Text)...)
+		}
+	}
+	return out
+}
+
 // fitLine joins names, whole and in their order, by spaces within limit characters, leaving out each one that no
 // longer fits; empty when none fits.
 func fitLine(names []string, limit int) string {
@@ -450,6 +491,14 @@ func laidOut(m messages.Message) messages.Message {
 			}
 		}
 		cp.Alerts = &a
+	}
+	if m.AlertsLine != nil {
+		a := *m.AlertsLine
+		a.Lines = slices.Clone(a.Lines)
+		for n, l := range a.Lines {
+			a.Lines[n].Text = templates.ReplaceTokens(l.Text, tokenText)
+		}
+		cp.AlertsLine = &a
 	}
 	return cp
 }
