@@ -230,8 +230,9 @@ func (e *mm) linkMattermost(session *agent, conn, username, userID string) {
 // page_not_delivered no_root_message (C-32.AC-7); a step "Page the whole Team" Pages the Team mention and everyone in
 // the chat by the token, and a Team without a Team mention for the Connection is skipped with no_mention_possible
 // (C-32.AC-13); a reply that the fake refuses ends Not delivered and records page_not_delivered not_delivered
-// (C-32.FR-10); a Page in a Slack Thread mentions the person by <@U…> (C-32.FR-11); Pages in Telegram, through
-// Bridges and to outgoing webhooks (testPagesBeyondMattermost).
+// (C-32.FR-10), and a reply whose own attempt makes its Destination Broken ends its Page not delivered without waiting
+// for the recovery (#627); a Page in a Slack Thread mentions the person by <@U…> (C-32.FR-11); Pages in Telegram,
+// through Bridges and to outgoing webhooks (testPagesBeyondMattermost).
 func TestPages(t *testing.T) {
 	h := Start(t, DevProcess)
 	rep := h.Replicas[len(h.Replicas)-1]
@@ -514,6 +515,40 @@ func TestPages(t *testing.T) {
 			return slices.Contains(e.pageEntries(g, "page_not_delivered"), "page_not_delivered/not_delivered/ivan")
 		})
 		call(t, http.MethodDelete, e.fmm+"/faults", "")
+	})
+
+	t.Run("a reply whose Destination becomes Broken", func(t *testing.T) {
+		e := e.on(t)
+		dests["search-notice"] = e.destination("search-notice", conn, fakemattermost.ChannelSearchNotice, nil, 100)
+		broken := chain("broken", td, `[{"kind":"wait","wait_seconds":60},{"kind":"page_people","user_ids":["`+
+			ivan+`"]}]`)
+		route("Broken", "broken", []map[string]string{entry("search-notice", "any")}, broken)
+		g := fire("p9", "Broken", `{"category":"broken","system":"b","cluster":"p9a"}`)
+		eventually(t, "the root message", func() bool {
+			return slices.ContainsFunc(e.posts(), func(p mmPost) bool {
+				return p.ChannelID == fakemattermost.ChannelSearchNotice && p.RootID == ""
+			})
+		})
+		// Without the bot in the channel the reply of the Page meets a 403, a Fatal error: the Destination becomes
+		// Broken while the reply is still to be sent. The Page ends not delivered without waiting for the recovery,
+		// before the probe of the Destination is due (#627).
+		members := e.fmm + "/channels/" + fakemattermost.ChannelSearchNotice + "/members/" + fakemattermost.BotUserID
+		e.fake(http.MethodDelete, members, "")
+		advance(t, rep, 60)
+		e.waitHealth(dests["search-notice"], "broken")
+		eventually(t, "page_not_delivered not_delivered", func() bool {
+			return slices.Contains(e.pageEntries(g, "page_not_delivered"), "page_not_delivered/not_delivered/ivan")
+		})
+		eventually(t, "the Page counted", func() bool {
+			return pagesCounted(`muster_pages_total{chain="`+broken+`",kind="mention",outcome="not_delivered"}`) == 1
+		})
+		if hl := e.health(dests["search-notice"]); hl.State != "broken" {
+			t.Errorf("the destination is %s, want it still broken", hl.State)
+		}
+		if n := e.countIn(fakemattermost.ChannelSearchNotice, "you are needed"); n != 0 {
+			t.Errorf("%d Pages sent in the broken destination", n)
+		}
+		e.fake(http.MethodPut, members, "")
 	})
 
 	t.Run("a reply retried after a transient error", func(t *testing.T) {

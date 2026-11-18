@@ -646,6 +646,30 @@ SET state = 'dropped', lease_owner = NULL, lease_until = NULL
 WHERE org_id = @org_id AND delivery_id = @delivery_id AND page_id IS NOT NULL AND state IN ('collecting', 'pending')
 RETURNING page_id::bigint;
 
+-- DropBrokenPageReplies drops at most @lim Thread replies of Pages still to be sent whose Destination is Broken, as a
+-- Page reply queued while it is Broken is (PageTargets), and returns their Pages with their Alert Groups, which the
+-- round settles (C-32.FR-10): a Page does not wait for the recovery. The replies that are not Pages wait for it
+-- (C-11.FR-19). A reply whose lease is still running at the real time @now, its attempt in flight, and one that another
+-- transaction holds are skipped; a later round drops them once their outcome is recorded. It locks no delivery and
+-- waits for no row, so it closes no cycle with a transaction that locks a delivery and then its replies, nor with a
+-- recovery that holds the Destination's row.
+-- name: DropBrokenPageReplies :many
+WITH broken AS MATERIALIZED (
+    SELECT x.id
+    FROM thread_replies x
+    JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+    WHERE x.org_id = @org_id AND x.page_id IS NOT NULL AND x.state IN ('collecting', 'pending')
+      AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND ds.health = 'broken'
+    ORDER BY x.id
+    LIMIT @lim
+    FOR UPDATE OF x SKIP LOCKED
+)
+UPDATE thread_replies r
+SET state = 'dropped', lease_owner = NULL, lease_until = NULL
+FROM broken
+WHERE r.org_id = @org_id AND r.id = broken.id
+RETURNING r.page_id::bigint AS page_id, r.alert_group_id;
+
 -- SettleResolvedPublication decides the first Publication of a resolved Alert Group that is still pending (C-11.FR-11,
 -- FR-19): withheld while its Destination is Broken, so that nothing waits for it; Quiet with the late note when it
 -- waited for a RetryAfter or Transient retries; unchanged otherwise, also when no error was ever recorded
@@ -1115,7 +1139,9 @@ WHERE org_id = @org_id AND id = @id AND health = 'broken';
 
 -- ResetDestinationBudgets gives the pending deliveries and Thread replies of a recovered Destination a fresh Transient
 -- budget. It runs in the recovery, while no other replica works the Destination's rows: the claims skip a Broken
--- Destination, so no transaction of another replica holds them and waits for the Destination's row in return.
+-- Destination, so no transaction of another replica holds them and waits for the Destination's row in return. The one
+-- statement of DropBrokenPageReplies may hold some of its Page replies meanwhile, which this waits for; it waits for
+-- nothing itself, so that closes no cycle.
 -- name: ResetDestinationBudgets :exec
 WITH replies AS (
     UPDATE thread_replies r

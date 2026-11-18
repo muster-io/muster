@@ -4,10 +4,12 @@
 package delivery_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -189,6 +191,30 @@ func (f *fakeDB) ListEndedPages(_ context.Context, arg dbgen.ListEndedPagesParam
 		out = append(out, dbgen.ListEndedPagesRow{ID: id, AlertGroupID: f.pageDB.group[id]})
 	}
 	f.pageDB.lists++
+	return out, nil
+}
+
+func (f *fakeDB) DropBrokenPageReplies(_ context.Context, arg dbgen.DropBrokenPageRepliesParams) (
+	[]dbgen.DropBrokenPageRepliesRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("DropBrokenPageReplies"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.DropBrokenPageRepliesRow
+	for _, r := range slices.SortedFunc(slices.Values(f.replies), func(a, b *fakeReply) int {
+		return cmp.Compare(a.id, b.id)
+	}) {
+		if len(out) == int(arg.Lim) {
+			break
+		}
+		if d := f.dests[r.dest]; r.page == 0 || (r.state != "pending" && r.state != "collecting") || d == nil ||
+			d.health != "broken" || (r.owner != "" && r.until.After(arg.Now)) {
+			continue
+		}
+		r.state, r.owner, r.until = "dropped", "", time.Time{}
+		out = append(out, dbgen.DropBrokenPageRepliesRow{PageID: r.page, AlertGroupID: r.group})
+	}
 	return out, nil
 }
 
@@ -578,6 +604,166 @@ func TestPageStaysOpenUntilEveryReplyEnded(t *testing.T) {
 	e.round(t)
 	if e.db.pageDB.state[pageID] != "ended" {
 		t.Errorf("page %s once every reply ended", e.db.pageDB.state[pageID])
+	}
+}
+
+// TestPageReplyOfABrokenDestination is C-32.FR-10 and C-11.FR-19 for a Page reply queued before its Destination
+// became Broken (#627): its own attempt is Fatal, which makes the Destination Broken and leaves the reply to be sent;
+// the same round ends it, and settles its Page as ended and reaching nobody, without waiting for the recovery. A
+// reply that is not a Page keeps waiting for the recovery, and a later round settles nothing again.
+func TestPageReplyOfABrokenDestination(t *testing.T) {
+	e, s := pageEnv(t)
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	g := e.group(groups.StatusFiring, "a")
+	e.enqueue(t, g, groups.System, pagedEvent(2, pageID, groups.PageTarget{DestinationID: destMM,
+		Source: groups.PageSourceRoute, Linked: []int64{ivanID}}))
+	if len(e.db.replies) != 1 {
+		t.Fatalf("%d replies", len(e.db.replies))
+	}
+	page := e.db.replies[0]
+	other := &fakeReply{id: page.id + 1000, delivery: page.delivery, group: groupID, dest: destMM, event: "reminder",
+		state: "pending", next: e.business.Now().Add(time.Minute), loudness: "quiet"}
+	e.db.replies = append(e.db.replies, other)
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Failure(delivery.OutcomeFatal, "HTTP 403"))
+	e.round(t)
+	if h := e.db.dests[destMM].health; h != "broken" {
+		t.Fatalf("destination %s after the fatal reply", h)
+	}
+	if len(s.outcomes) != 1 || s.outcomes[0].Page != pageID || !s.outcomes[0].Ended || s.outcomes[0].Delivered ||
+		len(s.outcomes[0].Reached) != 0 {
+		t.Errorf("outcomes %+v, want the page ended without reaching anyone", s.outcomes)
+	}
+	if page.state != "dropped" || page.owner != "" || e.db.pageDB.state[pageID] != "ended" {
+		t.Errorf("page reply %s owned by %q, page %s", page.state, page.owner, e.db.pageDB.state[pageID])
+	}
+	// The other reply comes due while the Destination is Broken, before its probe: it waits for the recovery.
+	e.business.Advance(2 * time.Minute)
+	e.round(t)
+	if other.state != "pending" || e.rec.Count(deliverytest.MethodReply) != 1 || len(s.outcomes) != 1 {
+		t.Errorf("other reply %s after %d replies, outcomes %+v", other.state, e.rec.Count(deliverytest.MethodReply),
+			s.outcomes)
+	}
+}
+
+// TestBrokenPageRepliesInBatches is #627 for the drop of the Page replies of a Broken Destination: a batch at a time
+// until a short one, each Page settled once though two of its replies end in the same batch; a Page that fails to
+// settle is logged without failing the round and is settled by a later round, its replies all ended; a reply whose
+// lease another replica holds is left to it; a drop that fails fails the round.
+func TestBrokenPageRepliesInBatches(t *testing.T) {
+	e, s := pageEnv(t)
+	e.w.Batch = 2
+	del := e.db.deliveries[0].id
+	add := func(id, page int64) *fakeReply {
+		r := &fakeReply{id: id, delivery: del, group: groupID, dest: destMM, event: "paged", state: "pending",
+			next: e.business.Now(), page: page, pagedUsers: []int64{ivanID}}
+		e.db.replies = append(e.db.replies, r)
+		return r
+	}
+	for _, p := range []int64{1001, 1002, 1003, 1004, 1005} {
+		e.addPage(p, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	}
+	add(1, 1001)
+	add(2, 1001)
+	add(3, 1002)
+	add(4, 1003)
+	add(5, 1004)
+	leased := add(6, 1005)
+	leased.owner, leased.until = "r2", e.real.Now().Add(time.Hour)
+	e.breakDest(destMM, "down")
+	s.failPages = []int64{1002}
+	e.round(t)
+	settled := map[int64]int{}
+	for _, o := range s.outcomes {
+		if o.Ended && !o.Delivered {
+			settled[o.Page]++
+		}
+	}
+	if !maps.Equal(settled, map[int64]int{1001: 1, 1003: 1, 1004: 1}) {
+		t.Errorf("settled %v, want 1001, 1003 and 1004 once each", settled)
+	}
+	if got := pageStates(e, 1001, 1002, 1003, 1004, 1005); !slices.Equal(got,
+		[]string{"ended", "pending", "ended", "ended", "pending"}) {
+		t.Errorf("pages %q", got)
+	}
+	if !strings.Contains(e.log.String(), "settle page 1002") {
+		t.Errorf("no log line of the failing settle: %s", e.log.String())
+	}
+	if leased.state != "pending" || leased.owner != "r2" {
+		t.Errorf("the leased reply %s owned by %q", leased.state, leased.owner)
+	}
+	s.failPages = nil
+	e.round(t)
+	if got := pageStates(e, 1002, 1005); !slices.Equal(got, []string{"ended", "pending"}) {
+		t.Errorf("pages %q after the settle no longer fails", got)
+	}
+	errBoom := errors.New("boom")
+	e.db.fail["DropBrokenPageReplies"] = errBoom
+	if _, err := e.w.Round(t.Context()); !errors.Is(err, errBoom) {
+		t.Errorf("a failing drop: %v", err)
+	}
+}
+
+// TestBrokenPageSettledBehindABacklog is #627 for a Page whose reply its Destination drops while the Pages to settle
+// have a backlog: the round that drops the reply settles the Page itself, though settlePages goes on after the last
+// Page of the previous round, past it, and does not reach it in that round.
+func TestBrokenPageSettledBehindABacklog(t *testing.T) {
+	e, _ := pageEnv(t)
+	e.w.Batch = 2
+	e.addPage(500, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	e.db.replies = append(e.db.replies, &fakeReply{id: 1, delivery: e.db.deliveries[0].id, group: groupID,
+		dest: destMM, event: "paged", state: "pending", next: e.business.Now().Add(time.Hour), page: 500,
+		pagedUsers: []int64{ivanID}})
+	backlog := delivery.PageSettleBatches*2 + 3
+	for i := range backlog {
+		e.addPage(int64(1000+i), dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID)
+	}
+	if wait := e.round(t); wait > delivery.MinWait {
+		t.Fatalf("the first round waits %v, want it stopped at its batches", wait)
+	}
+	e.breakDest(destMM, "down")
+	e.round(t)
+	if got := pageStates(e, 500, int64(1000+backlog-1)); !slices.Equal(got, []string{"ended", "ended"}) {
+		t.Errorf("pages %q, want the page of the dropped reply and the newest of the backlog ended", got)
+	}
+}
+
+// TestPageReplyOfABrokenDestinationBesideASentOne is C-32.FR-10 and FR-12 for a Page with replies in two Destinations
+// (#627): the reply in the outgoing webhook is sent and reaches ivan and petr, the one in Mattermost is Fatal and its
+// Destination Broken; the Page ends delivered to the people the sent reply mentioned.
+func TestPageReplyOfABrokenDestinationBesideASentOne(t *testing.T) {
+	e, s := pageEnvOfAll(t)
+	e.addPage(pageID, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal"}, ivanID, petrID)
+	g := e.group(groups.StatusFiring, "a")
+	e.enqueue(t, g, groups.System, pagedEvent(2, pageID,
+		groups.PageTarget{DestinationID: destWH, Source: groups.PageSourceRoute, Linked: []int64{ivanID, petrID}},
+		groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceRoute, Linked: []int64{ivanID}}))
+	answers := map[int64]deliverytest.Answer{destWH: deliverytest.OK(),
+		destMM: deliverytest.Failure(delivery.OutcomeFatal, "HTTP 403")}
+	var order []int64
+	for _, r := range slices.SortedFunc(slices.Values(e.db.replies), func(a, b *fakeReply) int {
+		return cmp.Compare(a.id, b.id)
+	}) {
+		if r.page == pageID {
+			order = append(order, r.dest)
+			e.rec.Script(deliverytest.MethodReply, answers[r.dest])
+		}
+	}
+	if len(order) != 2 {
+		t.Fatalf("page replies in %v", order)
+	}
+	e.rounds(t)
+	if h := e.db.dests[destMM].health; h != "broken" {
+		t.Fatalf("mattermost %s after the fatal reply", h)
+	}
+	var ended []groups.PageOutcome
+	for _, o := range s.outcomes {
+		if o.Ended {
+			ended = append(ended, o)
+		}
+	}
+	if len(ended) != 1 || !ended[0].Delivered || !slices.Equal(slices.Sorted(slices.Values(ended[0].Reached)),
+		[]int64{ivanID, petrID}) || e.db.pageDB.state[pageID] != "ended" {
+		t.Errorf("outcomes %+v, want the page ended delivered to ivan and petr", s.outcomes)
 	}
 }
 

@@ -86,6 +86,9 @@ and the API, timers, and every other Destination.
   Destination check, so its next delivery is the probe.
 - **A new Alert Group is created and shown in Muster** as usual, but its first Publication waits. Its ack timeout does not
   start until it is published, so a Route whose only Destinations are Broken sends no notices.
+- **A Page of an [Escalation chain](escalation-chains.md#undelivered-pages) does not wait.** Its Thread reply in the
+  Broken Destination is withheld, also one that was waiting when the Destination became Broken, and is never sent: the
+  person counts as not delivered there at once, and the chain goes on.
 
 ## Recovery
 

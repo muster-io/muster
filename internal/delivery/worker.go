@@ -230,10 +230,12 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // Round probes every Broken Destination whose probe is due, then attempts the due work of every Organization, claiming
 // Batch at a time, in six ranks: 1, the Urgent deliveries that are not configuration only; 2, the Urgent configuration
 // edits (ClaimDueDeliveries); 3, the other deliveries that are not configuration only; 4, the Thread replies; 5, the
-// head events of outgoing webhooks; 6, last, the other configuration edits. It returns how long until the next one can
-// be claimed, at most MaxWait, or at most MinWait when it settled as many batches of ended Pages as a round settles
-// and more may wait (settlePages), so that a backlog of them drains a round after another. A row that fails is logged
-// and attempted again once its lease runs out; the round goes on.
+// head events of outgoing webhooks; 6, last, the other configuration edits. Then it drops the Page replies of the
+// Broken Destinations and settles their Pages (dropBrokenPages), and settles the Pages whose replies all ended
+// (settlePages). It returns how long until the next one can be claimed, at most MaxWait, or at most MinWait when it
+// settled as many batches of ended Pages as a round settles and more may wait (settlePages), so that a backlog of them
+// drains a round after another. A row that fails is logged and attempted again once its lease runs out; the round goes
+// on.
 //
 // They share the buckets of each Destination and Connection, and the order decides who gets a token (C-11.FR-3): a row
 // denied one is due again at the token's time plus TokenMargin, as every row denied before that token is, and the first
@@ -332,7 +334,7 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	next := w.maxWait()
 	var errs []error
 	for _, org := range orgs {
-		errs = append(errs, w.probe(ctx, org), w.reconcile(ctx, org))
+		errs = append(errs, w.probe(ctx, org), w.reconcile(ctx, org), w.dropBrokenPages(ctx, org))
 		more, err := w.settlePages(ctx, org)
 		errs = append(errs, err)
 		if more {

@@ -310,7 +310,9 @@ A Page that reaches its person nowhere records the Quiet `page_not_delivered` wi
   Destination was [Broken](broken-destinations.md), was sent through a bridge with their Mention left out for length,
   or was never sent because its Root message — a first Publication,
   or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
-  the Destination recovers.
+  the Destination recovers. A reply queued before its Destination became Broken, such as one whose own attempt made
+  it Broken, is withheld too as soon as the Destination is Broken: the Page does not wait for the recovery, and still
+  reaches the people that its other, delivered replies mentioned.
 
 A call through a Notification gateway that ends Not delivered records it too, with the reason of the call
 ([Calls through a Notification gateway](#calls-through-a-notification-gateway)).

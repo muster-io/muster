@@ -128,7 +128,10 @@
   (the Pages by Mention, `pages` and `page_users`, the runs of Notification rules, `notification_rule_runs`, the timer
   kind `notification_rule_action` whose subject is the rule run, `timers.notification_rule_run_id`, the Thread replies
   of Pages and the Team mention or token and the importance of a Page in the Timeline, C-32.FR-3, FR-8 to FR-10,
-  FR-19, C-31.FR-3, S-155), in
+  FR-19, C-31.FR-3, S-155) and
+  [`0052_thread_replies_page_pending_index`](../../internal/db/migrations/0052_thread_replies_page_pending_index.up.sql)
+  (`thread_replies_page_pending_idx`, the Page replies still to be sent that the delivery worker drops in Broken
+  Destinations, C-32.FR-10), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1619,7 +1622,13 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   queued — once it is `sent`, without those its line of Mentions left out for length through a bridge (C-12.FR-11),
   whom it did not reach (C-32.FR-10) — and `page_source`, `route` or `team`, whether the Destination is one of the
   Route or of a Team of the chain, which its text names ("Chain of the Route …"). A reply of a Page is `pending` at
-  once, never batched.
+  once, never batched. A reply of a Page does not wait for a Broken Destination to recover: one queued while it is
+  Broken is inserted `dropped`, and one still to be sent when it became Broken is made `dropped` by the round of the
+  delivery worker that follows, which settles its Page (C-32.FR-10); that drop skips a reply whose lease still runs
+  and rows another transaction holds (`FOR UPDATE SKIP LOCKED`), and locks no delivery. Migration 0052 adds
+  `thread_replies_page_pending_idx` `(org_id, id) WHERE page_id IS NOT NULL AND state IN ('collecting', 'pending')`
+  for that drop, run every round: it reads only the Page replies still to be sent, not every Page reply ever sent nor
+  every pending reply that is not a Page.
 - **`webhook_events`** — the events-mode queue of outgoing webhooks: one row per lifecycle event and Destination, with
   `sequence` (the Alert Group's `event_seq`: it grows with every lifecycle event, may have gaps on one Destination and
   does not start at 1 for a Destination added to the Route later), `webhook_id` (unique, kept across retries), `notify`,

@@ -47,6 +47,8 @@ type pageQueries interface {
 	ListPageReplyUsers(ctx context.Context, arg dbgen.ListPageReplyUsersParams) ([]dbgen.ListPageReplyUsersRow, error)
 	ListPageReplies(ctx context.Context, arg dbgen.ListPageRepliesParams) ([]dbgen.ListPageRepliesRow, error)
 	ListEndedPages(ctx context.Context, arg dbgen.ListEndedPagesParams) ([]dbgen.ListEndedPagesRow, error)
+	DropBrokenPageReplies(ctx context.Context, arg dbgen.DropBrokenPageRepliesParams) (
+		[]dbgen.DropBrokenPageRepliesRow, error)
 }
 
 // pageRoot is a Destination where the Alert Group has its Root message: its type, its Connection and what that can

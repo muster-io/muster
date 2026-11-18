@@ -22,10 +22,12 @@ import (
 // such a link is named in a line of the reply instead. The outcome of the replies goes back to the dispatcher
 // (groups.SettlePage, PageReached and PageNotDelivered): a delivered reply that mentions a person delivers the Page to
 // them — not one whose Mention line left them out for length (C-12.FR-11): its delivery records only the others in
-// paged_user_ids (reached) — and once every reply of the Page ended — sent, Not delivered or withheld, as after a
-// Broken Destination whose replies are dropped at its recovery (C-11.FR-19) — those it reached nowhere are not
-// delivered. Each reply settles its Page once its outcome committed, and every round settles the Pages whose replies
-// all ended without it.
+// paged_user_ids (reached) — and once every reply of the Page ended — sent, Not delivered or withheld, as in a Broken
+// Destination — those it reached nowhere are not delivered. A Page reply is withheld in a Destination that is Broken
+// when the Page is queued (PageTargets), and one queued before it became Broken is dropped by the worker's round
+// (dropBrokenPages), so that its Page does not wait for the recovery; the other replies wait for it (C-11.FR-19).
+// Each reply settles its Page once its outcome committed, and every round settles the Pages whose replies all ended
+// without it.
 
 // PageSettler records the outcome of the replies of a Page through the dispatcher, locking its Alert Group first:
 // (*groups.Service).SettlePage.
@@ -189,6 +191,39 @@ func (w *Worker) settlePages(ctx context.Context, org int64) (bool, error) {
 		after = rows[len(rows)-1].ID
 	}
 	return true, nil
+}
+
+// dropBrokenPages drops the replies of Pages still to be sent in the Broken Destinations of the Organization, a batch
+// at a time, and settles their Pages at once, in this round also when settlePages goes on past them after a backlog
+// (C-32.FR-10): a Page whose reply was queued before its Destination became Broken, such as by the reply's own Fatal
+// attempt, ends as one queued while it is Broken does, without waiting for the recovery, and reaches the people that
+// its sent replies mentioned. The replies that are not Pages wait for the recovery (C-11.FR-19). A reply in flight is
+// left to its attempt and dropped by a later round. A Page that fails to settle is logged, as in settlePages, which
+// settles it in a later round, its replies all ended.
+func (w *Worker) dropBrokenPages(ctx context.Context, org int64) error {
+	if w.Pages == nil {
+		return nil
+	}
+	for {
+		rows, err := w.Store.queries(w.Store.db).DropBrokenPageReplies(ctx, dbgen.DropBrokenPageRepliesParams{
+			OrgID: org, Now: w.Lease.Clocks.Real.Now().UTC(), Lim: w.batch()})
+		if err != nil {
+			return fmt.Errorf("drop the page replies of the broken destinations: %w", err)
+		}
+		var settled []int64
+		for _, r := range rows {
+			if slices.Contains(settled, r.PageID) {
+				continue
+			}
+			settled = append(settled, r.PageID)
+			if err := w.settlePage(ctx, org, r.AlertGroupID, r.PageID); err != nil && ctx.Err() == nil {
+				w.Log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", "page"), logging.F("error", err.Error()))
+			}
+		}
+		if len(rows) < int(w.batch()) {
+			return nil
+		}
+	}
 }
 
 // settleReply settles the Page of a reply once its outcome committed; a failure is logged, and the round settles the
