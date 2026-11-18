@@ -117,6 +117,7 @@ type runQueries interface {
 	GetChainID(ctx context.Context, arg dbgen.GetChainIDParams) (int64, error)
 	ListChainRuns(ctx context.Context, arg dbgen.ListChainRunsParams) ([]dbgen.ListChainRunsRow, error)
 	ListRunSteps(ctx context.Context, arg dbgen.ListRunStepsParams) ([]dbgen.ListRunStepsRow, error)
+	ListRunPages(ctx context.Context, arg dbgen.ListRunPagesParams) ([]dbgen.ListRunPagesRow, error)
 }
 
 // Dispatcher is the dispatcher of Alert Groups through which a step changes its Alert Group:
@@ -618,13 +619,27 @@ type Actor struct {
 	Deactivated bool
 }
 
-// RunStepView is a step a run made or skipped, with the reason of a skip.
+// RunStepView is a step a run made or skipped, with the reason of a skip and the Pages of a made step; seq is its place
+// among the steps the run made, repeated ones included (escalation_run_steps.seq).
 type RunStepView struct {
 	Number  int
 	Kind    string
 	At      time.Time
 	Outcome string
 	Reason  string
+	Pages   []RunPageView
+	seq     int
+}
+
+// RunPageView is a Page a step of a run made (EscalationRunPage): its kind, the people it names, or the Team or the
+// word for everyone in the chat of a page_team step, and its outcome with the reason it was not delivered.
+type RunPageView struct {
+	Kind     string
+	Users    []UserRef
+	Team     *TeamRef
+	Everyone string
+	Outcome  string
+	Reason   string
 }
 
 // RunPosition is the place of a run in the list of a chain's runs, newest first.
@@ -640,8 +655,9 @@ type RunPage struct {
 }
 
 // ChainRuns lists a page of the recent runs of the chain publicID, newest first, after the position after (C-32.FR-18,
-// "How it went"), without the steps of a run whose Alert Group's details are removed (C-09.FR-16); an unknown chain is
-// ErrNotFound.
+// "How it went"), each step with its Pages, without the steps — and so the Pages — of a run whose Alert Group's details
+// are removed (C-09.FR-16); an unknown chain is ErrNotFound. It reads the runs, then their steps, then their Pages, one
+// query each per page of runs.
 func (r *Runs) ChainRuns(ctx context.Context, publicID string, after *RunPosition, limit int) (RunPage, error) {
 	q := r.queries(r.db)
 	id, err := q.GetChainID(ctx, dbgen.GetChainIDParams{OrgID: r.s.orgID, PublicID: publicID})
@@ -691,9 +707,87 @@ func (r *Runs) ChainRuns(ctx context.Context, publicID string, after *RunPositio
 	for _, st := range steps {
 		run := &page.Runs[index[st.RunID]]
 		run.Steps = append(run.Steps, RunStepView{Number: int(st.Number), Kind: st.Kind, At: st.At.UTC(),
-			Outcome: st.Outcome, Reason: st.Reason.String})
+			Outcome: st.Outcome, Reason: st.Reason.String, Pages: []RunPageView{}, seq: int(st.Seq)})
+	}
+	if err := r.runPages(ctx, q, ids, index, page.Runs); err != nil {
+		return RunPage{}, fmt.Errorf("list the pages of the runs of the escalation chain %s: %w", publicID, err)
 	}
 	return page, nil
+}
+
+// runPages reads the Pages by Mention of the runs ids, those whose steps are shown, in one query, and gives each to the
+// step of its run that made it (C-32.FR-18): the run step its seq names — for a later Mention of a Notification rule,
+// that of the step that started the rule, so a step lists all the Pages it led to. A Page or a rule run written before
+// migration 0050 has no seq: its Page goes to the latest step of its number the run made at or before the step that
+// made it — the Page's own time, or for a later Mention the start of its rule run, so that a repeat of the step since
+// does not take it —, else to the latest step of its number the run made; one the run made no step of its number for
+// is not listed.
+func (r *Runs) runPages(ctx context.Context, q runQueries, ids []int64, index map[int64]int, runs []ChainRun) error {
+	rows, err := q.ListRunPages(ctx, dbgen.ListRunPagesParams{OrgID: r.s.orgID, RunIds: ids})
+	if err != nil {
+		return err
+	}
+	var last int64
+	var cur *RunPageView
+	for _, row := range rows {
+		if row.ID != last {
+			// The rows of a Page come together, one per person it names: a new id is the next Page.
+			last, cur = row.ID, nil
+			if st := stepOfPage(runs[index[row.RunID]].Steps, row); st != nil {
+				st.Pages = append(st.Pages, pageOf(row))
+				cur = &st.Pages[len(st.Pages)-1]
+			}
+		}
+		if cur != nil && row.UserPublicID.Valid {
+			cur.Users = append(cur.Users, UserRef{PublicID: row.UserPublicID.String, Name: row.UserName.String,
+				Login: row.UserLogin.String, Status: row.UserStatus.String})
+		}
+	}
+	return nil
+}
+
+// stepOfPage is the step of steps, those of the Page's run in the order of their seqs, that made the Page row: the one
+// its run step names, else the latest made step of its number at or before row.StepAt, else the latest made step of
+// its number; nil for none. The seqs of a run are 1 to n (InsertRunStep), so the step of a seq is looked for at its
+// place first, and only then among all the steps.
+func stepOfPage(steps []RunStepView, row dbgen.ListRunPagesRow) *RunStepView {
+	if row.RunStepSeq.Valid {
+		seq := int(row.RunStepSeq.Int32)
+		if seq >= 1 && seq <= len(steps) && steps[seq-1].seq == seq {
+			return &steps[seq-1]
+		}
+		for i := range steps {
+			if steps[i].seq == seq {
+				return &steps[i]
+			}
+		}
+	}
+	var latest, before *RunStepView
+	for i := range steps {
+		st := &steps[i]
+		if st.Number != int(row.StepNumber) || st.Outcome != OutcomeMade {
+			continue
+		}
+		latest = st
+		if !st.At.After(row.StepAt) {
+			before = st
+		}
+	}
+	if before != nil {
+		return before
+	}
+	return latest
+}
+
+// pageOf is the Page of a row of ListRunPages, without its people.
+func pageOf(row dbgen.ListRunPagesRow) RunPageView {
+	p := RunPageView{Kind: row.Kind, Users: []UserRef{}, Everyone: row.Everyone.String, Outcome: row.State,
+		Reason: row.Reason.String}
+	if row.TeamPublicID.Valid {
+		p.Team = &TeamRef{PublicID: row.TeamPublicID.String, Name: row.TeamName.String, Slug: row.TeamSlug.String,
+			Deleted: row.TeamDeleted}
+	}
+	return p
 }
 
 // detailsRemoved reports whether the details of an Alert Group resolved at resolvedAt are removed at now, as the reads

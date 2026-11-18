@@ -4457,8 +4457,9 @@ paths:
       summary: List the runs of an Escalation chain
       description: 'The recent runs of the chain on Alert Groups, newest first, for "How it went" (C-32.FR-18): one per
         start of the chains of an Alert Group, so an Alert Group whose chains started over has a run per start. Each run
-        names its Alert Group, the steps it made and skipped with the reason of each skip, and what stopped it — the
-        Command and its actor — or that it ran out. Runs of a chain keep its steps from when they started (P-73).'
+        names its Alert Group, the steps it made and skipped with the reason of each skip and the Pages of each step it
+        made, and what stopped it — the Command and its actor — or that it ran out. Runs of a chain keep its steps from
+        when they started (P-73).'
       x-permission: escalation-chains:read
       x-listener: app
       security:
@@ -15082,7 +15083,8 @@ components:
           - 'null'
     EscalationRun:
       type: object
-      description: A run of an Escalation chain on an Alert Group, as "How it went" lists it. S-155 adds its Pages.
+      description: A run of an Escalation chain on an Alert Group, as "How it went" lists it, with the Pages of its
+        steps.
       required:
       - id
       - alert_group
@@ -15114,9 +15116,10 @@ components:
           - type: 'null'
         steps:
           type: array
-          description: The steps it made and skipped, in their order; a repeat makes its steps again. A step is
-            `skipped` here only as a whole; a person a step that was made skipped — a Viewer or a disabled User — is
-            in the Timeline of the Alert Group as `escalation_step_skipped`, and the Pages follow with a later version.
+          description: The steps it made and skipped, in their order, each made one with its Pages; a repeat makes its
+            steps again. A step is `skipped` here only as a whole; a person a step that was made skipped — a Viewer or
+            a disabled User — is in the Timeline of the Alert Group as `escalation_step_skipped`. Once the details of
+            the Alert Group are removed (C-09.FR-16) a run lists no steps, and so no Pages.
           items:
             $ref: '#/components/schemas/EscalationRunStep'
     EscalationRunAlertGroup:
@@ -15164,13 +15167,14 @@ components:
           - type: 'null'
     EscalationRunStep:
       type: object
-      description: A step a run made or skipped, with the reason of a skip.
+      description: A step a run made or skipped, with the reason of a skip and the Pages of a made step.
       required:
       - number
       - kind
       - at
       - outcome
       - reason
+      - pages
       properties:
         number:
           type: integer
@@ -15187,6 +15191,79 @@ components:
           - skipped
         reason:
           $ref: '#/components/schemas/EscalationSkipReason'
+        pages:
+          type: array
+          description: The Pages the step made, in the order they were made — its first Mentions, then the later
+            Mentions of the Notification rules it started, which are Pages of the step that started them (C-31.FR-3);
+            empty for a skipped step and for a step that Pages nobody, such as a wait.
+          items:
+            $ref: '#/components/schemas/EscalationRunPage'
+    EscalationRunPage:
+      type: object
+      description: 'A Page a step of a run made (C-32.FR-18): its kind, the people it names, or the Team or the word for
+        everyone in the chat of a `page_team` step, and its outcome (C-32.FR-10): `pending` until every Thread reply
+        of it ended, even after one reached someone; then `delivered` when one reached a person it names (or, for a
+        Team or everyone in the chat, when one was delivered), else `not_delivered`. A Page that could reach nobody
+        when it was made ends `not_delivered` at once. `reason`, only with `not_delivered`: for a Page of
+        people that ended at once, the one reason all its people missed it for, such as `no_account_link`, null when
+        they missed it for several; for one whose Thread replies ended without reaching anyone, `not_delivered`; null
+        for a Page of a Team or of everyone in the chat.'
+      required:
+      - kind
+      - users
+      - team
+      - everyone
+      - outcome
+      - reason
+      properties:
+        kind:
+          type: string
+          description: '`mention`, a Page by Mention in the Threads of the chain''s Destinations. Later versions add kinds
+            (calls through a Notification gateway); clients show an unknown one as it is.'
+          enum:
+          - mention
+        users:
+          type: array
+          description: The people the Page names; empty for a Page of a Team or of everyone in the chat.
+          items:
+            $ref: '#/components/schemas/UserRef'
+        team:
+          description: The Team whose Team mention a `page_team` step wrote; null otherwise.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+        everyone:
+          $ref: '#/components/schemas/PageEveryone'
+        outcome:
+          type: string
+          enum:
+          - pending
+          - delivered
+          - not_delivered
+        reason:
+          $ref: '#/components/schemas/PageNotDeliveredReason'
+    PageEveryone:
+      type:
+      - string
+      - 'null'
+      description: The word for everyone in the chat that a `page_team` step wrote instead of a Team mention; null
+        otherwise.
+      enum:
+      - channel
+      - here
+      - all
+      - everyone
+      - null
+    NullablePageImportance:
+      type:
+      - string
+      - 'null'
+      description: How a step Paged its people, which ran their Notification rule of that name (C-31.FR-3); null for a
+        Page of a Team or of everyone in the chat, and for the events of the kind that are no Page by Mention.
+      enum:
+      - normal
+      - important
+      - null
     EscalationSkipReason:
       type:
       - string
@@ -15913,11 +15990,13 @@ components:
       - not_delivered
       - null
     TimelineEscalationEntry:
-      description: An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a
-        Notification gateway that ended Not delivered, `escalation_step_skipped` for a step of a chain that was
-        skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person,
-        `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or
-        `assignees_changed`, with the Assignees after the change in `assignees`.
+      description: An event of Escalation chains and Pages (C-32), such as `paged` for a Page by Mention, with its
+        people and `importance`, or the `team` or the word for `everyone` of a `page_team` step, `page_not_delivered`
+        for a call through a Notification gateway or a Page by Mention that ended Not delivered,
+        `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`,
+        and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an
+        outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after
+        the change in `assignees`.
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'
       - $ref: '#/components/schemas/TimelineLifecycleFields'
@@ -15935,6 +16014,15 @@ components:
             description: The people the Page names.
             items:
               $ref: '#/components/schemas/UserRef'
+          team:
+            description: The Team whose Team mention a `page_team` step wrote, for its `paged`; null otherwise.
+            oneOf:
+            - $ref: '#/components/schemas/TeamRef'
+            - type: 'null'
+          everyone:
+            $ref: '#/components/schemas/PageEveryone'
+          importance:
+            $ref: '#/components/schemas/NullablePageImportance'
           gateway:
             description: The Notification gateway of a call; null for a Page by Mention.
             oneOf:

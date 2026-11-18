@@ -1022,6 +1022,42 @@ func (e EscalationChainWarningKind) Valid() bool {
 	}
 }
 
+// Defines values for EscalationRunPageKind.
+const (
+	EscalationRunPageKindMention EscalationRunPageKind = "mention"
+)
+
+// Valid indicates whether the value is a known member of the EscalationRunPageKind enum.
+func (e EscalationRunPageKind) Valid() bool {
+	switch e {
+	case EscalationRunPageKindMention:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EscalationRunPageOutcome.
+const (
+	EscalationRunPageOutcomeDelivered    EscalationRunPageOutcome = "delivered"
+	EscalationRunPageOutcomeNotDelivered EscalationRunPageOutcome = "not_delivered"
+	EscalationRunPageOutcomePending      EscalationRunPageOutcome = "pending"
+)
+
+// Valid indicates whether the value is a known member of the EscalationRunPageOutcome enum.
+func (e EscalationRunPageOutcome) Valid() bool {
+	switch e {
+	case EscalationRunPageOutcomeDelivered:
+		return true
+	case EscalationRunPageOutcomeNotDelivered:
+		return true
+	case EscalationRunPageOutcomePending:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EscalationRunSourceKind.
 const (
 	EscalationRunSourceKindRoute EscalationRunSourceKind = "route"
@@ -2546,6 +2582,27 @@ func (e NullableOutgoingHeartbeatErrorClass) Valid() bool {
 	}
 }
 
+// Defines values for NullablePageImportance.
+const (
+	NullablePageImportanceImportant   NullablePageImportance = "important"
+	NullablePageImportanceLessThannil NullablePageImportance = "<nil>"
+	NullablePageImportanceNormal      NullablePageImportance = "normal"
+)
+
+// Valid indicates whether the value is a known member of the NullablePageImportance enum.
+func (e NullablePageImportance) Valid() bool {
+	switch e {
+	case NullablePageImportanceImportant:
+		return true
+	case NullablePageImportanceLessThannil:
+		return true
+	case NullablePageImportanceNormal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NullableRequestErrorClass.
 const (
 	NullableRequestErrorClassBlocked     NullableRequestErrorClass = "blocked"
@@ -2798,18 +2855,45 @@ func (e OutgoingWebhookEventVersion) Valid() bool {
 	}
 }
 
+// Defines values for PageEveryone.
+const (
+	PageEveryoneAll         PageEveryone = "all"
+	PageEveryoneChannel     PageEveryone = "channel"
+	PageEveryoneEveryone    PageEveryone = "everyone"
+	PageEveryoneHere        PageEveryone = "here"
+	PageEveryoneLessThannil PageEveryone = "<nil>"
+)
+
+// Valid indicates whether the value is a known member of the PageEveryone enum.
+func (e PageEveryone) Valid() bool {
+	switch e {
+	case PageEveryoneAll:
+		return true
+	case PageEveryoneChannel:
+		return true
+	case PageEveryoneEveryone:
+		return true
+	case PageEveryoneHere:
+		return true
+	case PageEveryoneLessThannil:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PageImportance.
 const (
-	Important PageImportance = "important"
-	Normal    PageImportance = "normal"
+	PageImportanceImportant PageImportance = "important"
+	PageImportanceNormal    PageImportance = "normal"
 )
 
 // Valid indicates whether the value is a known member of the PageImportance enum.
 func (e PageImportance) Valid() bool {
 	switch e {
-	case Important:
+	case PageImportanceImportant:
 		return true
-	case Normal:
+	case PageImportanceNormal:
 		return true
 	default:
 		return false
@@ -6197,7 +6281,7 @@ type EscalationChainWarning struct {
 // EscalationChainWarningKind What the chain or one of its steps cannot do (C-32.FR-17): `everyone_unsupported`, a `page_team` step whose Team mention or word for everyone the Connection of one of the chain's Destinations cannot mention, such as a Telegram Destination; `gateway_deleted`, a `call` step whose Notification gateway was deleted or is no Notification gateway any more; `destination_deleted`, a `webhook` step whose Destination was deleted; `team_deleted`, a `page_team` step whose Team — the one it names, else the chain's owning Team — was deleted; `pages_nobody`, a chain none of whose steps Pages anyone — no `page_on_call`, `page_people`, `page_team` or `call` step, such as an empty chain or one of waits, repeats and webhooks — the only warning of the chain as a whole, with `step` null.
 type EscalationChainWarningKind string
 
-// EscalationRun A run of an Escalation chain on an Alert Group, as "How it went" lists it. S-155 adds its Pages.
+// EscalationRun A run of an Escalation chain on an Alert Group, as "How it went" lists it, with the Pages of its steps.
 type EscalationRun struct {
 	// AlertGroup The Alert Group of a run.
 	AlertGroup EscalationRunAlertGroup `json:"alert_group"`
@@ -6212,7 +6296,7 @@ type EscalationRun struct {
 	// State The state of a run: `running`, `ran_out` once it passed its last step without an acknowledgement, `stopped` by Acknowledge, Snooze or Resolve.
 	State EscalationRunState `json:"state"`
 
-	// Steps The steps it made and skipped, in their order; a repeat makes its steps again. A step is `skipped` here only as a whole; a person a step that was made skipped — a Viewer or a disabled User — is in the Timeline of the Alert Group as `escalation_step_skipped`, and the Pages follow with a later version.
+	// Steps The steps it made and skipped, in their order, each made one with its Pages; a repeat makes its steps again. A step is `skipped` here only as a whole; a person a step that was made skipped — a Viewer or a disabled User — is in the Timeline of the Alert Group as `escalation_step_skipped`. Once the details of the Alert Group are removed (C-09.FR-16) a run lists no steps, and so no Pages.
 	Steps []EscalationRunStep `json:"steps"`
 
 	// StoppedBy What stopped it; null while it runs and once it ran out.
@@ -6234,6 +6318,31 @@ type EscalationRunList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// EscalationRunPage A Page a step of a run made (C-32.FR-18): its kind, the people it names, or the Team or the word for everyone in the chat of a `page_team` step, and its outcome (C-32.FR-10): `pending` until every Thread reply of it ended, even after one reached someone; then `delivered` when one reached a person it names (or, for a Team or everyone in the chat, when one was delivered), else `not_delivered`. A Page that could reach nobody when it was made ends `not_delivered` at once. `reason`, only with `not_delivered`: for a Page of people that ended at once, the one reason all its people missed it for, such as `no_account_link`, null when they missed it for several; for one whose Thread replies ended without reaching anyone, `not_delivered`; null for a Page of a Team or of everyone in the chat.
+type EscalationRunPage struct {
+	// Everyone The word for everyone in the chat that a `page_team` step wrote instead of a Team mention; null otherwise.
+	Everyone nullable.Nullable[PageEveryone] `json:"everyone"`
+
+	// Kind `mention`, a Page by Mention in the Threads of the chain's Destinations. Later versions add kinds (calls through a Notification gateway); clients show an unknown one as it is.
+	Kind    EscalationRunPageKind    `json:"kind"`
+	Outcome EscalationRunPageOutcome `json:"outcome"`
+
+	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). A Page by Mention (C-32.FR-10): none of its chain's Destinations has the Alert Group's Root message (`no_root_message`), the person has no Account link in the Identity space of any of them (`no_account_link`), or every Thread reply that would mention them ended Not delivered, was withheld while its Destination was Broken, or was never sent because its Root message ended Not delivered (`not_delivered`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason"`
+
+	// Team The Team whose Team mention a `page_team` step wrote; null otherwise.
+	Team nullable.Nullable[TeamRef] `json:"team"`
+
+	// Users The people the Page names; empty for a Page of a Team or of everyone in the chat.
+	Users []UserRef `json:"users"`
+}
+
+// EscalationRunPageKind `mention`, a Page by Mention in the Threads of the chain's Destinations. Later versions add kinds (calls through a Notification gateway); clients show an unknown one as it is.
+type EscalationRunPageKind string
+
+// EscalationRunPageOutcome defines model for EscalationRunPage.Outcome.
+type EscalationRunPageOutcome string
+
 // EscalationRunSource What named the chain of a run on an Alert Group, its Route or one of its Teams.
 type EscalationRunSource struct {
 	Kind EscalationRunSourceKind `json:"kind"`
@@ -6248,7 +6357,7 @@ type EscalationRunSourceKind string
 // EscalationRunState The state of a run: `running`, `ran_out` once it passed its last step without an acknowledgement, `stopped` by Acknowledge, Snooze or Resolve.
 type EscalationRunState string
 
-// EscalationRunStep A step a run made or skipped, with the reason of a skip.
+// EscalationRunStep A step a run made or skipped, with the reason of a skip and the Pages of a made step.
 type EscalationRunStep struct {
 	At time.Time `json:"at"`
 
@@ -6256,6 +6365,9 @@ type EscalationRunStep struct {
 	Kind    EscalationStepKind       `json:"kind"`
 	Number  int                      `json:"number"`
 	Outcome EscalationRunStepOutcome `json:"outcome"`
+
+	// Pages The Pages the step made, in the order they were made — its first Mentions, then the later Mentions of the Notification rules it started, which are Pages of the step that started them (C-31.FR-3); empty for a skipped step and for a step that Pages nobody, such as a wait.
+	Pages []EscalationRunPage `json:"pages"`
 
 	// Reason Why a step was skipped (`escalation_step_skipped`, C-32.FR-14): outside the Working hours of its chain (`outside_working_hours`), for a Severity level its condition does not meet (`severity`), in a gap of the Schedule it Pages (`schedule_gap`), for a person it names who became a Viewer (`viewer`) or was disabled (`disabled`) since it was saved, or for a step "Send to an outgoing webhook" whose Destination was deleted (`destination_deleted`) or is no longer an outgoing webhook in the mode events or both (`webhook_events_required`), or for a step "Page the whole Team" that none of its chain's Destinations can mention, as a Telegram channel cannot (`no_mention_possible`). Null when the step was made. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[EscalationSkipReason] `json:"reason"`
@@ -7643,6 +7755,9 @@ type NullableLanguage string
 // NullableOutgoingHeartbeatErrorClass Why the last outgoing heartbeat failed; null when it succeeded or was not sent. The URL answered `last_status` and the answer was classified `transient` (a server error, the next interval is the retry), `retry_after` (the URL asked to wait), `fatal` (a client error, such as a wrong URL), `redirect` (Muster follows no redirects) or `unknown`; or there was no answer: `blocked` (the outbound address policy refused the address), `dns`, `connect`, `tls`, `timeout`, `proxy_auth` (the proxy refused its credentials); or Muster could not prepare the request (`internal`, such as a URL it cannot decrypt).
 type NullableOutgoingHeartbeatErrorClass string
 
+// NullablePageImportance How a step Paged its people, which ran their Notification rule of that name (C-31.FR-3); null for a Page of a Team or of everyone in the chat, and for the events of the kind that are no Page by Mention.
+type NullablePageImportance string
+
 // NullablePublicId A `public_id` in the format of `PublicId`, or null.
 type NullablePublicId = string
 
@@ -8132,6 +8247,9 @@ type OutgoingWebhookEvent struct {
 
 // OutgoingWebhookEventVersion defines model for OutgoingWebhookEvent.Version.
 type OutgoingWebhookEventVersion int
+
+// PageEveryone The word for everyone in the chat that a `page_team` step wrote instead of a Team mention; null otherwise.
+type PageEveryone string
 
 // PageImportance How a step Pages a person, which runs their Notification rule of that name (C-31.FR-3).
 type PageImportance string
@@ -10407,7 +10525,7 @@ type TimelineEntryList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
+// TimelineEscalationEntry An event of Escalation chains and Pages (C-32), such as `paged` for a Page by Mention, with its people and `importance`, or the `team` or the word for `everyone` of a `page_team` step, `page_not_delivered` for a call through a Notification gateway or a Page by Mention that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
 type TimelineEscalationEntry struct {
 	// Actor Who caused the entry. `system` entries carry the reason in `reason`.
 	Actor TimelineActor `json:"actor"`
@@ -10429,14 +10547,20 @@ type TimelineEscalationEntry struct {
 	// The Timeline kind of each event is given in `x-event-kinds`.
 	Event LifecycleEvent `json:"event"`
 
+	// Everyone The word for everyone in the chat that a `page_team` step wrote instead of a Team mention; null otherwise.
+	Everyone nullable.Nullable[PageEveryone] `json:"everyone,omitempty"`
+
 	// Gateway The Notification gateway of a call; null for a Page by Mention.
 	Gateway nullable.Nullable[EntityRef] `json:"gateway,omitempty"`
 
 	// Id `TE` for lifecycle and system entries, `NE` for a Note (the same id as its `note`), `DE` for a delivery event.
-	Id       PublicId                    `json:"id"`
-	Kind     TimelineEscalationEntryKind `json:"kind"`
-	Loudness Loudness                    `json:"loudness"`
-	Mentions []MentionName               `json:"mentions"`
+	Id PublicId `json:"id"`
+
+	// Importance How a step Paged its people, which ran their Notification rule of that name (C-31.FR-3); null for a Page of a Team or of everyone in the chat, and for the events of the kind that are no Page by Mention.
+	Importance nullable.Nullable[NullablePageImportance] `json:"importance,omitempty"`
+	Kind       TimelineEscalationEntryKind               `json:"kind"`
+	Loudness   Loudness                                  `json:"loudness"`
+	Mentions   []MentionName                             `json:"mentions"`
 
 	// PagedUsers The people the Page names.
 	PagedUsers []UserRef `json:"paged_users"`
@@ -10449,6 +10573,9 @@ type TimelineEscalationEntry struct {
 
 	// Step The number of the step of the chain; null for an event of no chain.
 	Step nullable.Nullable[int] `json:"step,omitempty"`
+
+	// Team The Team whose Team mention a `page_team` step wrote, for its `paged`; null otherwise.
+	Team nullable.Nullable[TeamRef] `json:"team,omitempty"`
 }
 
 // TimelineEscalationEntryKind defines model for TimelineEscalationEntry.Kind.

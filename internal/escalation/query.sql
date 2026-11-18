@@ -470,3 +470,23 @@ SELECT run_id, seq, number, kind, at, outcome, reason
 FROM escalation_run_steps
 WHERE org_id = @org_id AND run_id = ANY(@run_ids::bigint[])
 ORDER BY run_id, seq;
+
+-- ListRunPages reads the Pages by Mention of the runs, in the order they were made, one row per person a Page names
+-- and one row with no person for a Page of a Team or of everyone in the chat (C-32.FR-18): each with the run step it
+-- belongs to — that of the rule run of a later Mention of a Notification rule, which the step that started it made,
+-- else its own; null for a Page or a rule run written before migration 0050 —, when that step was made at the latest
+-- — the start of the rule run of a later Mention, else the Page's own time —, its Team and its outcome. Calls are not
+-- Pages of this version's runs (S-157).
+-- name: ListRunPages :many
+SELECT p.id, p.escalation_run_id::bigint AS run_id, p.step_number, coalesce(rr.run_step_seq, p.run_step_seq) AS run_step_seq,
+       coalesce(rr.started_at, p.created_at)::timestamptz AS step_at,
+       p.kind, p.everyone, p.state, p.reason, p.created_at, t.public_id AS team_public_id, t.name AS team_name,
+       t.slug AS team_slug, coalesce(t.deleted_at IS NOT NULL, false)::boolean AS team_deleted,
+       u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.status AS user_status
+FROM pages p
+LEFT JOIN notification_rule_runs rr ON rr.org_id = p.org_id AND rr.id = p.notification_rule_run_id
+LEFT JOIN teams t ON t.org_id = p.org_id AND t.id = p.team_id
+LEFT JOIN page_users pu ON pu.org_id = p.org_id AND pu.page_id = p.id
+LEFT JOIN users u ON u.org_id = pu.org_id AND u.id = pu.user_id
+WHERE p.org_id = @org_id AND p.escalation_run_id = ANY(@run_ids::bigint[]) AND p.kind = 'mention'
+ORDER BY p.escalation_run_id, p.created_at, p.id, u.name, u.id;

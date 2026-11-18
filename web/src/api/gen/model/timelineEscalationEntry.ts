@@ -7,19 +7,26 @@ import type { DestinationRef } from './destinationRef';
 import type { EntityRef } from './entityRef';
 import type { EscalationChainRef } from './escalationChainRef';
 import type { EscalationSkipReason } from './escalationSkipReason';
+import type { NullablePageImportance } from './nullablePageImportance';
+import type { PageEveryone } from './pageEveryone';
 import type { PageNotDeliveredReason } from './pageNotDeliveredReason';
+import type { TeamRef } from './teamRef';
 import type { TimelineEntryBase } from './timelineEntryBase';
 import type { TimelineEscalationEntryKind } from './timelineEscalationEntryKind';
 import type { TimelineLifecycleFields } from './timelineLifecycleFields';
 import type { UserRef } from './userRef';
 
 /**
- * An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a Notification gateway that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
+ * An event of Escalation chains and Pages (C-32), such as `paged` for a Page by Mention, with its people and `importance`, or the `team` or the word for `everyone` of a `page_team` step, `page_not_delivered` for a call through a Notification gateway or a Page by Mention that ended Not delivered, `escalation_step_skipped` for a step of a chain that was skipped, with the chain, the step and `skip_reason`, and the person in `paged_users` for a skip of a person, `escalation_webhook` for a step that sent to an outgoing webhook, with the chain, the step and `destination`, or `assignees_changed`, with the Assignees after the change in `assignees`.
  */
 export type TimelineEscalationEntry = TimelineEntryBase & TimelineLifecycleFields & ({
   kind: TimelineEscalationEntryKind;
   /** The people the Page names. */
   paged_users: UserRef[];
+  /** The Team whose Team mention a `page_team` step wrote, for its `paged`; null otherwise. */
+  team?: TeamRef | null;
+  everyone?: PageEveryone | null;
+  importance?: NullablePageImportance | null;
   /** The Notification gateway of a call; null for a Page by Mention. */
   gateway?: EntityRef | null;
   reason?: PageNotDeliveredReason | null;

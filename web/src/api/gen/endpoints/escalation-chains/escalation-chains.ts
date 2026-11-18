@@ -537,7 +537,7 @@ export const useDeleteEscalationChain = <TError = UnauthorizedResponse | Forbidd
 }
 
 /**
- * The recent runs of the chain on Alert Groups, newest first, for "How it went" (C-32.FR-18): one per start of the chains of an Alert Group, so an Alert Group whose chains started over has a run per start. Each run names its Alert Group, the steps it made and skipped with the reason of each skip, and what stopped it — the Command and its actor — or that it ran out. Runs of a chain keep its steps from when they started (P-73).
+ * The recent runs of the chain on Alert Groups, newest first, for "How it went" (C-32.FR-18): one per start of the chains of an Alert Group, so an Alert Group whose chains started over has a run per start. Each run names its Alert Group, the steps it made and skipped with the reason of each skip and the Pages of each step it made, and what stopped it — the Command and its actor — or that it ran out. Runs of a chain keep its steps from when they started (P-73).
  * @summary List the runs of an Escalation chain
  */
 export const listEscalationChainRuns = async (escalationChainId: string,

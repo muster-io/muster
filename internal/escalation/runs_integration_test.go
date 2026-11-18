@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/escalation"
+	"github.com/muster-io/muster/internal/escalation/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/routing"
@@ -624,6 +627,181 @@ func TestIntegrationRunOwningTeam(t *testing.T) {
 		if n := e.count(t, `SELECT count(*) FROM escalation_run_steps WHERE run_id = $1 AND number = 1
 			AND outcome = 'made'`, next); n != 1 {
 			t.Error("the step of the next run was not made in the working hours of the organization")
+		}
+	})
+}
+
+// runPagesOf renders the steps of a run with their Pages, a step per line as number/outcome: and each Page as
+// kind/outcome/reason/logins/team/everyone.
+func runPagesOf(r escalation.ChainRun) string {
+	var b strings.Builder
+	for _, st := range r.Steps {
+		fmt.Fprintf(&b, "%d/%s:", st.Number, st.Outcome)
+		for _, p := range st.Pages {
+			fmt.Fprintf(&b, " %s/%s/%s", p.Kind, p.Outcome, p.Reason)
+			for _, u := range p.Users {
+				b.WriteString("/" + u.Login)
+			}
+			if p.Team != nil {
+				b.WriteString("/team:" + p.Team.Slug)
+			}
+			if p.Everyone != "" {
+				b.WriteString("/everyone:" + p.Everyone)
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// TestIntegrationRunPages is C-32.FR-18, C-32.AC-17 and C-09.FR-16 on PostgreSQL: "How it went" lists with each step
+// the run made its Pages by Mention, by the run step they carry — a Page of a step's first Mentions its own, a later
+// Mention of a Notification rule that of its rule run, so on the step that started the rule — with their people,
+// the Team or the word for everyone of a Page of a Team, and their outcome and reason; a Page or a rule run written
+// before migration 0050, without a run step, goes to the latest step of its number made at or before it; a call is no
+// Page of this version's runs; and the Pages of an Alert Group whose details are removed are hidden with its steps.
+func TestIntegrationRunPages(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setupRuns(t, s)
+		ctx := t.Context()
+		start := func(number int64) (int64, int64) {
+			t.Helper()
+			id, _ := e.group(t, number, e.route.ID)
+			if err := e.groups.MarkPublished(ctx, id, t0, true); err != nil {
+				t.Fatal(err)
+			}
+			var run int64
+			if err := e.d.Pool.QueryRow(ctx, `SELECT id FROM escalation_runs WHERE alert_group_id = $1
+				AND chain_id = $2`, id, e.devops.ID).Scan(&run); err != nil {
+				t.Fatal(err)
+			}
+			fireRun(t, e, e.runs, run)
+			return id, run
+		}
+		g1, r1 := start(40)
+		g2, r2 := start(41)
+		e.clock.Set(t0.Add(10 * time.Minute))
+		fireRun(t, e, e.runs, r1)
+		fireRun(t, e, e.runs, r2)
+		// Each run made step 1 (run step 1) and the wait 2 (run step 2) at t0, and step 3 (run step 3) at t0+10m.
+		rule := func(group, run int64, seq any) int64 {
+			t.Helper()
+			var id int64
+			if err := e.d.Pool.QueryRow(ctx, `INSERT INTO notification_rule_runs (org_id, alert_group_id,
+				escalation_run_id, step_number, user_id, importance, actions, state, started_at, ended_at, run_step_seq)
+				SELECT $1::bigint, $2::bigint, $3::bigint, 3, u.id, 'important', '[]', 'done', $4::timestamptz,
+				       $4::timestamptz, $5::integer
+				FROM users u WHERE u.public_id = $6
+				RETURNING id`, e.orgID, group, run, t0.Add(10*time.Minute), seq, e.people["petr"]).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		type pg struct {
+			group, run int64
+			step       int
+			seq, rule  any
+			kind       string
+			state      string
+			reason     any
+			team       any
+			everyone   any
+			at         time.Duration
+			people     []string
+			// missed are those of people the Page did not reach, with the reason not_delivered.
+			missed []string
+		}
+		insert := func(p pg) {
+			t.Helper()
+			if p.kind == "" {
+				p.kind = "mention"
+			}
+			var id int64
+			if err := e.d.Pool.QueryRow(ctx, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id,
+				notification_rule_run_id, step_number, kind, team_id, everyone, state, reason, created_at, ended_at,
+				run_step_seq) VALUES ($1, $2, $3, $4::bigint, $5, $6, $7::bigint, $8::text, $9::text, $10::text,
+				$11::timestamptz, CASE WHEN $9::text = 'pending' THEN NULL ELSE $11::timestamptz END, $12::integer)
+				RETURNING id`, e.orgID, p.group,
+				p.run, p.rule, p.step, p.kind, p.team, p.everyone, p.state, p.reason, t0.Add(p.at),
+				p.seq).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			for _, login := range p.people {
+				outcome, reason := p.state, p.reason
+				if slices.Contains(p.missed, login) {
+					outcome, reason = "not_delivered", "not_delivered"
+				}
+				e.exec(t, `INSERT INTO page_users (org_id, page_id, user_id, outcome, reason)
+					SELECT $1::bigint, $2::bigint, id, $3::text, $4::text FROM users WHERE public_id = $5`, e.orgID, id,
+					outcome, reason, e.people[login])
+			}
+		}
+		for _, p := range []pg{
+			// Delivered, though it did not reach petr: the outcome is the Page's, not a person's.
+			{group: g1, run: r1, step: 1, seq: 1, state: "delivered", people: []string{"vic", "petr"},
+				missed: []string{"petr"}},
+			{group: g1, run: r1, step: 3, rule: rule(g1, r1, 3), state: "not_delivered", reason: "no_account_link",
+				at: 15 * time.Minute, people: []string{"petr"}},
+			{group: g1, run: r1, step: 3, seq: 3, state: "pending", at: 10 * time.Minute, people: []string{"petr"}},
+			{group: g1, run: r1, step: 1, state: "delivered", at: time.Minute, people: []string{"petr"}},
+			{group: g1, run: r1, step: 3, rule: rule(g1, r1, nil), state: "delivered", at: 20 * time.Minute,
+				people: []string{"petr"}},
+			{group: g1, run: r1, step: 3, seq: 3, team: e.env.payments.ID, state: "delivered", at: 10 * time.Minute},
+			{group: g1, run: r1, step: 3, seq: 3, everyone: "here", state: "not_delivered", at: 10 * time.Minute},
+			{group: g1, run: r1, step: 1, seq: 1, kind: "call", state: "delivered", people: []string{"petr"}},
+			{group: g2, run: r2, step: 1, seq: 1, state: "delivered", people: []string{"petr"}},
+		} {
+			insert(p)
+		}
+		read := func() map[int64]escalation.ChainRun {
+			t.Helper()
+			page, err := e.runs.ChainRuns(ctx, e.devops.PublicID, nil, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := map[int64]escalation.ChainRun{}
+			for _, r := range page.Runs {
+				out[r.Group.Number] = r
+			}
+			return out
+		}
+		// What ListRunPages reads of each Page of the first run, as step/run step/since the step: a later Mention takes
+		// the run step and the start of its rule run, 0 for none.
+		raw, err := dbgen.New(e.d.Pool).ListRunPages(ctx, dbgen.ListRunPagesParams{OrgID: e.orgID, RunIds: []int64{r1}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cols []string
+		for i, row := range raw {
+			if i == 0 || row.ID != raw[i-1].ID {
+				cols = append(cols, fmt.Sprintf("%d/%d/%s", row.StepNumber, row.RunStepSeq.Int32, row.StepAt.Sub(t0)))
+			}
+		}
+		if got := strings.Join(cols, " "); got != "1/1/0s 1/0/1m0s 3/3/10m0s 3/3/10m0s 3/3/10m0s 3/3/10m0s 3/0/10m0s" {
+			t.Errorf("the rows of the pages %s", got)
+		}
+		runs := read()
+		want := "1/made: mention/delivered//petr/vic mention/delivered//petr\n" +
+			"2/made:\n" +
+			"3/made: mention/pending//petr mention/delivered//team:payments mention/not_delivered//everyone:here " +
+			"mention/not_delivered/no_account_link/petr mention/delivered//petr\n"
+		if got := runPagesOf(runs[40]); got != want {
+			t.Errorf("pages\n%s\nwant\n%s", got, want)
+		}
+		if got := runPagesOf(runs[41]); got != "1/made: mention/delivered//petr\n2/made:\n3/made:\n" {
+			t.Errorf("pages of the second run\n%s", got)
+		}
+
+		// Once the details of the second Alert Group are removed, its steps and Pages are hidden.
+		e.exec(t, `UPDATE alert_groups SET status = 'resolved', resolved_at = $2, resolved_by_kind = 'system',
+			resolve_reason = 'resolved', unclaimed = false WHERE id = $1`, g2, t0.Add(10*time.Minute))
+		e.clock.Set(t0.Add(91 * 24 * time.Hour))
+		runs = read()
+		if r := runs[41]; len(r.Steps) != 0 {
+			t.Errorf("the run of an alert group whose details are removed %+v", r)
+		}
+		if got := runPagesOf(runs[40]); got != want {
+			t.Errorf("pages of the firing alert group\n%s", got)
 		}
 	})
 }
