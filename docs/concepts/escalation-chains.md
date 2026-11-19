@@ -260,7 +260,9 @@ to them through that Destination: when no other Destination of the chain reaches
 `page_not_delivered` with `not_delivered`. The same holds for a person whose Mention a bridge's reply leaves out
 because its line of Mentions keeps only the whole Mentions that fit half of the bridge's body limit
 ([Undelivered Mentions](mentions.md#undelivered-mentions)): the reply does not reach them and they do not become an
-Assignee. An outgoing webhook takes every person of the Page as data, linked or not, and the Team of a step "Page the
+Assignee. The same holds for a linked person whose marker cannot be written — an account id longer than 512
+characters, or neither the link nor the person has a name to show — and whom the reply therefore names by the plain
+name. An outgoing webhook takes every person of the Page as data, linked or not, and the Team of a step "Page the
 whole Team" by its slug and name; the template mode gives them to the "reply in thread" request as `.Mentions`, with
 `.Event` `paged` ([Template mode](../outgoing-webhooks/templates.md#mentions)).
 One whose "reply in thread" request was removed after the Page was queued sends nothing, and that reply ends Not
@@ -307,8 +309,8 @@ A Page that reaches its person nowhere records the Quiet `page_not_delivered` wi
   chain and no Destination, whose chains start when the Alert Group is created;
 - `no_account_link`: the person has no Account link in the Identity space of any of the chain's Destinations;
 - `not_delivered`: every Thread reply that would mention them ended Not delivered, was withheld while its
-  Destination was [Broken](broken-destinations.md), was sent through a bridge with their Mention left out for length,
-  or was never sent because its Root message — a first Publication,
+  Destination was [Broken](broken-destinations.md), was sent through a bridge with their Mention left out for length
+  or with their plain name for want of a marker, or was never sent because its Root message — a first Publication,
   or one published again after it was deleted — ended Not delivered; a reply withheld while Broken is not sent after
   the Destination recovers. A reply queued before its Destination became Broken, such as one whose own attempt made
   it Broken, is withheld too as soon as the Destination is Broken: the Page does not wait for the recovery, and still

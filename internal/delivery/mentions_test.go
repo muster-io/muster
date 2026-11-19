@@ -152,6 +152,57 @@ func TestMentionEventsLeftOut(t *testing.T) {
 	}
 }
 
+// TestMentionEventsPlain is C-28.FR-3 and C-22.FR-16 (#652) for a person whom a bridge's message names by the
+// plain name, because no marker could be built for their Account link: they are not delivered, with the reason
+// bridge_cannot_mention_people, after those the resolution found undelivered and those left out for length; a later
+// Loud reply that names a person with an open warning so records no mention_delivered, and one that mentions them
+// closes it.
+func TestMentionEventsPlain(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit = 600
+	alice, bob := aliceMentioned, bobMentioned
+	alice.PublicID, bob.PublicID = "SRAAAAAAAAAAA1", "SRAAAAAAAAAAA2"
+	m := &fakeMentioner{undelivered: []mentions.Undelivered{bobUndelivered}, mentioned: []mentions.Mentioned{alice}}
+	e.w.Mentions = m
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		Plain: []string{alice.PublicID}}})
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	if kinds := e.eventKinds(); !slices.Equal(kinds,
+		[]string{"publication", "mention_not_delivered", "mention_not_delivered"}) {
+		t.Fatalf("events %v", kinds)
+	}
+	got := e.mentionEvents()
+	if d := detailOf(t, got[1]); d != (delivery.MentionDetail{UserID: 1, EntryID: 72, Position: 1,
+		Target: aliceEntry.Target, Event: mentions.KindNewAlertGroup,
+		Reason: mentions.ReasonBridgeCannotMentionPeople}) || got[1].Loudness != "quiet" {
+		t.Errorf("the mention by the plain name %+v", d)
+	}
+
+	// bob's warning is open: a Loud reply that names him by the plain name, and leaves nobody out, keeps it open.
+	m.undelivered, m.mentioned = nil, []mentions.Mentioned{bob}
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		Plain: []string{bob.PublicID}}})
+	e.business.Advance(5 * time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(2, groups.StatusFiring, "f1"))
+	e.round(t)
+	got = e.mentionEvents()
+	if len(got) != 3 || got[2].Kind != "mention_not_delivered" {
+		t.Fatalf("after a reply that names bob by the plain name %v", e.eventKinds())
+	}
+	if d := detailOf(t, got[2]); d != (delivery.MentionDetail{UserID: 2, EntryID: 71, Target: onCallEntry.Target,
+		Event: mentions.KindNewAlerts, Reason: mentions.ReasonBridgeCannotMentionPeople}) {
+		t.Errorf("the mention of the reply by the plain name %+v", d)
+	}
+	// A Loud reply that mentions him closes it.
+	e.business.Advance(5 * time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(3, groups.StatusFiring, "f2"))
+	e.round(t)
+	if got = e.mentionEvents(); len(got) != 4 || got[3].Kind != "mention_delivered" {
+		t.Errorf("after a reply that mentions bob %v", e.eventKinds())
+	}
+}
+
 // TestMentionEventsNotDelivered is C-28.FR-3 and C-11.FR-10: a Loud Publication that ends Not delivered records
 // not_delivered and no mention event, and the warnings stay as they were.
 func TestMentionEventsNotDelivered(t *testing.T) {

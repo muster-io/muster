@@ -342,7 +342,7 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 				return false, err
 			}
 		}
-		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), a.resolved.LeftOut(out.LeftOut),
+		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), asDelivered(a.resolved, out),
 			now); err != nil {
 			return false, err
 		}
@@ -633,14 +633,14 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 	case OutcomeOK:
 		n, err := q.RecordReplySent(ctx, dbgen.RecordReplySentParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 			MessageID: nonEmpty(out.MessageID), ButtonKeyID: nonEmpty(buttonKeyOf(a.message)),
-			PagedUserIds: a.reached(out.LeftOut), Now: now})
+			PagedUserIds: a.reached(out), Now: now})
 		if err != nil {
 			return replyNotRecorded, fmt.Errorf("record the sent thread reply: %w", err)
 		}
 		// Under the lease only, so that a reply another replica sends again records its Mentions once.
 		if n == 1 {
 			group := a.row.AlertGroupID
-			if err := recordMentions(ctx, q, org, a.destination, &group, nil, a.resolved.LeftOut(out.LeftOut),
+			if err := recordMentions(ctx, q, org, a.destination, &group, nil, asDelivered(a.resolved, out),
 				now); err != nil {
 				return replyNotRecorded, err
 			}

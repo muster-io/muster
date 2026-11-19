@@ -707,8 +707,9 @@ func (s *Service) labelTeams(ctx context.Context, q Queries, org int64, r Reques
 
 // The reasons a person whom a Mention entry names is not mentioned as their messenger mentions them
 // (MentionNotDeliveredReason, C-28.FR-3): no Account link in the Destination's identity space, which leaves them out of
-// the message, a bridge without native_mentions, which names them by the plain name (C-22.FR-16), or a bridge message
-// whose Mention line left their Mention out for its length (C-12.FR-11).
+// the message, a bridge without native_mentions, or an Account link whose marker the bridge's message cannot build,
+// which names them by the plain name (C-22.FR-16), or a bridge message whose Mention line left their Mention out for
+// its length (C-12.FR-11).
 const (
 	ReasonNoAccountLink             = "no_account_link"
 	ReasonBridgeCannotMentionPeople = "bridge_cannot_mention_people"
@@ -857,6 +858,19 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) (R
 // (C-12.FR-11): each Mentioned of theirs is Undelivered with message_too_long, after the Undelivered of r. r is left
 // as it is.
 func (r Result) LeftOut(ids []string) Result {
+	return r.undelivered(ids, ReasonMessageTooLong)
+}
+
+// Plain is r once the delivered message named the people whose public ids are ids by the plain name, without a
+// marker, as a bridge does for an Account link whose marker it cannot build (C-22.FR-16): each Mentioned of theirs is
+// Undelivered with bridge_cannot_mention_people, after the Undelivered of r. r is left as it is.
+func (r Result) Plain(ids []string) Result {
+	return r.undelivered(ids, ReasonBridgeCannotMentionPeople)
+}
+
+// undelivered is r with each Mentioned of the people whose public ids are ids Undelivered with the reason, after the
+// Undelivered of r; r itself when ids is empty.
+func (r Result) undelivered(ids []string, reason string) Result {
 	if len(ids) == 0 {
 		return r
 	}
@@ -864,7 +878,7 @@ func (r Result) LeftOut(ids []string) Result {
 	for _, m := range r.Mentioned {
 		if slices.Contains(ids, m.PublicID) {
 			out.Undelivered = append(out.Undelivered, Undelivered{UserID: m.UserID, Entry: m.Entry, Event: m.Event,
-				Reason: ReasonMessageTooLong})
+				Reason: reason})
 		} else {
 			out.Mentioned = append(out.Mentioned, m)
 		}

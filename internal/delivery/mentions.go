@@ -18,7 +18,8 @@ import (
 // or a Thread reply, in the transaction that records it delivered under its lease, so that a retry after a crash
 // records them once — its delivery records, for each person whom a Mention entry named, once per entry:
 // mention_not_delivered when the message does not mention them as their messenger mentions them, with the reason —
-// message_too_long for a person whose Mention the adapter left out for the message's length (Outcome.LeftOut); and
+// message_too_long for a person whose Mention the adapter left out for the message's length (Outcome.LeftOut), and
+// bridge_cannot_mention_people for one it named by the plain name for want of a marker (Outcome.Plain); and
 // mention_delivered when it does and their latest such event through that entry on the Destination is
 // mention_not_delivered, which closes that warning. Nothing is posted for either (ADR-0005). A message that ends Not
 // delivered, a Quiet one and an edit record neither. The events of the first publication of a Storm summary name its
@@ -87,6 +88,12 @@ func recordMentions(ctx context.Context, q queries, org int64, d Destination, gr
 		}
 	}
 	return nil
+}
+
+// asDelivered is the resolution res of a delivered message as its outcome out reports it: the people whose Mentions
+// it left out for length and those it named without a marker are Undelivered.
+func asDelivered(res mentions.Result, out Outcome) mentions.Result {
+	return res.LeftOut(out.LeftOut).Plain(out.Plain)
 }
 
 // openFor reports whether the open warnings include the person and the entry's target of m.

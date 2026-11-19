@@ -1188,3 +1188,27 @@ func TestResultLeftOut(t *testing.T) {
 		t.Errorf("nobody left out = %q", p)
 	}
 }
+
+// TestResultPlain is C-28.FR-3 and C-22.FR-16 (#652): a person whom the delivered message named by the plain name,
+// because no marker could be built for their Account link, is, for each entry that named them, Undelivered with
+// bridge_cannot_mention_people after those already undelivered, those left out for length included; the others stay
+// Mentioned, and the resolution itself is unchanged.
+func TestResultPlain(t *testing.T) {
+	r := Result{Undelivered: []Undelivered{{UserID: 2, Reason: ReasonNoAccountLink}},
+		Mentioned: []Mentioned{{UserID: 1, PublicID: alice, Entry: EntryRef{ID: 7, Position: 2},
+			Event: KindNewAlertGroup}, {UserID: 3, PublicID: "SRAAAAAAAAAAA3"}, {UserID: 4, PublicID: "SRAAAAAAAAAAA4"},
+			{UserID: 1, PublicID: alice, Entry: EntryRef{ID: 9, Position: 4}, Event: KindReopen}}}
+	got := r.LeftOut([]string{"SRAAAAAAAAAAA4"}).Plain([]string{alice, "SRAAAAAAAAAAA9"})
+	if p := people(got); p != "undelivered 2/0//no_account_link,undelivered 4/0//message_too_long,"+
+		"undelivered 1/2/new_alert_group/bridge_cannot_mention_people,"+
+		"undelivered 1/4/reopen/bridge_cannot_mention_people,mentioned 3/0/" {
+		t.Errorf("plain = %q", p)
+	}
+	if p := people(r); p != "undelivered 2/0//no_account_link,mentioned 1/2/new_alert_group,mentioned 3/0/,"+
+		"mentioned 4/0/,mentioned 1/4/reopen" {
+		t.Errorf("the resolution changed: %q", p)
+	}
+	if p := people(r.Plain(nil)); p != people(r) {
+		t.Errorf("nobody named by the plain name = %q", p)
+	}
+}
