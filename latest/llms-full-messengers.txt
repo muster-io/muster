@@ -401,8 +401,8 @@ characters; a long one drops its description first, then its Alerts, its summary
   attachment's summary line — the status, `#N` and the title — which Muster sets as its `fallback` and the channel does
   not show; a push notification under `generic` shows a fixed text such as "… notified the channel." An edit removes
   the line of Mentions. A reply in the
-  Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the attachment
-  as text and, on a Loud post, adds its Mention to the line of Mentions.
+  Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the post as
+  text and, on a Loud Root message or Thread reply, adds its Mention to the line of Mentions.
 - Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody.
 - The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" — writes a person with an Account link
   for the Connection as `@username`, so that Mattermost shows their name with their profile; a person without one is
