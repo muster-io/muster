@@ -129,6 +129,13 @@
   kind `notification_rule_action` whose subject is the rule run, `timers.notification_rule_run_id`, the Thread replies
   of Pages and the Team mention or token and the importance of a Page in the Timeline, C-32.FR-3, FR-8 to FR-10,
   FR-19, C-31.FR-3, S-155),
+  [`0050_assignees`](../../internal/db/migrations/0050_assignees.up.sql)
+  (the Assignees of Alert Groups, `alert_group_assignees`, the Assignees after a change in the Timeline and the run
+  step of the Pages and the runs of Notification rules, C-32.FR-12),
+  [`0051_gateway_pages`](../../internal/db/migrations/0051_gateway_pages.up.sql)
+  (the Pages through Notification gateways: the Page, the run and the rule run of each Alert Group of a call, the
+  gateway and the call of a Page of the kind call and the reasons of a call, C-32.FR-3, FR-10, FR-12, C-31.FR-3,
+  C-30.FR-4),
   [`0052_thread_replies_page_pending_index`](../../internal/db/migrations/0052_thread_replies_page_pending_index.up.sql)
   (`thread_replies_page_pending_idx`, the Page replies still to be sent that the delivery worker drops in Broken
   Destinations, C-32.FR-10),
