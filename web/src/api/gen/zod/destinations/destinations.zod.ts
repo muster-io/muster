@@ -361,7 +361,11 @@ export const ListDestinationsResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(listDestinationsResponseItemsItemOneTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -389,7 +393,7 @@ export const ListDestinationsResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemOneTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -571,7 +575,11 @@ export const ListDestinationsResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(listDestinationsResponseItemsItemTwoTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -599,7 +607,7 @@ export const ListDestinationsResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemTwoTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -835,7 +843,11 @@ export const ListDestinationsResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(listDestinationsResponseItemsItemThreeTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -863,7 +875,7 @@ export const ListDestinationsResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemThreeTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -1055,7 +1067,11 @@ export const ListDestinationsResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(listDestinationsResponseItemsItemFourTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -1083,7 +1099,7 @@ export const ListDestinationsResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemFourTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -1264,7 +1280,11 @@ export const ListDestinationsResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(listDestinationsResponseItemsItemFiveTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -1292,7 +1312,7 @@ export const ListDestinationsResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemFiveTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -2135,7 +2155,11 @@ export const CreateDestinationResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(createDestinationResponseDestinationOneTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -2163,7 +2187,7 @@ export const CreateDestinationResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationOneTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -2345,7 +2369,11 @@ export const CreateDestinationResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(createDestinationResponseDestinationTwoTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -2373,7 +2401,7 @@ export const CreateDestinationResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationTwoTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -2609,7 +2637,11 @@ export const CreateDestinationResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(createDestinationResponseDestinationThreeTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -2637,7 +2669,7 @@ export const CreateDestinationResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationThreeTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -2829,7 +2861,11 @@ export const CreateDestinationResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(createDestinationResponseDestinationFourTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -2857,7 +2893,7 @@ export const CreateDestinationResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationFourTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -3038,7 +3074,11 @@ export const CreateDestinationResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(createDestinationResponseDestinationFiveTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -3066,7 +3106,7 @@ export const CreateDestinationResponse = zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationFiveTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -3458,7 +3498,11 @@ export const GetDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(getDestinationResponseOneTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -3486,7 +3530,7 @@ export const GetDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(getDestinationResponseOneTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -3668,7 +3712,11 @@ export const GetDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(getDestinationResponseTwoTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -3696,7 +3744,7 @@ export const GetDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(getDestinationResponseTwoTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -3932,7 +3980,11 @@ export const GetDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(getDestinationResponseThreeTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -3960,7 +4012,7 @@ export const GetDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(getDestinationResponseThreeTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -4152,7 +4204,11 @@ export const GetDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(getDestinationResponseFourTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -4180,7 +4236,7 @@ export const GetDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(getDestinationResponseFourTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -4361,7 +4417,11 @@ export const GetDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(getDestinationResponseFiveTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -4389,7 +4449,7 @@ export const GetDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(getDestinationResponseFiveTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -5240,7 +5300,11 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(updateDestinationResponseOneTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -5268,7 +5332,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(updateDestinationResponseOneTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -5450,7 +5514,11 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(updateDestinationResponseTwoTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -5478,7 +5546,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(updateDestinationResponseTwoTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -5714,7 +5782,11 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(updateDestinationResponseThreeTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -5742,7 +5814,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(updateDestinationResponseThreeTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -5934,7 +6006,11 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(updateDestinationResponseFourTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -5962,7 +6038,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(updateDestinationResponseFourTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -6143,7 +6219,11 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(updateDestinationResponseFiveTwoMentionWarningsItemEntryPositionMin),
   "target": zod.object({
@@ -6171,7 +6251,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "messenger": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('The reason of the latest "Mention not delivered".'),
   "since": zod.iso.datetime({"offset":true}).describe('When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.')
-}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
+}).describe('A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.')).describe('The people and entries whose Mentions were not delivered (C-28.FR-3), by entry and then by the person\'s name; always empty on an outgoing webhook, which takes every person as data.'),
   "teams": zod.array(zod.object({
   "id": zod.string().regex(updateDestinationResponseFiveTwoTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),

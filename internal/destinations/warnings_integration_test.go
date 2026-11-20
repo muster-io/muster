@@ -49,7 +49,8 @@ func (c *countingStore) ListMentionWarnings(ctx context.Context, arg dbgen.ListM
 // latest event is mention_not_delivered warn, since the first such event after their last mention_delivered and with
 // the latest reason; a later mention_delivered clears the warning; an event of another Organization, of a deleted User
 // or of an entry removed since warns of nothing, nor do events past retention.alert_details, which also clear a
-// warning once the business clock passes them.
+// warning once the business clock passes them. A group or everyone that a bridge's line of Mentions left out warns the
+// same way by its Mention, with no person, and a template's token, which names no entry, warns of nothing (#626).
 func TestIntegrationMentionWarnings(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		ctx := t.Context()
@@ -161,6 +162,29 @@ func TestIntegrationMentionWarnings(t *testing.T) {
 		// d3: bob, delivered last.
 		event(org.ID, d3, bob, nd, onCall.Target, no, h(2))
 		event(org.ID, d3, bob, dl, onCall.Target, "", h(1))
+		// #626: d1's here, which a bridge's line of Mentions left out for length, twice, keyed by its Mention with no
+		// person; a template's token without an entry, which warns of nothing.
+		named := func(dst int64, kind delivery.EventKind, target *mentions.EntryTarget, at time.Time) {
+			t.Helper()
+			n++
+			detail := map[string]any{"mention": mentions.Mention{Kind: mentions.TargetEveryone, Name: "here"}}
+			if kind == nd {
+				detail["reason"] = mentions.ReasonMessageTooLong
+			}
+			if target != nil {
+				detail["entry_id"], detail["position"], detail["target"], detail["event"] = 1, 0, *target,
+					mentions.KindNewAlertGroup
+			}
+			b, err := json.Marshal(detail)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exec(`INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, kind, loudness, detail)
+				VALUES ($1, $2, $3, $4, $5, 'quiet', $6)`, org.ID, fmt.Sprintf("DE%012d", n), at, dst, string(kind), b)
+		}
+		named(d1, nd, &here.Target, h(4))
+		named(d1, nd, &here.Target, h(2))
+		named(d3, nd, nil, h(1))
 
 		store := &countingStore{Store: destinations.NewStore(d.Pool)}
 		svc := destinations.New(org.ID, store)
@@ -169,7 +193,11 @@ func TestIntegrationMentionWarnings(t *testing.T) {
 		describe := func(ws []destinations.MentionWarning) string {
 			var out []string
 			for _, w := range ws {
-				out = append(out, fmt.Sprintf("%s/%d/%s/%s/%s/%s", w.User.Login, w.Entry.Position, w.Entry.Target.Kind,
+				who := w.User.Login
+				if w.Mention.Kind != "" {
+					who = w.Mention.Kind + ":" + w.Mention.Name
+				}
+				out = append(out, fmt.Sprintf("%s/%d/%s/%s/%s/%s", who, w.Entry.Position, w.Entry.Target.Kind,
 					w.Messenger, w.Reason, w.Since.UTC().Format("15:04")))
 			}
 			return strings.Join(out, ",")
@@ -179,7 +207,8 @@ func TestIntegrationMentionWarnings(t *testing.T) {
 			t.Fatalf("list = %d, %v", len(page.Destinations), err)
 		}
 		want := map[string]string{
-			"DS0000000000D1": "bob/1/on_call_of_teams_from_label/mattermost/bridge_cannot_mention_people/07:00",
+			"DS0000000000D1": "everyone:here/0/everyone/mattermost/message_too_long/06:00," +
+				"bob/1/on_call_of_teams_from_label/mattermost/bridge_cannot_mention_people/07:00",
 			"DS0000000000D2": "carol/0/user/mattermost/bridge_cannot_mention_people/09:00",
 			"DS0000000000D3": "",
 		}
@@ -192,8 +221,13 @@ func TestIntegrationMentionWarnings(t *testing.T) {
 			t.Errorf("%d warning queries for a page", store.warningReads)
 		}
 
-		// A delivered Mention of bob through the entry clears his warning.
+		// A delivered Mention of bob through the entry clears his warning, and one of here clears its own.
 		event(org.ID, d1, bob, dl, onCall.Target, "", t0)
+		if got, err := svc.Get(ctx, "DS0000000000D1"); err != nil ||
+			describe(got.MentionWarnings) != "everyone:here/0/everyone/mattermost/message_too_long/06:00" {
+			t.Errorf("after bob's mention_delivered: %q, %v", describe(got.MentionWarnings), err)
+		}
+		named(d1, dl, &here.Target, t0)
 		if got, err := svc.Get(ctx, "DS0000000000D1"); err != nil || len(got.MentionWarnings) != 0 {
 			t.Errorf("after mention_delivered: %q, %v", describe(got.MentionWarnings), err)
 		}

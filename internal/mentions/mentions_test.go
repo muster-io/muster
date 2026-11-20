@@ -1060,12 +1060,19 @@ func targetsOf(r Result, err error) ([]Target, error) { return r.Targets, err }
 
 // people lists the Undelivered and Mentioned of a resolution as user/entry position/event/reason, in order.
 func people(r Result) string {
+	who := func(user int64, m Mention) string {
+		if m.Kind != "" {
+			return m.Kind + ":" + m.Name
+		}
+		return fmt.Sprint(user)
+	}
 	var out []string
 	for _, u := range r.Undelivered {
-		out = append(out, fmt.Sprintf("undelivered %d/%d/%s/%s", u.UserID, u.Entry.Position, u.Event, u.Reason))
+		out = append(out, fmt.Sprintf("undelivered %s/%d/%s/%s", who(u.UserID, u.Mention), u.Entry.Position, u.Event,
+			u.Reason))
 	}
 	for _, m := range r.Mentioned {
-		out = append(out, fmt.Sprintf("mentioned %d/%d/%s", m.UserID, m.Entry.Position, m.Event))
+		out = append(out, fmt.Sprintf("mentioned %s/%d/%s", who(m.UserID, m.Mention), m.Entry.Position, m.Event))
 	}
 	return strings.Join(out, ",")
 }
@@ -1119,7 +1126,9 @@ func TestResolveUndelivered(t *testing.T) {
 			"undelivered 1/2/new_alert_group/no_account_link"},
 		{"a bridge with native_mentions", Request{DestinationID: 50, DestinationType: TypeBridge,
 			ConnectionID: conn(5), AlertGroupID: 5, At: t0}, 0, []string{KindNewAlertGroup},
-			"everyone:channel,group:ops,user:alice@example.org,group:payments", "mentioned 1/2/new_alert_group"},
+			"everyone:channel,group:ops,user:alice@example.org,group:payments",
+			"mentioned everyone:channel/0/new_alert_group,mentioned group:ops/1/new_alert_group," +
+				"mentioned 1/2/new_alert_group,mentioned group:payments/3/new_alert_group"},
 		{"an outgoing webhook takes people as data", Request{DestinationID: 30, DestinationType: TypeWebhook,
 			AlertGroupID: 5, At: t0}, 0, []string{KindAckTimeout},
 			"user:Bob Jones,team:payments,team:search,user:Carol,everyone:everyone", ""},
@@ -1169,11 +1178,12 @@ func TestResultLeftOut(t *testing.T) {
 	conn := int64(5)
 	got, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 50, DestinationType: TypeBridge,
 		ConnectionID: &conn, AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
-	if err != nil || len(got.Mentioned) != 1 || got.Mentioned[0].PublicID != alice {
+	at := slices.IndexFunc(got.Mentioned, func(m Mentioned) bool { return m.UserID != 0 })
+	if err != nil || at < 0 || got.Mentioned[at].PublicID != alice {
 		t.Fatalf("resolve = %+v, %v", got, err)
 	}
 	r := Result{Undelivered: []Undelivered{{UserID: 2, Reason: ReasonNoAccountLink}},
-		Mentioned: []Mentioned{got.Mentioned[0], {UserID: 3, PublicID: "SRAAAAAAAAAAA3"},
+		Mentioned: []Mentioned{got.Mentioned[at], {UserID: 3, PublicID: "SRAAAAAAAAAAA3"},
 			{UserID: 1, PublicID: alice, Entry: EntryRef{ID: 9, Position: 4}, Event: KindReopen}}}
 	left := r.LeftOut([]string{alice, "SRAAAAAAAAAAA9"})
 	if p := people(left); p != "undelivered 2/0//no_account_link,undelivered 1/2/new_alert_group/message_too_long,"+
@@ -1186,6 +1196,62 @@ func TestResultLeftOut(t *testing.T) {
 	}
 	if p := people(r.LeftOut(nil)); p != people(r) {
 		t.Errorf("nobody left out = %q", p)
+	}
+}
+
+// TestResultLeftOutMentions is C-28.FR-3 and C-12.FR-11 (#626): through a bridge, the group, everyone and Team
+// mention entries a message names are Mentioned with their Mention, entry and event; once the delivered message left
+// out some of them for its length, each such entry is Undelivered with message_too_long after those already
+// undelivered, and a template's token that no entry names is Undelivered without an entry, once; the others stay
+// Mentioned, and the resolution itself is unchanged. No other messenger records them.
+func TestResultLeftOutMentions(t *testing.T) {
+	f := resolveFake()
+	f.users[0].links["bridge:5"], f.users[0].externals["bridge:5"] = "alice@example.org", "u-alice"
+	native := f.conns[5]
+	native.NativeMentions = true
+	f.conns[5] = native
+	s, _, tm := wired(f)
+	conn := func(id int64) *int64 { return &id }
+	got, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 50, DestinationType: TypeBridge,
+		ConnectionID: conn(5), AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := got.Mentioned[3]; e.Mention != (Mention{Kind: TargetGroup, Name: "payments"}) || e.Entry.ID != 5003 ||
+		e.Entry.Target != (EntryTarget{Kind: TargetTeam, TeamID: payments}) {
+		t.Errorf("the team mention = %+v", e)
+	}
+	group := func(name string) Target { return Target{Kind: TargetGroup, Group: name} }
+	everyone := func(word string) Target { return Target{Kind: TargetEveryone, Everyone: word} }
+	left := got.LeftOutMentions([]Target{group("ops"), everyone(EveryoneHere), group("payments"), group("ops"),
+		everyone(EveryoneHere)})
+	if p := people(left); p != "undelivered group:ops/1/new_alert_group/message_too_long,"+
+		"undelivered group:payments/3/new_alert_group/message_too_long,undelivered everyone:here/0//message_too_long,"+
+		"mentioned everyone:channel/0/new_alert_group,mentioned 1/2/new_alert_group" {
+		t.Errorf("left out = %q", p)
+	}
+	if u := left.Undelivered[2]; u.Entry != (EntryRef{}) || u.UserID != 0 {
+		t.Errorf("the token without an entry = %+v", u)
+	}
+	if p := people(got); p != "mentioned everyone:channel/0/new_alert_group,mentioned group:ops/1/new_alert_group,"+
+		"mentioned 1/2/new_alert_group,mentioned group:payments/3/new_alert_group" {
+		t.Errorf("the resolution changed: %q", p)
+	}
+	if p := people(got.LeftOutMentions(nil)); p != people(got) {
+		t.Errorf("nothing left out = %q", p)
+	}
+	// One entry, "Team from the label", whose two Teams have the same Team mention records it once.
+	f.entries[53] = []EntryInput{ent(TargetTeamsFromLabel)}
+	tm.mentions[12] = map[int64]TeamMention{5: {Group: "payments"}}
+	if label, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 53, DestinationType: TypeBridge,
+		ConnectionID: conn(5), AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}}); err != nil ||
+		people(label) != "mentioned group:payments/0/new_alert_group" {
+		t.Errorf("one entry, two teams = %q, %v", people(label), err)
+	}
+	mm, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
+		ConnectionID: conn(3), AlertGroupID: 5, At: t0, Mentions: []string{KindNewAlertGroup}})
+	if err != nil || slices.ContainsFunc(mm.Mentioned, func(m Mentioned) bool { return m.Mention.Kind != "" }) {
+		t.Errorf("mattermost = %q, %v", people(mm), err)
 	}
 }
 

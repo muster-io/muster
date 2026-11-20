@@ -4,6 +4,7 @@
 package delivery_test
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/messages"
 )
 
 // The people of the tests: bob, whom the entry "On-call of the Team from the label" names without an Account link,
@@ -203,6 +205,137 @@ func TestMentionEventsPlain(t *testing.T) {
 	}
 }
 
+// TestMentionEventsLeftOutGroups is C-28.FR-3 and C-12.FR-11 (#626) for the group, everyone and Team mention entries
+// of a bridge message: each that the delivered message left out for its length is not delivered, with its Mention,
+// its entry, the event and the reason message_too_long, and a template's token that the line left out without an entry
+// is not delivered with its Mention and the reason alone; a later Loud reply that leaves out an entry with an open
+// warning keeps it open, one that keeps the others closes theirs, and the token's, which no entry names, records
+// nothing. A message that keeps them all records nothing new.
+func TestMentionEventsLeftOutGroups(t *testing.T) {
+	opsEntry := mentions.EntryRef{ID: 73, Position: 2, Target: mentions.EntryTarget{Kind: mentions.TargetGroup,
+		Group: "ops"}}
+	teamEntry := mentions.EntryRef{ID: 74, Position: 3, Target: mentions.EntryTarget{Kind: mentions.TargetTeam,
+		TeamID: "TMAAAAAAAAAAA1"}}
+	hereEntry := mentions.EntryRef{ID: 75, Position: 4, Target: mentions.EntryTarget{Kind: mentions.TargetEveryone,
+		Everyone: mentions.EveryoneHere}}
+	ops, payments := mentions.Mention{Kind: mentions.TargetGroup, Name: "ops"},
+		mentions.Mention{Kind: mentions.TargetGroup, Name: "payments_team"}
+	here, channel := mentions.Mention{Kind: mentions.TargetEveryone, Name: mentions.EveryoneHere},
+		mentions.Mention{Kind: mentions.TargetEveryone, Name: mentions.EveryoneChannel}
+	target := func(m mentions.Mention) mentions.Target {
+		if m.Kind == mentions.TargetGroup {
+			return mentions.Target{Kind: m.Kind, Group: m.Name}
+		}
+		return mentions.Target{Kind: m.Kind, Everyone: m.Name}
+	}
+	named := []mentions.Mentioned{{Mention: ops, Entry: opsEntry, Event: mentions.KindNewAlertGroup},
+		{Mention: payments, Entry: teamEntry, Event: mentions.KindNewAlertGroup},
+		{Mention: here, Entry: hereEntry, Event: mentions.KindNewAlertGroup}}
+
+	// A message that keeps them all records nothing.
+	kept := newEnv(t)
+	kept.db.dests[destMM].limit = 600
+	kept.w.Mentions = &fakeMentioner{mentioned: named}
+	kept.enqueue(t, kept.group(groups.StatusFiring, "a"), groups.System, created())
+	kept.round(t)
+	if kinds := kept.eventKinds(); !slices.Equal(kinds, []string{"publication"}) {
+		t.Fatalf("kept: events %v", kinds)
+	}
+
+	e := newEnv(t)
+	e.db.dests[destMM].limit = 600
+	m := &fakeMentioner{mentioned: named}
+	e.w.Mentions = m
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		LeftOutMentions: []mentions.Target{target(ops), target(payments), target(here), target(channel)}}})
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	got := e.mentionEvents()
+	want := []delivery.MentionDetail{
+		{Mention: ops, EntryID: 73, Position: 2, Target: opsEntry.Target, Event: mentions.KindNewAlertGroup,
+			Reason: mentions.ReasonMessageTooLong},
+		{Mention: payments, EntryID: 74, Position: 3, Target: teamEntry.Target, Event: mentions.KindNewAlertGroup,
+			Reason: mentions.ReasonMessageTooLong},
+		{Mention: here, EntryID: 75, Position: 4, Target: hereEntry.Target, Event: mentions.KindNewAlertGroup,
+			Reason: mentions.ReasonMessageTooLong},
+		{Mention: channel, Reason: mentions.ReasonMessageTooLong}}
+	if len(got) != len(want) {
+		t.Fatalf("events %v", e.eventKinds())
+	}
+	for i, ev := range got {
+		if d := detailOf(t, ev); ev.Kind != "mention_not_delivered" || d != want[i] || ev.Loudness != "quiet" ||
+			ev.AlertGroupID.Int64 != groupID {
+			t.Errorf("event %d: %s %+v", i, ev.Kind, d)
+		}
+	}
+	if !strings.Contains(string(got[3].Detail), `"mention":{"kind":"everyone","name":"channel"}`) ||
+		strings.Contains(string(got[3].Detail), "entry_id") || strings.Contains(string(got[0].Detail), "user_id") {
+		t.Errorf("details %s, %s", got[0].Detail, got[3].Detail)
+	}
+
+	// A Loud reply that leaves out ops and the token again keeps ops open and closes the Team mention's and here's.
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		LeftOutMentions: []mentions.Target{target(ops), target(channel)}}})
+	e.business.Advance(5 * time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(2, groups.StatusFiring, "f1"))
+	e.round(t)
+	got = e.mentionEvents()[4:]
+	var kinds []string
+	for _, ev := range got {
+		d := detailOf(t, ev)
+		kinds = append(kinds, ev.Kind+":"+d.Mention.Name+":"+d.Reason)
+	}
+	if want := []string{"mention_not_delivered:ops:message_too_long", "mention_not_delivered:channel:message_too_long",
+		"mention_delivered:payments_team:", "mention_delivered:here:"}; !slices.Equal(kinds, want) {
+		t.Fatalf("after a reply that leaves out ops %v, want %v", kinds, want)
+	}
+	if d := detailOf(t, got[2]); d != (delivery.MentionDetail{Mention: payments, EntryID: 74, Position: 3,
+		Target: teamEntry.Target, Event: mentions.KindNewAlertGroup}) {
+		t.Errorf("mention_delivered %+v", d)
+	}
+	// A Loud reply that keeps them all closes ops, and nothing else.
+	e.business.Advance(5 * time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(3, groups.StatusFiring, "f2"))
+	e.round(t)
+	if got = e.mentionEvents()[8:]; len(got) != 1 || got[0].Kind != "mention_delivered" ||
+		detailOf(t, got[0]).Mention != ops {
+		t.Errorf("after a reply that keeps them all %v", e.eventKinds())
+	}
+}
+
+// TestMentionEventsLeftOutOneOfAnEntry is C-28.FR-3 and C-12.FR-11 (#626) for one entry, "Team from the label", that
+// names the Team mentions of two Teams: the warning of the one a message left out is its own, so a later message that
+// carries both closes that one alone and records nothing for the other.
+func TestMentionEventsLeftOutOneOfAnEntry(t *testing.T) {
+	fromLabel := mentions.EntryRef{ID: 76, Position: 0, Target: mentions.EntryTarget{
+		Kind: mentions.TargetTeamsFromLabel}}
+	payments, devops := mentions.Mention{Kind: mentions.TargetGroup, Name: "payments_team"},
+		mentions.Mention{Kind: mentions.TargetGroup, Name: "devops_team"}
+	e := newEnv(t)
+	e.db.dests[destMM].limit = 600
+	e.w.Mentions = &fakeMentioner{mentioned: []mentions.Mentioned{
+		{Mention: payments, Entry: fromLabel, Event: mentions.KindNewAlertGroup},
+		{Mention: devops, Entry: fromLabel, Event: mentions.KindNewAlertGroup}}}
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		LeftOutMentions: []mentions.Target{{Kind: mentions.TargetGroup, Group: "payments_team"}}}})
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	if got := e.mentionEvents(); len(got) != 1 || detailOf(t, got[0]).Mention != payments {
+		t.Fatalf("events %v", e.eventKinds())
+	}
+	e.business.Advance(5 * time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(2, groups.StatusFiring, "f1"))
+	e.round(t)
+	got := e.mentionEvents()
+	if len(got) != 2 || got[1].Kind != "mention_delivered" || detailOf(t, got[1]).Mention != payments {
+		var ds []delivery.MentionDetail
+		for _, ev := range got {
+			ds = append(ds, detailOf(t, ev))
+		}
+		t.Errorf("after a reply that carries both %v %+v", e.eventKinds(), ds)
+	}
+}
+
 // TestMentionEventsNotDelivered is C-28.FR-3 and C-11.FR-10: a Loud Publication that ends Not delivered records
 // not_delivered and no mention event, and the warnings stay as they were.
 func TestMentionEventsNotDelivered(t *testing.T) {
@@ -301,10 +434,27 @@ func TestMentionDeliveredRetention(t *testing.T) {
 	}
 }
 
+// stormLeavingOut is the adapter of a bridge whose Storm summaries leave out the template's `here` for length
+// (C-12.FR-11), which names no entry.
+type stormLeavingOut struct {
+	*deliverytest.Recorder
+}
+
+func (a stormLeavingOut) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
+	out := a.Recorder.Publish(ctx, c, m)
+	if out.Kind == delivery.OutcomeOK && m.Kind == messages.KindStorm {
+		out.LeftOutMentions = []mentions.Target{{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere}}
+	}
+	return out
+}
+
 // TestMentionEventsStorm is C-28.FR-7 with C-28.FR-3: the undelivered Mentions of the first publication of a Storm
-// summary are recorded with its Storm and no Alert Group, so that the Destination warns and no Timeline shows them.
+// summary are recorded with its Storm and no Alert Group, so that the Destination warns and no Timeline shows them; a
+// template's token it left out for length, which names no entry and so would show only in a Timeline, records nothing
+// (#626).
 func TestMentionEventsStorm(t *testing.T) {
 	e := stormEnv(t)
+	e.w.Adapters[delivery.TypeMattermost] = stormLeavingOut{Recorder: e.rec}
 	m := &fakeMentioner{}
 	e.w.Mentions = m
 	for i := int64(1); i <= 21; i++ {

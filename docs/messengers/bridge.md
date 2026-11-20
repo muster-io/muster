@@ -248,7 +248,9 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
     changed since, shows the marker's link text, which notifies nobody, and never refuses the message. See
     [Whom a message mentions](../concepts/mentions.md#undelivered-mentions). That copy is at most `bridge.info_max_age` (10 minutes) old: Muster reads `info` again when it is older, and when a
     Connection check runs. A long line of Mentions keeps, in their order, the whole markers that fit half of the
-    bridge's longest text, with their entries, and leaves out the others. Only the Owner's Mentions — of a Reminder, an
+    bridge's longest text, with their entries, and leaves out the others: each person, group, Team mention or mention
+    of everyone left out, a template's token included, is recorded as "Mention not delivered" with the reason
+    `message_too_long`. Only the Owner's Mentions — of a Reminder, an
     auto-unacknowledge or a Takeover — the footer and the Assignees name a person without one, by their display name as
     text. A Root message of a Destination that mentions the Team payments, `here` and Alice starts:
 
