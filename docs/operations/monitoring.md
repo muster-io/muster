@@ -92,8 +92,8 @@ The Internal alerts of Muster itself do not go through Alertmanager, so this rou
 ## Dashboard
 
 The chart ships one dashboard, "Muster", with the fixed uid `muster`, a data source variable, and the variables
-`namespace`/`job`, `integration`, `route` and `destination`. It has four rows: Overview, Ingestion, Delivery and
-Platform. You enable it in either or both ways, each behind its own flag:
+`namespace`/`job`, `integration`, `route` and `destination`. It has five rows: Overview, Ingestion, Delivery, Platform and
+Paging, with the Pages, the calls through Notification gateways, the Broken gateways and the Schedule gaps. You enable it in either or both ways, each behind its own flag:
 
 `dashboard.configMap.enabled`
 :   renders: a `ConfigMap` with the dashboard JSON

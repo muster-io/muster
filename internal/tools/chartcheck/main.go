@@ -57,7 +57,7 @@ const (
 var (
 	// The variables and rows of the dashboard, in order (C-19.FR-4).
 	dashboardVariables = []string{"datasource", "namespace", "job", "integration", "route", "destination"}
-	dashboardRows      = []string{"Overview", "Ingestion", "Delivery", "Platform"}
+	dashboardRows      = []string{"Overview", "Ingestion", "Delivery", "Platform", "Paging"}
 	// The variables that list the entities of their *_info series: the id is the value, the name the text.
 	entityVariables = []string{"integration", "route", "destination"}
 
