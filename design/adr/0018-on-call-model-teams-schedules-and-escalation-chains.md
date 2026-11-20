@@ -14,6 +14,13 @@
 - Amended: 2026-10-27 — with the review of the L2 story contracts: the Assignees of a chain that has run out stay until
   Acknowledge, Snooze or Resolve clears them; and the Destinations of a Team mention the Team by default except a
   Telegram Destination, which cannot mention a Team
+- Amended: 2026-11-21 — with the L2 PRD of Maintenance windows (C-34), by the maintainer: a window that starts to keep
+  back an Alert Group stops its running chains, its ack timeout and the Notification rule runs they started, instead of
+  keeping them waiting, and they start over at their first step when it stops keeping back the Alert Group while it is
+  firing and nobody owns it; a window of an Integration keeps an Alert Group back only while every Integration of its
+  Alerts is in a window, as for Teams; the setting that lets Urgent Alert Groups through belongs to each window, off by
+  default; an Alert Group that stops being kept back while firing and owned by nobody is published Loudly, whatever
+  ended the keeping back, a change of configuration included
 
 ## Context
 
@@ -152,9 +159,10 @@ Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a r
 acknowledgement or a Snooze, an auto-unacknowledge, and new Alerts that remove the acknowledgement where the Route
 allows it — and stops on Acknowledge, Snooze and Resolve (journal D507, D546, D555). An Alert Group with no Destination
 that can publish it — none at all, or only Broken ones — starts its chains when it is created (journal D528). In a
-Storm, the chain of an Alert Group waits for that Alert Group's own Publication, and a Maintenance window keeps chains
-waiting. A rise in Severity level of a firing Alert Group that nobody owns restarts no running chain; it only starts the
-chains whose condition it now meets, such as those for critical only (journal D555). A change of configuration starts no
+Storm, the chain of an Alert Group waits for that Alert Group's own Publication, and a Maintenance window that keeps an
+Alert Group back stops its chains, which start over once the window stops keeping it back (C-34). A rise in Severity
+level of a firing Alert Group that nobody owns restarts no running chain; it only starts the chains whose condition it
+now meets, such as those for critical only (journal D555). A change of configuration starts no
 chain: a chain that it makes apply starts at the next point that starts the chains (journal D567, D569). When the first
 chain of an Alert Group starts, its running ack timeout stops and sends no more notices: the steps take their place,
 while an Alert Group without a chain keeps the ack timeout of L1 (journal D487, D535). The Alert Group is Unclaimed once
@@ -221,10 +229,13 @@ for L3 (journal D508, D535).
 **Maintenance windows.** A Maintenance window covers an Integration, a Route or a Team from now until a time, or over a
 planned span such as Saturday 02:00–04:00; people open windows in the UI or through the API, for example from a CI
 pipeline before a deploy (journal D493). While a window keeps an Alert Group back, ingestion and grouping go on and its
-status changes as usual, but nothing is delivered for it and its timers and chains wait; when the window ends, the Alert
-Groups still firing are published with a mark, as at the end of a Storm, and those resolved meanwhile are not. Urgent
-Alert Groups may pass through where a setting allows it; the L2 PRD says where that setting lives (journal D493, D511).
-A window of an Integration or a Route keeps back all their Alert Groups. A window of a Team keeps an Alert Group back —
+status changes as usual, but nothing new is delivered for it, and its running chains and ack timeout stop; when the
+window ends, the Alert Groups still firing are published with a mark, gradually as at the end of a Storm but Loudly
+where nobody owns them, their chains start over at their first step, and those resolved meanwhile are not published
+(C-34). Urgent Alert Groups pass only where every window that would keep them back allows it, a setting of each window,
+off by default (journal D493, D511; C-34). A window of a Route keeps back all its Alert Groups; a window of an
+Integration keeps an Alert Group back only while every Integration of its Alerts is in a window (C-34). A window of a
+Team keeps an Alert Group back —
 in all its Destinations, the operations channels included — only while every Team of its Alerts is in a window, the
 Route's own Team not counted, so one team's deploy never keeps back an Alert Group that another team shares; a Team that
 joins an Alert Group during its window never stops the chains already running there (journal D523, D530). Opening and

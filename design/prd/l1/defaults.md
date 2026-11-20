@@ -237,7 +237,7 @@ Other lifecycle values:
 | `retention.stored_snapshots` | 14 days | Organization | C-05, C-20 | decided |
 | `retention.alert_details` | 90 days (Alerts in Alert Groups, Timeline entries, delivery events and, from L2, the steps of the runs of Escalation chains; never Notes) | Organization | C-09, C-20, C-32 | decided |
 | `retention.alert_group_summaries` | 2 years (summary rows with their Notes); at least `retention.alert_details`, otherwise `422` | Organization | C-09, C-20 | decided |
-| `retention.audit_log` | 1 year | Organization | C-03, C-20 | decided |
+| `retention.audit_log` | 1 year; from L2 also the ended Maintenance windows (C-34) | Organization | C-03, C-20, C-34 | decided |
 | `organization.outbound_policy` | standard (private allowed, loopback blocked) | Organization | C-02, C-20 | decided |
 | `organization.outbound_allowed` / `organization.outbound_denied` | empty | Organization | C-02, C-20 | decided |
 
@@ -259,6 +259,9 @@ Other lifecycle values:
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
 | `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per contact | built in | C-30 | P-86 |
 | `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the Pages that come due after it go together in the next call, no sooner than this after the previous call ended, accepted or Not delivered | built in | C-30 | P-87 |
+| `maintenance.limits` | a Maintenance window lasts at most 7 days and starts at most 90 days ahead | built in | C-34 | P-92 |
+| `maintenance.presets` | "Start maintenance" offers 30 minutes, 1 hour, 2 hours and 4 hours, beside a time entered | built in | C-34 | decided |
+| `maintenance.urgent_passes` | off: a new Maintenance window keeps back Urgent Alert Groups too | Maintenance window | C-34 | decided |
 | Chart rules of L2 | as in [reference.md](reference.md#chart-rules-added-in-l2) | Helm chart | C-27, C-30 | decided |
 
 ## Self-observation and chart

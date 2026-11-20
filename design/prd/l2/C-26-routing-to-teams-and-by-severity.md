@@ -63,12 +63,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   first Publication is part of that Publication. During a Storm of the Route, the Destination counts the Alert Group in
   its own Storm summary unless the Alert Group is Urgent (C-11.FR-6). A Destination that a change of configuration adds
   — saving a Team (C-25.FR-13), a changed Minimum severity (FR-9) or the changes of FR-6 — receives the Alert Group
-  Quietly, without `destination_joined` and without starting an Escalation chain (C-32.FR-5). How a Maintenance window
-  delays `destination_joined` is specified with Maintenance windows. A Destination whose Root message still awaits its
-  final edit (C-11.FR-14), as while the Destination is Broken, when the Alert Group reaches it again keeps that Root
-  message: the final edit is cancelled and the message is edited Quietly back to the current state, without
-  `destination_joined` and without Mentions, because a Loud join would need a second Root message next to one about to
-  say "No longer updated here", and messengers do not notify on edits.
+  Quietly, without `destination_joined` and without starting an Escalation chain (C-32.FR-5). A Maintenance window that
+  keeps the Alert Group back delays `destination_joined` until it stops keeping it back (C-34.FR-11, C-34.FR-19). A
+  Destination whose Root message still awaits its final edit (C-11.FR-14), as while the Destination is Broken, when the
+  Alert Group reaches it again keeps that Root message: the final edit is cancelled and the message is edited Quietly
+  back to the current state, without `destination_joined` and without Mentions, because a Loud join would need a second
+  Root message next to one about to say "No longer updated here", and messengers do not notify on edits.
 - **C-26.FR-6** Configuration changes add Destinations Quietly and remove none by a condition: naming a Destination on a
   Route or a Team, turning "Also to the Teams from the label" on, or changing a condition so that open Alert Groups now
   meet it publishes them there Quietly, within its limits, as a Destination added to a Route (C-11.FR-14). A condition
