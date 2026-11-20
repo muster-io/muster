@@ -51,8 +51,8 @@ event table](../l1/reference.md#lifecycle-events-added-in-l2).
   `maintenance:write`, and a CI pipeline uses a Service account whose Role is Responder (ADR-0018; journal D535).
   Everyone reads windows with the Permission `maintenance:read`, which Admins, Responders and Viewers hold
   ([reference.md](../l1/reference.md#permissions-added-in-l2)); whether an Alert Group is kept back is part of its read,
-  under `alert-groups:read`. Permissions stay global: a Responder may open a window
-  on any Team, whether or not they are in it, since only Overrides check who is in a Team (ADR-0018).
+  under `alert-groups:read`. Permissions stay global: a Responder may open a window on any Team, whether or not they are
+  in it, since only Overrides check who is in a Team (ADR-0018).
 - **C-34.FR-3** A window is opened from now or planned, changed, closed and deleted through the API and the UI:
   - its end is later than its start and later than now, a planned start is not in the past, and both are within
     `maintenance.limits`, or the request is refused with `422`;
