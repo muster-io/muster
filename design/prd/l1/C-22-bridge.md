@@ -237,6 +237,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   `info`, which may be older than the bridge's own.
   _Revised for L2 (2026-11-17, #590):_ Muster decides that a bridge cannot mention people from its stored copy of the
   bridge's `info`: a bridge whose `info` was never read, or does not declare `native_mentions`, counts as without it.
+  _Revised for L2 (2026-11-21, #631, #652):_ the sources of a `group` entry are a Team mention, a group entry of a
+  Destination and a `{{ mention "group" "name" }}` token of a template, which is merged with an entry of the same name;
+  the token keeps its place in the body as text, and a Quiet message or an edit carries no entry for it. A linked
+  person for whom a Mention marker cannot be built — the link's `external_id` is longer than 512 characters, or neither
+  the link nor the person has a name to show — is named by the plain name, which notifies nobody, and the Mention is
+  not delivered (`bridge_cannot_mention_people`, C-28.FR-3).
 - **C-22.FR-17** The Destination test and preview of C-16 apply: "Send test message" makes one `postMessage` of the
   kind `test`, marked "🧪 Test message", through the interactive path, and a press on it is answered "This is a test
   message; nothing was changed"; "Preview" shows the envelope as Muster would post it.
