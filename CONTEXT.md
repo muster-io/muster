@@ -519,6 +519,11 @@ _Avoid_: System alert, Self-alert
 The Organization's rule for which network addresses Muster may call, standard or strict.
 _Avoid_: SSRF settings, Firewall
 
+**Managed by**:
+The mark that names the tool, such as Terraform, that keeps a configuration object as code. Muster shows it and warns
+before a change in the web UI, and never refuses one.
+_Avoid_: Locked, Owned by, Owner (for this)
+
 **Leader**:
 The one Muster replica that currently does the work that must run only once at a time.
 _Avoid_: Master, Primary

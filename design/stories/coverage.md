@@ -4,14 +4,15 @@
 - Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md) and of the core of [L2](../prd/L2.md). A capability is done when its stories together cover every ID
+[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33. A
+capability is done when its stories together cover every ID
 of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID
 fully or in part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
-  Every ID of L1 and of the core of L2 is complete. The sections of L2 follow the non-functional requirements of L1,
-  and the requirements of L1 that L2 revises have a section of their own at the end.
+  Every ID of L1, of the core of L2 and of C-33 is complete. The sections of L2 follow the non-functional requirements
+  of L1, and the requirements of L1 that L2 revises have a section of their own at the end.
   [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 has a
   row here.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
@@ -21,8 +22,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) ·
 [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) ·
 [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) ·
-[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [L1 requirements revised
-for L2](#l1-requirements-revised-for-l2)
+[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [L1
+requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
 
@@ -60,6 +61,7 @@ for L2](#l1-requirements-revised-for-l2)
 | C-30 Notification gateways | L2 Paging | 18 | S-145, S-167, S-146, S-147, S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158 | yes | 18 of 18 |
 | C-31 Notification rules | L2 Paging | 12 | S-152, S-153, S-155, S-157, S-161 | yes | 12 of 12 |
 | C-32 Escalation chains and Assignees | L2 Paging | 38 | S-148, S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-161 | yes | 38 of 38 |
+| C-33 Terraform provider | L2 Terraform provider | 37 | S-179, S-180, S-181, S-182, S-183, S-184, S-185, S-186, S-187, S-188, S-189 | yes | 37 of 37 |
 
 ## C-01
 
@@ -1183,6 +1185,52 @@ S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-1
 | C-32.AC-16 | S-169 (part), S-155 (part) | complete |  |
 | C-32.AC-17 | S-169 (part), S-178 (part), S-158 (part) | complete | the Pages of the runs (S-178) |
 | C-32.AC-18 | S-169 | complete |  |
+
+## C-33
+
+[Terraform provider](../prd/l2/C-33-terraform-provider.md) · L2 Terraform provider · stories: S-179, S-180, S-181,
+S-182, S-183, S-184, S-185, S-186, S-187, S-188, S-189. S-182 to S-188 are worked in
+`muster-io/terraform-provider-muster`.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-33.FR-1 | S-182 | complete |  |
+| C-33.FR-2 | S-179 (part), S-182 (part) | complete | the licence in Muster (S-179); the copy, its check and the client (S-182) |
+| C-33.FR-3 | S-182 | complete |  |
+| C-33.FR-4 | S-182 | complete | 0.2.0 when S-179 and S-180 merge before its tag |
+| C-33.FR-5 | S-183 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete | by group of resources |
+| C-33.FR-6 | S-184 (part), S-186 (part) | complete | `muster_connection` (S-184); `muster_user`, `muster_team` (S-186) |
+| C-33.FR-7 | S-183 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete |  |
+| C-33.FR-8 | S-182 (part), S-184 (part), S-186 (part), S-187 (part) | complete | the machinery (S-182), the `412` test (S-184), the shared objects: a Team (S-186, S-187) and the Route order (S-187) |
+| C-33.FR-9 | S-183 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete |  |
+| C-33.FR-10 | S-183 (part), S-184 (part), S-185 (part), S-188 (part) | complete | the guide "Secrets" (S-188) |
+| C-33.FR-11 | S-179 (part), S-180 (part) | complete |  |
+| C-33.FR-12 | S-181 | complete |  |
+| C-33.FR-13 | S-183 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete |  |
+| C-33.FR-14 | S-183 (part), S-185 (part), S-187 (part) | complete | the settings objects (S-183), "Explore" (S-185), the Default route (S-187) |
+| C-33.FR-15 | S-186 | complete |  |
+| C-33.FR-16 | S-186 (part), S-187 (part) | complete |  |
+| C-33.FR-17 | S-182 (part), S-184 (part), S-186 (part), S-187 (part) | complete |  |
+| C-33.FR-18 | S-182 (part), S-188 (part), S-189 (part) | complete | generation (S-182), guides (S-188), Muster's page (S-189) |
+| C-33.FR-19 | S-182 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete |  |
+| C-33.FR-20 | S-182 (part), S-188 (part) | complete | the pipeline (S-182); the key, the Registries and the release (S-188) |
+| C-33.AC-1 | S-182 | complete |  |
+| C-33.AC-2 | S-183 (part), S-187 (part) | complete | the complete example (S-187) |
+| C-33.AC-3 | S-179 (part), S-180 (part) | complete |  |
+| C-33.AC-4 | S-181 | complete |  |
+| C-33.AC-5 | S-183 (part), S-184 (part), S-187 (part) | complete |  |
+| C-33.AC-6 | S-184 | complete |  |
+| C-33.AC-7 | S-183 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete |  |
+| C-33.AC-8 | S-184 | complete |  |
+| C-33.AC-9 | S-184 | complete |  |
+| C-33.AC-10 | S-186 | complete |  |
+| C-33.AC-11 | S-186 (part), S-187 (part) | complete |  |
+| C-33.AC-12 | S-183 | complete |  |
+| C-33.AC-13 | S-184 (part), S-187 (part) | complete |  |
+| C-33.AC-14 | S-186 (part), S-187 (part) | complete |  |
+| C-33.AC-15 | S-182 | complete |  |
+| C-33.AC-16 | S-188 | complete |  |
+| C-33.AC-17 | S-188 (part), S-189 (part) | complete |  |
 
 ## L1 requirements revised for L2
 
