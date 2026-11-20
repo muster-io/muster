@@ -295,7 +295,7 @@ writes every message the bot posts to the log. From a clone of the repository, w
 token, the one a Bridge Connection in Muster would hold:
 
 ```sh
-git clone --branch v0.1.0 https://github.com/muster-io/muster-bridge-go && cd muster-bridge-go
+git clone --branch v0.1.2 https://github.com/muster-io/muster-bridge-go && cd muster-bridge-go
 printf example-token > /tmp/bt
 go run ./examples/minimal -token-file /tmp/bt
 ```
@@ -589,7 +589,7 @@ and writes every message the bot posts to the log. With the library installed as
 uvicorn beside the library and run the example with a token, the one a Bridge Connection in Muster would hold:
 
 ```sh
-git clone --branch v0.1.0 https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
+git clone --branch v0.1.2 https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
 pip install uvicorn
 printf example-token > /tmp/bt
 python examples/memory_bridge.py --token-file /tmp/bt
@@ -615,7 +615,7 @@ Its image is `ghcr.io/muster-io/muster-example-bridge`, tagged `vX.Y.Z` with eac
 follows the `master` branch of the library's repository.
 
 ```sh
-docker run --rm -p 8095:8095 -e BRIDGE_TOKEN=example-token ghcr.io/muster-io/muster-example-bridge:v0.1.0
+docker run --rm -p 8095:8095 -e BRIDGE_TOKEN=example-token ghcr.io/muster-io/muster-example-bridge:v0.1.2
 ```
 
 The page is then at `http://127.0.0.1:8095/`, and the protocol under `/v1/` on the same port. `BRIDGE_FEATURES` limits
@@ -657,7 +657,7 @@ name and nothing on the host's loopback is involved.
     cat >compose.override.yaml <<'EOF'
     services:
       example-bridge:
-        image: ghcr.io/muster-io/muster-example-bridge:v0.1.0
+        image: ghcr.io/muster-io/muster-example-bridge:v0.1.2
         environment:
           BRIDGE_TOKEN: ${EXAMPLE_BRIDGE_TOKEN}
         ports:
@@ -2033,9 +2033,9 @@ The libraries do the protocol's part, as for a messenger bridge: validate every 
 the calls to your provider and the callback of your provider that says the person pressed.
 
 !!! note "Library versions"
-    The gateway role is in the `master` branch of both libraries, after `0.1.1`. Until their next release carries it,
-    take it from there: `go get github.com/muster-io/muster-bridge-go@master`, or install `muster-bridge` from the
-    repository of `muster-bridge-python`.
+    The gateway role is in the libraries from `0.1.2`: use `go get github.com/muster-io/muster-bridge-go@v0.1.2`, or
+    install `muster-bridge` from the tag `v0.1.2` of `muster-bridge-python`. `0.1.1` and earlier have no gateway
+    role.
 
 ### The role in `info`
 

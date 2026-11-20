@@ -66,7 +66,7 @@ The web UI
 Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
 - **`0.N` is layer N of the [roadmap](https://github.com/muster-io/muster#roadmap).** L1, Alert Groups in messengers,
-  is released as `0.1.x`; L2 will be `0.2.x`, L3 `0.3.x`, and so on. Layer N+1 starts with the release `0.(N+1).0`,
+  is `0.1.x`; L2, on-call, is `0.2.x`; L3 will be `0.3.x`, and so on. Layer N+1 starts with the release `0.(N+1).0`,
   which the maintainers set with release-please's `release-as`.
 - **`0.N.x` releases bring fixes and small changes**, and nothing that breaks an installation: settings, the API under
   `/api/v1` and the database keep working without a change on your side.
@@ -236,7 +236,7 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Routes and Teams name, none after the upgrade, and the Permissions `escalation-chains:read`, which every Role
       gets, and `escalation-chains:write`, which Admins get. Roles get them at once; a Personal access token keeps the
       Permissions it was issued with, so issue a new one to reach the Escalation chains. It is expand only: a replica
-      without it reads and writes none of them, and no chain runs on 0.2.0 before a later version.
+      without it reads and writes none of them.
     - Migration 0047 adds the runs of the Escalation chains on Alert Groups, the steps they made and skipped, and the
       timers of their steps, which name the run rather than the Alert Group, none after the upgrade: chains start at
       the next point that starts them, such as a first Publication or an Unacknowledge, never on the upgrade. It is
@@ -266,6 +266,38 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       no Assignee and never clears them when it acknowledges, snoozes or resolves an Alert Group — the reads show only
       the Assignees of firing Alert Groups, so such rows never show — and its Pages and rule runs carry no run step, so
       a reach by them only adds to a chain without Assignees; let the rollout finish before relying on Assignees.
+    - Migration 0051 adds the Pages through [Notification gateways](../messengers/notification-gateways.md): the Page, the
+      run of the chain and the rule run that queued each Alert Group of a call, and the gateway and the call of a Page
+      of the kind call, none after the upgrade. It is expand only: a 0.1 replica, or one of a development image without
+      it, writes none of the new columns, so the calls it queues have no stop check of a chain or a rule, and a call it
+      sends ends without settling its Pages, which stay pending and make no Assignee. Its delivery worker also settles
+      the Pages of the calls of a 0.2.0 replica as Pages by Mention within a round: it ends them `not_delivered`,
+      records a wrong `page_not_delivered`, and an accepted call then makes no Assignee. Do not rely on Pages through
+      gateways until every replica runs 0.2.0.
+    - Migrations 0052, 0053 and 0054 add one index each, on `thread_replies` (the Page replies still to be sent),
+      `alert_groups` (the open Alert Groups and those in their Grace period) and `deliveries` (the pending deliveries
+      of Alert Groups), which the delivery worker and the walks of a change of configuration read. They are expand only
+      and a replica without them works as before, only slower on a large database. Each builds its index inside a
+      transaction, so while it builds, writes to that table wait: ingestion and Alert Group changes for `alert_groups`
+      and `deliveries`, Thread replies for `thread_replies`.
+
+    **Breaking changes in 0.2.0.** Four changes can break an installation or a client that worked on 0.1; check them
+    before you upgrade:
+
+    - **The Route profile id `on_call` is now `paging`.** A client that types the enum of `listRouteProfiles` or looks
+      up `on_call` must use `paging`. Nothing stored changes. See "The Route profile On-call is now Paging" below.
+    - **A Helm `image.repository` without a registry host is prefixed with `ghcr.io`.** A path such as `myorg/muster`
+      that you pulled from Docker Hub now points at `ghcr.io/myorg/muster`: set `image.registry: docker.io` or write
+      the full path; a local image for kind or minikube needs `image.registry: ""`. See "Helm chart" below.
+    - **A Role mapping entry that ends in `/*` is a subtree.** `platform/*` matched only that exact group name on 0.1;
+      it now matches `platform` and every group below it, so it can give a Role to people it did not before. Review
+      each entry that ends in `/*` before the upgrade. An entry with `*` anywhere else is refused with `422` when you
+      save the OIDC settings. See "Role mapping entries with `*`" below.
+    - **The urgent mark of a Route and "critical is Urgent" stop acting.** An Alert Group is Urgent exactly when its
+      Severity level is critical, and a Route raises the level with its Minimum severity. Routes marked urgent got the
+      Minimum severity critical; an Organization that had turned "critical is Urgent" off now has Urgent critical Alert
+      Groups, and no setting keeps the old behaviour. Check the Minimum severity of your Routes after the upgrade. A
+      client that sends `urgent` or `critical_is_urgent` keeps working, as the notes above describe.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -298,6 +330,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       GitHub, set `image.repository` to the full `ghcr.io/muster-io/muster`, which ignores both registry values.
     - `httpRoute.app.annotations` and `httpRoute.ingest.annotations` set the annotations of one HTTPRoute, over the
       shared `httpRoute.annotations`, as the Ingress ones do.
+    - Three alert rules are new and on by default, so an installation that renders the rules gets them on upgrade:
+      `MusterIngestSnapshotFailed` (`alerting.rules.MusterIngestSnapshotFailed.enabled`), `MusterScheduleGap`
+      (`alerting.rules.MusterScheduleGap.enabled`) and `MusterNotificationGatewayBroken`
+      (`alerting.rules.MusterNotificationGatewayBroken.enabled`). Set the key to `false` to leave one out.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
     Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids or look up `on_call`;
@@ -774,6 +810,33 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     `muster migrate`. Going back below 0042 loses every Team mention and what the checks found of the groups; once 0042
     is back, each Connection's next check finds the groups again, and the Team mentions are entered again.
 
+    Migration 0043 adds the Mention entries, the Alert Groups each Storm counts and the new Mention of the delivery
+    events in three transactions: the first creates the tables, fills the entries from the Mention settings and adds
+    the new CHECK of `delivery_events`, `NOT VALID`; the second validates it; the third drops the CHECK it replaces. A
+    failure leaves the schema recorded as dirty at version 43. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'mention_entries';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 42, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE delivery_events VALIDATE CONSTRAINT delivery_events_mentions_v2_check;
+        ALTER TABLE delivery_events DROP CONSTRAINT IF EXISTS delivery_events_mentions_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0043 drops every Mention entry and the Alert Groups the Storms count, and turns the Mention
+    `storm_started` of the delivery events back into `new_alert_group`; the Mention settings are read again as the
+    column `destinations.mentions` kept them, so a change of the Mention entries made on 0.2.0 is lost.
+
     Migration 0044 adds the two columns of what a Telegram Destination's check saw of its discussion group in one
     transaction: a failure leaves nothing of it, but the schema recorded as dirty at version 44. To recover, with the
     same database role as Muster, run `UPDATE schema_migrations SET version = 43, dirty = false;` and start the 0.2.0
@@ -962,8 +1025,90 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     people it named and every run of a Notification rule; the Timeline keeps its `paged` and `page_not_delivered`
     entries without the Team mention or token and the importance of a Page.
 
-    Going back below 0050 loses the Assignees and the run steps of the Pages and the runs of Notification rules; the
-    Timeline keeps its `assignees_changed` entries without the Assignees after each change.
+    Migration 0050 adds the Assignees in one transaction: a failure leaves nothing of it, but the schema recorded as
+    dirty at version 50, as the lock timeout or a deadlock with the running replicas, which change the Pages and the
+    runs of Notification rules it alters, may cause. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 49, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0050 loses the Assignees and the run steps of the Pages and the runs of
+    Notification rules; the Timeline keeps its `assignees_changed` entries without the Assignees after each change.
+
+    Migration 0051 adds the Pages through Notification gateways in three transactions: the first adds the columns, the
+    foreign keys and CHECKs of the new columns, `NOT VALID`, and their indexes; the second validates them; the third
+    drops the CHECKs of the reasons they replace. Each gives up after 5 seconds of waiting for a lock (`lock_timeout`),
+    and PostgreSQL may end the first on a deadlock with the running replicas, which change the Pages and the calls it
+    alters; run the upgrade at a quiet time. Any such failure leaves the schema recorded as dirty at version 51, and
+    the 0.2.0 replica refuses to start with `schema_dirty`. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'pages' AND column_name = 'gateway_connection_id';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 50, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE gateway_call_items VALIDATE CONSTRAINT gateway_call_items_escalation_run_id_fkey;
+        ALTER TABLE gateway_call_items VALIDATE CONSTRAINT gateway_call_items_notification_rule_run_id_fkey;
+        ALTER TABLE gateway_call_items VALIDATE CONSTRAINT gateway_call_items_page_id_fkey;
+        ALTER TABLE pages VALIDATE CONSTRAINT pages_gateway_connection_id_fkey;
+        ALTER TABLE pages VALIDATE CONSTRAINT pages_gateway_call_id_fkey;
+        ALTER TABLE pages VALIDATE CONSTRAINT pages_gateway_check;
+        ALTER TABLE pages VALIDATE CONSTRAINT pages_reason_v2_check;
+        ALTER TABLE page_users VALIDATE CONSTRAINT page_users_reason_v2_check;
+        ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_reason_check;
+        ALTER TABLE page_users DROP CONSTRAINT IF EXISTS page_users_reason_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0051 deletes the Pages of calls and loses what ties each Alert Group of a call to its Page, run
+    and rule run; the calls that are still to be made go on without stop checks of their chains and rules, and the
+    Timeline keeps its `paged` and `page_not_delivered` entries.
+
+    Migrations 0052, 0053 and 0054 each build one index in a single transaction, with `CREATE INDEX` and not
+    `CREATE INDEX CONCURRENTLY`, on `thread_replies`, `alert_groups` and `deliveries`. Like the indexes of migration
+    0040, they block the writes to the table while they build, so on a large `alert_groups` or `deliveries` table
+    ingestion and the changes of Alert Groups wait. Each runs
+    under a `statement_timeout` of 5 minutes and gives up after 5 seconds of waiting for a lock. A failure, a timeout
+    of the build included, leaves nothing of the index but the schema recorded as dirty at the version of the
+    migration, 52, 53 or 54, and the 0.2.0 replica refuses to start with `schema_dirty`. To recover, with the same
+    database role as Muster, either run the upgrade again at a quiet time or build the index yourself without blocking
+    writes and mark the migration applied:
+
+    1. To run it again, clear the failed attempt, with `N` the version the schema is recorded dirty at, 52, 53 or 54,
+       and start the 0.2.0 replica again, or run `muster migrate`:
+
+        ```sql
+        UPDATE schema_migrations SET version = N - 1, dirty = false;
+        ```
+
+    2. To build the index yourself, run the statement of the failed migration outside a transaction (the `psql`
+       default), and then set the version to the migration's own:
+
+        ```sql
+        -- 0052
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS thread_replies_page_pending_idx ON thread_replies (org_id, id)
+            WHERE page_id IS NOT NULL AND state IN ('collecting', 'pending');
+        -- 0053
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS alert_groups_evaluated_idx ON alert_groups (org_id, id)
+            WHERE status <> 'resolved' OR grace_deadline IS NOT NULL;
+        -- 0054
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS deliveries_alert_group_pending_idx ON deliveries (org_id, alert_group_id)
+            WHERE state = 'pending' AND alert_group_id IS NOT NULL;
+        -- then, with N the version of the migration whose index you built
+        UPDATE schema_migrations SET version = N, dirty = false;
+        ```
+
+       A failed `CONCURRENTLY` build leaves an invalid index of that name: drop it with `DROP INDEX` before building
+       again. Migrations run in order, so only the one the schema is recorded dirty at has failed; build its index
+       alone, set the version, and the 0.2.0 replica applies the later ones as it starts.
+
+    Going back below 0052, 0053 or 0054 drops its index and loses nothing else; the queries it served read more rows
+    until it is back.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
