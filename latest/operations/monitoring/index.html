@@ -3313,8 +3313,8 @@ Point the receiver <code>platform-direct</code> at a path that does not depend o
 <p>The Internal alerts of Muster itself do not go through Alertmanager, so this route does not see them.</p>
 <h2 id="dashboard">Dashboard<a class="headerlink" href="#dashboard" title="Permanent link">&para;</a></h2>
 <p>The chart ships one dashboard, "Muster", with the fixed uid <code>muster</code>, a data source variable, and the variables
-<code>namespace</code>/<code>job</code>, <code>integration</code>, <code>route</code> and <code>destination</code>. It has four rows: Overview, Ingestion, Delivery and
-Platform. You enable it in either or both ways, each behind its own flag:</p>
+<code>namespace</code>/<code>job</code>, <code>integration</code>, <code>route</code> and <code>destination</code>. It has five rows: Overview, Ingestion, Delivery, Platform and
+Paging, with the Pages, the calls through Notification gateways, the Broken gateways and the Schedule gaps. You enable it in either or both ways, each behind its own flag:</p>
 <dl>
 <dt><code>dashboard.configMap.enabled</code></dt>
 <dd>
