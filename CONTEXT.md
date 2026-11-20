@@ -443,7 +443,9 @@ A span of time, current or planned, during which Muster delivers nothing about t
 Route or a Team and runs no Escalation chains for them, while ingestion and grouping go on. Alert Groups still firing
 when it ends are published with a mark. A Team's window keeps an Alert Group back only while every Team of its Alerts
 is in a window.
-_Avoid_: Silence, Mute, Downtime
+_Avoid_: Silence, Mute, Downtime (as a name for a Maintenance window; "downtime" for Muster itself being down, as in
+"after downtime", is allowed, because no other term in this glossary names that and a Maintenance window is never meant
+by it)
 
 **Destination check**:
 A test of whether Muster can still reach and post to a Destination, without sending a message.

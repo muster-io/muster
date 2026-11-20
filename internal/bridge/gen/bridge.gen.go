@@ -447,7 +447,7 @@ type Capabilities struct {
 	// EveryoneMentions The mentions of everyone in the chat that the bridge's messenger has, by their symbolic names. Muster sends only those listed here, each as a `mentions` entry of the kind `everyone`; missing or empty, none.
 	EveryoneMentions *[]CapabilitiesEveryoneMentions `json:"everyone_mentions,omitempty"`
 
-	// GroupMentions The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it. Missing or false, Muster offers no group mention for the bridge's Connections.
+	// GroupMentions The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination, and the `mention "group"` tokens of a template, need it. Missing or false, Muster offers no group mention for the bridge's Connections and sends none for a template's token.
 	GroupMentions *bool `json:"group_mentions,omitempty"`
 
 	// NativeMentions Mention markers become the messenger's own mentions, which notify the person.
@@ -695,7 +695,7 @@ type Link struct {
 	Url   string `json:"url"`
 }
 
-// Mention One Mention of the envelope, which a marker `[@Display Name](muster-mention:<ref>)` in the body places: a person (`kind` `user`, the default), a group of the messenger (`group`), or everyone in the chat (`everyone`). Muster sends `group` only while its copy of the bridge's `info`, at most `bridge.info_max_age` (10 minutes) old, declares `group_mentions`, and `everyone` only with a symbolic name that copy lists in `everyone_mentions`; it sends a person without `kind`.
+// Mention One Mention of the envelope, which a marker `[@Display Name](muster-mention:<ref>)` in the body places: a person (`kind` `user`, the default), a group of the messenger (`group`), or everyone in the chat (`everyone`). Muster sends `group` only while its copy of the bridge's `info`, at most `bridge.info_max_age` (10 minutes) old, declares `group_mentions`, and `everyone` only with a symbolic name that copy lists in `everyone_mentions`; it sends a person without `kind`. A `group` entry comes from a Team mention, a group entry of a Destination or a `mention "group"` token of a template; the token keeps its place in the body as text.
 type Mention struct {
 	// DisplayName The name the marker shows; for a group its name and for everyone in the chat its symbolic name, as `external_id`.
 	DisplayName string `json:"display_name"`

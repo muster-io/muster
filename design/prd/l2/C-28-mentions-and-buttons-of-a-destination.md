@@ -63,7 +63,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   a gap; "On-call of the Team from the label", the same for each Team of the Alert Group. Each person and group is
   mentioned once in a message. A person whom an entry names but who has no Account link in that Identity space is not
   mentioned, and nothing is written in the Thread for it; through a bridge without `native_mentions`, a linked person is
-  named by the plain name of C-22.FR-16, which notifies nobody. In both cases the Alert Group's Timeline records the
+  named by the plain name of C-22.FR-16, which notifies nobody, and so is a linked person for whom a Mention marker
+  cannot be built (the link's external id is longer than 512 characters, or neither the link nor the person has a name
+  to show). In these cases the Alert Group's Timeline records the
   delivery event "Mention not delivered" with the person, the entry, the event and the reason (C-11.FR-21), and the
   Destination page warns about each person and entry whose latest such delivery event is not followed by a delivered
   Mention of that person through that entry — computed from the delivery events, not stored: "Mention not delivered:

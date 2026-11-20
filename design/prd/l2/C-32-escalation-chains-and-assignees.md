@@ -117,9 +117,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   can make a reply in none of the chain's Destinations it records `escalation_step_skipped` with that reason. A call
   through a gateway writes nothing in the Thread.
 - **C-32.FR-10** A Page whose person it reaches nowhere — no Root message to reply to in the chain's Destinations, no
-  Account link in any of their Identity spaces, or Thread replies that all end Not delivered or are withheld, such as
-  while a Destination is Broken — records `page_not_delivered` with the person and the reason and does not make them an
-  Assignee. Thread replies that came due while a Destination was Broken, Pages among them, are not sent after it
+  Account link in any of their Identity spaces, a Mention that the bridge's line of Mentions left out for length
+  (C-12.FR-11), or Thread replies that all end Not delivered or are withheld, such as while a Destination is Broken —
+  records `page_not_delivered` with the person and the reason and does not make them an Assignee. A call through a
+  gateway that is not made because its chain or rule run stopped first (C-30.FR-4) ends Not delivered with no reason
+  and records no `page_not_delivered`; it is not counted in `muster_pages_total`. Thread replies that came due while a Destination was Broken, Pages among them, are not sent after it
   recovers (C-11.FR-19). Calls through a gateway depend on no Root message and keep working while a messenger is down.
 - **C-32.FR-11** How a Page reaches a person, by where it goes:
 
@@ -128,9 +130,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   | Mattermost | a Thread reply with `@username` | they have an Account link for the Connection; push to phones is [still to be verified](../../facts.md#pending) |
   | Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection; push to phones is still to be verified |
   | Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group ([F-014](../../facts.md#notifications)); the creator of the group, anonymous in it, who muted it was not rung by a Mention ([F-129](../../facts.md#members-and-mentions-in-the-discussion-group)) |
-  | Bridge | a Thread reply with a Mention marker (C-22.FR-16) | they have an Account link for the Connection and the bridge declares `native_mentions`; otherwise their plain name reaches nobody |
-  | Outgoing webhook, events mode | the event `paged`, with the people as `mentions` data (C-15.FR-11) | the receiver acts on it |
-  | Outgoing webhook, template mode | the "reply in thread" request, when it has one | the receiver acts on it |
+  | Bridge | a Thread reply with a Mention marker (C-22.FR-16) | they have an Account link for the Connection, the bridge declares `native_mentions` and a Mention marker can be built for them; otherwise their plain name reaches nobody, as it does when the marker cannot be built (the external id is longer than 512 characters, or neither the link nor the person has a name to show) |
+  | Outgoing webhook, events mode | the event `paged`, with the people as `mentions` data (C-15.FR-11) | never: the receiver acts on it, but Muster cannot know that it did, so the webhook counts nobody as reached |
+  | Outgoing webhook, template mode | the "reply in thread" request, when it has one | the request is made, and the webhook counts everyone it names as reached |
   | Notification gateway | a call to the confirmed contact (C-30.FR-4) | the gateway reaches them, whatever the messengers do |
 
 - **C-32.FR-12** Until someone acknowledges, an Alert Group shows its Assignees: for each chain started on it, running
@@ -159,6 +161,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   pass, so nested repeats restart their inner counts on each outer pass. A run makes at most 4,020 steps
   (`escalation.MaxStepsPerRun`) and runs out when it reaches them, logging the warning event
   `escalation_run_step_limit`.
+  _Revised for L2 (2026-11-21, #594):_ when a step comes due late, such as after Muster was down, the run makes the
+  overdue steps in one go but Pages each person, Team or everyone in the chat once. A step that would Page only whom
+  that firing already Paged at an earlier due time is deferred, not collapsed: it waits, counted from now, as long as
+  it would have waited after those Pages on time (the shortest such gap among its targets), and the steps after it wait
+  with it. A step that Pages anyone new runs in full, and calls and outgoing webhooks are made each time.
 - **C-32.FR-16** A change of a chain applies to the runs that start after it; a running chain keeps the steps it started
   with until it stops or starts over (P-73).
 

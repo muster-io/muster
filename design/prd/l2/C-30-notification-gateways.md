@@ -66,6 +66,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   gateway or Not delivered — joins the next call, which goes once that window has passed, as one call about all of its
   Alert Groups. Right before its first attempt, Muster drops from a call the Alert Groups on which the chain or the rule
   that Paged has stopped — acknowledged, snoozed, resolved or started over — and a call left without any is not sent.
+  _Revised for L2 (2026-11-21, #446):_ a call not made because its chain or rule run stopped first ends Not delivered
+  with no reason; it records no `page_not_delivered` and is not counted in `muster_pages_total`. A chain run that ran
+  out still counts as running for this check, so a `call` step that is the last step of a chain still calls. When one
+  waiting call gets several Pages for the same Alert Group, such as from a chain that started over, the stop check of
+  the latest Page decides for that Alert Group.
   From its first attempt on, a call keeps its Alert Groups and its text, which its `Idempotency-Key` stands for: it
   takes no more, and when every Alert Group of a call being retried has stopped, its retries end. Mentions are never
   combined.

@@ -38,7 +38,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   them: a Mention action is a Thread reply in the chain's Threads that mentions them (C-32.FR-8); a call action is a
   call through the gateway to their confirmed contact there (C-30.FR-4); a wait delays the next action. The run stops
   when the Alert Group is acknowledged, snoozed or resolved, and when its chain starts over or stops; an action that
-  comes due after that is not made. A call action for a person without a confirmed contact at that gateway, or whose
+  comes due after that is not made; a call that was queued but not yet made when the run stopped ends Not delivered with
+  no reason and is not counted (C-30.FR-4). A call action for a person without a confirmed contact at that gateway, or whose
   gateway is gone, is skipped and recorded with its reason (C-32.FR-14). Each Mention and call a run makes is a Page of
   its step. When the next action of a run comes due late, such as after Muster was down, the Mentions overdue by then
   are made as one Page of its step instead of one each, as overdue notices collapse (C-17.FR-7), and the wait after
