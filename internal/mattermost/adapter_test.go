@@ -343,6 +343,73 @@ func TestTemplateMentions(t *testing.T) {
 	}
 }
 
+// TestTemplateMentionsInReply is C-13.FR-8 for Thread replies (#632): a Loud reply adds the everyone and group tokens
+// of its own template output to its Mentions, after its targets' and once each, as a Loud Root message and Slack's
+// reply do; the tokens stay text that notifies nobody where they stand, and so does the Owner's. A Loud reply with
+// buttons, a Reminder, keeps that line in its message; a Quiet reply has no Mentions line and notifies nobody.
+func TestTemplateMentionsInReply(t *testing.T) {
+	e := newAdapter(t)
+	ctx := t.Context()
+	tok := func(name, group string) string {
+		return templates.MentionToken(templates.Token{Name: name, Group: group})
+	}
+	out := e.adapter.Publish(ctx, call(1), root(messages.ColourFiring))
+	if out.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", out)
+	}
+	r := delivery.Root{MessageID: out.MessageID}
+	notice := func(buttons ...messages.Button) messages.Message {
+		m := reply()
+		m.Buttons = append(m.Buttons, buttons...)
+		m.Body = &messages.Body{Text: "Nobody acknowledged " + tok("here", "") + " " + tok("group", "oncall") + " " +
+			tok("owner", "") + " " + tok("here", ""), Markup: messages.MarkupMarkdown}
+		return m
+	}
+	// split checks the tokens where they stand in text and returns the line of Mentions before it, which alone
+	// notifies.
+	zw := "@" + string(rune(0x200b))
+	split := func(t *testing.T, message, text string) string {
+		t.Helper()
+		if !strings.Contains(text, "Nobody acknowledged "+zw+"here "+zw+"oncall "+zw+"owner "+zw+"here") {
+			t.Errorf("the tokens are not text where they stand: %q", text)
+		}
+		line, rest, _ := strings.Cut(message, "\n")
+		if !notifying.MatchString(line) {
+			line, rest = "", message
+		}
+		if notifying.MatchString(rest) || (text != message && notifying.MatchString(text)) {
+			t.Errorf("a Mention outside the Mentions line: message %q, text %q", message, text)
+		}
+		return line
+	}
+
+	quiet := e.adapter.Reply(ctx, call(1), r, notice())
+	q := postByID(t, e.fake, quiet.MessageID)
+	if line := split(t, q.Message, q.Message); quiet.Kind != delivery.OutcomeOK || line != "" ||
+		len(e.fake.Notifications()) != 0 {
+		t.Errorf("quiet reply = %+v, %+v; notifications %+v", quiet, q.Post, e.fake.Notifications())
+	}
+
+	bob := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{Name: "Bob", Username: "bob"}}
+	lr := e.adapter.Reply(ctx, loud(bob), r, notice())
+	l := postByID(t, e.fake, lr.MessageID)
+	ns := e.fake.Notifications()
+	if line := split(t, l.Message, l.Message); lr.Kind != delivery.OutcomeOK || line != "@bob @here @oncall" ||
+		len(ns) == 0 || ns[0].PostID != lr.MessageID {
+		t.Errorf("loud reply = %+v, %+v; notifications %+v", lr, l.Post, ns)
+	}
+
+	reminder := notice(messages.Button{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "action",
+		KeyID: "k-00112233"})
+	rr := e.adapter.Reply(ctx, loud(), r, reminder)
+	p := postByID(t, e.fake, rr.MessageID)
+	text, _ := attachmentOf(t, p)["text"].(string)
+	if line := split(t, p.Message, text); rr.Kind != delivery.OutcomeOK || line != "@here @oncall" ||
+		p.Message != line || len(e.fake.Notifications()) == len(ns) {
+		t.Errorf("loud reminder = %+v, %+v; text %q", rr, p.Post, text)
+	}
+}
+
 // TestPublishWithoutTeamName links a post through the server's redirect when the team's name is unknown, and a Storm
 // summary is a post with an empty message and its text in one attachment of the Storm colour, without a title.
 func TestPublishWithoutTeamName(t *testing.T) {
