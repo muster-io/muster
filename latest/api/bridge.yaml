@@ -833,8 +833,9 @@ components:
         group_mentions:
           type: boolean
           description: The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`;
-            the Team mentions and group entries of a Destination need it. Missing or false, Muster offers no group
-            mention for the bridge's Connections.
+            the Team mentions and group entries of a Destination, and the `mention "group"` tokens of a template, need
+            it. Missing or false, Muster offers no group mention for the bridge's Connections and sends none for a
+            template's token.
         everyone_mentions:
           type: array
           description: The mentions of everyone in the chat that the bridge's messenger has, by their symbolic names.
@@ -930,7 +931,8 @@ components:
         places: a person (`kind` `user`, the default), a group of the messenger (`group`), or everyone in the chat
         (`everyone`). Muster sends `group` only while its copy of the bridge''s `info`, at most `bridge.info_max_age`
         (10 minutes) old, declares `group_mentions`, and `everyone` only with a symbolic name that copy lists in
-        `everyone_mentions`; it sends a person without `kind`.'
+        `everyone_mentions`; it sends a person without `kind`. A `group` entry comes from a Team mention, a group entry
+        of a Destination or a `mention "group"` token of a template; the token keeps its place in the body as text.'
       required:
       - ref
       - external_id
