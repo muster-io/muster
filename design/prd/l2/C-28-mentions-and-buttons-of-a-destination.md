@@ -79,6 +79,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-28.FR-4** The rules of L1 stay: Reminders and auto-unacknowledge mention the Owner and a Takeover the previous
   Owner, whatever the entries; a Reopen into acknowledged mentions only the Owner; Mentions are never added by an edit
   (ADR-0005); a Quiet new message carries none.
+  _Revised for L2 (2026-11-21):_ the entries for a Loud event that the Alert Group's Route does not list mention nobody,
+  the first publication of a Storm summary included, and the Owner is still mentioned where a row about the Owner
+  stays Loud (C-36.FR-2, C-36.FR-3).
 - **C-28.FR-5** The 0.2.0 migration turns the L1 Mention settings of every Destination into entries with exactly the
   same effect: each target chosen for a kind of Loud event becomes an entry for the kinds it was chosen for, and an
   entry for `new_alert_group` also applies to `storm_started`, since an L1 Storm summary mentioned the targets of

@@ -40,6 +40,8 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   _Revised for L2 (2026-10-26):_ from 0.2.0 the Urgent flag is true exactly when the Severity level is critical
   (C-26.FR-8), and an Alert Group also has its Teams (C-25.FR-6), its running Escalation chains and its Assignees
   (C-32.FR-12).
+  _Revised for L2 (2026-11-21):_ an Alert Group may be attached to a main Alert Group, whose status it then follows
+  (C-37.FR-4, C-37.FR-5), and carries the main Alert Group it is attached to.
 - **C-09.FR-2** `#N` is assigned per Organization without gaps in the transaction that creates the Alert Group;
   `public_id` is opaque and used in URLs, the API and signed buttons.
 - **C-09.FR-23** The title of an Alert Group is the `alertname` its Alerts share or, once Alerts with different
@@ -59,6 +61,8 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   the Owner, Reminders continue (an Owner disabled or deleted meanwhile has no acknowledgements, so it reopens as
   firing, C-03.FR-13); snoozed with the end still ahead — snoozed again, Quiet; firing, or a Snooze that ended
   meanwhile — firing, a Loud event, and the ack timeout starts over.
+  _Revised for L2 (2026-11-21):_ a Reopen into firing is Loud only where its Route lists `reopen` among its Loud events;
+  a Reopen into acknowledged stays Loud for the Owner (C-36.FR-2).
 - **C-09.FR-5** After a person resolves an Alert Group (C-10), no Reopen window applies. The Alert Group shows how many
   Alerts were still firing in the last Snapshot. If those Alerts are still reported firing when the Route's Grace period
   (`route.grace_period`) ends, they are grouped again on the Alert Group's Route as if they had just fired (FR-3): they
@@ -70,6 +74,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
 - **C-09.FR-6** New Alerts in an existing Alert Group: firing — a Loud event, batched into Thread replies by delivery
   (C-11); acknowledged — a Quiet event (Thread reply and Root message update), and the acknowledgement always stays;
   snoozed — a Quiet Root message update only, and what accumulated is listed when the Snooze ends.
+  _Revised for L2 (2026-11-21):_ new Alerts in a firing Alert Group are Loud only where the Route lists `new_alerts`;
+  on a Route that lets new Alerts remove the acknowledgement, they make an acknowledged Alert Group firing without an
+  Owner, Loudly (C-36.FR-6, C-36.FR-7).
 - **C-09.FR-7** A new Alert that differs from a firing Alert of the same Alert Group only in Instance labels
   (`organization.instance_labels`) is a Replacement: a Quiet event names the label that differs, the old Alert going
   away is Quiet too, and the Alert Group page suggests fixing the source (for example `without(pod, instance)` in the
@@ -83,6 +90,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   acceptance of this requirement needs Acknowledge and Snooze and is in C-10 (C-10.AC-12, C-10.AC-13).
   _Revised for L2 (2026-10-26):_ from 0.2.0 a rise makes an Alert Group Urgent when it reaches critical (C-26.FR-8);
   where Escalation chains run, they start over in place of the ack timeout (C-32.FR-5, C-32.FR-6).
+  _Revised for L2 (2026-11-21):_ the event of a rise that ends a Snooze is Loud only where the Route lists
+  `rise_to_urgent`; one that removes the acknowledgement stays Loud and mentions the Owner (C-36.FR-2). An attached
+  Alert Group follows its main Alert Group, and a rise of its own changes nothing of its status (C-37.FR-7).
 - **C-09.FR-10** Every automatic status change carries its reason, shown on the Alert Group page, in the Timeline and,
   from C-11 on, in the Root message or Thread.
 - **C-09.FR-11** The Timeline of an Alert Group shows, in order: Alerts added, resolved (with the reason), replaced and
@@ -145,6 +155,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   L2](reference.md#lifecycle-events-added-in-l2), with the same columns and meaning; Mentions are then the Loud events
   of a Destination's Mention entries (C-28.FR-1), `storm_started` among them, and `paged`, the people an Escalation step
   Pages.
+  _Revised for L2 (2026-11-21):_ the loudness of the rows that a Loud event governs follows the Route's Loud and Quiet
+  settings; such a row made Quiet is recorded Quiet without Mentions (C-36.FR-2, C-36.FR-3), and every event of an
+  attached Alert Group is Quiet (C-37.FR-7).
 
 ### Alert Group list
 
@@ -172,6 +185,8 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   _Revised for L2 (2026-10-26):_ L2 adds the filter Team, with the quick filter "My Teams" (C-25.FR-6), and the filter
   Assignee, a User or "me" (C-32.FR-18), and the columns Teams and Assignees; the Urgent filter selects the critical
   Alert Groups (C-26.FR-8).
+  _Revised for L2 (2026-11-21):_ attached Alert Groups carry the mark "→ #{M}", the list gains the filter "Attached",
+  and Attach is a bulk command (C-37.FR-13).
 - **C-09.FR-17** Times in the UI are shown in the user's time zone; durations are relative ("2 h 14 min"), and the
   absolute time is available on hover.
 - **C-09.FR-24** The Alert Group list and the Alert Group page work at phone width (NFR-15): from a viewport 360 CSS
@@ -228,6 +243,8 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   _Revised for L2 (2026-10-26):_ L2 adds to the header the Teams with the rule that brought each (C-25.FR-6) and the
   Assignees (C-32.FR-12), a section of the running Escalation chains with their next step (C-32.FR-18), the entries that
   reached each Destination in its delivery state (C-26), and the Timeline kind `escalation`.
+  _Revised for L2 (2026-11-21):_ the page of an attached Alert Group shows that it follows its main Alert Group, and
+  that of a main Alert Group lists the Alert Groups attached to it with their Alerts (C-37.FR-12).
 - **C-09.FR-20** The Alert Group page lists the previous Alert Groups of the same Route with the same Group key values —
   number, status, start, duration and who resolved them — linked to each.
 
@@ -243,6 +260,8 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   every view takes the filters of FR-30: the chosen Routes or Integrations are the values of the Route or Integration
   filter, which then narrows the other views too. The period still selects the Alert Groups that started in it, and the
   first acknowledgement also records who made it (FR-27).
+  _Revised for L2 (2026-11-21):_ every view leaves out an Alert Group resolved by following its main Alert Group's
+  resolve (C-37.FR-14).
 - **C-09.FR-27** _Added for L2 (2026-11-16)._ The first acknowledgement of an Alert Group records who made it — "first
   acknowledged by", a User — on the summary row, in the transaction that sets the time of the first acknowledgement.
   Only Users acknowledge (C-04.FR-2, C-10.FR-1), so the field names a User and never a Service account. Neither changes

@@ -34,6 +34,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   (`route.minimum_severity`) takes its place (C-26.FR-8, C-26.FR-10); each Destination of a Route has a Severity
   condition (C-26.FR-1), and a Route also has the option to deliver to the Teams from the label (C-26.FR-2), its
   Escalation chains (C-32.FR-2), its owning Team (C-25.FR-2) and its "Labels in the message" (C-29.FR-2).
+  _Revised for L2 (2026-11-21):_ the policy fields gain the Loud and Quiet settings — the Loud events that are Loud on
+  the Route and "New Alerts remove the acknowledgement" (C-36.FR-1).
 - **C-08.FR-2** Matchers use Alertmanager syntax — `=`, `!=`, `=~`, `!~` with RE2 regular expressions — and are combined
   with AND. The UI builds them from fields; the API accepts the same structure; an invalid expression is refused with a
   pointer to the field.
@@ -64,6 +66,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   (`route-profiles`); they cannot be edited.
   _Revised for L2 (2026-10-26):_ from 0.2.0 the profiles are Paging, formerly On-call, and Informational, with the ids
   `paging` and `informational` (C-26.FR-11).
+  _Revised for L2 (2026-11-21):_ the profiles also pre-fill the Loud and Quiet settings: Paging with every Loud event,
+  Informational with only a new Alert Group, both with new Alerts not removing the acknowledgement (C-36.FR-8).
 - **C-08.FR-8** Edits of a Route's settings apply at once, also to open Alert Groups (whose Root messages are re-rendered
   once delivery exists, C-11); they never change any Alert Group's status. A new Group key or new Matchers apply only to
   new Alert Groups, and a fingerprint already living in an open Alert Group stays there until that Alert Group is

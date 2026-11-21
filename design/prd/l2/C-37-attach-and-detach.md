@@ -9,11 +9,10 @@ the main Alert Group's page; Detach lets it live on its own again at any time (A
 Several teams working on one problem together is a matter for Incidents in L3.
 
 Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md); the lifecycle events are rows of the
-[L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2). This capability is a draft: the behaviours
-that the recorded decisions do not settle carry the recommended answer and name their item of
-[Open questions](#open-questions); that section and the list of changes to shared tables exist only while it is a
-draft, and move into the decided requirements, or into `P-NN` items of
-[L2 §5.3](../L2.md#53-provisional-values-and-behaviours), when it is adopted.
+[L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2). What journal D547, D556 and the ADRs left
+open — the Permission, which Alert Groups may be attached, the status taken on Attach, the end of an attachment on a
+resolve, the messages, the Severity level, what Detach returns to, the commands on an attached Alert Group, statistics,
+bulk Attach and the limit — the maintainer decided with the draft of this capability (#674).
 
 ## Scenarios
 
@@ -36,10 +35,9 @@ draft, and move into the decided requirements, or into `P-NN` items of
 
 - **C-37.FR-1** Attach and Detach are Commands of the dispatcher (ADR-0016): Attach puts an Alert Group under another
   one, its main Alert Group; Detach lets an attached Alert Group live on its own. Both are made from the UI and the
-  API — later also through the MCP server — and never from messengers, which have no button and no Text command for
-  them. They
-  need the Permission `alert-groups:attach`, which Admins and Responders have ([open question 1](#open-questions)); a
-  Service account may make them. Each has its own Audit log type, `alert_group.attached` and `alert_group.detached`,
+  API, later also through the MCP server, and never from messengers, which have no button and no Text command for them.
+  They need the Permission `alert-groups:attach`, which Admins and Responders have, as each kind of Command has its own;
+  a Service account may make them. Each has its own Audit log type, `alert_group.attached` and `alert_group.detached`,
   naming both Alert Groups, the actor and the Transport; `allowed_commands` (C-10.FR-16) lists `attach` and `detach`
   where they are allowed; `muster_commands_total{command}` gains `attach` and `detach`.
 - **C-37.FR-2** Attach names the main Alert Group. A main Alert Group that does not exist in the Organization is `404`;
@@ -55,21 +53,21 @@ draft, and move into the decided requirements, or into `P-NN` items of
   | `main_is_attached` | the main Alert Group is itself attached; the refusal names its main Alert Group |
   | `attach_limit_reached` | the main Alert Group has `alert_group.attach_max` attached Alert Groups already |
 
-  So attachment is one level deep and has no cycles ([open question 2](#open-questions)). An Alert Group may be attached
-  to an Alert Group of any Route and Integration of the Organization. Detach of an Alert Group that is not attached is
-  refused with `409` `not_attached`.
+  So attachment is one level deep and has no cycles. An Alert Group may be attached to an Alert Group of any Route and
+  Integration of the Organization, since one problem often fires on several Routes. Detach of an Alert Group that is
+  not attached is refused with `409` `not_attached`.
 - **C-37.FR-3** Every Command and system transition that touches a main Alert Group or an attached one locks the main
   Alert Group first and then its attached Alert Groups in the order of their ids, and following (FR-4) runs in the
   transaction of the change of the main Alert Group, so that Commands on the two stay serialized (C-10.FR-10) and two
   Attaches never cross.
 - **C-37.FR-4** Attach makes the Alert Group follow its main Alert Group at once: it takes the main Alert Group's status
-  with its Owner and Snooze end ([open question 3](#open-questions)). Its running Escalation chains stop, so no later
-  step is made, a queued call through a gateway is not made (C-30.FR-4) and the runs of Notification rules for its Pages
-  stop (C-31.FR-3); its ack timeout, Reminders, the end of its Snooze and its count of unanswered Reminders stop. Its
-  Assignees and its Unclaimed mark change only as its status does: taking an acknowledged, snoozed or resolved status
-  clears the Assignees (C-32.FR-12) and ends Unclaimed (C-17.FR-3), while an Alert Group that stays firing keeps them
-  as they are. The Alert Group records `attached` and the main Alert Group `alert_group_attached`, both with the person
-  who attached it.
+  with its Owner and Snooze end, even when that ends its own acknowledgement or Snooze. Its running Escalation chains
+  stop, so no later step is made, a queued call through a gateway is not made (C-30.FR-4) and the runs of Notification
+  rules for its Pages stop (C-31.FR-3); its ack timeout, Reminders, the end of its Snooze and its count of unanswered
+  Reminders stop. Its Assignees and its Unclaimed mark change only as its status does: taking an acknowledged, snoozed
+  or resolved status clears the Assignees (C-32.FR-12) and ends Unclaimed (C-17.FR-3), while an Alert Group that stays
+  firing keeps them as they are. The Alert Group records `attached` and the main Alert Group `alert_group_attached`,
+  both with the person who attached it.
 - **C-37.FR-5** While it is attached, every change of the main Alert Group's status is applied to the Alert Group as a
   system transition of the dispatcher, with Muster as the actor and the Transport `system` (ADR-0016), recording
   `status_followed` with the new status, the person or system change behind it and the main Alert Group: Acknowledge
@@ -78,8 +76,8 @@ draft, and move into the decided requirements, or into `P-NN` items of
   never starts the attached Alert Group's own Escalation chains, ack timeout or Reminders, whatever status it takes; the
   main Alert Group's run for it. Following is not in the Audit log; the Command on the main Alert Group is. Following an
   acknowledgement sets the attached Alert Group's first acknowledgement, when it has none, to the main Alert Group's
-  Owner at that moment (C-09.FR-27; [open question 9](#open-questions)).
-- **C-37.FR-6** An attachment ends when either Alert Group resolves ([open question 4](#open-questions)):
+  Owner at that moment (C-09.FR-27), so that an Alert Group detached later has one.
+- **C-37.FR-6** An attachment ends when either Alert Group resolves:
   - the main Alert Group resolved by a person: each attached Alert Group is resolved with it, recording
     `status_followed` with that person as the resolver; Alerts of it still firing are grouped again after the Route's
     Grace period, as after any manual resolve (C-09.FR-5);
@@ -97,23 +95,23 @@ draft, and move into the decided requirements, or into `P-NN` items of
   Snooze and removes no acknowledgement, and new Alerts remove none. Every lifecycle event recorded on it while it is
   attached is Quiet and carries no Mentions, the Owner's included, whatever its row and its Route's Loud and Quiet
   settings say (C-36.FR-2), and appears in a messenger only as an update of its line (FR-10), apart from the Thread
-  replies of `attached` and `detached` ([open question 5](#open-questions)); a Destination it reaches meanwhile receives
-  the line Quietly, and its `destination_joined` is Quiet. The main Alert Group's Severity level, Urgent flag, Teams,
-  Destinations and Escalation chains do not take the attached Alert Groups' Alerts into account
-  ([open question 6](#open-questions)).
+  replies of `attached` and `detached`, since the person who attached it chose to watch the main Alert Group, whose
+  page lists its Alerts; a Destination it reaches meanwhile receives the line Quietly, and its `destination_joined` is
+  Quiet. The main Alert Group's Severity level, Urgent flag, Teams, Destinations and Escalation chains do not take the
+  attached Alert Groups' Alerts into account.
 - **C-37.FR-8** Detach lets the Alert Group live on its own again with the current state of its own Alerts, which still
   fire, since one whose Alerts are gone has resolved already (FR-6). It keeps the status, Owner and Snooze end it
-  followed last ([open question 7](#open-questions)). Kept firing, it is a point at which it becomes firing again
-  (C-17.FR-1, C-32.FR-5): its Escalation chains that apply start over at their first step, and where none applies its
-  ack timeout starts over. Kept acknowledged, its Reminders start for the Owner from the Detach; kept snoozed, its
+  followed last, so that whoever handles the problem keeps it. Kept firing, it is a point at which it becomes firing
+  again (C-17.FR-1, C-32.FR-5): its Escalation chains that apply start over at their first step, and where none applies
+  its ack timeout starts over. Kept acknowledged, its Reminders start for the Owner from the Detach; kept snoozed, its
   Snooze ends at the end it kept. The Alert Group records `detached` and the main Alert Group `alert_group_detached`,
   both with the person.
 - **C-37.FR-9** While an Alert Group is attached, the Commands Acknowledge, Unacknowledge, Resolve, Snooze and Unsnooze
   on it, from any Transport, are refused with `409` `alert_group_attached`, whose message names the main Alert Group:
-  "#{N} follows #{M}; act on #{M}, or detach it first" ([open question 8](#open-questions)). Add Note and Detach stay
-  allowed. A bulk command refuses such an item with that outcome and goes on with the others (C-10.FR-14). An
-  acknowledgement reported by a Notification gateway for an attached Alert Group is answered as one for an Alert Group
-  someone owns (C-30.FR-6).
+  "#{N} follows #{M}; act on #{M}, or detach it first", since the next change of the main Alert Group would overwrite
+  a status set on it. Add Note and Detach stay allowed. A bulk command refuses such an item with that outcome and goes
+  on with the others (C-10.FR-14). An acknowledgement reported by a Notification gateway for an attached Alert Group
+  is answered as one for an Alert Group someone owns (C-30.FR-6).
 
 ### Messages
 
@@ -125,8 +123,9 @@ draft, and move into the decided requirements, or into `P-NN` items of
   layout of its status with its Destination's buttons (C-28.FR-8), and a Quiet Thread reply says "Detached from #{M} by
   @{login}" or gives the system's reason. Reminders and ack timeout notices of an attached Alert Group are not sent.
 - **C-37.FR-11** The Root messages of a main Alert Group show, Quietly, the line "Attached: #1288, #1290" with up to
-  five numbers and "+{K} more", without links ([open question 5](#open-questions)); its buttons act on the main Alert
-  Group and, through it, on the attached ones, and the private answer to a press says so: "Acknowledged #1287 and 2
+  five numbers and "+{K} more", without links, and nothing is written in its Thread, which stays for the problem
+  itself; its buttons act on the main Alert Group and, through it, on the attached ones, and the private answer to a
+  press says so: "Acknowledged #1287 and 2
   attached Alert Groups".
 
 ### The UI, statistics and webhooks
@@ -142,11 +141,12 @@ draft, and move into the decided requirements, or into `P-NN` items of
 - **C-37.FR-13** The Alert Group list shows an attached Alert Group with the mark "→ #{M}" and gains the filter
   "Attached" — all (the default), only attached, or none attached — kept in the URL; the main Alert Group shows how many
   are attached to it. The list offers Attach as a bulk command (C-10.FR-14): "Attach to #…" for the selected Alert
-  Groups, each through the dispatcher with its own outcome ([open question 10](#open-questions)).
+  Groups, each through the dispatcher with its own outcome, since an outage creates many Alert Groups at once.
 - **C-37.FR-14** The statistics leave out an Alert Group resolved by following its main Alert Group's resolve (FR-6): it
   stood for the problem of its main Alert Group, which is counted. One that was detached, or resolved on its own while
-  attached, counts as any other ([open question 9](#open-questions)). The summary row keeps the main Alert Group of an
-  Alert Group resolved with it, and the Alert Group page shows "Resolved with #{M}".
+  attached, counts as any other, so that one problem is counted once and one acknowledgement is credited once
+  (C-09.FR-27, C-09.FR-28). The summary row keeps the main Alert Group of an Alert Group resolved with it, and the
+  Alert Group page shows "Resolved with #{M}".
 - **C-37.FR-15** Attach and Detach record these rows, with the columns and meaning of C-09.FR-22; outgoing webhooks in
   events mode receive them one to one (C-15.FR-2), and the `alert_group` of every event gains `attached_to`, the
   `public_id` and number of its main Alert Group, or null:
@@ -159,31 +159,26 @@ draft, and move into the decided requirements, or into `P-NN` items of
   | `detached` | the Alert Group is detached by a person, or by the system (FR-6, FR-8) | Quiet | — | `status` | Root message edited back to its status, and a Thread reply |
   | `alert_group_detached` | an Alert Group attached to this one is detached, or resolves on its own (FR-6) | Quiet | — | `system` | Root message update |
 
-- **C-37.FR-16** At most `alert_group.attach_max` Alert Groups are attached to one main Alert Group
-  ([open question 11](#open-questions)), so that a Command on it changes a bounded number of Alert Groups.
+- **C-37.FR-16** At most `alert_group.attach_max` Alert Groups are attached to one main Alert Group, so that a Command
+  on it, which changes each attached one in its transaction, changes a bounded number of Alert Groups.
 - **C-37.FR-17** The documentation's page on Attach and Detach says when to attach and when Incidents of L3 will fit
   better, what an attached Alert Group does and does not do, what Detach returns to, and how statistics count; the
   dialog and the notice link to it.
 
 ### Changes to shared tables, to L1 and to L2
 
-The story that implements this capability, in the same pull request:
-
-- adds the rows of FR-15 to the [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2), with the
-  rule of FR-7 that every event of an attached Alert Group is Quiet;
-- adds `alert-groups:attach` to [Permissions added in L2](../l1/reference.md#permissions-added-in-l2) and then to the
-  table of Roles and Permissions, and rewords "attaching an Escalation chain" there to "naming", since Attach is now a
-  term of its own;
-- marks the row of `muster_commands_total` in the [metrics catalogue](../l1/reference.md#metrics-catalogue) "from L2"
-  with `attach` and `detach`; adds to [Buttons and links by status](../l1/reference.md#buttons-and-links-by-status) that
-  an attached Root message has no buttons, and to [Banners, warnings and
-  notices](../l1/reference.md#banners-warnings-and-notices) the notice of FR-12;
-- adds `alert_group.attach_max` to [defaults.md](../l1/defaults.md#routing-and-lifecycle);
-- marks with the revision of [L2 §2](../L2.md#2-conventions) C-09.FR-1, C-09.FR-3, C-09.FR-13, C-09.FR-14, C-09.FR-15,
-  C-09.FR-28, C-10.FR-1, C-10.FR-2, C-10.FR-14, C-10.FR-16, C-15.FR-2 (`attached_to`), C-17.FR-1 and C-17.FR-3, and
-  adds their row to [L2 §6](../L2.md#6-revisions-to-l1);
-- adds a dated revision to C-30.FR-6, C-32.FR-5, C-32.FR-6, C-32.FR-7 and C-32.FR-12, for Attach, which stops the
-  chains, and Detach, which is a point of starting over.
+The [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2) has the rows of FR-15 and the rule of
+FR-7; [Permissions added in L2](../l1/reference.md#permissions-added-in-l2) has `alert-groups:attach`, and
+[Buttons and links by status](../l1/reference.md#buttons-and-links-by-status) says that an attached Root message has
+none, and [Loud and Quiet](../l1/reference.md#loud-and-quiet) that every event of an attached Alert Group is Quiet;
+[defaults.md](../l1/defaults.md#routing-and-lifecycle) lists `alert_group.attach_max`; C-09.FR-1, C-09.FR-9,
+C-09.FR-13, C-09.FR-14, C-09.FR-15, C-09.FR-22, C-10.FR-1, C-10.FR-2, C-10.FR-14, C-10.FR-16, C-15.FR-2 and C-17.FR-1
+carry the revision of [L2 §2](../L2.md#2-conventions), listed in [L2 §6](../L2.md#6-revisions-to-l1), and C-26.FR-5,
+C-30.FR-6 and C-32.FR-5 a dated revision. The story that implements this capability moves `alert-groups:attach` into
+the table of Roles and Permissions and adds `attach` and `detach` to `muster_commands_total` in the
+[metrics catalogue](../l1/reference.md#metrics-catalogue), which the code checks; adds the notice of FR-12 to
+[Banners, warnings and notices](../l1/reference.md#banners-warnings-and-notices) with its texts; and changes
+`api/openapi.yaml` and the schema.
 
 ## UI
 
@@ -239,51 +234,6 @@ Checked with the fake Alertmanager, a virtual clock, the fake messenger servers 
   warns that its chains for critical stop; the page of the main Alert Group lists it with its Alerts, the list filter
   "only attached" shows it with "→ #1287", and Detach brings its commands back, in English and in Russian, 360 CSS
   pixels wide without horizontal scrolling of the page.
-
-## Open questions
-
-The recorded decisions (journal D547, D556, ADR-0004, ADR-0016) settle that an attached Alert Group follows the main
-one's status — its Acknowledge, Snooze and Resolve apply to it — that its chains and timers stop, that its Root messages
-shrink to a line with a link and no buttons, that its Alerts are shown on the main page, that Detach is possible at any
-time and returns it to the current state of its own Alerts, that both are made from the UI and the API, that following
-is a system transition, and the terms. These are not settled; the requirements above follow the recommendation, to be
-confirmed before the stories.
-
-1. **Which Permission?** Recommendation: a new `alert-groups:attach` for Admins and Responders, as each kind of
-   Command has its own; reusing `alert-groups:acknowledge` would give the same Roles today but not after custom Roles.
-2. **Which Alert Groups may be attached?** Recommendation: any open Alert Group to any open one of the Organization,
-   across Routes and Integrations, since one problem often fires on several Routes; one level deep — a main Alert Group
-   cannot be attached, an Alert Group with attached ones cannot be attached, and moving needs a Detach first — so there
-   are no cycles and no chains of attachment to follow.
-3. **What status does an Alert Group take on Attach?** Recommendation: the main Alert Group's status, Owner and Snooze
-   end at once, as "follows" says, even when that ends its own acknowledgement or Snooze; the dialog shows it before
-   confirming. Its Assignees and Unclaimed mark then change only as that status changes them, as `CONTEXT.md` defines
-   both, so no glossary change is needed.
-4. **What happens when an Alert Group of the pair resolves?** Recommendation: the attachment ends. A resolve of the
-   main Alert Group by a person resolves the attached ones with the same resolver; a resolve by the system detaches
-   them, since their Alerts still fire and the system never resolves an Alert Group with firing Alerts (C-09.FR-3); an
-   attached Alert Group whose own Alerts are gone resolves by itself. An Unresolve brings nothing back together.
-5. **What do the messages show?** Recommendation: every event of an attached Alert Group is Quiet, its new Alerts and
-   rises included, and its Thread gets only the replies of Attach and Detach; the main Alert Group's Root messages get
-   the line "Attached: #…", and nothing is written in its Thread, to keep it for the problem itself. The attached line
-   links to the main Alert Group's page in Muster rather than to its Root message, which may be in another Destination.
-   The cost is that a new serious Alert in an attached Alert Group is Loud for nobody; the main page lists it.
-6. **Do attached Alerts raise the main Alert Group?** Recommendation: no — the main Alert Group's Severity level, Urgent
-   flag, Teams, Destinations and chains stay its own; attaching a critical Alert Group to one that is not critical is
-   allowed and the dialog warns that its chains for critical stop.
-7. **What does Detach return to?** Recommendation: the status, Owner and Snooze end it followed last, so that whoever
-   handles the problem keeps it; when firing, its chains or its ack timeout start over.
-8. **May commands be made on an attached Alert Group?** Recommendation: only Add Note and Detach; the others are refused
-   with `alert_group_attached`, since a status set on it would be overwritten by the next change of the main one.
-9. **How do statistics and the first acknowledgement count?** Recommendation: leave out an Alert Group resolved by
-   following its main Alert Group, from the counts, the times and By people, so that one problem is counted once and
-   one acknowledgement is credited once (C-09.FR-27, C-09.FR-28); following an acknowledgement still sets the first
-   acknowledgement, to the main Alert Group's Owner, so that an Alert Group detached later has one and does not count
-   as "Unknown".
-10. **Is there a bulk Attach and a list filter?** Recommendation: yes to both — an outage creates many Alert Groups at
-    once, and the Open tab should be able to hide those that follow another.
-11. **Is there a limit of attached Alert Groups?** Recommendation: `alert_group.attach_max`, 100, built in, the same as
-    `alert_group.bulk_max`, since every Command on the main Alert Group changes each attached one in its transaction.
 
 ## Related ADRs
 

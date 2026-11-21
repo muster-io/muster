@@ -10,11 +10,9 @@ Whom a Loud event mentions stays with each Destination (C-28).
 
 Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md); the lifecycle events are rows of the
 lifecycle event tables of [C-09.FR-22](../l1/C-09-alert-group-lifecycle.md#lifecycle-events), C-10.FR-15, C-17.FR-11
-and the [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2). This capability is a draft: the
-behaviours that the recorded decisions do not settle carry the recommended answer and name their item of
-[Open questions](#open-questions); that section and the list of changes to shared tables exist only while it is a
-draft, and move into the decided requirements, or into `P-NN` items of
-[L2 §5.3](../L2.md#53-provisional-values-and-behaviours), when it is adopted.
+and the [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2). What journal D546 and the ADRs
+left open — that the rows about the Owner stay Loud, which new Alerts remove the acknowledgement and how, and what
+existing Routes get — the maintainer decided with the draft of this capability (#674).
 
 ## Scenarios
 
@@ -60,10 +58,11 @@ draft, and move into the decided requirements, or into `P-NN` items of
   A row that mentions the Owner because it ends or returns their acknowledgement stays Loud on every Route and always
   mentions the Owner: `reopened` into acknowledged, `urgency_raised` that removes the acknowledgement and `alerts_added`
   that removes it (FR-6); its Loud event decides only whether the Destinations' entries for that event are mentioned
-  too ([open question 1](#open-questions)). `takeover`, `reminder`, `auto_unacknowledged`, `unacknowledged` when the
-  Owner is disabled or deleted, `notices_missed` when it stands for Reminders and `paged` by Mention stay Loud on every
-  Route: each is about one person, or comes from an Escalation chain that the Route or a Team names on purpose.
-  `notices_missed` keeps one row and takes the loudness of the notices it stands for.
+  too, as ADR-0004 says for the rise and the removal and C-28.FR-4 for the Reopen. `takeover`, `reminder`,
+  `auto_unacknowledged`, `unacknowledged` when the Owner is disabled or deleted, `notices_missed` when it stands for
+  Reminders and `paged` by Mention stay Loud on every Route: each is about one person, or comes from an Escalation chain
+  that the Route or a Team names on purpose. `notices_missed` keeps one row and takes the loudness of the notices it
+  stands for.
 - **C-36.FR-3** A governed row whose Loud event the Route does not list is recorded with the loudness `quiet` and no
   Mentions, and appears in a messenger as the row says, Quietly: the same new Root message, Thread reply or Storm
   summary, with `disable_notification` in Telegram, without Mentions in Mattermost, Slack and Bridges (C-13.FR-8,
@@ -83,19 +82,21 @@ draft, and move into the decided requirements, or into `P-NN` items of
 
 - **C-36.FR-6** With `route.new_alerts_remove_ack` on, an Alert that newly fires in an acknowledged Alert Group of the
   Route — one the Alert Group never had, or one of its own firing again — removes the acknowledgement: the Alert Group
-  becomes firing without an Owner, with the reason "New Alerts arrived". It records `alerts_added` in a row of its own
-  (variant `removes`): Loud, with the Mention `owner` (the Owner before the transition, C-09.FR-22), and `new_alerts`
-  as well where the Route lists `new_alerts` (FR-2); Timeline kind `alerts`, like every row of `alerts_added`; in a
-  messenger a Thread reply that gives the reason, names the Owner and lists the new Alerts, and a Root message update to
-  firing with the buttons of that status. The reply opens the Thread batching window, and further new Alerts within it
-  go into one reply when it closes (C-11.FR-4). A Replacement (C-09.FR-7), a Continuation (C-06.FR-11), the Alerts of a
-  Reopen into acknowledged (C-09.FR-4), new Alerts in a snoozed Alert Group (C-09.FR-6) and new Alerts in an attached
-  Alert Group, which follows its main Alert Group (C-37), leave the acknowledgement as it is
-  ([open question 2](#open-questions)). The rise to Urgent is checked first: an Alert that makes the Alert Group Urgent
-  while `route.urgent_rise_removes_ack` is on records `alerts_added` (acknowledged) and `urgency_raised` (removes), as
-  in L1 (C-09.FR-9), and no `alerts_added` (removes); with `route.urgent_rise_removes_ack` off, the same Alert removes
-  the acknowledgement as this requirement says. With `route.new_alerts_remove_ack` off, the rows of L1 stand: new Alerts
-  in an acknowledged Alert Group are Quiet and the acknowledgement stays.
+  becomes firing without an Owner, with the reason "New Alerts arrived". It records `alerts_added` in a row of its own,
+  told apart by the status change it records: Loud, with the Mention `owner` (the Owner before the transition,
+  C-09.FR-22), and `new_alerts` as well where the Route lists `new_alerts` (FR-2); Timeline kind `alerts`, like every
+  row of `alerts_added`; in a messenger a Thread reply that gives the reason, names the Owner and lists the new Alerts,
+  and a Root message update to firing with the buttons of that status. The reply opens the Thread batching window, and
+  further new Alerts within it go into one reply when it closes (C-11.FR-4). A Replacement (C-09.FR-7), a Continuation
+  (C-06.FR-11), the Alerts of a Reopen into acknowledged (C-09.FR-4), new Alerts in a snoozed Alert Group (C-09.FR-6)
+  and new Alerts in an attached Alert Group, which follows its main Alert Group (C-37), leave the acknowledgement as it
+  is; a Reopen keeps its Owner, as journal D151 and D625 decided. The removal is a row of its own of `alerts_added`, as
+  `urgency_raised` records a rise that removes the acknowledgement in a row of its own, rather than a new event. The
+  rise to Urgent is checked first: an Alert that makes the Alert Group Urgent while `route.urgent_rise_removes_ack` is
+  on records `alerts_added` (acknowledged) and `urgency_raised` (removes), as in L1 (C-09.FR-9), and no `alerts_added`
+  (removes); with `route.urgent_rise_removes_ack` off, the same Alert removes the acknowledgement as this requirement
+  says. With `route.new_alerts_remove_ack` off, the rows of L1 stand: new Alerts in an acknowledged Alert Group are
+  Quiet and the acknowledgement stays.
 - **C-36.FR-7** The removal is a system transition of the dispatcher, with Muster as the actor and the Transport
   `system`, recorded in the Timeline and not in the Audit log (ADR-0016). It is a point at which the Alert Group becomes
   firing again (ADR-0004, C-17.FR-1, C-32.FR-5): the Escalation chains that apply start over at their first step, and
@@ -121,29 +122,25 @@ draft, and move into the decided requirements, or into `P-NN` items of
   does not send Quiet notices unless the Admin unticks it.
 - **C-36.FR-10** The release that brings the settings adds them as columns in an expand step: its migration gives every
   existing Route, the Default route included, all seven Loud events and `route.new_alerts_remove_ack` off, which is the
-  fixed table of L1, whatever profile the Route was created with ([open question 3](#open-questions)); no Alert Group,
-  Timeline entry or Root message changes. Both fields are optional in the input of a Route: a create without them takes
-  the values of the Paging profile, and an update without them keeps the stored values, so that earlier clients keep
-  working. During a rolling update, replicas of the earlier version record every event with the loudness of L1,
-  whatever a Route edited meanwhile on a new replica says.
+  fixed table of L1, whatever profile the Route was created with — profiles are not stored, and guessing one from the
+  ack timeout and Reminders being off would change behaviour on upgrade; the release notes suggest unticking events on
+  Informational Routes. No Alert Group, Timeline entry or Root message changes. Both fields are optional in the input
+  of a Route: a create without them takes the values of the Paging profile, and an update without them keeps the
+  stored values, so that earlier clients keep working. During a rolling update, replicas of the earlier version record
+  every event with the loudness of L1, whatever a Route edited meanwhile on a new replica says.
 - **C-36.FR-11** The documentation's page on Loud and Quiet describes the settings, the table of FR-2 and the rows that
   stay Loud, the profiles, what Quiet means in each messenger ([reference.md](../l1/reference.md#loud-and-quiet)), and
   "New Alerts remove the acknowledgement" with what it starts over; the Route form links to it.
 
 ### Changes to shared tables, to L1 and to L2
 
-The story that implements this capability, in the same pull request:
-
-- adds `route.loud_events` and `route.new_alerts_remove_ack` to
-  [defaults.md](../l1/defaults.md#routing-and-lifecycle) with the values of FR-8;
-- adds the row `alerts_added` (removes) to the
-  [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2) and a revision of "Loudness is fixed in
-  L1" in [Loud and Quiet](../l1/reference.md#loud-and-quiet);
-- marks with the revision of [L2 §2](../L2.md#2-conventions) C-08.FR-1, C-08.FR-7, C-09.FR-4, C-09.FR-6, C-09.FR-9,
-  C-09.FR-22, C-17.FR-1, C-17.FR-2 and C-17.FR-11, and adds their row to [L2 §6](../L2.md#6-revisions-to-l1);
-- adds a dated revision to C-26.FR-5 (`destination_joined` follows `new_alert_group`), C-28.FR-4 and C-28.FR-7 (the
-  entries of an event that is not Loud mention nobody) and C-32.FR-5, whose table gains the removal as a point of
-  starting over, and updates the note on that point in [coverage.md](../../stories/coverage.md).
+[defaults.md](../l1/defaults.md#routing-and-lifecycle) lists `route.loud_events` and `route.new_alerts_remove_ack`;
+the [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2) has the row `alerts_added` (removes),
+and [Loud and Quiet](../l1/reference.md#loud-and-quiet) the revision of its fixed loudness; C-08.FR-1, C-08.FR-7,
+C-09.FR-4, C-09.FR-6, C-09.FR-9, C-09.FR-22, C-15.FR-2, C-17.FR-1, C-17.FR-2 and C-17.FR-11 carry the revision of
+[L2 §2](../L2.md#2-conventions), listed in [L2 §6](../L2.md#6-revisions-to-l1), and C-26.FR-5, C-28.FR-4 and C-32.FR-5
+a dated revision. The story that implements this capability adds the new fields to `api/openapi.yaml` and a
+migration, and updates the note on C-32.FR-5 in [coverage.md](../../stories/coverage.md).
 
 ## UI
 
@@ -159,7 +156,8 @@ profile fills the section. The Routes list needs no change.
 ## API surface
 
 `loud_events` (a list of `MentionEvent`) and `new_alerts_remove_ack` in the policy of `routes`, optional in the input;
-both on `route-profiles`; the `alerts_added` entry of the removal, with its variant, on `alert-groups/{id}/timeline`.
+both on `route-profiles`; the `alerts_added` entry of the removal, with the status it changed, on
+`alert-groups/{id}/timeline`.
 
 ## Acceptance
 
@@ -198,29 +196,6 @@ Checked with the fake Alertmanager, a virtual clock, the fake messenger servers 
 - **C-36.AC-10** In a real browser, the Route form fills "Loud and Quiet" from the chosen profile, shows "Ack timeout"
   unavailable while the ack timeout is off and ticks it when the ack timeout is turned on, and saves a change that the
   Audit log shows as a diff, in English and in Russian.
-
-## Open questions
-
-The recorded decisions (journal D546, ADR-0004, ADR-0005) settle the seven Loud events, the profiles' values, that a
-change applies to later events, that a Quiet message carries no Mentions (C-28.FR-4), that loudness does not decide when
-Escalation chains start (ADR-0004), and that new Alerts remove the acknowledgement only where a Route allows it, off by
-default, not in a snoozed Alert Group and not by a Replacement, with a Loud reply (ADR-0004). These are not settled; the
-requirements above follow the recommendation, to be confirmed before the story.
-
-1. **Are the rows about the Owner governed by the settings?** A Reopen into acknowledged, a rise that removes the
-   acknowledgement and new Alerts that remove it mention the Owner. Recommendation: they stay Loud and always mention
-   the Owner, as ADR-0004 says for the rise and the removal and C-28.FR-4 for the Reopen; the Route's Loud event decides
-   only whether the Destinations' entries for that event are mentioned as well. The alternative — a Quiet row that drops
-   the Owner too — would need an amendment of ADR-0004.
-2. **Which new Alerts remove the acknowledgement, and how is it recorded?** Recommendation: every Alert that newly fires
-   in an acknowledged Alert Group, except a Continuation and the Alerts of a Reopen into acknowledged, which keeps the
-   Owner as journal D151 and D625 decided for Reopens; recorded as a row `removes` of `alerts_added` with the kind
-   `alerts` of every `alerts_added` row, as `urgency_raised` records a rise that removes the acknowledgement in a row of
-   its own, rather than as a new event.
-3. **What do existing Routes get?** Profiles are not stored, so the migration cannot tell an Informational Route.
-   Recommendation: all seven Loud events and the removal off for every Route, which is exactly L1, and the release
-   notes suggest unticking events on Informational Routes; inferring the profile from the ack timeout and Reminders
-   being off would change behaviour on upgrade.
 
 ## Related ADRs
 
