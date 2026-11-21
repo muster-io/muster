@@ -53,6 +53,7 @@ import { destinationMessengerName, useConnectionsById } from "../components/dest
 import { DestinationPreviewPanel } from "../components/destination-preview-panel";
 import { DestinationTestPanel } from "../components/destination-test-panel";
 import { PageTitle } from "../components/docs-link";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
 import { RequestLogTabs } from "../components/request-log";
 import { type RequestLogSearch, requestLogSearchSchema } from "../components/request-log-search";
@@ -412,6 +413,7 @@ function DestinationView({ destinationId }: { destinationId: string }) {
                   {destinationMessengerName(t, destination.type, connection)}
                 </span>
                 <HealthBadge health={destination.health} />
+                <ManagedByBadge tool={destination.managed_by} />
               </p>
             )}
           </div>
@@ -431,6 +433,7 @@ function DestinationView({ destinationId }: { destinationId: string }) {
             <BrokenBanner health={destination.health} />
           </div>
           {destination.template_error && <TemplateErrorBanner state={destination.template_error} />}
+          <ManagedByWarning object="destination" tool={destination.managed_by} />
           {destination.type === "webhook" ? (
             <RequestLogTabs
               search={search}

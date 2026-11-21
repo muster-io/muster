@@ -499,8 +499,8 @@ function EntryDetails({ entry }: { entry: TimelineEntry }) {
   }
   if (entry.kind === "delivery" && entry.mention !== undefined) {
     // A person, or a group or everyone in the chat that a bridge's line of Mentions left out; a template's token has
-    // no entry and no event.
-    const { user, mention, entry: named, event, reason } = entry.mention;
+    // no entry and no event, and the Team mention or everyone of a Page names its Page instead.
+    const { user, mention, entry: named, event, reason, page: paged } = entry.mention;
     if (user !== undefined) {
       rows.push(
         <Detail key="mention-person" term={t("timeline.details.mentionPerson")}>
@@ -516,15 +516,25 @@ function EntryDetails({ entry }: { entry: TimelineEntry }) {
         </Detail>,
       );
     }
-    rows.push(
-      <Detail key="mention-entry" term={t("timeline.details.mentionEntry")}>
-        <span data-testid="mention-entry">
-          {named === undefined
-            ? t("timeline.details.mentionFromTemplate")
-            : targetLabel(t, named.target)}
-        </span>
-      </Detail>,
-    );
+    if (paged !== undefined) {
+      rows.push(
+        <Detail key="mention-page" term={t("timeline.details.mentionPage")}>
+          <span data-testid="mention-page">
+            {t("timeline.details.mentionPageStep", { number: paged.step, chain: paged.chain_name })}
+          </span>
+        </Detail>,
+      );
+    } else {
+      rows.push(
+        <Detail key="mention-entry" term={t("timeline.details.mentionEntry")}>
+          <span data-testid="mention-entry">
+            {named === undefined
+              ? t("timeline.details.mentionFromTemplate")
+              : targetLabel(t, named.target)}
+          </span>
+        </Detail>,
+      );
+    }
     if (event !== undefined) {
       rows.push(
         <Detail key="mention-event" term={t("timeline.details.mentionEvent")}>

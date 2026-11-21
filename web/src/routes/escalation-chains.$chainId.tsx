@@ -25,6 +25,7 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
 import { EscalationChainForm } from "../components/escalation-chain-form";
 import { EscalationChainRuns } from "../components/escalation-chain-runs";
+import { ManagedByBadge, ManagedByDeleteLine, ManagedByWarning } from "../components/managed-by";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button, buttonVariants } from "../components/ui/button";
 import {
@@ -80,6 +81,7 @@ function DeleteChain({ chain }: { chain: EscalationChain }) {
               {t("escalation.delete.title", { name: chain.name })}
             </DialogTitle>
             <DialogDescription>{t("escalation.delete.description")}</DialogDescription>
+            <ManagedByDeleteLine tool={chain.managed_by} />
           </DialogHeader>
           {remove.isError && (
             <Alert variant="destructive">
@@ -119,6 +121,7 @@ function ChainBody({ chain, reload }: { chain: EscalationChain; reload: () => vo
   const stale = chain.etag !== base.etag && !superseded.has(chain.etag);
   return (
     <div className="flex min-w-0 flex-col gap-8">
+      <ManagedByWarning object="escalationChain" tool={base.managed_by} />
       <EscalationChainForm
         chain={base}
         readOnly={!canWrite}
@@ -177,9 +180,12 @@ function ChainView({ chainId }: { chainId: string }) {
           <ArrowLeftIcon aria-hidden="true" />
           {t("escalation.title")}
         </Link>
-        <PageTitle docs="page.escalation_chain">
-          {chain?.name ?? t("escalation.page.title")}
-        </PageTitle>
+        <div className="flex min-w-0 flex-col items-start gap-1">
+          <PageTitle docs="page.escalation_chain">
+            {chain?.name ?? t("escalation.page.title")}
+          </PageTitle>
+          <ManagedByBadge tool={chain?.managed_by} />
+        </div>
         {chain?.owning_team != null && (
           <p className="text-sm text-muted-foreground">
             {t("escalation.page.ownedBy")}{" "}

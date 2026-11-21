@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { useGetOrganization } from "../api/gen/endpoints/organization/organization";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import {
   OutgoingHeartbeatForm,
   OutgoingHeartbeatLastResult,
@@ -29,9 +30,13 @@ function OutgoingHeartbeatView() {
   const status = useSystemStatus(canRead);
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <PageTitle docs="page.organization.outgoing_heartbeat">
-        {t("outgoingHeartbeat.title")}
-      </PageTitle>
+      <div className="flex flex-col items-start gap-1">
+        <PageTitle docs="page.organization.outgoing_heartbeat">
+          {t("outgoingHeartbeat.title")}
+        </PageTitle>
+        <ManagedByBadge tool={query.data?.managed_by} />
+      </div>
+      <ManagedByWarning object="organization" tool={query.data?.managed_by} />
       {query.data === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}

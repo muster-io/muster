@@ -410,9 +410,11 @@ func TestPageRepliesOfTeams(t *testing.T) {
 }
 
 // leavingOutMentions is the adapter of a bridge whose Mention line leaves out every group and mention of everyone of
-// its replies for length (C-12.FR-11), which it reports in Outcome.LeftOutMentions.
+// its replies for length (C-12.FR-11), which it reports in Outcome.LeftOutMentions, and the people whose public ids
+// are ids, which it reports in Outcome.LeftOut.
 type leavingOutMentions struct {
 	*deliverytest.Recorder
+	ids []string
 }
 
 func (a leavingOutMentions) Reply(ctx context.Context, c delivery.Call, root delivery.Root,
@@ -424,28 +426,111 @@ func (a leavingOutMentions) Reply(ctx context.Context, c delivery.Call, root del
 				out.LeftOutMentions = append(out.LeftOutMentions, tg)
 			}
 		}
+		out.LeftOut = a.ids
 	}
 	return out
 }
 
-// TestPageReplyLeftOutMentions (#626): the Team mention and the mention of everyone of a Page name no Mention entry of
-// the Destination, so a Page reply whose line leaves them out for length records no "Mention not delivered" — not as
-// a template's token, which they are not.
+// pageMentionDetails are the details of the mention events of e, each decoded as a map, so that a field the event
+// should not carry shows.
+func pageMentionDetails(t *testing.T, e *env) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, ev := range e.mentionEvents() {
+		var d map[string]any
+		if err := json.Unmarshal(ev.Detail, &d); err != nil {
+			t.Fatalf("detail %s: %v", ev.Detail, err)
+		}
+		if ev.Kind != string(delivery.EventMentionNotDelivered) || ev.Loudness != "quiet" || len(ev.Mentions) != 0 ||
+			ev.AlertGroupID.Int64 != groupID || ev.DestinationID != destMM {
+			t.Errorf("event %s %s %v group %d destination %d", ev.Kind, ev.Loudness, ev.Mentions,
+				ev.AlertGroupID.Int64, ev.DestinationID)
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// TestPageReplyLeftOutMentions is C-28.FR-3, C-12.FR-11 and C-32.FR-9 (#690): a Page reply whose line leaves out the
+// Team mention or the mention of everyone that its Page names, for length, records "Mention not delivered" with the
+// reason message_too_long, Quiet and without Mentions, naming the Mention and — in place of an entry, which a Page
+// does not have — the Page, by its step and the name of its chain; with no entry, event or target it shows in the
+// Timeline and warns on no Destination. A person the line leaves out is not reached, as before (#645), and records no
+// event; a Page of people only, and a reply that keeps its Mentions, record nothing.
 func TestPageReplyLeftOutMentions(t *testing.T) {
-	e, _ := pageEnv(t)
-	e.w.Adapters[delivery.TypeMattermost] = leavingOutMentions{Recorder: e.rec}
+	e, s := pageEnv(t)
+	e.w.Adapters[delivery.TypeMattermost] = leavingOutMentions{Recorder: e.rec,
+		ids: []string{pagePeople[ivanID].PublicID}}
 	e.addPage(901, dbgen.GetPageReplyRow{StepNumber: 6, TeamID: pgtype.Int8{Int64: 3, Valid: true},
-		TeamName: "payments", ChainTeamName: "payments"})
-	e.addPage(902, dbgen.GetPageReplyRow{StepNumber: 2, Everyone: "here"})
+		TeamName: "payments", ChainTeamName: "payments", ChainName: "Payments primary"})
+	e.addPage(902, dbgen.GetPageReplyRow{StepNumber: 2, Everyone: "here", ChainName: "Night"})
+	e.addPage(903, dbgen.GetPageReplyRow{StepNumber: 1, Importance: "normal", ChainName: "Night"}, ivanID)
 	target := groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceTeam}
 	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, pagedEvent(2, 901, target),
-		pagedEvent(3, 902, target))
+		pagedEvent(3, 902, target), pagedEvent(4, 903, groups.PageTarget{DestinationID: destMM,
+			Source: groups.PageSourceRoute, Linked: []int64{ivanID}}))
 	e.rounds(t)
-	if r := e.replies(); len(r) != 2 {
+	if r := e.replies(); len(r) != 3 {
 		t.Fatalf("replies %+v", r)
 	}
-	if ev := e.mentionEvents(); len(ev) != 0 {
-		t.Errorf("mention events %+v", ev)
+	want := []map[string]any{
+		{"mention": map[string]any{"kind": "group", "name": "payments"},
+			"page": map[string]any{"step": float64(6), "chain_name": "Payments primary"}, "reason": "message_too_long"},
+		{"mention": map[string]any{"kind": "everyone", "name": "here"},
+			"page": map[string]any{"step": float64(2), "chain_name": "Night"}, "reason": "message_too_long"}}
+	got := pageMentionDetails(t, e)
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("mention events\n%v\nwant\n%v", got, want)
+	}
+	for _, r := range e.db.replies {
+		if r.page == 903 && (r.state != "sent" || len(r.pagedUsers) != 0) {
+			t.Errorf("the reply of the Page of ivan, left out: %s, mentions %v", r.state, r.pagedUsers)
+		}
+	}
+	for _, o := range s.outcomes {
+		if o.Page == 903 && o.Ended && (!o.Delivered || len(o.Reached) != 0) {
+			t.Errorf("outcome of the Page of ivan %+v", o)
+		}
+	}
+
+	// A reply whose lease went to another replica during the call records nothing; the replica that sends it again
+	// records the Mention once.
+	e.addPage(904, dbgen.GetPageReplyRow{StepNumber: 3, Everyone: "channel", ChainName: "Night"})
+	e.business.Advance(time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, pagedEvent(5, 904, target))
+	var reply *fakeReply
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+		Then: func() {
+			for _, r := range e.db.replies {
+				if r.page == 904 {
+					reply, r.owner = r, "r2"
+				}
+			}
+		}})
+	e.round(t)
+	if reply == nil || len(e.mentionEvents()) != 2 {
+		t.Fatalf("recorded without the lease: %v", e.eventKinds())
+	}
+	reply.until = e.real.Now()
+	e.real.Advance(delivery.Lease)
+	e.round(t)
+	got = pageMentionDetails(t, e)
+	if reply.state != "sent" || len(got) != 3 || fmt.Sprint(got[2]) != fmt.Sprint(map[string]any{
+		"mention": map[string]any{"kind": "everyone", "name": "channel"},
+		"page":    map[string]any{"step": float64(3), "chain_name": "Night"}, "reason": "message_too_long"}) {
+		t.Errorf("after the reply sent again: %s %v", reply.state, got)
+	}
+
+	// A reply that keeps them records nothing.
+	kept, _ := pageEnv(t)
+	kept.addPage(901, dbgen.GetPageReplyRow{StepNumber: 6, TeamID: pgtype.Int8{Int64: 3, Valid: true},
+		TeamName: "payments", ChainName: "Payments primary"})
+	kept.addPage(902, dbgen.GetPageReplyRow{StepNumber: 2, Everyone: "here", ChainName: "Night"})
+	kept.enqueue(t, kept.group(groups.StatusFiring, "a"), groups.System, pagedEvent(2, 901, target),
+		pagedEvent(3, 902, target))
+	kept.rounds(t)
+	if r := kept.replies(); len(r) != 2 || len(kept.mentionEvents()) != 0 {
+		t.Errorf("kept: %d replies, events %v", len(r), kept.eventKinds())
 	}
 }
 

@@ -23,6 +23,7 @@ import {
 import { useGetOrganization } from "../api/gen/endpoints/organization/organization";
 import type { Integration } from "../api/gen/model";
 import { isStale, problemText } from "../lib/api";
+import { ManagedByDeleteLine } from "./managed-by";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -100,6 +101,7 @@ export function IntegrationDeleteDialog({ integration }: { integration: Integrat
                 </>
               )}
             </DialogDescription>
+            <ManagedByDeleteLine tool={integration.managed_by} />
           </DialogHeader>
           {organization.isError && (
             <Alert variant="destructive">

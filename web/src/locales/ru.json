@@ -2055,6 +2055,25 @@
     "readOnly": "Эту таблицу соответствий можно смотреть, но не менять.",
     "title": "Таблицы соответствий"
   },
+  "managedBy": {
+    "badge": "Управляется {{tool}}",
+    "deleteLine": "{{tool}} создаст его снова при следующем запуске.",
+    "objects": {
+      "connection": "подключение",
+      "destination": "место доставки",
+      "escalationChain": "цепочка эскалации",
+      "integration": "интеграция",
+      "linkRule": "правило ссылок",
+      "lookupTable": "таблица соответствий",
+      "oidcSettings": "настройки OIDC",
+      "organization": "организация",
+      "outboundPolicy": "политика исходящих адресов",
+      "route": "маршрут",
+      "schedule": "расписание",
+      "team": "команда"
+    },
+    "warning": "Этим объектом ({{object}}) управляет {{tool}}. Изменения, сохранённые здесь, отменит следующий запуск {{tool}}: меняйте его код."
+  },
   "matchers": {
     "add": "Добавить матчер",
     "applied": "Применённые матчеры",
@@ -3753,6 +3772,8 @@
       "mentionEvent": "Событие",
       "mentionFromTemplate": "шаблон сообщения",
       "mentionNamed": "Упоминание",
+      "mentionPage": "Призыв",
+      "mentionPageStep": "Шаг {{number}} · {{chain}}",
       "mentionPerson": "Человек",
       "mentionReason": "Причина",
       "owner": "Владелец",

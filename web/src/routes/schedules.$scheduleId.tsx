@@ -25,6 +25,7 @@ import {
 import type { OnCallSegment, Schedule } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
+import { ManagedByBadge, ManagedByDeleteLine, ManagedByWarning } from "../components/managed-by";
 import { OverrideForm } from "../components/override-form";
 import { RotationLayersSummary, useTeamPeople } from "../components/rotation-layers-editor";
 import { IcalSubscription } from "../components/ical-subscription";
@@ -83,6 +84,7 @@ function DeleteSchedule({ schedule }: { schedule: Schedule }) {
           <DialogHeader>
             <DialogTitle>{t("schedule.delete.title", { name: schedule.name })}</DialogTitle>
             <DialogDescription>{t("schedule.delete.description")}</DialogDescription>
+            <ManagedByDeleteLine tool={schedule.managed_by} />
           </DialogHeader>
           {remove.isError && (
             <Alert variant="destructive">
@@ -190,10 +192,12 @@ function ScheduleBody({ schedule }: { schedule: Schedule }) {
               {t("schedule.main")}
             </span>
           )}
+          <ManagedByBadge tool={schedule.managed_by} />
         </div>
         <p className="text-muted-foreground">
           {t("schedule.hint", { count: schedule.rotation_layers.length })}
         </p>
+        <ManagedByWarning object="schedule" tool={schedule.managed_by} />
       </div>
       {current.data !== undefined && <ScheduleOnCallNow data={current.data} zone={zone} />}
       {view.data !== undefined && <ScheduleWarnings warnings={view.data.warnings} zone={zone} />}
