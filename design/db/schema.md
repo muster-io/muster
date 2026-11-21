@@ -1962,12 +1962,12 @@ stored `info` declares the role `gateway`; it has no table of its own.
   its notification — only the newest sent code of a contact is checked, so that a code still being sent, or one whose
   sending failed, never hides an earlier valid one — `used_at` once it confirmed its contact and `voided_at` once the
   last attempt was wrong, a newer code of the contact was sent or its own sending failed. `user_id` and `contact_hash`,
-  the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User
-  (`gateway_contact_codes_user_idx`) and per contact whoever asked (`gateway_contact_codes_hash_idx`), each on `(org_id,
-  …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that removing and
-  adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id, contact_id,
-  created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since `created_at` comes
-  from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
+  the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User and per User
+  and contact (`gateway_contact_codes_user_idx`) and per contact whoever asked (`gateway_contact_codes_hash_idx`), each
+  on `(org_id, …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that
+  removing and adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id,
+  contact_id, created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since
+  `created_at` comes from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
   `gateway_contact_codes_contact_fk_idx` on `(contact_id)` serve the foreign key actions: the pruning of sessions
   deletes their codes, and removing a contact sets the contact of its codes to null. The Leader's short-lived pruning
   deletes the codes that expired a day ago (`gateway_contact_codes_expires_idx` on `(org_id, expires_at)`) with the

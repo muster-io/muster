@@ -39,10 +39,13 @@ const (
 	CodeLength  = 6
 	CodeTTL     = 10 * time.Minute
 	MaxAttempts = 5
-	// RequestsPerUser and RequestsPerContact are gateway.contact_code_requests: the codes per User and per contact
-	// text, whoever asks, within RequestWindow.
+	// RequestsPerUser, RequestsPerContact and CodesPerContact are gateway.contact_code_requests within RequestWindow:
+	// the codes a User asks for, refused beyond it; the codes a User asks for to one contact text, refused beyond it;
+	// and the codes one contact text receives whoever asks, beyond which a request is answered as sent and nothing is
+	// sent, so that the answer never tells of other Users' requests.
 	RequestsPerUser    = 5
 	RequestsPerContact = 3
+	CodesPerContact    = 10
 	RequestWindow      = time.Hour
 	// CodePruneAfter is how long after it expired a code is deleted, as account_link.request_prune_after is for the
 	// Account link requests it is pruned with.
@@ -77,9 +80,10 @@ const (
 
 // The outcomes of gateway_contact_code_sent besides the error classes of the Bridge protocol.
 const (
-	OutcomeOK      = "ok"
-	OutcomeLimited = "limited"
-	OutcomeError   = "error"
+	OutcomeOK       = "ok"
+	OutcomeLimited  = "limited"
+	OutcomeError    = "error"
+	OutcomeWithheld = "withheld"
 )
 
 // The error classes of the Bridge protocol that a refusal of the gateway has.
@@ -234,8 +238,8 @@ func (s *Service) user(ctx context.Context, publicID string) (dbgen.GetUserByPub
 // unknown_id at /connection_id. In one transaction, under the lock of the User: the limits of
 // gateway.contact_code_requests (RateLimitedError), the replacement of the User's earlier unconfirmed contact at the
 // gateway, recorded as gateway_contact.deleted with the reason replaced, the contact, recorded as
-// gateway_contact.created, and its code. Then the code goes out as SendCode sends it; a failure there leaves the
-// contact, unconfirmed, and is returned as SendCode returns it.
+// gateway_contact.created, and its code. Then the code goes out as SendCode sends it, or is withheld as SendCode
+// withholds it; a failure there leaves the contact, unconfirmed, and is returned as SendCode returns it.
 func (s *Service) Create(ctx context.Context, r Requester, connectionPublicID, contact string) (Contact, error) {
 	text, err := normalizeContact(contact)
 	if err != nil {
@@ -258,6 +262,7 @@ func (s *Service) Create(ctx context.Context, r Requester, connectionPublicID, c
 		contactID int64
 		codeID    int64
 		lang      string
+		withhold  bool
 	)
 	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
 		u, err := s.lockUser(ctx, q, r.UserID)
@@ -265,7 +270,7 @@ func (s *Service) Create(ctx context.Context, r Requester, connectionPublicID, c
 			return err
 		}
 		lang = language(u.Language)
-		if err := s.limits(ctx, q, u.ID, hashText(text), now); err != nil {
+		if withhold, err = s.limits(ctx, q, u.ID, hashText(text), now); err != nil {
 			return err
 		}
 		gone, err := q.DeleteUnconfirmedContacts(ctx, dbgen.DeleteUnconfirmedContactsParams{OrgID: s.cfg.OrgID,
@@ -296,11 +301,15 @@ func (s *Service) Create(ctx context.Context, r Requester, connectionPublicID, c
 			added(gw, text), details(gw, u.PublicID, "", "")); err != nil {
 			return err
 		}
-		codeID, err = s.insertCode(ctx, q, u.ID, contactID, created.PublicID, text, r.SessionID, code, now)
+		codeID, err = s.storeCode(ctx, q, u.ID, contactID, created.PublicID, text, r.SessionID, code, now, withhold)
 		return err
 	})
 	if err != nil {
 		return Contact{}, err
+	}
+	if withhold {
+		s.withheld(ctx, r, gw, created.PublicID)
+		return created, nil
 	}
 	if err := s.send(ctx, r, gw, contactID, created.PublicID, text, lang, code, codeID); err != nil {
 		return Contact{}, err
@@ -314,8 +323,11 @@ func (s *Service) Create(ctx context.Context, r Requester, connectionPublicID, c
 // requesting web session; then, on the interactive path, sendNotification with the key of the code, the text
 // "Your Muster code: …" in the User's language and no action, the code masked in the Request log. No limiter token
 // within the budget is a *delivery.LimitedError and deletes the code, which was never sent; a refusal of the gateway
-// is a *RefusedError and any other failure an error, both of which void the code, which still counts. A contact of
-// another User is ErrNotFound; one whose gateway is no longer a Notification gateway a FieldError unknown_id.
+// is a *RefusedError and any other failure an error, both of which void the code, which still counts. A request beyond
+// the codes the contact text receives across Users is answered as if its code were sent: a code that no one knows is
+// stored and marked sent in the transaction, voiding the earlier ones, nothing is sent, and gateway_contact_code_sent
+// says withheld. A contact of another User is ErrNotFound; one whose gateway is no longer a Notification gateway a
+// FieldError unknown_id.
 func (s *Service) SendCode(ctx context.Context, r Requester, contactPublicID string) (Contact, error) {
 	norm, err := publicid.Parse(publicid.GatewayContact, contactPublicID)
 	if err != nil {
@@ -330,9 +342,10 @@ func (s *Service) SendCode(ctx context.Context, r Requester, contactPublicID str
 	}
 	now := s.now()
 	var (
-		c      dbgen.LockContactOfUserRow
-		codeID int64
-		lang   string
+		c        dbgen.LockContactOfUserRow
+		codeID   int64
+		lang     string
+		withhold bool
 	)
 	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
 		u, err := s.lockUser(ctx, q, r.UserID)
@@ -351,16 +364,20 @@ func (s *Service) SendCode(ctx context.Context, r Requester, contactPublicID str
 		if !c.Gateway {
 			return notGateway()
 		}
-		if err := s.limits(ctx, q, u.ID, hashText(c.Contact), now); err != nil {
+		if withhold, err = s.limits(ctx, q, u.ID, hashText(c.Contact), now); err != nil {
 			return err
 		}
-		codeID, err = s.insertCode(ctx, q, u.ID, c.ID, c.PublicID, c.Contact, r.SessionID, code, now)
+		codeID, err = s.storeCode(ctx, q, u.ID, c.ID, c.PublicID, c.Contact, r.SessionID, code, now, withhold)
 		return err
 	})
 	if err != nil {
 		return Contact{}, err
 	}
 	gw := gatewayRef{id: c.ConnectionID, publicID: c.ConnectionPublicID, name: c.ConnectionName}
+	if withhold {
+		s.withheld(ctx, r, gw, c.PublicID)
+		return contactOf(c), nil
+	}
 	if err := s.send(ctx, r, gw, c.ID, c.PublicID, c.Contact, lang, code, codeID); err != nil {
 		return Contact{}, err
 	}
@@ -563,43 +580,68 @@ func notGateway() error {
 }
 
 // limits takes the lock of the requests for the contact text of hash, then refuses a request beyond
-// gateway.contact_code_requests within the hour before now — of the User, then for the contact whoever asked — with
-// a *RateLimitedError until the oldest one counted is an hour old. The caller holds the lock of the User.
-func (s *Service) limits(ctx context.Context, q Queries, userID int64, hash []byte, now time.Time) error {
+// gateway.contact_code_requests within the hour before now — of the User, then of the User for the contact text —
+// with a *RateLimitedError until the oldest one counted is an hour old. A request beyond the codes the contact text
+// receives within the hour, whoever asked, is not refused, which would tell of other Users' requests: withhold says
+// to answer it as sent and send nothing. The caller holds the lock of the User.
+func (s *Service) limits(ctx context.Context, q Queries, userID int64, hash []byte, now time.Time) (bool, error) {
 	if err := q.LockContactText(ctx, dbgen.LockContactTextParams{LockClass: db.GatewayContactLockClass,
 		OrgID: s.cfg.OrgID, ContactHash: hash}); err != nil {
-		return fmt.Errorf("lock the code requests of the contact: %w", err)
+		return false, fmt.Errorf("lock the code requests of the contact: %w", err)
 	}
 	since := now.Add(-RequestWindow)
 	n, err := q.CountUserCodes(ctx, dbgen.CountUserCodesParams{Since: since, OrgID: s.cfg.OrgID, UserID: userID})
 	if err != nil {
-		return fmt.Errorf("count the code requests of the user: %w", err)
+		return false, fmt.Errorf("count the code requests of the user: %w", err)
 	}
 	if n.Requests >= RequestsPerUser {
-		return &RateLimitedError{RetryAfter: n.Oldest.Add(RequestWindow).Sub(now)}
+		return false, &RateLimitedError{RetryAfter: n.Oldest.Add(RequestWindow).Sub(now)}
+	}
+	p, err := q.CountUserContactCodes(ctx, dbgen.CountUserContactCodesParams{Since: since, OrgID: s.cfg.OrgID,
+		UserID: userID, ContactHash: hash})
+	if err != nil {
+		return false, fmt.Errorf("count the code requests of the user for the contact: %w", err)
+	}
+	if p.Requests >= RequestsPerContact {
+		return false, &RateLimitedError{RetryAfter: p.Oldest.Add(RequestWindow).Sub(now)}
 	}
 	m, err := q.CountContactCodes(ctx, dbgen.CountContactCodesParams{Since: since, OrgID: s.cfg.OrgID,
 		ContactHash: hash})
 	if err != nil {
-		return fmt.Errorf("count the code requests of the contact: %w", err)
+		return false, fmt.Errorf("count the code requests of the contact: %w", err)
 	}
-	if m.Requests >= RequestsPerContact {
-		return &RateLimitedError{RetryAfter: m.Oldest.Add(RequestWindow).Sub(now)}
-	}
-	return nil
+	return m.Requests >= CodesPerContact, nil
 }
 
-// insertCode stores the code of the contact contactID, its SHA-256 bound to the contact only, tied to the web session
-// sessionID, expiring CodeTTL after now.
-func (s *Service) insertCode(ctx context.Context, q Queries, userID, contactID int64, contactPublicID, text string,
-	sessionID int64, code string, now time.Time) (int64, error) {
+// storeCode stores the code of the contact contactID, its SHA-256 bound to the contact only, tied to the web session
+// sessionID, expiring CodeTTL after now. A withheld code is stored instead as random bytes that no code hashes to and
+// marked sent at once, voiding the contact's earlier codes: it counts toward the limits and looks like a code the
+// gateway accepted, but confirms nothing.
+func (s *Service) storeCode(ctx context.Context, q Queries, userID, contactID int64, contactPublicID, text string,
+	sessionID int64, code string, now time.Time, withhold bool) (int64, error) {
+	hash := codeHash(contactPublicID, code)
+	if withhold {
+		if _, err := io.ReadFull(s.cfg.Random, hash); err != nil {
+			return 0, fmt.Errorf("generate the withheld code: %w", err)
+		}
+	}
 	id, err := q.InsertCode(ctx, dbgen.InsertCodeParams{OrgID: s.cfg.OrgID, UserID: userID,
 		ContactID: pgtype.Int8{Int64: contactID, Valid: true}, ContactHash: hashText(text), SessionID: sessionID,
-		CodeHash: codeHash(contactPublicID, code), CreatedAt: now, ExpiresAt: now.Add(CodeTTL)})
+		CodeHash: hash, CreatedAt: now, ExpiresAt: now.Add(CodeTTL)})
 	if err != nil {
 		return 0, fmt.Errorf("store the code: %w", err)
 	}
+	if withhold {
+		return id, s.markSent(ctx, q, contactID, id, now)
+	}
 	return id, nil
+}
+
+// withheld logs the code of the contact contactPublicID that was withheld, as gateway_contact_code_sent.
+func (s *Service) withheld(ctx context.Context, r Requester, gw gatewayRef, contactPublicID string) {
+	s.cfg.Log.Log(ctx, logging.GatewayContactCodeSent, logging.F("user", r.UserPublicID),
+		logging.F("connection", gw.publicID), logging.F("contact", contactPublicID),
+		logging.F("outcome", OutcomeWithheld))
 }
 
 // send sends the code codeID of the contact contactID through the gateway gw on the interactive path, with the code
@@ -656,17 +698,23 @@ func (s *Service) sent(ctx context.Context, userID, contactID, codeID int64) err
 		if err != nil {
 			return err
 		}
-		if err := q.MarkCodeSent(ctx, dbgen.MarkCodeSentParams{Now: now, OrgID: s.cfg.OrgID, ID: codeID}); err != nil {
-			return fmt.Errorf("mark the code sent: %w", err)
-		}
-		if _, err := q.VoidEarlierCodes(ctx, dbgen.VoidEarlierCodesParams{Now: now, OrgID: s.cfg.OrgID,
-			ContactID: pgtype.Int8{Int64: contactID, Valid: true}, Keep: codeID}); err != nil {
-			return fmt.Errorf("void the earlier codes: %w", err)
-		}
-		return nil
+		return s.markSent(ctx, q, contactID, codeID, now)
 	})
 	if err != nil {
 		return fmt.Errorf("the code was sent, but %w", err)
+	}
+	return nil
+}
+
+// markSent marks the code codeID sent and voids the earlier codes of the contact contactID; the caller holds the lock
+// of the User.
+func (s *Service) markSent(ctx context.Context, q Queries, contactID, codeID int64, now time.Time) error {
+	if err := q.MarkCodeSent(ctx, dbgen.MarkCodeSentParams{Now: now, OrgID: s.cfg.OrgID, ID: codeID}); err != nil {
+		return fmt.Errorf("mark the code sent: %w", err)
+	}
+	if _, err := q.VoidEarlierCodes(ctx, dbgen.VoidEarlierCodesParams{Now: now, OrgID: s.cfg.OrgID,
+		ContactID: pgtype.Int8{Int64: contactID, Valid: true}, Keep: codeID}); err != nil {
+		return fmt.Errorf("void the earlier codes: %w", err)
 	}
 	return nil
 }

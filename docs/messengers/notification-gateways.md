@@ -94,14 +94,16 @@ Code requests — adding a contact and asking for a new code — are limited (`g
 Per person
 :   5 within an hour.
 
-Per contact
-:   3 within an hour for one contact, as typed and trimmed, whoever asks.
+Per person and contact
+:   3 within an hour from one person for one contact, as typed and trimmed.
 
 A request beyond them answers `429` `contact_code_requests_exceeded` with `Retry-After`; a request whose code the
-gateway could not deliver still counts. The code is sent on the interactive path, since the person waits for it: when
-no rate-limit token of the gateway is free within `delivery.interactive_budget`, the answer is `503` with
-`Retry-After`, and when the gateway refuses the notification, `502` `gateway_refused` with its `gateway_class`. The
-contact stays, unconfirmed, and a new code can be asked for.
+gateway could not deliver still counts. What others ask for never refuses a person's request: a contact receives at
+most 10 codes within an hour whoever asks, and a request beyond them is answered as if its code were sent, but nothing
+is sent, so that the answer never tells of other people's requests. The code is sent on the interactive path, since
+the person waits for it: when no rate-limit token of the gateway is free within `delivery.interactive_budget`, the
+answer is `503` with `Retry-After`, and when the gateway refuses the notification, `502` `gateway_refused` with its
+`gateway_class`. The contact stays, unconfirmed, and a new code can be asked for.
 
 ### Change a contact
 
