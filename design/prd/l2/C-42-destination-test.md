@@ -10,8 +10,8 @@ Escalation chains that would run there in accelerated time and sees whom each st
 Paging or calling anyone. No Alert Group, statistic, metric of Pages or Assignee changes (journal D141, D548;
 ADR-0018). The one-message test of C-16 stays as it is; this capability carries what C-16.FR-6 left out of L1.
 
-Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md). This capability is a draft: where
-its decisions are still open, a requirement names the [open question](#open-questions) that settles it.
+Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md). The questions of the draft were
+decided by the maintainer in its review (#673).
 
 ## Scenarios
 
@@ -25,8 +25,8 @@ its decisions are still open, a requirement names the [open question](#open-ques
 3. Ivan presses Acknowledge on the Test message in Mattermost. He is answered "This is a test message; nothing was
    changed", and the result shows "A press reached Muster: @ivan, Acknowledge".
 4. An outgoing webhook Destination in events mode receives, step by step, the events of each step marked `test: true`,
-   and its receiver's answers are shown masked; in template mode it receives the "update" and "reply in thread"
-   requests that its templates build.
+   and its receiver's answers are shown masked; in template mode it receives the "create", "update" and "reply in
+   thread" requests that its templates build.
 5. Under "Escalation chains", the test lists the chains that would Page in this Destination — "devops" of the Route
    "Infrastructure" and "payments" of the Team payments — and plays them from Saturday 03:00: "+0 min · devops · Step
    1 · would Page @ivan (On-call of devops, Main) normally in the Threads of infra-critical and infra-notice"; "+0 min ·
@@ -43,11 +43,13 @@ its decisions are still open, a requirement names the [open question](#open-ques
   one of the Destination's Routes or the built-in example (C-16.FR-1) — and a Severity level, by default the source's.
   Each run has its own Test message; several runs, of one Admin or of several, may go on at once without touching each
   other. A run is a row of the database with its Organization (`org_id`, lint 1), so that any replica takes its next
-  step, and ends when its last step is made, when the Admin ends it, or once it has made no step for the time of
-  [open question 5](#open-questions) on the business clock. An idle run is ended lazily: the next step, read or new run
-  of that Destination that finds it expired deletes it, so no Leader task is added (ADR-0007).
+  step, and ends when its last step is made, when the Admin ends it, or once it has made no step for
+  `destination_test.idle_timeout` on the business clock. An idle run is ended lazily: the next step, read or new run of
+  that Destination that finds it expired deletes it, so no Leader task is added (ADR-0007); a step or read of an ended
+  run gets `404`.
 - **C-42.FR-2** The steps go in this order, each one a valid transition of the step before it, so that every message
-  shows a state an Alert Group can have ([open question 1](#open-questions)):
+  shows a state an Alert Group can have; the Reminder comes right after Acknowledge, since after Unresolve an Alert
+  Group has no Owner to remind, and the end of a Snooze, an ack timeout notice and a rise to critical are not steps:
   1. **Created** — the Publication of the Root message, Loud, as `new_alert_group`;
   2. **New Alert** — a second Alert joins, Loud, as `new_alerts`;
   3. **Acknowledge** — by the Admin who runs the test, as its Owner, or by "Example person" when a Service account
@@ -63,8 +65,8 @@ its decisions are still open, a requirement names the [open question](#open-ques
   Root message to its Desired state, a Thread reply, or both, as the [Loud and Quiet
   table](../l1/reference.md#loud-and-quiet) says, with the compact layout (C-29) and the Destination's button set
   (C-28.FR-9); to an outgoing webhook, the event in events mode, marked `test: true` like the `test` event of
-  C-16.FR-1, and the "update" or "reply in thread" request of its templates in template mode. "Next: {step}" makes the
-  next step; a step is never made on its own.
+  C-16.FR-1, and the "create", "update" or "reply in thread" request of its templates in template mode. "Next:
+  {step}" makes the next step; a step is never made on its own.
 - **C-42.FR-3** Every step goes through the interactive path (C-11.FR-2) under `delivery.interactive_budget`, as the
   Test message of C-16 does, and its result shows each request with Secrets, the Signing secret and tokens masked, the
   answer (truncated, as untrusted text, masked), the duration and the error class (C-16.FR-2); a step that gets no
@@ -74,10 +76,10 @@ its decisions are still open, a requirement names the [open question](#open-ques
 - **C-42.FR-4** For each Loud step the result lists whom the Destination's Mention entries for that event would mention
   (C-28.FR-1, FR-3) — each person, messenger group, Team and On-call by name, and each entry that would mention nobody
   with the reason, such as "has no linked Mattermost account" — and, for the Reminder and the Takeover, the Owner and
-  the previous Owner that L1 mentions whatever the entries (C-28.FR-4). Whether the Test message itself mentions them,
-  and so notifies their devices, is [open question 2](#open-questions); until it is settled, a step sends no Mention,
-  of an entry or of an Owner, and writes the names as plain text after "Would mention:", which notifies nobody. No
-  "Mention not delivered" is recorded and no warning of the Destination changes (C-28.FR-3).
+  the previous Owner that L1 mentions whatever the entries (C-28.FR-4). The Test message never mentions them, so that
+  a test notifies nobody's devices, possibly at night: a step sends no Mention, of an entry or of an Owner, and writes
+  the names as plain text after "Would mention:". No "Mention not delivered" is recorded and no warning of the
+  Destination changes (C-28.FR-3).
 - **C-42.FR-5** The buttons of the Test message are those its status shows from the Destination's button set
   (C-28.FR-8). A press on any of them, by anyone, changes nothing and is answered privately with "This is a test
   message; nothing was changed" (C-16.FR-3), and the result of the run shows each press that reached Muster with the
@@ -88,17 +90,19 @@ its decisions are still open, a requirement names the [open question](#open-ques
 - **C-42.FR-6** A run changes nothing outside itself: no Alert Group, Alert, Timeline, Note or Assignee is written, so
   `internal/groups` writes nothing (lint 2); its messages are never reconciled; it counts in no statistic (C-09.FR-15,
   C-40), no `muster_delivery_attempts_total`, `muster_commands_total` or `muster_pages_total`, and its requests count
-  only in `muster_client_requests_total` with the client `interactive`, as those of C-16 do. Its messages stay in the
-  messenger when it ends, marked "🧪 Test message" ([open question 4](#open-questions)).
+  only in `muster_client_requests_total` with the client `interactive`, as those of C-16 do. Its Test messages stay in
+  the Destination when it ends, marked "🧪 Test message", as those of C-16 stay; Muster never deletes them, which would
+  need a messenger operation outside delivery (lint 3).
 
 ### The accelerated run of the Escalation chains
 
-- **C-42.FR-7** "Escalation chains" in a run lists the chains that would run on its Alert Group and Page in this
-  Destination: those that the Routes naming this Destination name and, where a Route delivers to the Teams and runs
-  their chains (C-26.FR-2), those that the Teams naming this Destination name, each whose Severity condition the
-  run's Severity level meets (C-32.FR-2, FR-4, FR-8). The Admin plays one of them or all, from the business clock's
-  now or from a chosen time, so that nights, weekends and Shifts can be checked. Which chains it offers beyond these is
-  [open question 3](#open-questions).
+- **C-42.FR-7** "Escalation chains", beside the step-by-step test on the Destination page, takes a source and a
+  Severity level of its own, as FR-1 does, whether or not a test run is going on, and lists the chains that would run
+  on such an Alert Group and Page in this Destination: those that the Routes naming this Destination name and, where a
+  Route delivers to the Teams and runs their chains (C-26.FR-2), those that the Teams naming this Destination name,
+  each whose Severity condition that Severity level meets (C-32.FR-2, FR-4, FR-8). The Admin plays one of them or
+  all, from the business clock's now or from a chosen time, so that nights, weekends and Shifts can be checked. It
+  offers no other chain: a chain that Pages only through a gateway, or only in other Destinations, is not played here.
 - **C-42.FR-8** Playing computes the run as C-32 would make it if nobody acknowledged, and shows it at once as a
   timeline of moments from the start — "+0 min", "+10 min" — without waiting: each step with its number and kind; whom
   it would Page — the On-call of the Schedule at that moment from its Result (C-27), chosen people, a Team or everyone
@@ -110,14 +114,14 @@ its decisions are still open, a requirement names the [open question](#open-ques
   steps a run makes, the timeline folding the passes after the first; an outgoing webhook step as "would send
   `escalation_webhook` to {Destination}"; and, at the end, the moment the Alert Group would become Unclaimed
   (C-32.FR-7). Overlapping chains are shown on one timeline, each step named with its chain.
-- **C-42.FR-9** The accelerated run is a computation, never a run: it writes no row of a chain run, Notification rule
-  run, call or timer, sends nothing through a messenger, an outgoing webhook or a Notification gateway, records no
-  `page_not_delivered` or `escalation_step_skipped`, makes no Assignee and counts in no metric. It reads the chains,
-  Schedules, Notification rules, Account links and gateway contacts as they are when it is played. Its moments are the
-  chosen start plus the waits, computed on the business clock: neither the business clock nor the development clock
-  moves, in production or under `muster dev` (`/_dev/clock` is not used), and the real clock is not read for them.
-  Whether a played run may also post its Pages as plain lines in the Thread of the Test message is [open question
-  2](#open-questions).
+- **C-42.FR-9** The accelerated run is only a computation, which the UI calls "Play" and never a run of a chain: it
+  writes no row of a chain run, Notification rule run, call or timer, sends nothing through a messenger, an outgoing
+  webhook or a Notification gateway, records no `page_not_delivered` or `escalation_step_skipped`, makes no Assignee
+  and counts in no metric. It reads the chains, Schedules, Notification rules, Account links and gateway contacts as
+  they are when it is played. Its moments are the chosen start plus the waits, computed on the business clock: neither
+  the business clock nor the development clock moves, in production or under `muster dev` (`/_dev/clock` is not
+  used), and the real clock is not read for them. Playing posts nothing in the Thread of any Test message; its
+  timeline is shown only on the page. "Accelerated run" stays a description, not a term of the glossary.
 
 ### Access, record and documentation
 
@@ -143,7 +147,7 @@ Destination page → "Test": "Send test message" (C-16) and "Step-by-step test",
 
 ## API surface
 
-Proposed, to be specified in `api/openapi.yaml` by the backend story, each with `x-permission: destinations:test`:
+To be specified in `api/openapi.yaml` by the backend story, each with `x-permission: destinations:test`:
 `destinations/{id}/test-runs` (create with the source and the Severity level → the run and the result of its first
 step); `destinations/{id}/test-runs/{run_id}` (read the run with its steps and presses; delete to end it);
 `destinations/{id}/test-runs/{run_id}/steps` (create → the next step's result); `destinations/{id}/chain-plays`
@@ -165,8 +169,8 @@ gateway and the development clock, through the API and in a real browser.
   message; nothing was changed" and appears in the run's result with the person and the button; nothing changes.
 - **C-42.AC-4** For a Destination whose entries name a person without an Account link, the result says that the entry
   would mention nobody and why, the message carries no Mention, and the Destination gains no warning.
-- **C-42.AC-5** A run left alone ends after the time of open question 5, advanced with the development clock; its
-  next step then gets `404`, and its messages stay in the fake server.
+- **C-42.AC-5** A run left alone ends after `destination_test.idle_timeout`, advanced with the development clock; its
+  next step then gets `404`, its row is gone, and its Test messages stay in the fake server.
 - **C-42.AC-6** Playing a chain of three steps — Page the On-call normally, wait 10 minutes, Page them importantly —
   with an important rule of a Mention, a wait of 5 minutes and a call, shows "+0 min", "+10 min" and "+15 min" with the
   call as "would call"; the fake gateway receives nothing, no `escalation_runs` row or timer is written, and the
@@ -178,29 +182,8 @@ gateway and the development clock, through the API and in a real browser.
   example people.
 - **C-42.AC-9** In a real browser 360 CSS pixels wide the test and the timeline work without horizontal scrolling, in
   English and in Russian.
-
-## Open questions
-
-Each is for the maintainer to settle before the story that depends on it; the recommendation is the agent's.
-
-1. **The order of the steps.** The step-by-step test that L2 listed before 0.2.0 went through creation, a new Alert,
-   Acknowledge, Takeover, Snooze, Resolve, Unresolve and then a Reminder (journal D548); after Unresolve an Alert Group
-   is Firing without an Owner, and a Reminder goes only to an Owner. Recommendation: the order of FR-2, with the
-   Reminder after Acknowledge, so that every message shows a real state; and add no other steps — the end of a Snooze,
-   an ack timeout notice and a rise to critical can join later if asked for.
-2. **Real Mentions in the Test message.** Real Mentions, of the entries and of the Owner, prove that the Account links
-   and Team mentions work, but notify people, possibly at night, for a test; the same goes for posting the Pages of the
-   accelerated run into the Thread. Recommendation: no real Mentions and no Pages in the Thread; the step's result and
-   the timeline name everyone, and the message writes them as plain text after "Would mention:".
-3. **Which chains the accelerated run offers.** Recommendation: only those that would Page in this Destination (FR-7);
-   a chain that Pages only through a gateway, or elsewhere, is played from its own page later if asked for.
-4. **Removing the Test messages.** Recommendation: leave them, as the Test messages of C-16 stay; deleting needs a new
-   messenger operation outside delivery, which lint 3 guards, and Telegram cannot delete after 48 hours.
-5. **How long an idle run lasts.** Recommendation: 1 hour on the business clock, after which its next step gets `404`
-   and its row is removed.
-6. **A term for the glossary.** Recommendation: none is needed — the run sends Test messages (`CONTEXT.md`), and "the
-   accelerated run of the Escalation chains" stays a description, not a term, so that it is never confused with a run
-   of a chain.
+- **C-42.AC-10** The Test message of a Loud step carries no Mention markup in the fake Mattermost server — the names
+  stand after "Would mention:" as plain text — and playing the chains adds no Thread reply to it.
 
 ## Related ADRs
 
