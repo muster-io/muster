@@ -99,15 +99,19 @@ type ConformanceConfig struct {
 	timer    func(d time.Duration) (<-chan time.Time, func())
 }
 
-// ValidPushSecret reports whether s is a push secret in the Standard Webhooks form, whsec_ followed by base64 of at
-// least one byte, as a Connection's push secret is checked.
+// MinPushSecretBytes is the shortest key of a push secret, the lower bound that Standard Webhooks recommends: the push
+// callback is authenticated by its HMAC alone, so a short key could be guessed online.
+const MinPushSecretBytes = 24
+
+// ValidPushSecret reports whether s is a push secret in the Standard Webhooks form, whsec_ followed by the base64 of
+// a key of at least MinPushSecretBytes, as a Connection's push secret is checked when it is saved.
 func ValidPushSecret(s logging.Secret) bool {
 	rest, ok := strings.CutPrefix(string(s), webhooks.SigningSecretPrefix)
 	if !ok {
 		return false
 	}
 	key, err := base64.StdEncoding.DecodeString(rest)
-	return err == nil && len(key) > 0
+	return err == nil && len(key) >= MinPushSecretBytes
 }
 
 // conformance is one run: what the steps learned, for the steps after them.

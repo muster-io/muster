@@ -174,13 +174,13 @@ type Limiter struct {
 }
 
 // Connection is a Connection as the API reads it; its secrets show only their status. ServerURL is a Mattermost
-// Connection's; BotAPIBaseURL, UpdateMode and Warnings are a Telegram Connection's; BridgeBaseURL, EventDelivery,
-// PushSecret, BridgeInfo — the last info its check read, as the bridge sent it, nil before — and BridgeInfoReadAt are a
-// Bridge Connection's; EventMode, AppToken, SlackSigningSecret, what its last passing check learned — SlackTeamID,
-// SlackTeamName and SlackAppID, nil before — and SlackSocket — what the last hello of its Socket Mode connection
-// counted, nil in http mode and before the first hello after a save — are a Slack Connection's. SlackUsergroupsRead
-// and MattermostGroupsRead are what the last passing check of a Slack or a Mattermost Connection found of its groups,
-// nil before one (C-25.FR-8).
+// Connection's; BotAPIBaseURL and UpdateMode are a Telegram Connection's; Warnings are a Telegram or a Bridge
+// Connection's; BridgeBaseURL, EventDelivery, PushSecret, BridgeInfo — the last info its check read, as the bridge sent
+// it, nil before — and BridgeInfoReadAt are a Bridge Connection's; EventMode, AppToken, SlackSigningSecret, what its
+// last passing check learned — SlackTeamID, SlackTeamName and SlackAppID, nil before — and SlackSocket — what the last
+// hello of its Socket Mode connection counted, nil in http mode and before the first hello after a save — are a Slack
+// Connection's. SlackUsergroupsRead and MattermostGroupsRead are what the last passing check of a Slack or a
+// Mattermost Connection found of its groups, nil before one (C-25.FR-8).
 type Connection struct {
 	ID                 int64
 	PublicID           string
@@ -457,7 +457,7 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 		if err != nil {
 			return Page{}, err
 		}
-		page.Connections = append(page.Connections, c)
+		page.Connections = append(page.Connections, s.withBridgeWarnings(c, dbgen.GetConnectionRow(r)))
 	}
 	return page, nil
 }
@@ -468,7 +468,8 @@ func (s *Service) Get(ctx context.Context, publicID string) (Connection, error) 
 	if err != nil {
 		return Connection{}, err
 	}
-	return connectionOf(row)
+	c, err := connectionOf(row)
+	return s.withBridgeWarnings(c, row), err
 }
 
 // row reads the Connection publicID with its secrets as stored.
@@ -806,7 +807,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		after.Proxy, after.Limiter = p, in.Limiter
 		diff := append(audit.Diff(viewOf(before), viewOf(after)), secretDiff...)
 		if len(diff) == 0 {
-			out = before
+			out = s.withBridgeWarnings(before, row)
 			return nil
 		}
 		tokenAt := row.BotTokenUpdatedAt
@@ -844,6 +845,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if out, err = connectionOf(row); err != nil {
 			return err
 		}
+		out = s.withBridgeWarnings(out, row)
 		if s.cfg.Gateways.Renamed != nil && row.GatewayBrokenSince.Valid && out.Name != before.Name {
 			if err := s.cfg.Gateways.Renamed(ctx, q.DB(), out.PublicID, out.Name); err != nil {
 				return err
