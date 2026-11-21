@@ -709,8 +709,8 @@ func (q *Queries) FailGatewayProbe(ctx context.Context, arg FailGatewayProbePara
 }
 
 const getAcknowledgedCall = `-- name: GetAcknowledgedCall :one
-SELECT g.id, g.public_id, g.state, u.id AS user_id, u.public_id AS user_public_id, u.role AS user_role,
-       u.status AS user_status, u.language AS user_language
+SELECT g.id, g.public_id, g.state, g.notification_id, g.ended_at, u.id AS user_id, u.public_id AS user_public_id,
+       u.role AS user_role, u.status AS user_status, u.language AS user_language
 FROM gateway_calls g
 JOIN users u ON u.org_id = g.org_id AND u.id = g.user_id
 WHERE g.org_id = $1 AND g.connection_id = $2 AND g.public_id = $3
@@ -723,19 +723,22 @@ type GetAcknowledgedCallParams struct {
 }
 
 type GetAcknowledgedCallRow struct {
-	ID           int64
-	PublicID     string
-	State        string
-	UserID       int64
-	UserPublicID string
-	UserRole     string
-	UserStatus   string
-	UserLanguage pgtype.Text
+	ID             int64
+	PublicID       string
+	State          string
+	NotificationID pgtype.Text
+	EndedAt        pgtype.Timestamptz
+	UserID         int64
+	UserPublicID   string
+	UserRole       string
+	UserStatus     string
+	UserLanguage   pgtype.Text
 }
 
 // GetAcknowledgedCall reads the call public_id of a Notification gateway's Connection, whatever its state, with the
-// User it was for — Role, state, name and profile language — for the Acknowledge of a notification_acknowledged event
-// (C-30.FR-6). No row for a call of another Connection or Organization, or none.
+// notification_id the gateway accepted it under and when it ended, and with the User it was for — Role, state, name
+// and profile language — for the Acknowledge of a notification_acknowledged event (C-30.FR-6). No row for a call of
+// another Connection or Organization, or none.
 func (q *Queries) GetAcknowledgedCall(ctx context.Context, arg GetAcknowledgedCallParams) (GetAcknowledgedCallRow, error) {
 	row := q.db.QueryRow(ctx, getAcknowledgedCall, arg.OrgID, arg.ConnectionID, arg.PublicID)
 	var i GetAcknowledgedCallRow
@@ -743,6 +746,8 @@ func (q *Queries) GetAcknowledgedCall(ctx context.Context, arg GetAcknowledgedCa
 		&i.ID,
 		&i.PublicID,
 		&i.State,
+		&i.NotificationID,
+		&i.EndedAt,
 		&i.UserID,
 		&i.UserPublicID,
 		&i.UserRole,

@@ -849,14 +849,16 @@ var GatewayCallFailed = newEvent("gateway_call_failed", LevelWarn, "C-30",
 	"call", "error")
 
 // GatewayAcknowledgeRefused is logged when a notification_acknowledged event of a Notification gateway acknowledged
-// nothing because of its action data or the person the call was for (C-30.FR-6).
+// nothing because of its action data, the call it names or the person the call was for (C-30.FR-6).
 var GatewayAcknowledgeRefused = newEvent("gateway_acknowledge_refused", LevelInfo, "C-30",
 	"A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the "+
 		"public_id of the call its action data names, empty when the data names none, connection the public_id of the "+
 		"Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, "+
 		"expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this "+
-		"Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the "+
-		"Commands themselves are logged as command_refused.",
+		"Connection, not_accepted for a call the gateway never accepted, notification_mismatch for an event whose "+
+		"notification_id is not the one the gateway accepted the call under, stale_call for a call that ended more "+
+		"than twice bridge.event_max_age ago by the business clock, disabled or deleted for a person the call was for "+
+		"who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.",
 	"call", "connection", "reason")
 
 // GatewayBroken is logged when a Notification gateway becomes Broken (C-30.FR-8).
