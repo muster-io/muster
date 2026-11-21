@@ -35,9 +35,12 @@ const (
 	// PurposeMattermostCallback derives the callback secret of a Mattermost button, which only the Mattermost server
 	// learns and sends back with a press.
 	PurposeMattermostCallback Purpose = "mattermost-callback"
+	// PurposeGatewayContactCode signs the confirmation codes of gateway contacts as they are stored.
+	PurposeGatewayContactCode Purpose = "gateway-contact-code"
 )
 
-var purposes = []Purpose{PurposeEncryption, PurposeButtonSignature, PurposeCSRF, PurposeMattermostCallback}
+var purposes = []Purpose{PurposeEncryption, PurposeButtonSignature, PurposeCSRF, PurposeMattermostCallback,
+	PurposeGatewayContactCode}
 
 const (
 	keyIDPrefix = "k-"

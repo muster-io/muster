@@ -1128,7 +1128,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.messengerAdapters()
 	// The contacts at Notification gateways are kept in the main pool, as the Account links are (C-30.FR-3).
 	p.gatewayContacts = gateways.New(gateways.Config{OrgID: orgID, Store: gateways.NewStore(p.db.AccountLinksDB()),
-		Audit: w, Business: p.clocks.Business, Log: p.log, Gateway: p.bridge, Path: interactive})
+		Keys: p.keyring, Audit: w, Business: p.clocks.Business, Log: p.log, Gateway: p.bridge, Path: interactive})
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
 		_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload)
