@@ -106,15 +106,16 @@ func (d *DB) CheckSchema(ctx context.Context, log *logging.Logger) error {
 	if err != nil {
 		return err
 	}
-	version, dirty, err := schemaVersion(ctx, d.pool)
+	version, dirty, err := SchemaVersion(ctx, d.pool)
 	if err != nil {
 		return err
 	}
 	return checkSchema(ctx, log, version, dirty, known, false)
 }
 
-// schemaVersion reads the version golang-migrate recorded; a database without the table or the row has version 0.
-func schemaVersion(ctx context.Context, q querier) (uint, bool, error) {
+// SchemaVersion reads the version golang-migrate recorded, with whether it is dirty, and writes nothing; a database
+// without the table or the row has version 0, which no migration has.
+func SchemaVersion(ctx context.Context, q querier) (uint, bool, error) {
 	var exists bool
 	if err := q.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", migrationsTable).Scan(&exists); err != nil {
 		return 0, false, fmt.Errorf("read the schema version: %w", err)
