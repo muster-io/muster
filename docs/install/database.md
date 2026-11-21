@@ -50,6 +50,26 @@ CREATE DATABASE muster OWNER muster;
 Muster applies its migrations at the first start: the compose example sets `MUSTER_MIGRATE_ON_START`, and the chart runs
 `muster migrate` in an init container.
 
+## The compose example
+
+The [compose example](../quick-start.md) runs its own PostgreSQL 17, for evaluation and small installations. It limits
+the container to 640 MB of memory and sets PostgreSQL to fit inside the limit:
+
+- `shared_buffers=96MB`
+- `work_mem=2MB`
+- `maintenance_work_mem=32MB`
+- `max_connections=30`
+
+These values were checked with 100,000 Alert Groups, under a steady trickle of alerts and API reads and through an
+upgrade of Muster with migrations: PostgreSQL lost no process to the kernel's out-of-memory killer, which ends a
+process that would take the container past its limit.
+
+For more, edit the `postgres` service in `docker-compose.yml`: raise `mem_limit`, then the settings under `command`,
+and keep them inside the limit. Count `shared_buffers` in full, about 12 MB for each of the `max_connections`, up to
+32 MB (`maintenance_work_mem`) for each of the three autovacuum workers, and about 70 MB for the rest. One replica of
+Muster opens up to `max(10, CPUs)` connections and about three more, so raise `max_connections` on a machine with more
+than 27 CPUs. Run `docker compose up -d --wait` to restart PostgreSQL with the new values.
+
 ## CloudNativePG
 
 [CloudNativePG](https://cloudnative-pg.io) runs PostgreSQL clusters on Kubernetes. A `Cluster` for Muster creates the

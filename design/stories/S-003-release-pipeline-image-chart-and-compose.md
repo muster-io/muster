@@ -103,9 +103,11 @@ issue: 3
   `existingSecret`, and with every `ci/*-values.yaml`, and validates the output with kubeconform (including the
   Gateway API and ServiceMonitor schemas); CI runs it on every pull request.
 - **Compose example** (`deploy/compose/`): services `postgres` (PostgreSQL 17) and `muster` (the released image).
-  PostgreSQL gets a container memory limit and its settings on the command line — starting values `mem_limit: 160m`,
-  `shared_buffers=32MB`, `work_mem=2MB`, `max_connections=30` — sized for the footprint of NFR-3 and provisional
-  (P-43) until the nightly load test measures them. `.env.example` holds the master key placeholder that S-007 refuses
+  PostgreSQL gets a container memory limit and its settings on the command line — `mem_limit: 640m`,
+  `shared_buffers=96MB`, `work_mem=2MB`, `maintenance_work_mem=32MB`, `max_connections=30` — sized for evaluation and
+  small installations and checked with 100,000 Alert Groups (the starting values, `160m` with `shared_buffers=32MB`,
+  lost PostgreSQL processes to the OOM killer at 50,000); the nightly load test reports the footprint of NFR-3 with
+  them (P-43) and fails when the kernel kills a PostgreSQL process. `.env.example` holds the master key placeholder that S-007 refuses
   and the bootstrap Admin; `make compose-check` runs `docker compose config`.
 - **Trivy** (C-01.FR-11): CI builds the image with goreleaser's snapshot mode and scans it; high and critical
   vulnerabilities with a fix fail the job.
@@ -137,12 +139,13 @@ make compose-check && echo ok
 cp deploy/compose/.env.example deploy/compose/.env
 docker compose -f deploy/compose/docker-compose.yml up -d postgres
 docker compose -f deploy/compose/docker-compose.yml exec postgres \
-  psql -U muster -Atc "SHOW shared_buffers; SHOW work_mem; SHOW max_connections"
-# 32MB
+  psql -U muster -Atc "SHOW shared_buffers; SHOW work_mem; SHOW maintenance_work_mem; SHOW max_connections"
+# 96MB
 # 2MB
+# 32MB
 # 30
 docker inspect -f '{{.HostConfig.Memory}}' "$(docker compose -f deploy/compose/docker-compose.yml ps -q postgres)"
-# 167772160
+# 671088640
 
 goreleaser release --snapshot --clean
 docker run --rm ghcr.io/muster-io/muster:v<snapshot version>-amd64 version

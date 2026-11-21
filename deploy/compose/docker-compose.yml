@@ -11,17 +11,21 @@ services:
       POSTGRES_USER: muster
       POSTGRES_DB: muster
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    # Provisional starting values, sized for the 256 MB footprint of the minimal installation; the nightly load test
-    # confirms them.
+    # Sized for evaluation and small installations, checked with 100,000 Alert Groups: shared_buffers 96 MB, plus
+    # 30 connections of about 12 MB each, plus 3 autovacuum workers of up to 32 MB each (maintenance_work_mem, or
+    # the rows ANALYZE samples), plus about 70 MB for one index build, the other processes and the kernel: 622 MB of
+    # the 640 MB limit. The nightly load test fails when the kernel kills a PostgreSQL process for memory.
     command:
       - postgres
       - -c
-      - shared_buffers=32MB
+      - shared_buffers=96MB
       - -c
       - work_mem=2MB
       - -c
+      - maintenance_work_mem=32MB
+      - -c
       - max_connections=30
-    mem_limit: 160m
+    mem_limit: 640m
     healthcheck:
       test:
         - CMD
