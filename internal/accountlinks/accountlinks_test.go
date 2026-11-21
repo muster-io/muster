@@ -608,10 +608,18 @@ func (s *fakeStore) CountTargetCodeRequests(_ context.Context, a dbgen.CountTarg
 		return dbgen.CountTargetCodeRequestsRow{}, err
 	}
 	s.mark("target")
-	n, oldest := s.count(MessengerMattermost, func(r fReq) bool {
+	return s.countTarget(MessengerMattermost, a), nil
+}
+
+// countTarget counts the code requests of messenger for one account of a Connection: those of any User, and those of
+// the User with the oldest of them.
+func (s *fakeStore) countTarget(messenger string, a dbgen.CountTargetCodeRequestsParams) dbgen.CountTargetCodeRequestsRow {
+	target := func(r fReq) bool {
 		return a.OrgID == org && r.connID == a.ConnectionID && r.target == a.TargetExternalID
-	}, a.Since)
-	return dbgen.CountTargetCodeRequestsRow{Requests: n, Oldest: oldest}, nil
+	}
+	n, _ := s.count(messenger, target, a.Since)
+	mine, oldest := s.count(messenger, func(r fReq) bool { return target(r) && r.userID == a.UserID }, a.Since)
+	return dbgen.CountTargetCodeRequestsRow{Requests: n, UserRequests: mine, UserOldest: oldest}
 }
 
 func (s *fakeStore) DeleteUserAccountLinks(_ context.Context, a dbgen.DeleteUserAccountLinksParams) (

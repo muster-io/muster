@@ -18,7 +18,6 @@ import (
 
 	"github.com/muster-io/muster/internal/accountlinks/dbgen"
 	"github.com/muster-io/muster/internal/audit"
-	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
@@ -34,10 +33,12 @@ const (
 	// minutes, at most 5 attempts.
 	BridgeCodeTTL     = 10 * time.Minute
 	BridgeMaxAttempts = 5
-	// BridgeCodeRequestsPerUser and BridgeCodeRequestsPerTarget are account_link.bridge_code_requests: code requests
-	// per requesting User and per target account within CodeRequestWindow.
+	// BridgeCodeRequestsPerUser, BridgeCodeRequestsPerTarget and BridgeCodesPerTarget are
+	// account_link.bridge_code_requests within CodeRequestWindow, as CodeRequestsPerUser, CodeRequestsPerTarget and
+	// CodesPerTarget are Mattermost's.
 	BridgeCodeRequestsPerUser   = 5
 	BridgeCodeRequestsPerTarget = 3
+	BridgeCodesPerTarget        = 10
 )
 
 // The methods of a Bridge link (C-22.FR-15): a token the person sends to the bot, or a code the bot sends them.
@@ -333,15 +334,17 @@ type BridgeCodeStarted struct {
 // StartBridgeCode starts a link of the requesting User to the account with handle of the Bridge Connection
 // connectionPublicID by code (C-22.FR-15): handle is trimmed and may not be empty. With one limiter token of the
 // interactive path: a Connection whose info offers no code is ErrCodeNotOffered, whatever the limits; code requests
-// beyond account_link.bridge_code_requests within the last hour — of the User, or for the target account — are a
-// *RateLimitedError until the oldest one counted is an hour old, the User's counted before the bridge looks the
+// beyond account_link.bridge_code_requests within the last hour — of the User, or of the User for the target account —
+// are a *RateLimitedError until the oldest one counted is an hour old, the User's counted before the bridge looks the
 // account up, and both again in the transaction that stores the request, under the lock of the User and of the target
 // account; the account is found with findUsers (none: FieldError handle_not_found); an account linked to another User is
 // ErrLinkedElsewhere, recorded as link_rejected with conflict; otherwise the User's pending code requests for the
 // Connection are voided, a code of account_link.bridge_code is stored as its SHA-256 with the account's external id,
 // handle and display name, and the bot sends it with sendDirectMessage, key dm-<request public_id>. A message that
 // fails voids the request, which still counts toward the limits; one the bridge refuses as forbidden is a FieldError
-// direct_message_refused. A Connection that is missing, deleted or not a Bridge one is a FieldError unknown_id.
+// direct_message_refused. A request beyond the codes the account receives within the hour across Users is answered as
+// StartMattermost answers it, and nothing is sent. A Connection that is missing, deleted or not a Bridge one is a
+// FieldError unknown_id.
 func (s *Service) StartBridgeCode(ctx context.Context, r Requester, connectionPublicID, handle string) (
 	BridgeCodeStarted, error) {
 	conn, err := s.connection(ctx, connectionPublicID, MessengerBridge)
@@ -394,6 +397,7 @@ func (s *Service) startBridgeCode(ctx context.Context, b BridgeBot, r Requester,
 	}
 	var (
 		conflict bool
+		withhold bool
 		lang     string
 		reqID    int64
 		method   = MethodCode
@@ -401,7 +405,7 @@ func (s *Service) startBridgeCode(ctx context.Context, b BridgeBot, r Requester,
 			ExpiresAt: now.Add(BridgeCodeTTL), AttemptsRemaining: BridgeMaxAttempts}
 	)
 	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
-		conflict = false
+		conflict, withhold = false, false
 		u, err := q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: r.UserID})
 		if err != nil {
 			return fmt.Errorf("lock the user: %w", err)
@@ -410,7 +414,8 @@ func (s *Service) startBridgeCode(ctx context.Context, b BridgeBot, r Requester,
 		if err := s.bridgeUserCodeLimit(ctx, q, u.ID, now); err != nil {
 			return err
 		}
-		if err := s.bridgeTargetCodeLimit(ctx, q, conn.id, acct.ExternalID, now); err != nil {
+		if withhold, err = s.targetCodeLimit(ctx, q, MessengerBridge, conn.id, acct.ExternalID, u.ID,
+			now); err != nil {
 			return err
 		}
 		other, err := q.GetAccountLinkBySpace(ctx, dbgen.GetAccountLinkBySpaceParams{OrgID: s.cfg.OrgID,
@@ -426,9 +431,13 @@ func (s *Service) startBridgeCode(ctx context.Context, b BridgeBot, r Requester,
 			OrgID: s.cfg.OrgID, UserID: u.ID, ConnectionID: conn.id}); err != nil {
 			return fmt.Errorf("void the earlier link requests: %w", err)
 		}
+		secret, err := s.secretHash(code, withhold)
+		if err != nil {
+			return err
+		}
 		reqID, err = q.InsertLinkRequest(ctx, dbgen.InsertLinkRequestParams{OrgID: s.cfg.OrgID,
 			PublicID: started.RequestPublicID, UserID: u.ID, Messenger: MessengerBridge, ConnectionID: conn.id,
-			Method: optText(&method), SecretHash: hash(code), TargetExternalID: optText(&acct.ExternalID),
+			Method: optText(&method), SecretHash: secret, TargetExternalID: optText(&acct.ExternalID),
 			TargetUsername: optText(&username), TargetDisplayName: optText(&name), CreatedAt: now,
 			ExpiresAt: started.ExpiresAt})
 		if err != nil {
@@ -442,6 +451,10 @@ func (s *Service) startBridgeCode(ctx context.Context, b BridgeBot, r Requester,
 	if conflict {
 		s.logRejected(ctx, MessengerBridge, conn.publicID, ReasonConflict, nil)
 		return BridgeCodeStarted{}, ErrLinkedElsewhere
+	}
+	if withhold {
+		s.logWithheld(ctx, MessengerBridge, conn.publicID, r.UserPublicID)
+		return started, nil
 	}
 	// The code is masked in the Request log's record of the direct message (C-23.FR-3).
 	err = b.SendDirectMessage(outbound.WithSecrets(ctx, logging.Secret(code)), "dm-"+started.RequestPublicID,
@@ -470,27 +483,6 @@ func (s *Service) bridgeUserCodeLimit(ctx context.Context, q Queries, userID int
 		return fmt.Errorf("count the link code requests: %w", err)
 	}
 	if n.Requests >= BridgeCodeRequestsPerUser {
-		return &RateLimitedError{RetryAfter: n.Oldest.Add(CodeRequestWindow).Sub(now)}
-	}
-	return nil
-}
-
-// bridgeTargetCodeLimit takes the lock of the code requests for the account target of the Bridge Connection connID
-// until the transaction of q ends, then refuses a request beyond account_link.bridge_code_requests within the hour
-// before now with a *RateLimitedError.
-func (s *Service) bridgeTargetCodeLimit(ctx context.Context, q Queries, connID int64, target string,
-	now time.Time) error {
-	if err := q.LockCodeTarget(ctx, dbgen.LockCodeTargetParams{LockClass: db.AccountLinkCodeTargetLockClass,
-		OrgID: s.cfg.OrgID, ConnectionID: connID, TargetExternalID: target}); err != nil {
-		return fmt.Errorf("lock the link code requests of the account: %w", err)
-	}
-	n, err := q.CountTargetBridgeCodeRequests(ctx, dbgen.CountTargetBridgeCodeRequestsParams{
-		Since: now.Add(-CodeRequestWindow), OrgID: s.cfg.OrgID, ConnectionID: connID,
-		TargetExternalID: optText(&target)})
-	if err != nil {
-		return fmt.Errorf("count the link code requests: %w", err)
-	}
-	if n.Requests >= BridgeCodeRequestsPerTarget {
 		return &RateLimitedError{RetryAfter: n.Oldest.Add(CodeRequestWindow).Sub(now)}
 	}
 	return nil

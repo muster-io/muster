@@ -208,12 +208,12 @@ Other lifecycle values:
 |---|---|---|---|---|
 | `account_link.telegram_token_ttl` | single use, 10 min | built in | C-18 | decided |
 | `account_link.mattermost_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts | built in | C-18 | decided |
-| `account_link.mattermost_code_requests` | 5 per hour per requesting User; 3 per hour per target account | built in | C-18 | decided |
+| `account_link.mattermost_code_requests` | 5 per hour per requesting User; 3 per hour per requesting User and target account; 10 per hour per target account across Users, beyond which a request is answered as if the code was sent and nothing is sent | built in | C-18 | decided |
 | `account_link.bridge_token_ttl` | single use, 10 min, like `account_link.telegram_token_ttl` | built in | C-22 | decided |
 | `account_link.bridge_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts, like `account_link.mattermost_code` | built in | C-22 | decided |
-| `account_link.bridge_code_requests` | 5 per hour per requesting User; 3 per hour per target account, like `account_link.mattermost_code_requests` | built in | C-22 | decided |
+| `account_link.bridge_code_requests` | 5 per hour per requesting User; 3 per hour per requesting User and target account; 10 per hour per target account across Users, beyond which a request is answered as if the code was sent and nothing is sent; like `account_link.mattermost_code_requests` | built in | C-22 | decided |
 | `account_link.slack_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts, like `account_link.mattermost_code` | built in | C-24 | decided |
-| `account_link.slack_code_requests` | 5 per hour per requesting User; 3 per hour per target account, like `account_link.mattermost_code_requests` | built in | C-24 | decided |
+| `account_link.slack_code_requests` | 5 per hour per requesting User; 3 per hour per requesting User and target account; 10 per hour per target account across Users, beyond which a request is answered as if the code was sent and nothing is sent; like `account_link.mattermost_code_requests` | built in | C-24 | decided |
 | `account_link.request_prune_after` | 24 h after a link request's `expires_at`, consumed and voided requests included, so that the hour `account_link.mattermost_code_requests` counts is kept and a late `/start` still answers that the link expired; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-18 | decided |
 
 ## Organization

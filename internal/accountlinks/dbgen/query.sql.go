@@ -33,13 +33,15 @@ func (q *Queries) ConsumeLinkRequest(ctx context.Context, arg ConsumeLinkRequest
 }
 
 const countTargetBridgeCodeRequests = `-- name: CountTargetBridgeCodeRequests :one
-SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+SELECT count(*)::bigint AS requests, count(*) FILTER (WHERE user_id = $1)::bigint AS user_requests,
+       coalesce(min(created_at) FILTER (WHERE user_id = $1), $2::timestamptz)::timestamptz AS user_oldest
 FROM account_link_requests
-WHERE org_id = $2 AND connection_id = $3 AND target_external_id = $4
-  AND messenger = 'bridge' AND method = 'code' AND created_at > $1::timestamptz
+WHERE org_id = $3 AND connection_id = $4 AND target_external_id = $5
+  AND messenger = 'bridge' AND method = 'code' AND created_at > $2::timestamptz
 `
 
 type CountTargetBridgeCodeRequestsParams struct {
+	UserID           int64
 	Since            time.Time
 	OrgID            int64
 	ConnectionID     int64
@@ -47,32 +49,36 @@ type CountTargetBridgeCodeRequestsParams struct {
 }
 
 type CountTargetBridgeCodeRequestsRow struct {
-	Requests int64
-	Oldest   time.Time
+	Requests     int64
+	UserRequests int64
+	UserOldest   time.Time
 }
 
-// CountTargetBridgeCodeRequests counts the Bridge code requests for one account of a Connection made after since, by
-// any User, with the oldest of them.
+// CountTargetBridgeCodeRequests counts the Bridge code requests for one account of a Connection made after since:
+// those of any User, and those of the User user_id with the oldest of them.
 func (q *Queries) CountTargetBridgeCodeRequests(ctx context.Context, arg CountTargetBridgeCodeRequestsParams) (CountTargetBridgeCodeRequestsRow, error) {
 	row := q.db.QueryRow(ctx, countTargetBridgeCodeRequests,
+		arg.UserID,
 		arg.Since,
 		arg.OrgID,
 		arg.ConnectionID,
 		arg.TargetExternalID,
 	)
 	var i CountTargetBridgeCodeRequestsRow
-	err := row.Scan(&i.Requests, &i.Oldest)
+	err := row.Scan(&i.Requests, &i.UserRequests, &i.UserOldest)
 	return i, err
 }
 
 const countTargetCodeRequests = `-- name: CountTargetCodeRequests :one
-SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+SELECT count(*)::bigint AS requests, count(*) FILTER (WHERE user_id = $1)::bigint AS user_requests,
+       coalesce(min(created_at) FILTER (WHERE user_id = $1), $2::timestamptz)::timestamptz AS user_oldest
 FROM account_link_requests
-WHERE org_id = $2 AND connection_id = $3 AND target_external_id = $4
-  AND messenger = 'mattermost' AND created_at > $1::timestamptz
+WHERE org_id = $3 AND connection_id = $4 AND target_external_id = $5
+  AND messenger = 'mattermost' AND created_at > $2::timestamptz
 `
 
 type CountTargetCodeRequestsParams struct {
+	UserID           int64
 	Since            time.Time
 	OrgID            int64
 	ConnectionID     int64
@@ -80,32 +86,36 @@ type CountTargetCodeRequestsParams struct {
 }
 
 type CountTargetCodeRequestsRow struct {
-	Requests int64
-	Oldest   time.Time
+	Requests     int64
+	UserRequests int64
+	UserOldest   time.Time
 }
 
-// CountTargetCodeRequests counts the Mattermost code requests for one account of a Connection made after since, by
-// any User, with the oldest of them.
+// CountTargetCodeRequests counts the Mattermost code requests for one account of a Connection made after since: those
+// of any User, and those of the User user_id with the oldest of them.
 func (q *Queries) CountTargetCodeRequests(ctx context.Context, arg CountTargetCodeRequestsParams) (CountTargetCodeRequestsRow, error) {
 	row := q.db.QueryRow(ctx, countTargetCodeRequests,
+		arg.UserID,
 		arg.Since,
 		arg.OrgID,
 		arg.ConnectionID,
 		arg.TargetExternalID,
 	)
 	var i CountTargetCodeRequestsRow
-	err := row.Scan(&i.Requests, &i.Oldest)
+	err := row.Scan(&i.Requests, &i.UserRequests, &i.UserOldest)
 	return i, err
 }
 
 const countTargetSlackCodeRequests = `-- name: CountTargetSlackCodeRequests :one
-SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+SELECT count(*)::bigint AS requests, count(*) FILTER (WHERE user_id = $1)::bigint AS user_requests,
+       coalesce(min(created_at) FILTER (WHERE user_id = $1), $2::timestamptz)::timestamptz AS user_oldest
 FROM account_link_requests
-WHERE org_id = $2 AND connection_id = $3 AND target_external_id = $4
-  AND messenger = 'slack' AND created_at > $1::timestamptz
+WHERE org_id = $3 AND connection_id = $4 AND target_external_id = $5
+  AND messenger = 'slack' AND created_at > $2::timestamptz
 `
 
 type CountTargetSlackCodeRequestsParams struct {
+	UserID           int64
 	Since            time.Time
 	OrgID            int64
 	ConnectionID     int64
@@ -113,21 +123,23 @@ type CountTargetSlackCodeRequestsParams struct {
 }
 
 type CountTargetSlackCodeRequestsRow struct {
-	Requests int64
-	Oldest   time.Time
+	Requests     int64
+	UserRequests int64
+	UserOldest   time.Time
 }
 
-// CountTargetSlackCodeRequests counts the Slack code requests for one account of a Connection made after since, by any
-// User, with the oldest of them.
+// CountTargetSlackCodeRequests counts the Slack code requests for one account of a Connection made after since: those
+// of any User, and those of the User user_id with the oldest of them.
 func (q *Queries) CountTargetSlackCodeRequests(ctx context.Context, arg CountTargetSlackCodeRequestsParams) (CountTargetSlackCodeRequestsRow, error) {
 	row := q.db.QueryRow(ctx, countTargetSlackCodeRequests,
+		arg.UserID,
 		arg.Since,
 		arg.OrgID,
 		arg.ConnectionID,
 		arg.TargetExternalID,
 	)
 	var i CountTargetSlackCodeRequestsRow
-	err := row.Scan(&i.Requests, &i.Oldest)
+	err := row.Scan(&i.Requests, &i.UserRequests, &i.UserOldest)
 	return i, err
 }
 

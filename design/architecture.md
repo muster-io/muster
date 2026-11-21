@@ -1071,7 +1071,7 @@ sequenceDiagram
 
     U->>API: Link Mattermost, Connection "corp", username @bob
     API->>AL: request a code
-    AL->>DB: check the limits per requesting User and per target account
+    AL->>DB: check the limits per requesting User and per requesting User and target account;<br/>past the target account's codes across Users, no direct message is sent, answered as sent
     AL->>IP: find @bob
     IP->>MM: look up the user by username with the bot token
     MM-->>IP: user id
