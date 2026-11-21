@@ -92,6 +92,15 @@ None.
 - If S-160's facts confirm a push in every messenger, the statement about the night changes to say which settings a
   person needs, and the pages keep recommending a Notification gateway for people who must be reached whatever their
   messenger does.
+- The pull request of this story leaves out the part that S-160 owns, because that spike, which the maintainer runs with
+  a phone, has not merged yet and the maintainer decided not to hold back the rest. The part is the per-messenger
+  statement of what S-160's facts found about the push of a Mention in a Thread reply, for Mattermost, Slack and
+  Telegram, in Concepts → Escalation chains (the section "How a Page reaches a person") and in Messengers →
+  Notification gateways (the section "At night"), and the matching item of "Reach people at night" in the template
+  `full` of `docs/llms.txt.tmpl`. Meanwhile those pages carry the standing statement that at night only a Notification
+  gateway is reliable, without pending wording. A follow-up pull request after S-160 adds the facts, cites the F-NNN
+  entries and changes the statement where they confirm a push, as the note above describes; acceptance 1's
+  per-messenger clause and the C-32.FR-11 facts row stay open until then.
 
 ## Coverage
 

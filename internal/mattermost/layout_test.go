@@ -28,6 +28,7 @@ const (
 
 func testLook() look {
 	return look{markup: messages.MarkupMarkdown, space: "mattermost:3", callback: callback,
+		secret: func(action, keyID string) string { return "secret-" + action + "-" + keyID },
 		footer: "Muster v1.2.3", icon: "http://localhost:8080/muster-mark-256.png", limit: LengthLimit}
 }
 
@@ -471,9 +472,11 @@ func TestReplyPost(t *testing.T) {
 	}
 	for i, want := range []action{
 		{ID: "stillonit", Name: "Still on it", Type: "button", Style: "primary",
-			Integration: integration{URL: l.callback, Context: actionContext{Action: "x", KeyID: "k"}}},
+			Integration: integration{URL: l.callback, Context: actionContext{Action: "x", KeyID: "k",
+				Secret: "secret-x-k"}}},
 		{ID: "unack", Name: "Unack", Type: "button",
-			Integration: integration{URL: l.callback, Context: actionContext{Action: "y", KeyID: "k"}}},
+			Integration: integration{URL: l.callback, Context: actionContext{Action: "y", KeyID: "k",
+				Secret: "secret-y-k"}}},
 	} {
 		if att.Actions[i] != want {
 			t.Errorf("action %d = %+v", i, att.Actions[i])
@@ -538,7 +541,7 @@ func TestActionStyles(t *testing.T) {
 			t.Errorf("%s: actions %s, want %s", c.name, got, c.want)
 		}
 	}
-	if a := actions([]messages.Button{{Command: "unresolve", Label: "x"}}, callback); a[0].Style != "" {
+	if a := actions([]messages.Button{{Command: "unresolve", Label: "x"}}, testLook()); a[0].Style != "" {
 		t.Errorf("an unknown command has the style %q", a[0].Style)
 	}
 }

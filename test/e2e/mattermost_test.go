@@ -747,6 +747,34 @@ func TestMattermost(t *testing.T) {
 		t.Errorf("a refused press changed %v / %v", e.alertGroup(g)["status"], e.alertGroup(g2)["status"])
 	}
 
+	// C-13.FR-4: a press with the action id and the key id of a bound post but not the button's callback secret, as
+	// one forged from what another messenger and the Request log show, changes nothing. With a wrong secret it is not
+	// verified; with none, as every press on a Root message posted before buttons carried a secret arrives, the Root
+	// message is edited again so that its buttons carry it, and the person is told to press again.
+	if ctx["secret"] == "" {
+		t.Errorf("the button carries no callback secret: %v", ctx)
+	}
+	without := func(secret string) map[string]string {
+		c := map[string]string{"action": ctx["action"], "key_id": ctx["key_id"]}
+		if secret != "" {
+			c["secret"] = secret
+		}
+		return c
+	}
+	e.callback(http.MethodPost, conn, press(root.ID, without(strings.Repeat("A", 43))), pressAnswer(notVerified))
+	edits := len(e.calls(http.MethodPut, patch))
+	e.callback(http.MethodPost, conn, press(root.ID, without("")), pressAnswer("These buttons are out of date and "+
+		"are being updated; nothing was changed. Press again in a moment."))
+	eventually(t, "the edit of the root message pressed without a secret", func() bool {
+		return len(e.calls(http.MethodPut, patch)) > edits
+	})
+	if e.alertGroup(g)["status"] != status {
+		t.Errorf("a press without the secret changed the status to %v", e.alertGroup(g)["status"])
+	}
+	if c := e.post(root.ID).attachment(t).Actions[0].Integration.Context; c["secret"] == "" {
+		t.Errorf("the edited root message carries no callback secret: %v", c)
+	}
+
 	// C-13.AC-15: a 429 with a plain-text body and Retry-After: 1 holds the Connection.
 	limited := e.clientRequests("delivery", "retry_after")
 	e.fault(fakeserver.Fault{Path: "/api/v4/posts", Status: http.StatusTooManyRequests, RetryAfterSeconds: 1,

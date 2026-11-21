@@ -108,7 +108,13 @@ A Bridge event of a type that this Muster reads but no handler of this process t
 
 INFO · fields: `connection`, `protocol_version`, `features` · C-22
 
-Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.
+Muster read the info of a Bridge Connection, on a Connection check, when the Connection was created or saved with a new base URL or token, or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.
+
+### `bridge_info_read_failed`
+
+WARN · fields: `connection`, `error` · C-22
+
+Muster could not read the info of a Bridge Connection right after it was created or saved with a new base URL or token, and the save stands: connection is the public_id of the Connection and error what failed — the check code of the step info with the bridge's text, masked of the token and the push secret, no limiter token within delivery.interactive_budget, or a failed store of the info. The Connection has no info until its check, or a call that depends on it, reads it; until then a Page through its Destinations names people without markers. Check the Connection from its page; its Request log has the request.
 
 ### `bridge_poll_failed`
 

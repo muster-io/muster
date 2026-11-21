@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // The Destination test of Mattermost Destinations (C-16.FR-1 to FR-4): the step message posts the Root message of the
@@ -294,7 +295,7 @@ func firstActions(p post) []action {
 	return nil
 }
 
-// postRequest is a request of the bot to path of the Target's server as a test shows it: the token masked.
+// postRequest is a request of the bot to path of the Target's server as a test shows it, masked.
 func postRequest(tg Target, method, path string, body any) *delivery.TestRequest {
 	r := &delivery.TestRequest{Method: method,
 		URL:     strings.TrimSuffix(tg.Client.settings.ServerURL, "/") + path,
@@ -306,12 +307,16 @@ func postRequest(tg Target, method, path string, body any) *delivery.TestRequest
 	return r
 }
 
-// mask replaces the bot token of the Target in s.
+// contextMembers are the members of a button's context that only the Mattermost server may know: the key id and the
+// callback secret, in a post and in an answer that echoes one, also as JSON inside a JSON string.
+var contextMembers = outbound.NewMemberMasker("key_id", "secret")
+
+// mask replaces, in s, the bot token of the Target and the key ids and callback secrets of buttons.
 func (t Target) mask(s string) string {
 	if tok := string(t.Client.settings.Token); tok != "" {
 		s = strings.ReplaceAll(s, tok, redacted)
 	}
-	return s
+	return contextMembers.Mask(s)
 }
 
 // newNonce is the nonce of one test: 16 random bytes in base64url.

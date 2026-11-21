@@ -43,11 +43,13 @@ func (p *presses) Pressed(_ context.Context, nonce string) error {
 	return p.err
 }
 
-// testBody is a MattermostActionRequest of a press of a test message, with the nonce of its test.
-func testBody(user, channel, action, keyID, nonce string) string {
+// testBody is a MattermostActionRequest of a press of a test message, with the nonce of its test and the callback
+// secret of its button.
+func (e *callbackEnv) testBody(user, channel, action, keyID, nonce string) string {
+	secret, _ := mattermost.CallbackSecret(e.keys, keyID, connectionPublicID, action)
 	b, _ := json.Marshal(map[string]any{"user_id": user, "user_name": "someone", "channel_id": channel,
 		"team_id": fakemattermost.TeamID, "post_id": "post-test", "trigger_id": "tr", "type": "button",
-		"context": map[string]string{"action": action, "key_id": keyID, "test": nonce}})
+		"context": map[string]string{"action": action, "key_id": keyID, "test": nonce, "secret": secret}})
 	return string(b)
 }
 
@@ -62,7 +64,7 @@ func TestPressTestMessage(t *testing.T) {
 		e.conns.conn.BotUserID = fakemattermost.BotUserID
 		e.bindings.tests = map[postKey]delivery.Destination{{destA.PublicID, fakemattermost.ChannelAlerts}: destA}
 		id, kid := e.action(t, buttons.SubjectTest, destA.PublicID, buttons.CommandAcknowledge, 0)
-		text := e.press(t, http.MethodPost, connectionPublicID, testBody(fakemattermost.BobUserID,
+		text := e.press(t, http.MethodPost, connectionPublicID, e.testBody(fakemattermost.BobUserID,
 			fakemattermost.ChannelAlerts, id, kid, "n1"))
 		want := "This is a test message; nothing was changed"
 		if e.admin {
@@ -78,31 +80,57 @@ func TestPressTestMessage(t *testing.T) {
 		}
 		// Another channel than the Destination's is not verified and answered with nothing.
 		posted := len(e.ephemeralCalls())
-		if text := e.press(t, http.MethodPost, connectionPublicID, testBody(fakemattermost.BobUserID,
+		if text := e.press(t, http.MethodPost, connectionPublicID, e.testBody(fakemattermost.BobUserID,
 			fakemattermost.ChannelAlertsProd, id, kid, "n1")); text != "" || len(e.ephemeralCalls()) != posted ||
 			e.last(t)["outcome"] != "not_verified" {
 			t.Errorf("other channel %q %v", text, e.last(t))
 		}
 		// The bot's own press during a test.
-		if text := e.press(t, http.MethodPost, connectionPublicID, testBody(fakemattermost.BotUserID,
+		if text := e.press(t, http.MethodPost, connectionPublicID, e.testBody(fakemattermost.BotUserID,
 			fakemattermost.ChannelAlerts, id, kid, "n2")); text != "" || len(e.ephemeralCalls()) != posted ||
 			e.last(t)["outcome"] != "test_press" || len(rec.nonces) != 1 || rec.nonces[0] != "n2" {
 			t.Errorf("bot press %q %v %v", text, e.last(t), rec.nonces)
 		}
 		rec.err = errors.New("notify failed")
-		e.press(t, http.MethodPost, connectionPublicID, testBody(fakemattermost.BotUserID,
+		e.press(t, http.MethodPost, connectionPublicID, e.testBody(fakemattermost.BotUserID,
 			fakemattermost.ChannelAlerts, id, kid, "n3"))
 		if l := e.last(t); l["outcome"] != "test_press" || l["error"] != "notify failed" {
 			t.Errorf("failed report %v", l)
 		}
 		// A failed read of the Destination.
 		e.bindings.testErr = errors.New("db down")
-		e.press(t, http.MethodPost, connectionPublicID, testBody(fakemattermost.BobUserID,
+		e.press(t, http.MethodPost, connectionPublicID, e.testBody(fakemattermost.BobUserID,
 			fakemattermost.ChannelAlerts, id, kid, ""))
 		if l := e.last(t); l["outcome"] != "failed" || len(e.commands.calls) != 0 {
 			t.Errorf("failed read %v", l)
 		}
 	})
+}
+
+// TestPressTestMessageWithoutSecret is C-13.FR-4 on a test message: the bot's own press and a person's press without
+// the callback secret of the button, or with a wrong one, are not verified, answered with nothing, and report no nonce
+// to a waiting test.
+func TestPressTestMessageWithoutSecret(t *testing.T) {
+	e := newCallbackAs(t, true)
+	rec := &presses{}
+	e.cfg.TestPresses = rec
+	e.conns.conn.BotUserID = fakemattermost.BotUserID
+	e.bindings.tests = map[postKey]delivery.Destination{{destA.PublicID, fakemattermost.ChannelAlerts}: destA}
+	id, kid := e.action(t, buttons.SubjectTest, destA.PublicID, buttons.CommandAcknowledge, 0)
+	for _, user := range []string{fakemattermost.BotUserID, fakemattermost.BobUserID} {
+		for _, secret := range []string{"", strings.Repeat("A", 43)} {
+			b, _ := json.Marshal(map[string]any{"user_id": user, "channel_id": fakemattermost.ChannelAlerts,
+				"post_id": "post-test", "context": map[string]string{"action": id, "key_id": kid, "test": "n1",
+					"secret": secret}})
+			if text := e.press(t, http.MethodPost, connectionPublicID, string(b)); text != "" ||
+				e.last(t)["outcome"] != "not_verified" {
+				t.Errorf("%s with secret %q: answer %q, line %v", user, secret, text, e.last(t))
+			}
+		}
+	}
+	if len(rec.nonces) != 0 || len(e.fake.Ephemeral()) != 0 || len(e.commands.calls) != 0 {
+		t.Errorf("nonces %v, ephemeral %+v, commands %+v", rec.nonces, e.fake.Ephemeral(), e.commands.calls)
+	}
 }
 
 // testerEnv is a Tester over the fake server, whose presses reach the callback served on loopback; the press waits
@@ -142,7 +170,7 @@ func newTester(t *testing.T) *testerEnv {
 		Real: clock.Real{}, Keys: e.keys, Log: logging.New(&bytes.Buffer{}, logging.LevelInfo)})
 	env := &testerEnv{callbackEnv: e, targets: ts, waits: waits,
 		tester: &mattermost.Tester{Adapter: &mattermost.Adapter{Targets: ts, PublicURL: "http://localhost:8080",
-			IngestURL: srv.URL + "/", Version: "v1.2.3"}, Path: e.cfg.Path, Renderer: r, Waits: waits,
+			IngestURL: srv.URL + "/", Version: "v1.2.3", Keys: e.keys}, Path: e.cfg.Path, Renderer: r, Waits: waits,
 			Budget: 2 * time.Second},
 		src: &messages.Source{Number: 7, Title: "disk full", Status: messages.ColourFiring, SeverityLevel: "warning",
 			TimeZone: "UTC", StartedAt: press0, Route: messages.RouteRef{Name: "db", Language: "en",
@@ -194,6 +222,20 @@ func TestMattermostTest(t *testing.T) {
 	if req.Method != http.MethodPost || !strings.HasSuffix(req.URL, "/api/v4/posts") ||
 		req.Headers[0] != [2]string{"Authorization", "Bearer [redacted]"} || !strings.Contains(*req.Body, "🧪") {
 		t.Errorf("request %+v", req)
+	}
+	// The test's request and response show the key id and the callback secret of the button masked.
+	s, _ := ctx["secret"].(string)
+	k, _ := ctx["key_id"].(string)
+	if s == "" || k == "" || !strings.Contains(*req.Body, `"key_id":"[redacted]","secret":"[redacted]"`) {
+		t.Errorf("secret %q, key id %q, request body %s", s, k, *req.Body)
+	}
+	for _, body := range []string{*req.Body, *steps[0].ResponseBody, *steps[1].Request.Body} {
+		if strings.Contains(body, s) || strings.Contains(body, k) {
+			t.Errorf("a step shows the key id or the callback secret: %s", body)
+		}
+	}
+	if !strings.Contains(*steps[0].ResponseBody, `"key_id":"[redacted]"`) {
+		t.Errorf("response body %s", *steps[0].ResponseBody)
 	}
 	if steps[0].ResponseStatus != http.StatusCreated || !strings.Contains(*steps[0].ResponseBody, posts[0].ID) {
 		t.Errorf("response %d %v", steps[0].ResponseStatus, steps[0].ResponseBody)
@@ -318,6 +360,11 @@ func TestMattermostPreview(t *testing.T) {
 		!strings.Contains(*items[0].Request.Body, `"fallback":"🔴 #7 disk full"`) ||
 		strings.Contains(*items[0].Request.Body, "🧪") || strings.Contains(*items[0].Request.Body, token) {
 		t.Fatalf("preview %+v %v", items, err)
+	}
+	// The buttons' context shows the key id and the callback secret masked.
+	if !strings.Contains(*items[0].Request.Body, `"key_id":"[redacted]","secret":"[redacted]"`) ||
+		strings.Contains(*items[0].Request.Body, e.keys.ActiveKeyID()) {
+		t.Errorf("preview body %s", *items[0].Request.Body)
 	}
 	if len(e.fake.Requests()) != 0 {
 		t.Errorf("sent %+v", e.fake.Requests())

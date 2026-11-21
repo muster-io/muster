@@ -267,6 +267,33 @@ func leftOut(c delivery.Call, sent []gen.Mention) []string {
 	return out
 }
 
+// leftOutMentions are the groups and mentions of everyone of the Loud call c — its targets with the template's tokens
+// (withTemplateTokens) — that the bridge whose info is i declares and whom sent, the Mentions the message carries,
+// lacks: the Mention line left them out for the body's length (C-12.FR-11). Each is listed once, in the order of the
+// targets; delivery records them as not delivered (C-28.FR-3). A Quiet call has none.
+func leftOutMentions(c delivery.Call, i Info, sent []gen.Mention) []mentions.Target {
+	if c.Loudness != groups.Loud {
+		return nil
+	}
+	var out []mentions.Target
+	add := func(t mentions.Target, kind gen.MentionKind, id string) {
+		if entryOf(sent, kind, id) < 0 && !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	for _, t := range c.Targets {
+		switch {
+		case t.Kind == mentions.TargetGroup && i.GroupMentions():
+			if name := oneLine(t.Group); namable(name) {
+				add(mentions.Target{Kind: t.Kind, Group: t.Group}, gen.MentionKindGroup, name)
+			}
+		case t.Kind == mentions.TargetEveryone && slices.Contains(i.EveryoneMentions(), t.Everyone):
+			add(mentions.Target{Kind: t.Kind, Everyone: t.Everyone}, gen.MentionKindEveryone, t.Everyone)
+		}
+	}
+	return out
+}
+
 // plainNamed are the public ids of the people of the Loud call c who have no marker — an Account link whose external
 // id is longer than maxID or whose marker has no name, or no link — and whom the message therefore names by the plain
 // name, which mentions nobody (C-22.FR-16). Delivery records them as not delivered (C-28.FR-3), and a Page reply does
