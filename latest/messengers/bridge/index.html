@@ -3371,7 +3371,11 @@ the examples do the same with the <a href="../../reference/api/">API</a>, with a
 <li><strong><code>push</code></strong> when the bridge can reach <code>MUSTER_INGEST_URL</code>. The bridge posts each event to the Connection's callback
   address, <code>https://ingest.muster.example.org/api/v1/callbacks/bridge/CN…</code>, which the Connection shows in
   <code>callback_url</code>, signed with a <strong>push secret</strong> that you configure on both sides. The push secret has the Standard
-  Webhooks form, <code>whsec_</code> followed by base64, and is write-only like the token.</li>
+  Webhooks form, <code>whsec_</code> followed by the base64 of at least 24 random bytes, and is write-only like the token. The
+  callback is authenticated by this signature alone, so Muster refuses a shorter key with <code>invalid_format</code>. Generate
+  one with <code>printf 'whsec_%s\n' "$(openssl rand -base64 32)"</code>. A Connection saved with a shorter push secret before
+  Muster required 24 bytes keeps working; the API's <code>warnings</code> lists <code>push_secret_too_short</code>, and the form and
+  <code>muster doctor</code> warn about it, until you save a new push secret here and in the bridge.</li>
 </ul>
 <p>A Connection also has a <strong>proxy</strong>, for a bridge that Muster reaches only through one, and a <strong>limiter</strong>: 10 requests
 per second by default, shared by all its Destinations. When the bridge answers that it is rate-limited, Muster waits

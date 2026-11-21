@@ -129,7 +129,7 @@ The full text, one file per section of the document map; [`llms-full.txt`](https
 - [Install](https://muster-io.github.io/muster/latest/llms-full-install.txt): 3 pages, about 25610 tokens.
 - [Configure](https://muster-io.github.io/muster/latest/llms-full-configure.txt): 3 pages, about 12868 tokens.
 - [Integrations](https://muster-io.github.io/muster/latest/llms-full-integrations.txt): 3 pages, about 11363 tokens.
-- [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, about 68819 tokens.
+- [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, about 68943 tokens.
 - [Outgoing webhooks](https://muster-io.github.io/muster/latest/llms-full-outgoing-webhooks.txt): 3 pages, about 13844 tokens.
 - [Sign-in](https://muster-io.github.io/muster/latest/llms-full-sign-in.txt): 5 pages, about 11234 tokens.
 - [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 14 pages, about 63611 tokens.
