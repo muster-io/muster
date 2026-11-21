@@ -98,9 +98,10 @@ func TestIntegrationTakeTokensDueTimes(t *testing.T) {
 	})
 }
 
-// TestIntegrationSkipsOfRefusedLimiters is C-11.FR-3 on PostgreSQL for #547: the claims of deliveries and of Thread
-// replies and NextDeliveryWork leave out the work of the limiters the memo skips — the deliveries and Thread replies of
-// a skipped Destination or of any Destination of a skipped Connection, and the events of a skipped outgoing webhook.
+// TestIntegrationSkipsOfRefusedLimiters is C-11.FR-3 on PostgreSQL for #547: the claims of deliveries, of Thread
+// replies and of webhook events and NextDeliveryWork leave out the work of the limiters the memo skips — the
+// deliveries and Thread replies of a skipped Destination or of any Destination of a skipped Connection, and the events
+// of a skipped outgoing webhook.
 func TestIntegrationSkipsOfRefusedLimiters(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
@@ -203,6 +204,22 @@ func TestIntegrationSkipsOfRefusedLimiters(t *testing.T) {
 		}
 		if n := claimDeliveries(nil, nil); n != 1 {
 			t.Errorf("claimed %d deliveries without skips, want 1", n)
+		}
+		claimEvents := func(dests []int64) int {
+			t.Helper()
+			rows, err := q.ClaimDueWebhookEvents(ctx, dbgen.ClaimDueWebhookEventsParams{OrgID: l.orgID,
+				Owner: "skips", LeaseUntil: l.real.Now().Add(time.Minute), Due: l.business.Now(), Now: l.real.Now(),
+				SkipDestinations: dests, Lim: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return len(rows)
+		}
+		if n := claimEvents([]int64{hook}); n != 0 {
+			t.Errorf("claimed %d webhook events with the webhook skipped", n)
+		}
+		if n := claimEvents(nil); n == 0 {
+			t.Error("claimed no webhook event without skips")
 		}
 	})
 }

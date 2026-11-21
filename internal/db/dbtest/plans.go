@@ -50,6 +50,45 @@ func UpdateScans(t testing.TB, connString, mode string, f func(ctx context.Conte
 	return scans
 }
 
+// RowsRead runs f on a connection to the database at connString that plans every prepared statement as mode, a
+// plan_cache_mode, says and sends the executed plan of every statement back as a notice (auto_explain with
+// log_analyze); it returns how many rows of relation the scans under alias read in all those plans together, every
+// loop counted: those they returned and those their filters removed. A claim whose plan cannot see its limit and
+// misjudges its filters reads every due row to choose a batch.
+func RowsRead(t testing.TB, connString, mode, relation, alias string,
+	f func(ctx context.Context, conn *pgx.Conn)) float64 {
+	t.Helper()
+	read := 0.0
+	for _, p := range loggedPlans(t, connString, []string{"SET plan_cache_mode = " + mode,
+		"SET auto_explain.log_analyze = on", "SET auto_explain.log_timing = off"}, f) {
+		read += rowsRead(t, p, relation, alias)
+	}
+	return read
+}
+
+// rowsRead is the rows the scans of relation under alias at the plan node raw and below it read, every loop counted.
+func rowsRead(t testing.TB, raw json.RawMessage, relation, alias string) float64 {
+	var node struct {
+		Relation string            `json:"Relation Name"`
+		Alias    string            `json:"Alias"`
+		Rows     float64           `json:"Actual Rows"`
+		Removed  float64           `json:"Rows Removed by Filter"`
+		Loops    float64           `json:"Actual Loops"`
+		Plans    []json.RawMessage `json:"Plans"`
+	}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		t.Fatalf("plan node %s: %v", raw, err)
+	}
+	read := 0.0
+	if node.Relation == relation && node.Alias == alias {
+		read = (node.Rows + node.Removed) * node.Loops
+	}
+	for _, child := range node.Plans {
+		read += rowsRead(t, child, relation, alias)
+	}
+	return read
+}
+
 // planNode is a node of an EXPLAIN plan in JSON.
 type planNode struct {
 	Type      string     `json:"Node Type"`

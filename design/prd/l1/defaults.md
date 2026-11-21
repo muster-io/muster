@@ -133,6 +133,8 @@ Other lifecycle values:
 | `routing.group_key_preview_examples` | the 5 largest Alert Groups for each key | built in | C-08 | decided |
 | `routing.group_key_preview_max_alerts` | 10,000 Alerts, the newest first (the active Alerts of NFR-1) | built in | C-08 | decided |
 | `alert_group.list_range` | last 7 days (lifetime overlapping the range) | request | C-09 | decided |
+| `dashboard.refresh_interval` | 5 min: the dashboard on the Home page reads its figures again while the page is visible; the counts of open Alert Groups follow live updates instead (C-40.FR-8) | built in | C-40 | decided |
+| `dashboard.noisy_alerts` | 10 titles, each with more than one Alert Group in the period (C-40.FR-7) | built in | C-40 | decided |
 | `alert_group.note_max_length` | 4,000 characters | built in | C-10 | decided |
 | `alert_group.bulk_max` | 100 Alert Groups per bulk command | built in | C-10 | decided |
 | `alert_group.attach_max` | 100 Alert Groups attached to one main Alert Group | built in | C-37 | decided |
@@ -200,6 +202,7 @@ Other lifecycle values:
 | `slack.press_deadline` | 30 s from the hand-over of a press to the end of its Command, its wait for a slot included: the time Mattermost waits for the answer to a press ([F-032](../../facts.md#rate-limit-and-server-settings)); a press that runs out of it is answered that it failed | built in | C-24 | decided |
 | `slack.max_waiting_presses` | 64 Slack presses waiting for a slot in a process; one more is dropped, unanswered and logged, which bounds the memory a replayed signed request can hold | built in | C-24 | decided |
 | `slack.parallel_presses` | 2 Slack presses handled at the same time per replica, over all its Slack Connections and both event modes, like `bridge.parallel_events`; the others wait, already confirmed | built in | C-24 | decided |
+| `destination_test.idle_timeout` | 1 h on the business clock without a step: the step-by-step test of a Destination then ends, and its Test messages stay (C-42.FR-1) | built in | C-42 | decided |
 
 ## Request log
 

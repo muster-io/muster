@@ -30,7 +30,7 @@ files_touched:
   - .github/workflows/codeql.yml
   - .github/workflows/scorecard.yml
   - api/openapi.yaml
-  - api/MUSTER_VERSION
+  - api/MUSTER_COMMIT
   - api/codegen.yaml
   - internal/client/client.go
   - internal/client/client_test.go
@@ -48,12 +48,12 @@ files_touched:
   - examples/provider/provider.tf
 acceptance:
   - "[C-33.FR-1] `go.mod` declares `github.com/muster-io/terraform-provider-muster`; `main.go` serves the provider with terraform-plugin-framework over protocol version 6 at the address `registry.terraform.io/muster-io/muster`; every Go file, workflow and the Makefile carry `SPDX-License-Identifier: MIT` and `Copyright The Muster Authors`, which `make lint` checks; CONTRIBUTING.md takes contributions under MIT without a CLA; `make licenses` fails on a dependency whose licence is not on the list of the Contracts."
-  - "[C-33.FR-2, C-33.AC-15] `api/MUSTER_VERSION` names the Muster version and `api/openapi.yaml` is that version's specification byte for byte, whose `info.license` is MIT; `make spec-check` downloads the specification of that tag and fails naming the difference — a copy with one byte changed fails it — and `make generate-check` fails when the client generated with oapi-codegen from the copy is not current; the CI jobs `spec` and `generate` run them."
+  - "[C-33.FR-2, C-33.AC-15] Until Muster's `v0.2.0` is tagged, `api/MUSTER_COMMIT` pins a commit of Muster's `master`; from then `api/MUSTER_VERSION` names the version, and `make spec-sync VERSION=0.2.0` switches from the one to the other — the repository holds exactly one of the two files. `api/openapi.yaml` is the specification of the pin byte for byte, whose `info.license` is MIT from the first pin that carries S-179; `make spec-check` downloads the specification of the pinned commit or tag and fails naming the difference — a copy with one byte changed fails it — and `make generate-check` fails when the client generated with oapi-codegen from the copy is not current; the CI jobs `spec` and `generate` run them."
   - "[C-33.FR-3] The provider schema has `endpoint` and `token` (sensitive), both optional, falling back to `MUSTER_ENDPOINT` and `MUSTER_TOKEN`; the configuration wins over the environment; neither set is an error naming both (`provider_test.go`)."
   - "[C-33.FR-3, C-33.FR-4, C-33.AC-1] Against a test server whose `getSystemStatus` answers `0.1.4`, configuring fails with \"Muster 0.1.4 is older than 0.2.0, the oldest version this provider works with\"; `0.2.0` and `0.9.3` pass; `0.2.1-5-gabc1234` and `dev` pass with a warning that the version cannot be compared; `401` fails naming `MUSTER_TOKEN` or `token` as configured; `403` fails saying that the token needs the Admin Role (`version_test.go`, `provider_test.go`)."
-  - "[C-33.AC-1] The acceptance test `TestAccProvider_configure` plans a configuration with only the provider block against `muster dev` with the token of a Service account with the Admin Role, and fails as above with the token of a Service account with the Responder Role."
+  - "[C-33.AC-1] The acceptance test `TestAccProvider_configure`, against `muster dev`, plans the provider block alone, then reads through the data source `muster_acceptance_probe` with the token of a Service account with the Admin Role, and fails as above with the token of a Service account with the Responder Role and with a wrong token. Terraform and OpenTofu never configure a provider block that nothing uses, so the test-only data source, which only `internal/acctest` serves and the shipped provider never has, makes them configure it."
   - "[C-33.FR-8, C-33.FR-17] The client sends `Authorization: Bearer` and `User-Agent: terraform-provider-muster/<version>`; an answer `412` becomes the diagnostic of C-33.FR-8 naming the object; a problem `422` becomes a diagnostic at the attribute path of each `errors` pointer, with the problem's title, detail and code; `429` is retried after `Retry-After`, at most five times; a `GET` that fails with a transient error or `5xx` is retried with back-off, and no other method is; two writers of one shared object run one after the other, each sending the ETag of its own fresh read, and a writer whose part changed since its prior state gets the `412` error without writing (`client_test.go`, `problem_test.go`, `resourcekit_test.go`)."
-  - "[C-33.FR-19] `make testacc` starts PostgreSQL and `muster dev` from `ghcr.io/muster-io/muster:<api/MUSTER_VERSION>` (`MUSTER_IMAGE` overrides it), creates the Service account and its token through the API, and runs `go test` with `TF_ACC=1`; the workflow `acceptance.yml` runs it on pull requests and pushes to `master` with the lowest and the newest supported Terraform and OpenTofu, and daily with `MUSTER_IMAGE=ghcr.io/muster-io/muster:edge`; its job `old-cli` runs the `_oldCLI` tests on Terraform 1.10 and OpenTofu 1.10."
+  - "[C-33.FR-19] `make testacc` starts PostgreSQL and `muster dev` from the image of the pin — `ghcr.io/muster-io/muster:v<api/MUSTER_VERSION>`, or `ghcr.io/muster-io/muster:sha-<7 hex digits>` of `api/MUSTER_COMMIT` (`MUSTER_IMAGE` overrides it), creates the Service account and its token through the API, and runs `go test` with `TF_ACC=1`; the workflow `acceptance.yml` runs it on pull requests and pushes to `master` with the lowest and the newest supported Terraform and OpenTofu, and daily with `MUSTER_IMAGE=ghcr.io/muster-io/muster:edge`; its job `old-cli` runs the `_oldCLI` tests on Terraform 1.10 and OpenTofu 1.10."
   - "[C-33.FR-18] `make docs` generates `docs/` with tfplugindocs from the schema, `templates/` and `examples/`, and `make docs-check`, run in CI, fails when `docs/` is not current."
   - "[C-33.FR-20] `goreleaser check` passes on `.goreleaser.yml`, which builds the platforms of the Contracts into `terraform-provider-muster_<version>_<os>_<arch>.zip` with `terraform-provider-muster_<version>_SHA256SUMS`, its detached GPG signature and `terraform-provider-muster_<version>_manifest.json` from `terraform-registry-manifest.json` (protocol version 6.0); `goreleaser release --snapshot --clean --skip=sign` builds them in CI; release-please keeps a release pull request with `0.x` versions, and its tag starts `release.yml`."
 verify: "make ci"
@@ -99,11 +99,16 @@ issue: 700
   each dependency is stated in the pull request with its licence, latest release and maintenance status (ADR-0001).
   `main.go` serves `providerserver.NewProtocol6` with the address `registry.terraform.io/muster-io/muster` and a
   `-debug` flag.
-- **Specification and client** (`api/openapi.yaml`, `api/MUSTER_VERSION`, `api/codegen.yaml`): `MUSTER_VERSION`
-  holds one version, `0.2.0` at first (C-33.FR-4); `make spec-check` downloads
-  `https://raw.githubusercontent.com/muster-io/muster/v<version>/api/openapi.yaml` (`MUSTER_SPEC_URL` overrides it)
-  and compares it byte for byte; `make spec-sync VERSION=x.y.z` replaces the copy and the version and runs
-  `make generate`. oapi-codegen writes the types and the client into `internal/client/gen/` (generated, never listed).
+- **Specification and client** (`api/openapi.yaml`, `api/MUSTER_COMMIT` or `api/MUSTER_VERSION`, `api/codegen.yaml`):
+  the copy is pinned by exactly one of two files, which the Makefile, `test/muster-dev.sh` and AGENTS.md all read.
+  Until Muster's `v0.2.0` is tagged, `api/MUSTER_COMMIT` holds a commit of Muster's `master`, whose image is
+  `sha-<7 hex digits>`; from the tag, `api/MUSTER_VERSION` holds one version, `0.2.0` first (C-33.FR-4), whose image is
+  `v<version>`. `make spec-check` downloads
+  `https://raw.githubusercontent.com/muster-io/muster/<commit or v<version>>/api/openapi.yaml` (`MUSTER_SPEC_URL`
+  overrides it) and compares it byte for byte; `make spec-sync VERSION=x.y.z` replaces the copy, writes
+  `api/MUSTER_VERSION` in place of `api/MUSTER_COMMIT`, and runs `make generate`. A copy pinned to a commit before
+  S-179 and S-180 still has `info.license` `AGPL-3.0-only` and no `managed_by`, so `RequireManagedBy` refuses every body
+  until the re-pin that brings the field; the resources of S-183 onward start after that re-pin. oapi-codegen writes the types and the client into `internal/client/gen/` (generated, never listed).
   A daily CI job compares the copy with Muster's `master` and reports the difference in its summary without failing.
 - **Client** (`internal/client`): wraps the generated client with the base URL `<endpoint>/api/v1`, the bearer token,
   the `User-Agent`, a timeout of 60 seconds per request, the retries of C-33.FR-17, and `Problem` decoding of
@@ -139,13 +144,20 @@ issue: 700
   `MUSTER_RESPONDER_TOKEN` for `make testacc`; `down` removes both containers. The fake servers of `muster dev` serve
   the Connections of the acceptance tests; the development clock is not used. `acctest.go` gives the
   `ProtoV6ProviderFactories`, a `PreCheck` that needs the variables, and helpers that call the API directly to change
-  an object behind Terraform's back for the drift and `412` tests.
+  an object behind Terraform's back for the drift and `412` tests. It also serves the data source
+  `muster_acceptance_probe`, which only the acceptance tests' provider has, never the shipped one: Terraform and
+  OpenTofu configure a provider only when a resource or data source uses it, so the configuration errors of
+  C-33.AC-1 show only through a read of the probe.
+  `make testacc` takes two variables, which the Makefile passes to `go test` as `-run` and `-skip`: `ACC_RUN`, a regular
+  expression that selects the tests to run (empty: all of them), and `ACC_SKIP`, a regular expression of the tests to
+  leave out, which defaults to `_oldCLI$` so that the ordinary run skips the tests that only the job `old-cli` runs, on
+  the CLIs of version 1.10; `ACC_RUN='_oldCLI$$' ACC_SKIP=` (the `$$` is make's escape of `$`) runs those alone.
 - **CI** (`ci.yml`, `acceptance.yml`): `ci.yml` on pull requests, pushes to `master`, daily and by hand — jobs `lint`
   (golangci-lint, the header check), `test` (`go test -race`, coverage at least 80 % of `internal/` without
   `internal/client/gen/`), `generate`, `spec`, `docs`, `licenses`, `vulncheck`, `goreleaser` (`check` and a snapshot
   build), and `ci`, which passes only when all of them did. `acceptance.yml` — on pull requests and pushes to
   `master`, a matrix of Terraform `1.11.*` and the newest `1.x`, and OpenTofu `1.11.*` and the newest `1.x`, against
-  the image of `api/MUSTER_VERSION`; daily, the newest of each against `edge`; a job `old-cli` with Terraform `1.10.*`
+  the image of the pin; daily, the newest of each against `edge`; a job `old-cli` with Terraform `1.10.*`
   and OpenTofu `1.10.*` runs only the tests named `TestAcc*_oldCLI`, which check that those CLIs refuse a write-only
   attribute and accept the sensitive one; its jobs `acceptance` and `old-cli` join `ci`'s required checks. Terraform
   1.11 and OpenTofu 1.11 are the lowest supported versions because the write-only Secrets need them; the sensitive
@@ -182,20 +194,13 @@ In a clone of `muster-io/terraform-provider-muster`:
 
 ```sh
 make ci                                                   # lint, generate-check, spec-check, docs-check, licenses, test
-eval "$(test/muster-dev.sh up)"                           # MUSTER_ENDPOINT, MUSTER_TOKEN, MUSTER_RESPONDER_TOKEN
-make testacc TESTARGS='-run TestAccProvider'               # PASS
-mkdir -p /tmp/tfp && cd /tmp/tfp && printf 'provider "muster" {}\n' > main.tf
-cat > ~/.terraformrc <<EOF
-provider_installation { dev_overrides { "registry.terraform.io/muster-io/muster" = "$HOME/go/bin" } direct {} }
-EOF
-(cd - && go install .) && terraform plan                  # No changes. Your infrastructure matches the configuration.
-MUSTER_TOKEN=$MUSTER_RESPONDER_TOKEN terraform plan 2>&1 | grep -c 'needs the Admin Role'                    # 1
-MUSTER_TOKEN=wrong terraform plan 2>&1 | grep -c MUSTER_TOKEN                                                # 1
-cd - && test/muster-dev.sh down
-MUSTER_IMAGE=ghcr.io/muster-io/muster:0.1.4 test/muster-dev.sh up > /tmp/env && eval "$(cat /tmp/env)"
-cd /tmp/tfp && terraform plan 2>&1 | grep -o 'Muster 0.1.4 is older than 0.2.0.*'
+make testacc                                              # --- PASS: TestAccProvider_configure
+                                                          #   Admin token: plan, then a read of muster_acceptance_probe
+                                                          #   Responder token: The token needs the Admin Role
+                                                          #   wrong token: Muster refused the token from MUSTER_TOKEN
+make testacc ACC_RUN='_oldCLI$$' ACC_SKIP=                # --- PASS: TestAccProvider_configure_oldCLI (Terraform/OpenTofu 1.10)
+MUSTER_IMAGE=ghcr.io/muster-io/muster:v0.1.4 make testacc 2>&1 | grep -o 'Muster 0.1.4 is older than 0.2.0.*'
 # Muster 0.1.4 is older than 0.2.0, the oldest version this provider works with
-cd - && test/muster-dev.sh down
 cp api/openapi.yaml /tmp/spec.yaml && printf ' ' >> api/openapi.yaml && make spec-check; echo "exit=$?"   # … exit=2
 cp /tmp/spec.yaml api/openapi.yaml
 goreleaser release --snapshot --clean --skip=sign && ls dist/*.zip | wc -l                                   # 10
@@ -204,7 +209,10 @@ grep -L 'SPDX-License-Identifier: MIT' $(git ls-files '*.go' ':!internal/client/
 
 The pull request's checks show `ci` and `acceptance` green on the four CLI versions; its evidence table carries the
 output above, and its body says `Part of muster-io/muster#<issue of S-182>`. The Service account of the 0.1.4 run is
-made with the API of 0.1.4, which has Service accounts (C-04).
+made with the API of 0.1.4, which has Service accounts (C-04). Muster's images are tagged `vX.Y.Z` — `:v0.1.4`, not
+`:0.1.4`. A `terraform plan` by hand on a configuration with only `provider "muster" {}` cannot show the configuration
+errors, because Terraform and OpenTofu do not configure a provider that nothing uses; the acceptance test, which reads
+the probe data source, is the evidence instead.
 
 ## Open questions
 
@@ -213,9 +221,18 @@ None.
 ## Notes
 
 - Suggested commit: `feat: add the provider skeleton with its client, configuration and release pipeline`.
-- Starts after Muster's tag `v0.2.0` (journal D757), which carries S-179 to S-181: `depends_on` names S-181, the last
-  of them, since it cannot name a tag, and the tag is the maintainer's to announce. `api/MUSTER_VERSION` starts at
-  `0.2.0`.
+- The contract planned this story after Muster's tag `v0.2.0` (journal D757), which carries S-179 to S-181: `depends_on`
+  names S-181, the last of them, since it cannot name a tag, and the tag is the maintainer's to announce. The skeleton
+  was in fact built before the tag (muster-io/terraform-provider-muster#1), so `api/MUSTER_COMMIT` pins a commit of
+  Muster's `master` until then; when `v0.2.0` exists, with `managed_by` and the MIT `info.license`, a pull request runs
+  `make spec-sync VERSION=0.2.0`, which replaces it with `api/MUSTER_VERSION` `0.2.0`.
+- A question for the maintainer, non-blocking: the PRD's C-33.AC-1 says that with only the provider block a
+  configuration "stops" with "Muster 0.1.4 is older than 0.2.0 ...", which cannot be observed, since Terraform and
+  OpenTofu configure a provider that nothing uses never; that is why the acceptance probe exists (Contracts). The
+  maintainer is asked to amend the wording of C-33.AC-1 to "a configuration that reads a resource or data source of
+  the provider"; this story does not edit the PRD.
+- Corrected after muster-io/terraform-provider-muster#1: the pin by commit until the tag, the test-only data source
+  `muster_acceptance_probe` in place of the manual `terraform plan` checks, and the image tag `vX.Y.Z`.
 - **Maintainer** (operator attention): install on this repository the GitHub App that release-please uses in Muster's
   repository and give it the variable `RELEASE_PLEASE_APP_CLIENT_ID` and the secret `RELEASE_PLEASE_APP_PRIVATE_KEY`;
   enable Renovate; after the first push, require the checks `ci` and `acceptance` on `master`; turn on private
