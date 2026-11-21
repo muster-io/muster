@@ -3496,8 +3496,16 @@ way, with `message_too_long`: "Mention not delivered" names the group's name or 
 the API, in place of the person), the entry that named it and the Loud event. A `{{ mention "here" }}` or group token
 of a template that the line leaves out names no entry and no event: the Timeline still records it, but no warning
 follows, since the Destination has no entry to show it on. A group or a mention of everyone that the bridge no longer
-declares when the message is sent is not sent at all, so it is not recorded as left out either. Neither is the Team
-or everyone that a Page names, which no entry names.
+declares when the message is sent is not sent at all, so it is not recorded as left out either.
+
+The Team mention or everyone in the chat that a Page names has no entry either. When a Page's Thread reply through a
+bridge has no room for it, "Mention not delivered" names the group or the word, the reason `message_too_long` and, in
+place of the entry, the Page: the number of its step and the name of its Escalation chain (`page` in the API). Like a
+template's token, it shows in the Timeline only and raises no warning on the Destination. With today's limits this does
+not happen: a Page names one group or everyone at most, and its line has room for at least 250 characters, since a
+bridge declares a `max_body_length` of 500 or more. The people a Page reply
+leaves out are not reached instead, and the Page records `page_not_delivered` for them
+([How a Page reaches a person](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#how-a-page-reaches-a-person)).
 
 The Destination page warns about each person and entry whose latest "Mention not delivered" is not followed by a
 delivered Mention of that person through that entry, and in the same way about each group, Team mention and everyone
