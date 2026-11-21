@@ -112,6 +112,8 @@ From 0.2.0 the profile On-call is called Paging (C-26.FR-11).
 | `route.reopen_window` | 15 min | 15 min | C-09 | decided |
 | `route.grace_period` | 15 min | 15 min | C-09 | decided |
 | `route.urgent_rise_removes_ack` | on | on | C-09 | decided |
+| `route.loud_events` | all seven: `new_alert_group`, `new_alerts`, `reopen`, `ack_timeout`, `snooze_ended`, `rise_to_urgent`, `storm_started`; Routes that exist before it get the same (C-36.FR-10) | `new_alert_group` | C-36 | decided |
+| `route.new_alerts_remove_ack` | off | off | C-36 | decided |
 | `route.snooze_durations` | 1 h / 4 h / 24 h | 1 d / 3 d / 7 d | C-10 | decided |
 | `route.thread_batching_window` | 60 s | 60 s | C-11 | decided |
 | `route.storm_threshold` | 20 new Alert Groups per minute | same | C-11 | decided |
@@ -131,6 +133,7 @@ Other lifecycle values:
 | `alert_group.list_range` | last 7 days (lifetime overlapping the range) | request | C-09 | decided |
 | `alert_group.note_max_length` | 4,000 characters | built in | C-10 | decided |
 | `alert_group.bulk_max` | 100 Alert Groups per bulk command | built in | C-10 | decided |
+| `alert_group.attach_max` | 100 Alert Groups attached to one main Alert Group | built in | C-37 | decided |
 | `timers.auto_unacknowledge_after` | 2 unanswered Reminders in a row | built in | C-17 | decided |
 
 ## Delivery and messages

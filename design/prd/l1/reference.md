@@ -24,6 +24,10 @@ lifecycle event tables of the capabilities that record them:
 [C-09.FR-22](C-09-alert-group-lifecycle.md#lifecycle-events), [C-10.FR-15](C-10-commands.md#functional-requirements) and
 [C-17.FR-11](C-17-timers.md#functional-requirements). Delivery turns lifecycle events into messages (C-11.FR-20) and
 outgoing webhook events (C-15.FR-2).
+_Revised for L2 (2026-11-21):_ from C-36 each Route lists the Loud events that are Loud on it (`route.loud_events`),
+pre-filled by its Route profile, and may let new Alerts remove the acknowledgement; C-36.FR-2 gives the rows each Loud
+event governs and those that stay Loud on every Route, and a row that a Route makes Quiet is recorded Quiet without
+Mentions (C-36.FR-3). Every event of an attached Alert Group is Quiet (C-37.FR-7).
 
 Mentions are symbolic: `owner`, `previous_owner`, or the name of a Destination setting of C-12.FR-8 (`new_alert_group`,
 `new_alerts`, `reopen`, `ack_timeout`, `snooze_ended`, `rise_to_urgent`), which each Destination turns into real
@@ -70,7 +74,9 @@ keep their rows; L2 adds causes to some of them: `unclaimed` is also recorded on
 Alert Group has run out (C-32.FR-7); an Acknowledge through a Notification gateway records `acknowledged` with the
 Transport `gateway` (C-30.FR-6); and a raised Minimum severity of a Route records the Quiet `severity_raised` or
 `urgency_raised` with its reason (C-26.FR-9). The Timeline kind `escalation` is new and joins the filter of the Timeline
-(C-09.FR-14). Lifecycle events of the later part of L2 — Maintenance windows, Attach and Detach — are added with it.
+(C-09.FR-14). Lifecycle events of the later part of L2 are added with their capabilities: the removal of an
+acknowledgement by new Alerts (C-36) and Attach and Detach (C-37) below, and Maintenance windows with theirs. Every
+event recorded on an attached Alert Group, whatever its row, is Quiet and carries no Mentions (C-37.FR-7).
 
 | Event | When | Loud or Quiet | Mentions | Timeline kind | In a messenger (C-11) | Capability |
 |---|---|---|---|---|---|---|
@@ -84,6 +90,12 @@ Transport `gateway` (C-30.FR-6); and a raised Minimum severity of a Route record
 | `escalation_step_skipped` | a step is skipped, with its reason (C-32.FR-14) | Quiet | — | `escalation` | nothing | C-32 |
 | `assignees_changed` | the Assignees change (C-32.FR-12) | Quiet | — | `escalation` | Root message update | C-32 |
 | `escalation_webhook` | a step sends to an outgoing webhook (C-32.FR-13) | Quiet | — | `escalation` | nothing; sent only to the outgoing webhook Destination of the step | C-32 |
+| `alerts_added` | new Alerts remove the acknowledgement, where the Route lets them (C-36.FR-6) | Loud | `owner`, and `new_alerts` where the Route lists it | `alerts` | Thread reply with the reason, and Root message update | C-36 |
+| `attached` | the Alert Group is attached to a main Alert Group (C-37.FR-4) | Quiet | — | `status` | Root message edited to the line, and a Thread reply | C-37 |
+| `alert_group_attached` | an Alert Group is attached to this one | Quiet | — | `system` | Root message update | C-37 |
+| `status_followed` | an attached Alert Group takes a new status of its main Alert Group (C-37.FR-5, C-37.FR-6) | Quiet | — | `status` | update of its line; on a resolve, the Root message of its resolved status | C-37 |
+| `detached` | the Alert Group is detached by a person, or by the system (C-37.FR-6, C-37.FR-8) | Quiet | — | `status` | Root message edited back to its status, and a Thread reply | C-37 |
+| `alert_group_detached` | an Alert Group attached to this one is detached, or resolves on its own (C-37.FR-6) | Quiet | — | `system` | Root message update | C-37 |
 
 ## Transports
 
@@ -135,6 +147,10 @@ _Revised for L2 (2026-10-26):_ a Destination's button set (C-28.FR-8) — the Or
 default, or its own — chooses which of these buttons its Root messages show: Acknowledge with Unacknowledge, Resolve,
 each Snooze duration and each Snooze preset; Unsnooze is not part of the set. The buttons of Reminders, the Text
 commands of Bridges, the UI and the API keep every action.
+
+_Revised for L2 (2026-11-21):_ the Root message of an attached Alert Group is one line that names its main Alert Group,
+with a link and no buttons, and no Reminder or ack timeout notice is sent for it; Attach and Detach are made only from
+the UI and the API (C-37.FR-1, C-37.FR-10).
 
 ## Banners, warnings and notices
 
@@ -360,7 +376,7 @@ with the C-03 sign-in story (P-42).
 | `schedules:write` | Create, edit and delete Schedules and Rotation layers, and choose a Team's main Schedule (from 0.2.0, C-27) | ✓ | — | — |
 | `schedule-overrides:write` | Create, change and delete Overrides, when the caller is in the Team or is an Admin (from 0.2.0, C-27.FR-6) | ✓ | ✓ | — |
 | `escalation-chains:read` | Read Escalation chains with their steps (from 0.2.0, C-32) | ✓ | ✓ | ✓ |
-| `escalation-chains:write` | Create, edit and delete Escalation chains; attaching one to a Route needs `routes:write`, and to a Team `teams:write` (from 0.2.0, C-32) | ✓ | — | — |
+| `escalation-chains:write` | Create, edit and delete Escalation chains; naming one on a Route needs `routes:write`, and on a Team `teams:write` (from 0.2.0, C-32) | ✓ | — | — |
 | `organization:read` | Read the outbound address policy, the Keyring status and the severity values seen | ✓ | — | — |
 | `organization:write` | Change Organization settings, the outbound address policy and the outgoing heartbeat | ✓ | — | — |
 | `audit-log:read`, `system-status:read` | Read the Audit log and the System status | ✓ | — | — |
@@ -384,10 +400,12 @@ by everyone who can read Destinations because they contain only references (`{{ 
 ### Permissions added in L2
 
 The capabilities of L2 add Permissions with the same rules. Each joins the table above, the `Permission` schema and
-the allocation that the migrations seed in the story that implements it; until then this section holds them. None is
-left: `escalation-chains:read` and `escalation-chains:write` joined the table above with the story of the Escalation
-chains (S-154). Attaching an Escalation chain to a Route needs `routes:write`, and to a Team `teams:write`; seeing and
-changing another User's Notification rules and removing their gateway contacts need `users:read` and `users:write`.
+the allocation that the migrations seed in the story that implements it; until then this section holds them, in prose,
+since the checks read every table with the columns above. Held here: `alert-groups:attach` — Attach and Detach Alert
+Groups (C-37.FR-1) — for Admins and Responders, not Viewers. `escalation-chains:read` and `escalation-chains:write`
+joined the table above with the story of the Escalation chains (S-154). Naming an Escalation chain on a Route needs
+`routes:write`, and on a Team `teams:write`; seeing and changing another User's Notification rules and removing their
+gateway contacts need `users:read` and `users:write`.
 
 ## Internal alerts
 
