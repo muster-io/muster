@@ -2121,6 +2121,48 @@ func TestMessageSettingsRerender(t *testing.T) {
 	}
 }
 
+// TestStormSummariesHook is C-11.FR-6 and C-12.FR-10 (#542): a save that renames the Route or changes its language runs
+// the hook of delivery with the Route, which brings the Storm summary of an active Storm current, whether or not the
+// Route has open Alert Groups; a save that changes neither runs none, and a failing hook fails the save.
+func TestStormSummariesHook(t *testing.T) {
+	svc, store, _ := newService(t)
+	r, err := svc.Create(t.Context(), by, input("infra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []int64
+	svc.SetStormSummaries(func(_ context.Context, _ dbgen.DBTX, routeID int64) error {
+		calls = append(calls, routeID)
+		return store.fail["storm summaries"]
+	})
+	in := input("infra")
+	for _, tc := range []struct {
+		name   string
+		change func(in *Input)
+		calls  int
+	}{
+		{"snooze durations", func(in *Input) { in.Policy.SnoozeDurationsSeconds = []int64{3600} }, 0},
+		{"language", func(in *Input) { in.Policy.Language = LanguageRussian }, 1},
+		{"the same language", func(*Input) {}, 0},
+		{"name", func(in *Input) { in.Name = "Infra" }, 1},
+		{"name and language", func(in *Input) { in.Name, in.Policy.Language = "infra", LanguageEnglish }, 1},
+	} {
+		before := len(calls)
+		tc.change(&in)
+		if _, err := svc.Update(t.Context(), by, r.PublicID, nil, in); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := len(calls) - before; got != tc.calls || (got > 0 && calls[len(calls)-1] != r.ID) {
+			t.Errorf("%s: calls %v, want %d of route %d", tc.name, calls[before:], tc.calls, r.ID)
+		}
+	}
+	store.fail["storm summaries"] = errBoom
+	in.Name = "renamed"
+	if _, err := svc.Update(t.Context(), by, r.PublicID, nil, in); !errors.Is(err, errBoom) {
+		t.Errorf("a failing hook: %v", err)
+	}
+}
+
 // TestRouteDestinationEntries is C-26.FR-1, FR-2 and C-08.FR-1 revised: a Route takes destination_entries with their
 // Severity conditions, any by default; destination_ids alone keeps the stored condition of each Destination it keeps
 // and gives a new one any; both together take the entries; neither keeps the stored entries. A changed condition is

@@ -191,6 +191,9 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 	l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
 		return l.svc.RouteDestinationsChanged(ctx, tx, c)
 	})
+	l.routes.SetStormSummaries(func(ctx context.Context, tx routingdb.DBTX, routeID int64) error {
+		return l.svc.StormRouteChanged(ctx, tx, routeID)
+	})
 	l.dsvc = destinations.New(org.ID, destinations.NewStore(d.Pool))
 	l.dsvc.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(d.Pool), Audit: w, Business: l.business,
 		Routes: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {

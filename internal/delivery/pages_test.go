@@ -409,6 +409,46 @@ func TestPageRepliesOfTeams(t *testing.T) {
 	}
 }
 
+// leavingOutMentions is the adapter of a bridge whose Mention line leaves out every group and mention of everyone of
+// its replies for length (C-12.FR-11), which it reports in Outcome.LeftOutMentions.
+type leavingOutMentions struct {
+	*deliverytest.Recorder
+}
+
+func (a leavingOutMentions) Reply(ctx context.Context, c delivery.Call, root delivery.Root,
+	m delivery.Message) delivery.Outcome {
+	out := a.Recorder.Reply(ctx, c, root, m)
+	if out.Kind == delivery.OutcomeOK {
+		for _, tg := range c.Targets {
+			if tg.Kind != mentions.TargetUser {
+				out.LeftOutMentions = append(out.LeftOutMentions, tg)
+			}
+		}
+	}
+	return out
+}
+
+// TestPageReplyLeftOutMentions (#626): the Team mention and the mention of everyone of a Page name no Mention entry of
+// the Destination, so a Page reply whose line leaves them out for length records no "Mention not delivered" — not as
+// a template's token, which they are not.
+func TestPageReplyLeftOutMentions(t *testing.T) {
+	e, _ := pageEnv(t)
+	e.w.Adapters[delivery.TypeMattermost] = leavingOutMentions{Recorder: e.rec}
+	e.addPage(901, dbgen.GetPageReplyRow{StepNumber: 6, TeamID: pgtype.Int8{Int64: 3, Valid: true},
+		TeamName: "payments", ChainTeamName: "payments"})
+	e.addPage(902, dbgen.GetPageReplyRow{StepNumber: 2, Everyone: "here"})
+	target := groups.PageTarget{DestinationID: destMM, Source: groups.PageSourceTeam}
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, pagedEvent(2, 901, target),
+		pagedEvent(3, 902, target))
+	e.rounds(t)
+	if r := e.replies(); len(r) != 2 {
+		t.Fatalf("replies %+v", r)
+	}
+	if ev := e.mentionEvents(); len(ev) != 0 {
+		t.Errorf("mention events %+v", ev)
+	}
+}
+
 // TestPageReplyFailures: a reply whose Page cannot be read, whose people or Team mention cannot be read is retried;
 // a settle that fails is logged without failing the round, which settles the Page later; a list that fails fails it.
 func TestPageReplyFailures(t *testing.T) {

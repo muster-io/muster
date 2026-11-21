@@ -3364,14 +3364,17 @@ func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsO
 }
 
 const listOpenMentions = `-- name: ListOpenMentions :many
-SELECT latest.user_id::bigint AS user_id, latest.target::jsonb AS target
-FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'target')
-             e.detail ->> 'user_id' AS user_id, e.detail -> 'target' AS target, e.kind
+SELECT coalesce(latest.user_id::bigint, 0)::bigint AS user_id, latest.mention::jsonb AS mention,
+       latest.target::jsonb AS target
+FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'mention', e.detail -> 'target')
+             e.detail ->> 'user_id' AS user_id, e.detail -> 'mention' AS mention, e.detail -> 'target' AS target,
+             e.kind
       FROM delivery_events e
       WHERE e.org_id = $1 AND e.destination_id = $2
         AND e.kind IN ('mention_not_delivered', 'mention_delivered') AND e.occurred_at >= $3
-        AND e.detail ->> 'user_id' = ANY($4::text[])
-      ORDER BY e.detail ->> 'user_id', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
+        AND (e.detail ->> 'user_id' = ANY($4::text[]) OR e.detail -> 'mention' IS NOT NULL)
+        AND e.detail -> 'target' IS NOT NULL
+      ORDER BY e.detail ->> 'user_id', e.detail -> 'mention', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
 WHERE latest.kind = 'mention_not_delivered'
 `
 
@@ -3383,14 +3386,17 @@ type ListOpenMentionsParams struct {
 }
 
 type ListOpenMentionsRow struct {
-	UserID int64
-	Target []byte
+	UserID  int64
+	Mention []byte
+	Target  []byte
 }
 
-// ListOpenMentions reads which of the people @user_ids have an open warning about an undelivered Mention on the
-// Destination (C-28.FR-3): the person and the entry's target of each latest mention_not_delivered or
-// mention_delivered of the Destination per person and target since @since, the start of retention.alert_details,
-// whose latest is mention_not_delivered. On delivery_events_mentions_idx.
+// ListOpenMentions reads which of the people @user_ids, and which groups and mentions of everyone that a bridge's
+// entries named, have an open warning about an undelivered Mention on the Destination (C-28.FR-3, C-12.FR-11): the
+// person — 0 for a group or everyone — the Mention — null for a person — and the entry's target of each latest
+// mention_not_delivered or mention_delivered of the Destination per person or Mention and target since @since, the
+// start of retention.alert_details, whose latest is mention_not_delivered. A template's token, which names no entry,
+// has no warning. On delivery_events_mentions_idx.
 func (q *Queries) ListOpenMentions(ctx context.Context, arg ListOpenMentionsParams) ([]ListOpenMentionsRow, error) {
 	rows, err := q.db.Query(ctx, listOpenMentions,
 		arg.OrgID,
@@ -3405,7 +3411,7 @@ func (q *Queries) ListOpenMentions(ctx context.Context, arg ListOpenMentionsPara
 	items := []ListOpenMentionsRow{}
 	for rows.Next() {
 		var i ListOpenMentionsRow
-		if err := rows.Scan(&i.UserID, &i.Target); err != nil {
+		if err := rows.Scan(&i.UserID, &i.Mention, &i.Target); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -4236,7 +4242,7 @@ func (q *Queries) LockRerenderGroup(ctx context.Context, arg LockRerenderGroupPa
 
 const lockStorm = `-- name: LockStorm :one
 SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
-       r.name AS route_name, r.language AS route_language, r.storm_threshold
+       r.storm_threshold
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = $1 AND s.id = $2 AND s.ended_at IS NULL
@@ -4256,12 +4262,13 @@ type LockStormRow struct {
 	AlertGroupCount int64
 	UrgentCount     int64
 	RoutePublicID   string
-	RouteName       string
-	RouteLanguage   string
 	StormThreshold  int64
 }
 
-// LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.
+// LockStorm reads, and locks, a Storm that has not ended, with the public_id and Storm threshold of its Route. The
+// Route's row is not locked, so a lock that waited for a save of the Route still reads the Route as it was before: the
+// end of the Storm reads the name and the language the summaries show again, in a statement of its own
+// (GetRouteDelivery).
 func (q *Queries) LockStorm(ctx context.Context, arg LockStormParams) (LockStormRow, error) {
 	row := q.db.QueryRow(ctx, lockStorm, arg.OrgID, arg.ID)
 	var i LockStormRow
@@ -4273,8 +4280,6 @@ func (q *Queries) LockStorm(ctx context.Context, arg LockStormParams) (LockStorm
 		&i.AlertGroupCount,
 		&i.UrgentCount,
 		&i.RoutePublicID,
-		&i.RouteName,
-		&i.RouteLanguage,
 		&i.StormThreshold,
 	)
 	return i, err

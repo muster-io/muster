@@ -5,7 +5,7 @@
 import type { MentionTarget } from './mentionTarget';
 
 /**
- * The Mention entry that named a person, as on the Destination — its position in the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
+ * The Mention entry that named a person, a group or everyone, as on the Destination — its position in the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
  */
 export interface MentionEntryRef {
   /** @minimum 0 */

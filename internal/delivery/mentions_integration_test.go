@@ -28,7 +28,8 @@ import (
 // PostgreSQL: of the people asked for, ListOpenMentions returns each person and entry target whose latest mention event
 // of the Destination is mention_not_delivered — not one a later mention_delivered closed, nor one past
 // retention.alert_details (@since), nor one of another Destination, of another Organization or of a person not asked
-// for — whatever the order the rows were written in.
+// for — whatever the order the rows were written in; and each group or everyone of a bridge's entries, by its Mention
+// with no person, the same way, but never a template's token, which names no entry (#626).
 func TestIntegrationListOpenMentions(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		ctx := t.Context()
@@ -104,6 +105,33 @@ func TestIntegrationListOpenMentions(t *testing.T) {
 		event(org.ID, otherDest, 6, nd, onCall, h(1))                   // another Destination
 		event(org.ID, dest, 7, nd, onCall, h(1))                        // not asked for
 		event(org.ID, dest, 8, delivery.EventPublication, onCall, h(1)) // another kind
+		// #626: the groups and everyone of a bridge's entries, keyed by their Mention, whatever the people asked for.
+		named := func(destination int64, kind delivery.EventKind, m mentions.Mention, target *mentions.EntryTarget,
+			at time.Time) {
+			t.Helper()
+			n++
+			detail := map[string]any{"mention": m, "reason": mentions.ReasonMessageTooLong}
+			if target != nil {
+				detail["entry_id"], detail["position"], detail["target"], detail["event"] = 9, 0, *target,
+					mentions.KindNewAlertGroup
+			}
+			b, err := json.Marshal(detail)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exec(`INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, kind, loudness, detail)
+				VALUES ($1, $2, $3, $4, $5, 'quiet', $6)`, org.ID, fmt.Sprintf("DE%012d", n), at, destination,
+				string(kind), b)
+		}
+		ops, here := mentions.Mention{Kind: mentions.TargetGroup, Name: "ops"},
+			mentions.Mention{Kind: mentions.TargetEveryone, Name: mentions.EveryoneHere}
+		opsEntry := mentions.EntryTarget{Kind: mentions.TargetGroup, Group: "ops"}
+		hereEntry := mentions.EntryTarget{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere}
+		named(dest, nd, ops, &opsEntry, h(2))      // open
+		named(dest, nd, here, &hereEntry, h(3))    // closed by the next one
+		named(dest, dl, here, &hereEntry, h(1))    //
+		named(dest, nd, here, nil, h(1))           // a template's token, without an entry
+		named(otherDest, nd, ops, &opsEntry, h(1)) // another Destination
 		ids := []string{"2", "3", "4", "5", "6", "8"}
 		rows, err := deliverydb.New(d.Pool).ListOpenMentions(ctx, deliverydb.ListOpenMentionsParams{OrgID: org.ID,
 			DestinationID: dest, Since: now.AddDate(0, 0, -90), UserIds: ids})
@@ -113,20 +141,29 @@ func TestIntegrationListOpenMentions(t *testing.T) {
 		var got []string
 		for _, r := range rows {
 			var target mentions.EntryTarget
+			var m mentions.Mention
 			if err := json.Unmarshal(r.Target, &target); err != nil {
 				t.Fatal(err)
 			}
-			got = append(got, strconv.FormatInt(r.UserID, 10)+"/"+target.Kind+"/"+target.UserID)
+			if r.Mention != nil {
+				if err := json.Unmarshal(r.Mention, &m); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got = append(got, strconv.FormatInt(r.UserID, 10)+"/"+m.Kind+":"+m.Name+"/"+target.Kind+"/"+
+				target.UserID)
 		}
 		slices.Sort(got)
-		if want := []string{"2/on_call_of_teams_from_label/", "3/on_call_of_teams_from_label/"}; !slices.Equal(got,
-			want) {
+		if want := []string{"0/group:ops/group/", "2/:/on_call_of_teams_from_label/",
+			"3/:/on_call_of_teams_from_label/"}; !slices.Equal(got, want) {
 			t.Errorf("open = %q, want %q", got, want)
 		}
 		// With the retention reaching back further, the old one is open too.
 		rows, err = deliverydb.New(d.Pool).ListOpenMentions(ctx, deliverydb.ListOpenMentionsParams{OrgID: org.ID,
 			DestinationID: dest, Since: now.AddDate(0, 0, -100), UserIds: []string{"4"}})
-		if err != nil || len(rows) != 1 || rows[0].UserID != 4 {
+		if err != nil || len(rows) != 2 || !slices.ContainsFunc(rows, func(r deliverydb.ListOpenMentionsRow) bool {
+			return r.UserID == 4 && r.Mention == nil
+		}) {
 			t.Errorf("a longer retention = %+v, %v", rows, err)
 		}
 	})

@@ -19,9 +19,12 @@ import (
 // MentionWarning is a warning of a Destination about a person and a Mention entry whose latest "Mention not
 // delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): the person, the
 // entry as it is on the Destination now, the messenger — the Destination's type — the reason of the latest event and
-// the time of the first one since the person's last delivered Mention through the entry.
+// the time of the first one since the person's last delivered Mention through the entry. Through a bridge whose
+// Mention line left out a group, a Team mention or everyone in the chat for length (C-12.FR-11), the warning is about
+// that Mention and has no person.
 type MentionWarning struct {
 	User      mentions.UserRef
+	Mention   mentions.Mention
 	Entry     mentions.Entry
 	Messenger string
 	Reason    string
@@ -63,15 +66,21 @@ func (s *Service) withWarnings(ctx context.Context, list []Destination) error {
 			if at < 0 {
 				continue
 			}
+			var mention mentions.Mention
+			if len(r.Mention) > 0 {
+				if err := json.Unmarshal(r.Mention, &mention); err != nil {
+					return fmt.Errorf("read the mention of a mention warning of %s: %w", d.PublicID, err)
+				}
+			}
 			entry := d.MentionEntries[at]
 			entry.Position = at
 			d.MentionWarnings = append(d.MentionWarnings, MentionWarning{
-				User:  mentions.UserRef{ID: r.UserID, PublicID: r.UserPublicID, Name: r.UserName, Login: r.UserLogin},
-				Entry: entry, Messenger: d.Type, Reason: r.Reason, Since: r.Since.UTC()})
+				User:    mentions.UserRef{ID: r.UserID, PublicID: r.UserPublicID, Name: r.UserName, Login: r.UserLogin},
+				Mention: mention, Entry: entry, Messenger: d.Type, Reason: r.Reason, Since: r.Since.UTC()})
 		}
+		name := func(w MentionWarning) string { return strings.ToLower(cmp.Or(w.User.Name, w.Mention.Name)) }
 		slices.SortStableFunc(d.MentionWarnings, func(a, b MentionWarning) int {
-			return cmp.Or(cmp.Compare(a.Entry.Position, b.Entry.Position),
-				strings.Compare(strings.ToLower(a.User.Name), strings.ToLower(b.User.Name)),
+			return cmp.Or(cmp.Compare(a.Entry.Position, b.Entry.Position), strings.Compare(name(a), name(b)),
 				cmp.Compare(a.User.ID, b.User.ID))
 		})
 	}

@@ -1080,6 +1080,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
 		return p.delivery.RouteDestinationsChanged(ctx, tx, c)
 	})
+	// The Storm summary of a Route's active Storm names the Route in its language (C-12.FR-10): a rename or a new
+	// language edits it Quietly (C-11.FR-6).
+	p.routes.SetStormSummaries(func(ctx context.Context, tx routingdb.DBTX, routeID int64) error {
+		return p.delivery.StormRouteChanged(ctx, tx, routeID)
+	})
 	// Connections and Mattermost and Telegram Destinations check their bot on the interactive path, which takes the tokens of the
 	// same limiters as the delivery worker (C-11.FR-2).
 	interactive := &delivery.Interactive{OrgID: orgID, Store: p.db.DeliveryStore(), Clocks: p.clocks}
