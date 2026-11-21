@@ -125,8 +125,7 @@ bulk Attach and the limit — the maintainer decided with the draft of this capa
 - **C-37.FR-11** The Root messages of a main Alert Group show, Quietly, the line "Attached: #1288, #1290" with up to
   five numbers and "+{K} more", without links, and nothing is written in its Thread, which stays for the problem
   itself; its buttons act on the main Alert Group and, through it, on the attached ones, and the private answer to a
-  press says so: "Acknowledged #1287 and 2
-  attached Alert Groups".
+  press says so: "Acknowledged #1287 and 2 attached Alert Groups".
 
 ### The UI, statistics and webhooks
 
