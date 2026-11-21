@@ -1961,10 +1961,13 @@ stored `info` declares the role `gateway`; it has no table of its own.
   connection_id)` finds the contacts of a gateway, `gateway_contacts_user_idx` on `(org_id, user_id)` those of a
   person. Removing a contact, and deleting its User (C-03.FR-13), is a `DELETE`; the Audit log keeps its entries and
   shows `/contact` as `[erased]` once the User is deleted. The codes of a removed contact stay, for the limits.
-- **`gateway_contact_codes`** — the codes of `gateway.contact_code`: the SHA-256 of the code bound to its contact's
-  `public_id` (`code_hash`), the web session that asked for it (`session_id`, `ON DELETE CASCADE`: the code is checked
-  only in that session, ADR-0013), `attempts`, `expires_at` on the business clock, `sent_at` once the gateway accepted
-  its notification — only the newest sent code of a contact is checked, so that a code still being sent, or one whose
+- **`gateway_contact_codes`** — the codes of `gateway.contact_code`: the HMAC-SHA256 of the code bound to its
+  contact's `public_id` (`code_hash`), made with the active key's Keyring sub-key `gateway-contact-code` and checked
+  with every key of the Keyring, so that the value checks nothing without a master key (codes stored before as the
+  plain SHA-256 are still accepted until they expire), the web session that asked for it (`session_id`, `ON DELETE
+  CASCADE`: the code is checked only in that session, ADR-0013), `attempts`, `expires_at` on the business clock,
+  `sent_at` once the gateway accepted its notification — only the newest sent code of a contact is checked, so that a
+  code still being sent, or one whose
   sending failed, never hides an earlier valid one — `used_at` once it confirmed its contact and `voided_at` once the
   last attempt was wrong, a newer code of the contact was sent or its own sending failed. `user_id` and `contact_hash`,
   the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User and per User
