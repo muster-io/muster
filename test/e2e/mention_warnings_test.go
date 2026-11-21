@@ -23,9 +23,21 @@ import (
 )
 
 // undelivered is a "Mention not delivered" of a Timeline, or a warning of a Destination, as the Verification prints
-// them: the person's login, the entry's target kind, the Loud event or the messenger, and the reason.
+// them: the person's login — or the kind and name of a group or everyone — the entry's target kind, the Loud event or
+// the messenger, and the reason.
 type undelivered struct {
 	User, Kind, Event, Reason string
+}
+
+// namedMention is the mention of an undelivered group or everyone in the chat (#626).
+type namedMention struct{ Kind, Name string }
+
+// who is the login, or for a group or everyone its kind and name.
+func who(login string, m *namedMention) string {
+	if m != nil {
+		return m.Kind + ":" + m.Name
+	}
+	return login
 }
 
 func (u undelivered) String() string { return u.User + "/" + u.Kind + "/" + u.Event + "/" + u.Reason }
@@ -89,8 +101,9 @@ func TestMentionWarnings(t *testing.T) {
 			Items []struct {
 				DeliveryEvent string `json:"delivery_event"`
 				Mention       *struct {
-					User  struct{ Login string }
-					Entry struct {
+					User    struct{ Login string }
+					Mention *namedMention
+					Entry   struct {
 						Target struct{ Kind string }
 					}
 					Event, Reason string
@@ -107,8 +120,8 @@ func TestMentionWarnings(t *testing.T) {
 				if it.Mention == nil {
 					t.Fatalf("mention_not_delivered without mention in %s", g)
 				}
-				out = append(out, undelivered{it.Mention.User.Login, it.Mention.Entry.Target.Kind, it.Mention.Event,
-					it.Mention.Reason})
+				out = append(out, undelivered{who(it.Mention.User.Login, it.Mention.Mention),
+					it.Mention.Entry.Target.Kind, it.Mention.Event, it.Mention.Reason})
 			}
 		}
 		return out
@@ -117,8 +130,9 @@ func TestMentionWarnings(t *testing.T) {
 		t.Helper()
 		var d struct {
 			Warnings []struct {
-				User  struct{ Login string }
-				Entry struct {
+				User    struct{ Login string }
+				Mention *namedMention
+				Entry   struct {
 					Target struct{ Kind string }
 				}
 				Messenger, Reason, Since string
@@ -130,7 +144,7 @@ func TestMentionWarnings(t *testing.T) {
 			if _, err := time.Parse(time.RFC3339, w.Since); err != nil {
 				t.Errorf("since %q", w.Since)
 			}
-			out = append(out, undelivered{w.User.Login, w.Entry.Target.Kind, w.Messenger, w.Reason})
+			out = append(out, undelivered{who(w.User.Login, w.Mention), w.Entry.Target.Kind, w.Messenger, w.Reason})
 		}
 		return out
 	}
@@ -278,6 +292,69 @@ func TestMentionWarnings(t *testing.T) {
 	}
 	want("the timeline of the root message not delivered", timeline(g3))
 	want("the warnings at the end", warnings(pn))
+
+	// #626 (C-28.FR-3, C-12.FR-11): the bridge now declares group mentions and here, with max_body_length 500, read by
+	// a check on every replica. ops-bridge names three groups whose markers fill its Mention line, of 250 characters,
+	// then the Team mention of ops-team, the group ops and here, which the line leaves out: each is recorded "Mention
+	// not delivered" with message_too_long in the Timeline, by its Mention and its entry, and warned about on the
+	// Destination. With max_body_length 4000 the next Loud message carries them all, and the warnings are gone.
+	var caps map[string]any
+	if err := json.Unmarshal(capabilities, &caps); err != nil {
+		t.Fatal(err)
+	}
+	caps["native_mentions"], caps["group_mentions"], caps["everyone_mentions"] = true, true, []string{"here"}
+	declared, _ := json.Marshal(caps)
+	limits, _ := json.Marshal(fakebridge.DefaultConfig().Limits)
+	t.Cleanup(func() { restore(t, http.MethodPut, h.Fakes.Bridge+"/_fake/config", `{"limits":`+string(limits)+`}`) })
+	checkBridge := func(config string) {
+		t.Helper()
+		e.fake(http.MethodPut, h.Fakes.Bridge+"/_fake/config", config)
+		for _, rep := range h.Replicas {
+			api := patClient{t: t, base: rep.App, token: e.api.token}
+			if c := api.json(http.MethodPost, "/api/v1/connections/"+bridgeConn+"/checks", "",
+				http.StatusOK); c["ok"] != true {
+				t.Fatalf("the check of the bridge: %v", c)
+			}
+		}
+	}
+	checkBridge(`{"capabilities":` + string(declared) + `,"limits":{"max_body_length":500,` +
+		`"edit_max_age_seconds":null}}`)
+	ot := e.api.json(http.MethodPost, "/api/v1/teams", `{"name":"ops-team","slug":"ops-team",`+
+		`"own_working_hours":false,"team_mentions":[{"connection_id":"`+bridgeConn+`","group":"ops_oncall"}]}`,
+		http.StatusCreated)["id"].(string)
+	// Markers of 86, 86 and 72 characters with the spaces between them: 246 of the line's 250.
+	group := func(name string) string { return `{"target":{"kind":"group","group":"` + name + `"}}` }
+	entries(bd, `[`+group(strings.Repeat("a", 64))+`,`+group(strings.Repeat("b", 64))+`,`+
+		group(strings.Repeat("d", 50))+`,{"target":{"kind":"team","team_id":"`+ot+`"}},`+group("ops")+
+		`,{"target":{"kind":"everyone","everyone":"here"}}]`)
+	e.group("w4", "InodesFull")
+	e.alert("w4", "a", labels("w4", "ops"), "")
+	e.notify("w4", "first notification")
+	g4 := e.groupOf("w4")
+	e.waitPublished(g4)
+	eventually(t, "the left-out mentions", func() bool { return len(timeline(g4)) == 3 })
+	e.settle()
+	got := timeline(g4)
+	slices.SortFunc(got, func(a, b undelivered) int { return strings.Compare(a.String(), b.String()) })
+	want("the timeline of the left-out mentions", got, "everyone:here/everyone/new_alert_group/message_too_long",
+		"group:ops/group/new_alert_group/message_too_long", "group:ops_oncall/team/new_alert_group/message_too_long")
+	want("the warnings of the left-out mentions", warnings(bd), "group:ops_oncall/team/bridge/message_too_long",
+		"group:ops/group/bridge/message_too_long", "everyone:here/everyone/bridge/message_too_long")
+	decode(t, call(t, http.MethodGet, h.Fakes.Bridge+"/_fake/messages", ""), &all)
+	for _, m := range all {
+		if strings.HasSuffix(m.Envelope.Title, " InodesFull") && len(m.Envelope.Mentions) != 3 {
+			t.Errorf("the root message of w4 carries %+v", m.Envelope.Mentions)
+		}
+	}
+
+	checkBridge(`{"limits":{"max_body_length":4000,"edit_max_age_seconds":null}}`)
+	e.alert("w4", "b", `{"team":"ops","cluster":"w4","severity":"warning","queue":"b"}`, "")
+	e.notify("w4", "new alerts")
+	e.adv(61)
+	eventually(t, "the warnings of the left-out mentions closed", func() bool { return len(warnings(bd)) == 0 })
+	if n := len(timeline(g4)); n != 3 {
+		t.Errorf("%d mention_not_delivered after a message that carries them all, want 3", n)
+	}
 }
 
 // holdsSoon reports whether cond holds within the time eventually waits.

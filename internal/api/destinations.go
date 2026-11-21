@@ -579,10 +579,15 @@ func mentionTargetRead(e mentions.Entry) gen.MentionTarget {
 func mentionWarningsRead(list []destinations.MentionWarning) []gen.MentionWarning {
 	out := make([]gen.MentionWarning, len(list))
 	for i, w := range list {
-		login := w.User.Login
-		out[i] = gen.MentionWarning{User: gen.UserRef{Id: w.User.PublicID, Name: w.User.Name, Login: &login},
+		out[i] = gen.MentionWarning{
 			Entry:     gen.MentionEntryRef{Position: w.Entry.Position, Target: mentionTargetRead(w.Entry)},
 			Messenger: gen.ConnectionType(w.Messenger), Reason: gen.MentionNotDeliveredReason(w.Reason), Since: w.Since}
+		if w.Mention.Kind != "" {
+			out[i].Mention = &gen.NamedMention{Kind: gen.NamedMentionKind(w.Mention.Kind), Name: w.Mention.Name}
+			continue
+		}
+		login := w.User.Login
+		out[i].User = &gen.UserRef{Id: w.User.PublicID, Name: w.User.Name, Login: &login}
 	}
 	return out
 }

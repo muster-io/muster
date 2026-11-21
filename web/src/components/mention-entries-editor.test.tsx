@@ -449,6 +449,43 @@ describe("the Mentions grid", () => {
       );
   });
 
+  test("warns about a group and everyone a bridge's line of Mentions left out", async () => {
+    const warnings: MentionWarning[] = [
+      {
+        mention: { kind: "group", name: "payments_team" },
+        entry: { position: 1, target: { kind: "teams_from_label" } },
+        messenger: "bridge",
+        reason: "message_too_long",
+        since: "2026-11-16T10:00:00Z",
+      },
+      {
+        mention: { kind: "everyone", name: "here" },
+        entry: { position: 2, target: { kind: "everyone", everyone: "here" } },
+        messenger: "bridge",
+        reason: "message_too_long",
+        since: "2026-11-16T10:00:00Z",
+      },
+    ];
+    await render(providers(<Harness warnings={warnings} />));
+    const shown = page.getByTestId("mention-warning");
+    await expect
+      .element(shown.nth(0))
+      .toHaveTextContent(
+        "Mention not delivered: @payments_team, Team from the label, the message had no room for their Mention",
+      );
+    await expect
+      .element(shown.nth(1))
+      .toHaveTextContent(
+        "Mention not delivered: @here, @here, the message had no room for their Mention",
+      );
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(shown.nth(0))
+      .toHaveTextContent(
+        "Упоминание не доставлено: @payments_team, Команда из метки, в сообщении не хватило места для упоминания",
+      );
+  });
+
   test("shows the refusal of an entry at its row", async () => {
     await render(
       providers(<Harness errors={{ 1: "This Connection cannot mention this target." }} />),

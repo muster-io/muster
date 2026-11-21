@@ -5,13 +5,17 @@
 import type { ConnectionType } from './connectionType';
 import type { MentionEntryRef } from './mentionEntryRef';
 import type { MentionNotDeliveredReason } from './mentionNotDeliveredReason';
+import type { NamedMention } from './namedMention';
 import type { UserRef } from './userRef';
 
 /**
- * A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.
+ * A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.
  */
 export interface MentionWarning {
-  user: UserRef;
+  /** The person; absent for a group or everyone, which `mention` names. */
+  user?: UserRef;
+  /** The group or everyone in the chat; absent for a person. */
+  mention?: NamedMention;
   /** The entry as it is on the Destination now. */
   entry: MentionEntryRef;
   messenger: ConnectionType;

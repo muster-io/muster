@@ -1344,7 +1344,7 @@ func (f *fakeDB) ListOpenMentions(_ context.Context, arg dbgen.ListOpenMentionsP
 	if err := f.call("ListOpenMentions"); err != nil {
 		return nil, err
 	}
-	type key struct{ user, target string }
+	type key struct{ user, mention, target string }
 	latest := map[key]string{}
 	var order []key
 	for _, e := range f.events {
@@ -1353,14 +1353,21 @@ func (f *fakeDB) ListOpenMentions(_ context.Context, arg dbgen.ListOpenMentionsP
 			continue
 		}
 		var d struct {
-			UserID int64           `json:"user_id"`
-			Target json.RawMessage `json:"target"`
+			UserID  *int64          `json:"user_id"`
+			Mention json.RawMessage `json:"mention"`
+			Target  json.RawMessage `json:"target"`
 		}
 		if err := json.Unmarshal(e.Detail, &d); err != nil {
 			return nil, err
 		}
-		k := key{strconv.FormatInt(d.UserID, 10), string(d.Target)}
-		if !slices.Contains(arg.UserIds, k.user) {
+		if d.Target == nil {
+			continue
+		}
+		k := key{"", string(d.Mention), string(d.Target)}
+		if d.UserID != nil {
+			k.user = strconv.FormatInt(*d.UserID, 10)
+		}
+		if !slices.Contains(arg.UserIds, k.user) && d.Mention == nil {
 			continue
 		}
 		if _, ok := latest[k]; !ok {
@@ -1372,7 +1379,11 @@ func (f *fakeDB) ListOpenMentions(_ context.Context, arg dbgen.ListOpenMentionsP
 	for _, k := range order {
 		if latest[k] == "mention_not_delivered" {
 			id, _ := strconv.ParseInt(k.user, 10, 64)
-			out = append(out, dbgen.ListOpenMentionsRow{UserID: id, Target: []byte(k.target)})
+			row := dbgen.ListOpenMentionsRow{UserID: id, Target: []byte(k.target)}
+			if k.mention != "" {
+				row.Mention = []byte(k.mention)
+			}
+			out = append(out, row)
 		}
 	}
 	return out, nil

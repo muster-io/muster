@@ -1011,19 +1011,24 @@ VALUES (@org_id, @public_id, @occurred_at, @destination_id, sqlc.narg('alert_gro
         sqlc.narg('storm_id')::bigint, @kind, @loudness, @mentions::text[], sqlc.narg('error_class')::text,
         sqlc.narg('error')::text, sqlc.narg('detail')::jsonb);
 
--- ListOpenMentions reads which of the people @user_ids have an open warning about an undelivered Mention on the
--- Destination (C-28.FR-3): the person and the entry's target of each latest mention_not_delivered or
--- mention_delivered of the Destination per person and target since @since, the start of retention.alert_details,
--- whose latest is mention_not_delivered. On delivery_events_mentions_idx.
+-- ListOpenMentions reads which of the people @user_ids, and which groups and mentions of everyone that a bridge's
+-- entries named, have an open warning about an undelivered Mention on the Destination (C-28.FR-3, C-12.FR-11): the
+-- person — 0 for a group or everyone — the Mention — null for a person — and the entry's target of each latest
+-- mention_not_delivered or mention_delivered of the Destination per person or Mention and target since @since, the
+-- start of retention.alert_details, whose latest is mention_not_delivered. A template's token, which names no entry,
+-- has no warning. On delivery_events_mentions_idx.
 -- name: ListOpenMentions :many
-SELECT latest.user_id::bigint AS user_id, latest.target::jsonb AS target
-FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'target')
-             e.detail ->> 'user_id' AS user_id, e.detail -> 'target' AS target, e.kind
+SELECT coalesce(latest.user_id::bigint, 0)::bigint AS user_id, latest.mention::jsonb AS mention,
+       latest.target::jsonb AS target
+FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'mention', e.detail -> 'target')
+             e.detail ->> 'user_id' AS user_id, e.detail -> 'mention' AS mention, e.detail -> 'target' AS target,
+             e.kind
       FROM delivery_events e
       WHERE e.org_id = @org_id AND e.destination_id = @destination_id
         AND e.kind IN ('mention_not_delivered', 'mention_delivered') AND e.occurred_at >= @since
-        AND e.detail ->> 'user_id' = ANY(@user_ids::text[])
-      ORDER BY e.detail ->> 'user_id', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
+        AND (e.detail ->> 'user_id' = ANY(@user_ids::text[]) OR e.detail -> 'mention' IS NOT NULL)
+        AND e.detail -> 'target' IS NOT NULL
+      ORDER BY e.detail ->> 'user_id', e.detail -> 'mention', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
 WHERE latest.kind = 'mention_not_delivered';
 
 -- GetGroupForDeliveries reads the id of an Alert Group by public_id.
