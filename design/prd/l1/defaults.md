@@ -108,6 +108,8 @@ From 0.2.0 the profile On-call is called Paging (C-26.FR-11).
 | `route.team` | none (no owning Team) | none | C-25, C-26 | decided |
 | `route.escalation_chains` | none | none | C-32 | decided |
 | `route.message_labels` | computed while the Route sets none: the labels of the Group key except `alertname` and `organization.severity_label`, plus the Team label and `namespace` | same | C-29 | decided |
+| `route.message_layout` | Muster's default, the layout of C-29.FR-1, until an Admin saves the Route's own (C-38.FR-1) | same | C-38 | decided |
+| `route.message_layout_alerts_listed` | `message.compact_alerts_listed`; from 1 to 20, otherwise `422` (`out_of_range`) | same | C-38 | P-93 |
 | `route.group_key` | `alertname`, `severity`, `cluster` | same | C-08 | decided |
 | `route.reopen_window` | 15 min | 15 min | C-09 | decided |
 | `route.grace_period` | 15 min | 15 min | C-09 | decided |
@@ -154,6 +156,8 @@ Other lifecycle values:
 | `organization.buttons` | all: every button — Acknowledge, Resolve, each Snooze duration, durations added to a Route later included, and both Snooze presets — until an Admin lists the buttons | Organization | C-28 | decided |
 | `destination.buttons` | as in the Organization (`organization.buttons`) | Destination | C-28 | decided |
 | `message.compact_alerts_listed` | 5 values of the distinguishing label, then "…and K more" (C-29.FR-3) | built in | C-29 | P-83 |
+| `message.layout_fields` | 10 fields in a Route's message layout; above that `422` (`too_long`) | built in | C-38 | P-94 |
+| `message.layout_preview_groups` | the 20 most recent Alert Groups of the Route offered by the layout preview | built in | C-38 | P-95 |
 
 ## Connections and Destinations
 
