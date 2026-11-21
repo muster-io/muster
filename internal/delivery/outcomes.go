@@ -343,7 +343,7 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 			}
 		}
 		if err := recordMentions(ctx, q, org, a.destination, a.group(), a.storm(), asDelivered(a.resolved, out),
-			now); err != nil {
+			MentionPage{}, now); err != nil {
 			return false, err
 		}
 	}
@@ -639,14 +639,10 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		}
 		// Under the lease only, so that a reply another replica sends again records its Mentions once.
 		if n == 1 {
+			// A Page names its Team mention or everyone by no entry of the Destination: one left out for length names
+			// the Page instead (a.page).
 			group := a.row.AlertGroupID
-			delivered := out
-			if a.row.PageID.Valid {
-				// A Page names its Team mention or everyone by no entry of the Destination, so that one left out for
-				// length is not a template's token: it is not recorded as a Mention not delivered.
-				delivered.LeftOutMentions = nil
-			}
-			if err := recordMentions(ctx, q, org, a.destination, &group, nil, asDelivered(a.resolved, delivered),
+			if err := recordMentions(ctx, q, org, a.destination, &group, nil, asDelivered(a.resolved, out), a.page,
 				now); err != nil {
 				return replyNotRecorded, err
 			}

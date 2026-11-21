@@ -1660,7 +1660,8 @@ func TestTimelineMentionNotDelivered(t *testing.T) {
 // TestTimelineMentionNotDeliveredGroups is C-28.FR-3 and C-12.FR-11 (#626): a mention_not_delivered of a Team mention
 // or a group entry that a bridge's Mention line left out names the group, no person, the entry with its Team or its
 // group, the Loud event and the reason; one of a template's token names the Mention and the reason, with no entry and
-// no event.
+// no event; one of the Team mention or everyone of a Page (#690) names the Page — its step and chain — in place of the
+// entry.
 func TestTimelineMentionNotDeliveredGroups(t *testing.T) {
 	h := newHarness(t)
 	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
@@ -1676,15 +1677,25 @@ func TestTimelineMentionNotDeliveredGroups(t *testing.T) {
 			`"target":{"kind":"team","team_id":"TMAAAAAAAAAAA1"},"event":"new_alert_group","reason":"message_too_long"}`),
 		row(2, `{"mention":{"kind":"group","name":"ops"},"entry_id":73,"position":2,`+
 			`"target":{"kind":"group","group":"ops"},"event":"new_alerts","reason":"message_too_long"}`),
-		row(3, `{"mention":{"kind":"everyone","name":"here"},"reason":"message_too_long"}`)}
+		row(3, `{"mention":{"kind":"everyone","name":"here"},"reason":"message_too_long"}`),
+		row(4, `{"mention":{"kind":"group","name":"payments_team"},"page":{"step":2,"chain_name":"Primary"},`+
+			`"reason":"message_too_long"}`)}
 	h.db.delivery[0].MentionTeamPublicID, h.db.delivery[0].MentionTeamName = "TMAAAAAAAAAAA1", "Payments"
 	page, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 10, Kinds: []Kind{KindDelivery},
 		Ascending: true})
-	if err != nil || len(page.Entries) != 3 {
+	if err != nil || len(page.Entries) != 4 {
 		t.Fatalf("timeline = %+v, %v", page.Entries, err)
 	}
 	team, group, token := page.Entries[0].Delivery.Mention, page.Entries[1].Delivery.Mention,
 		page.Entries[2].Delivery.Mention
+	if p := page.Entries[3].Delivery.Mention; p == nil || p.User != nil || p.Target != nil || p.Event != "" ||
+		*p.Mention != (MentionName{Kind: "group", Name: "payments_team"}) || p.Page == nil ||
+		*p.Page != (MentionPage{Step: 2, ChainName: "Primary"}) || p.Reason != "message_too_long" {
+		t.Errorf("page %+v", p)
+	}
+	if team.Page != nil || token.Page != nil {
+		t.Errorf("a page beside an entry or a token: %+v, %+v", team.Page, token.Page)
+	}
 	if team == nil || team.User != nil || *team.Mention != (MentionName{Kind: "group", Name: "payments_team"}) ||
 		team.Position != 3 || team.Target == nil || team.Target.Kind != "team" || team.Target.Team == nil ||
 		team.Target.Team.Name != "Payments" || team.Event != "new_alert_group" || team.Reason != "message_too_long" {

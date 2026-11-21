@@ -30,11 +30,17 @@ import (
 // line left it out (Outcome.LeftOutMentions, C-12.FR-11), and mention_delivered when a later message carries it while
 // its warning is open. A template's token that the line left out names no entry: it records mention_not_delivered with
 // its Mention and the reason alone, which only the Timeline shows, so none for a Storm summary, and no warning.
+//
+// A Page names its Team mention or everyone in the chat by no entry either (C-32.FR-9): the Thread reply of a Page
+// whose line left one out records mention_not_delivered with its Mention, the reason and, in place of the entry, the
+// Page — its step and the name of its chain (MentionPage) — which only the Timeline shows, and no warning. Its people
+// left out are not reached, which settles their Page (reached), and record nothing here.
 
 // MentionDetail is the detail of a mention_not_delivered or mention_delivered delivery event: the person's id — or,
 // for a group or everyone in the chat, its Mention — the entry's id, position and target, the Loud event and, for
 // mention_not_delivered, the reason. The person or the Mention and the target identify the warning across saves of the
-// Destination, which write its entries again. A template's token has neither an entry nor an event.
+// Destination, which write its entries again. A template's token has neither an entry nor an event, and the Team
+// mention or everyone of a Page names the Page instead.
 type MentionDetail struct {
 	UserID   int64                `json:"user_id,omitempty"`
 	Mention  mentions.Mention     `json:"mention,omitzero"`
@@ -43,6 +49,15 @@ type MentionDetail struct {
 	Target   mentions.EntryTarget `json:"target,omitzero"`
 	Event    string               `json:"event,omitempty"`
 	Reason   string               `json:"reason,omitempty"`
+	Page     MentionPage          `json:"page,omitzero"`
+}
+
+// MentionPage is the Page whose Thread reply left out, for length, the Team mention or everyone in the chat that the
+// Page named (C-12.FR-11, C-32.FR-9): the number of its step and the name of its Escalation chain when the chain's run
+// started, as the Timeline names them. It names the Page in place of the entry that a Page does not have.
+type MentionPage struct {
+	Step      int    `json:"step"`
+	ChainName string `json:"chain_name"`
 }
 
 // mentionDetailOf is the detail of a mention event about the person userID or the Mention mention named by the entry
@@ -53,8 +68,8 @@ func mentionDetailOf(userID int64, mention mentions.Mention, entry mentions.Entr
 		Target: entry.Target, Event: event, Reason: reason}
 }
 
-// detailMap is d as the detail of a delivery event: user_id for a person and mention for a group or everyone, and the
-// entry and the event unless it names none.
+// detailMap is d as the detail of a delivery event: user_id for a person and mention for a group or everyone, the
+// entry and the event unless it names none, and the Page of one that a Page named.
 func (d MentionDetail) detailMap() map[string]any {
 	m := map[string]any{}
 	if d.Mention.Kind != "" {
@@ -68,23 +83,32 @@ func (d MentionDetail) detailMap() map[string]any {
 	if d.Reason != "" {
 		m["reason"] = d.Reason
 	}
+	if d.Page.Step != 0 {
+		m["page"] = d.Page
+	}
 	return m
 }
 
 // recordMentions records, through q in the transaction that recorded a Loud message delivered at now to d, the
 // undelivered Mentions of its resolution res and the delivered ones that close an open warning, about the Alert Group
-// group or the Storm storm.
+// group or the Storm storm. page is the Page of a Page's Thread reply, which names the Mentions that no entry names;
+// zero for another message.
 func recordMentions(ctx context.Context, q queries, org int64, d Destination, group, storm *int64,
-	res mentions.Result, now time.Time) error {
+	res mentions.Result, page MentionPage, now time.Time) error {
 	r := deliveryEvent(DeliveryMentionNotDelivered)
 	for _, u := range res.Undelivered {
 		if u.Entry.ID == 0 && group == nil {
 			// A template's token, which only the Timeline shows, and a Storm summary has none.
 			continue
 		}
+		detail := mentionDetailOf(u.UserID, u.Mention, u.Entry, u.Event, u.Reason)
+		if u.Entry.ID == 0 {
+			// The Team mention or everyone of a Page; a template's token of another message, whose page is zero.
+			detail.Page = page
+		}
 		if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: d.ID, AlertGroupID: group, StormID: storm,
 			Kind: EventMentionNotDelivered, Loudness: r.Loudness, Mentions: r.Mentions,
-			Detail: mentionDetailOf(u.UserID, u.Mention, u.Entry, u.Event, u.Reason).detailMap()}); err != nil {
+			Detail: detail.detailMap()}); err != nil {
 			return err
 		}
 	}

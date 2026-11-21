@@ -815,6 +815,45 @@ describe("Timeline", () => {
     await expect.element(token.getByTestId("mention-entry")).toHaveTextContent("шаблон сообщения");
   });
 
+  test("names the Page whose reply left out its Team mention or everyone, in English and Russian", async () => {
+    entries = [
+      mentionNotDelivered("DE1", {
+        mention: { kind: "group", name: "payments_team" },
+        page: { step: 2, chain_name: "Payments primary" },
+        reason: "message_too_long",
+      }),
+      mentionNotDelivered("DE2", {
+        mention: { kind: "everyone", name: "here" },
+        page: { step: 3, chain_name: "Night" },
+        reason: "message_too_long",
+      }),
+    ];
+    await renderTimeline();
+    const team = page.getByTestId("timeline-entry").nth(0);
+    const everyone = page.getByTestId("timeline-entry").nth(1);
+    await expect.element(team.getByTestId("mention-named")).toHaveTextContent("@payments_team");
+    await expect
+      .element(team.getByTestId("mention-page"))
+      .toHaveTextContent("Step 2 · Payments primary");
+    await expect.element(team.getByText("Page:", { exact: true })).toBeVisible();
+    expect(team.getByTestId("mention-entry").elements()).toHaveLength(0);
+    expect(team.getByTestId("mention-event").elements()).toHaveLength(0);
+    expect(team.getByTestId("mention-person").elements()).toHaveLength(0);
+    await expect
+      .element(team.getByTestId("mention-reason"))
+      .toHaveTextContent("the message had no room for their Mention");
+    await expect.element(everyone.getByTestId("mention-named")).toHaveTextContent("@here");
+    await expect.element(everyone.getByTestId("mention-page")).toHaveTextContent("Step 3 · Night");
+    await i18n.changeLanguage("ru");
+    await expect.element(team.getByText("Призыв:", { exact: true })).toBeVisible();
+    await expect
+      .element(team.getByTestId("mention-page"))
+      .toHaveTextContent("Шаг 2 · Payments primary");
+    await expect
+      .element(team.getByTestId("mention-reason"))
+      .toHaveTextContent("в сообщении не хватило места для упоминания");
+  });
+
   test("names the gateway of the call an acknowledgement came from", async () => {
     entries = [
       status("acknowledged", {

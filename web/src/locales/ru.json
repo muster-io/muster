@@ -3753,6 +3753,8 @@
       "mentionEvent": "Событие",
       "mentionFromTemplate": "шаблон сообщения",
       "mentionNamed": "Упоминание",
+      "mentionPage": "Призыв",
+      "mentionPageStep": "Шаг {{number}} · {{chain}}",
       "mentionPerson": "Человек",
       "mentionReason": "Причина",
       "owner": "Владелец",

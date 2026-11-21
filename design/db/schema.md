@@ -1696,7 +1696,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   group, a Team mention or everyone in the chat that an entry named and a bridge's line of Mentions left out for length
   (C-12.FR-11, #626) is recorded the same way, keyed by `mention` (`{"kind": "group" | "everyone", "name": …}`) in
   place of `user_id`; one of a template's token names no entry, so its `detail` has only `mention` and `reason`, and it
-  is written only about an Alert Group and never warns. The
+  is written only about an Alert Group and never warns. The Team mention or everyone that a Page's Thread reply left
+  out (#690) names no entry either: its `detail` has `mention`, `reason` and the Page in place of the entry, `page`
+  (`{"step": …, "chain_name": …}`, the step and the name of the chain when its run started), and it never warns. The
   Timeline lists `mention_not_delivered` and never `mention_delivered`. The warnings of a Destination are computed
   from them, never stored, on the partial index `delivery_events_mentions_idx` `(org_id, destination_id, kind,
   occurred_at DESC) WHERE kind IN ('mention_not_delivered', 'mention_delivered')`: created on the parent alone,

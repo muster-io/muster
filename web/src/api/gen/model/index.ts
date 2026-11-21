@@ -345,6 +345,7 @@ export * from './mentionEntryRef';
 export * from './mentionEvent';
 export * from './mentionName';
 export * from './mentionNotDeliveredReason';
+export * from './mentionPage';
 export * from './mentionResolution';
 export * from './mentionResolved';
 export * from './mentionResolvedKind';

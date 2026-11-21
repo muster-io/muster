@@ -18,7 +18,6 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mentions"
-	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -89,6 +88,9 @@ type replyAttempt struct {
 	// paged are the public ids of the people of a Page's reply by users.id, for the people its Mention line leaves
 	// out (reached).
 	paged map[int64]string
+	// page names the Page of a Page's reply in place of an entry, for the Team mention or everyone in the chat that
+	// its Mention line leaves out (recordMentions); zero for another reply.
+	page MentionPage
 	// after is what its render left to run once the transaction that prepared it committed.
 	after []func(context.Context)
 }
@@ -177,14 +179,13 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		var webhook *WebhookCall
 		var pending []func(context.Context)
 		var fallbacks []string
-		var page *messages.PageInput
-		var pageTargets []mentions.Target
-		var paged map[int64]string
+		var pr pageOfReply
 		if row.PageID.Valid {
-			if page, pageTargets, paged, err = w.pageReply(ctx, tx, q, org, row, d); err != nil {
+			if pr, err = w.pageReply(ctx, tx, q, org, row, d); err != nil {
 				return err
 			}
 		}
+		page := pr.input
 		if sendsRequests(d.Type) {
 			// The request templates render the Alert Group's latest Desired state and the event the reply carries.
 			webhook = &WebhookCall{State: row.DesiredPayload, Response: responseValues(row.ResponseValues),
@@ -205,7 +206,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		var resolved mentions.Result
 		if page != nil {
 			// A Page mentions its people by their Account links, not by the Destination's Mention entries.
-			resolved.Targets = pageTargets
+			resolved.Targets = pr.targets
 		} else if resolved, err = w.targets(ctx, tx, org, d, row.AlertGroupID, 0, seq, groups.Loudness(row.Loudness),
 			ms); err != nil {
 			return err
@@ -213,8 +214,8 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
 				Mentions: ms, Targets: resolved.Targets, Webhook: webhook},
-			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, resolved: resolved, paged: paged,
-			after: pending}
+			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, resolved: resolved, paged: pr.paged,
+			page: pr.page, after: pending}
 		if idem, ok := w.idempotent(d.Type); ok {
 			a.call.Key = idem.ReplyKey(d, row.ID)
 		}

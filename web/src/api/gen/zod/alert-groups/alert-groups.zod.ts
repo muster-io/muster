@@ -630,6 +630,7 @@ export const getAlertGroupTimelineResponseItemsItemFiveTwoMentionEntryTargetOneU
 export const getAlertGroupTimelineResponseItemsItemFiveTwoMentionEntryTargetOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemFiveTwoMentionEntryTargetTwoUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemFiveTwoMentionEntryTargetTwoTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
 export const getAlertGroupTimelineResponseItemsItemSixOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemSixOneActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemSixTwoDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -836,10 +837,14 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "deleted": zod.boolean()
 }).optional().describe('The Team of a `team` or `on_call_of_team` target.')
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
-}).optional().describe('The entry that named the person or the Mention; absent for a template\'s token.'),
-  "event": zod.enum(['new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).optional().describe('The Loud event the entry applied to; absent for a template\'s token.'),
+}).optional().describe('The entry that named the person or the Mention; absent for a template\'s token and for the Team mention or everyone of a Page.'),
+  "event": zod.enum(['new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).optional().describe('The Loud event the entry applied to; absent for a template\'s token and for the Team mention or everyone of a Page.'),
+  "page": zod.object({
+  "step": zod.int().min(1),
+  "chain_name": zod.string()
+}).optional().describe('The Page whose Thread reply left out the Team mention or everyone in the chat that it named; absent for any other Mention.'),
   "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination\'s Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11). `message_too_long` is also the reason of a group, a Team mention or everyone in the chat that such a line left out, the only reason a Mention that names no one person is not delivered.')
-}).optional().describe('For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge\'s Mention line left out for length (C-12.FR-11); nothing was written in the Thread for it.')
+}).optional().describe('For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge\'s Mention line left out for length (C-12.FR-11), that of a Page\'s Thread reply included; nothing was written in the Thread for it.')
 })).and(zod.object({
   "kind": zod.enum(['delivery'])
 })),zod.object({
