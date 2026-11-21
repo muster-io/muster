@@ -29,6 +29,7 @@ import (
 	"github.com/muster-io/muster/internal/integrations/dbgen"
 	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/tokens"
 )
@@ -298,7 +299,7 @@ func (s *fakeStore) InsertIntegration(_ context.Context, arg dbgen.InsertIntegra
 		ConnectionMode: arg.ConnectionMode, StaticLabels: arg.StaticLabels,
 		DuplicateWindowSeconds: arg.DuplicateWindowSeconds, HeartbeatEnabled: arg.HeartbeatEnabled,
 		HeartbeatTimeoutSeconds: arg.HeartbeatTimeoutSeconds, HeartbeatState: HeartbeatNotConfigured, CreatedAt: arg.Now,
-		Version: 1,
+		Version: 1, ManagedBy: arg.ManagedBy,
 	}})
 	if arg.HeartbeatEnabled {
 		s.rows[len(s.rows)-1].HeartbeatState = HeartbeatWaiting
@@ -325,7 +326,7 @@ func (s *fakeStore) UpdateIntegration(_ context.Context, arg dbgen.UpdateIntegra
 	r := s.byID(arg.ID)
 	r.Name, r.Description, r.StaticLabels = arg.Name, arg.Description, arg.StaticLabels
 	r.DuplicateWindowSeconds, r.HeartbeatTimeoutSeconds = arg.DuplicateWindowSeconds, arg.HeartbeatTimeoutSeconds
-	r.HeartbeatEnabled = arg.HeartbeatEnabled
+	r.HeartbeatEnabled, r.ManagedBy = arg.HeartbeatEnabled, arg.ManagedBy
 	switch {
 	case !arg.HeartbeatEnabled:
 		r.HeartbeatState, r.HeartbeatLostSince = HeartbeatNotConfigured, pgtype.Timestamptz{}
@@ -610,6 +611,8 @@ func TestCreateRefusals(t *testing.T) {
 		{"zero window", func(in *Input) { in.DuplicateWindowSeconds = 0 }, "/duplicate_window_seconds", CodeOutOfRange},
 		{"zero timeout", func(in *Input) { in.Heartbeat.TimeoutSeconds = ptr(int64(0)) }, "/heartbeat/timeout_seconds",
 			CodeOutOfRange},
+		{"managed by Terraform", func(in *Input) { in.ManagedBy = managedby.Set("Terraform") }, "/managed_by",
+			CodeInvalidFormat},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -634,6 +637,33 @@ func TestCreateRefusals(t *testing.T) {
 	store.fail["InsertIntegration"] = errors.New("down")
 	if _, err := svc.Create(t.Context(), by, input("y")); err == nil || errors.Is(err, ErrNameTaken) {
 		t.Errorf("failed insert = %v", err)
+	}
+}
+
+// TestManagedBy is C-33.FR-11: a creation stores the mark or none, an update that leaves it out keeps it, null clears
+// it, and each change is in the Audit log diff.
+func TestManagedBy(t *testing.T) {
+	svc, store, _, _ := newService(t)
+	in := input("tf")
+	in.ManagedBy = managedby.Set("terraform")
+	marked, err := svc.Create(t.Context(), by, in)
+	if err != nil || marked.ManagedBy == nil || *marked.ManagedBy != "terraform" {
+		t.Fatalf("create marked = %v, %v", marked.ManagedBy, err)
+	}
+	if plain, err := svc.Create(t.Context(), by, input("plain")); err != nil || plain.ManagedBy != nil {
+		t.Errorf("create without = %v, %v", plain.ManagedBy, err)
+	}
+	kept, err := svc.Update(t.Context(), by, marked.PublicID, nil, input("tf-2"))
+	if err != nil || kept.ManagedBy == nil || *kept.ManagedBy != "terraform" {
+		t.Errorf("update without = %v, %v", kept.ManagedBy, err)
+	}
+	null := input("tf-2")
+	null.ManagedBy = managedby.Clear
+	if cleared, err := svc.Update(t.Context(), by, marked.PublicID, nil, null); err != nil || cleared.ManagedBy != nil {
+		t.Errorf("update with null = %v, %v", cleared.ManagedBy, err)
+	}
+	if d := string(store.audit[len(store.audit)-1].Diff); d != `[{"pointer":"/managed_by","before":"terraform"}]` {
+		t.Errorf("clearing diff %s", d)
 	}
 }
 

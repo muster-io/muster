@@ -23,6 +23,11 @@ export interface EscalationChain {
   destinations: DestinationRef[];
   /** What the chain cannot do — `pages_nobody` first — then what its steps cannot do, by step. */
   warnings: EscalationChainWarning[];
+  /**
+     * The name of the tool that keeps the chain as code, such as `terraform`, or null when none does (C-33.FR-11); see `EscalationChainInput`.
+     * @nullable
+     */
+  managed_by?: string | null;
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. */
   readonly etag: string;

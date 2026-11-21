@@ -18,8 +18,8 @@ info:
 
     During 0.x, `0.N` is layer N of Muster (L1 is `0.1.x`) and a breaking change comes only with a new minor version, whose release notes say what to change; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
   license:
-    name: AGPL-3.0-only
-    identifier: AGPL-3.0-only
+    name: MIT
+    identifier: MIT
 servers:
 - url: '{public_url}/api/v1'
   description: App listener (`MUSTER_PUBLIC_URL`), the address for people.
@@ -12361,6 +12361,20 @@ components:
         duplicate_window_seconds:
           type: integer
           minimum: 1
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     Integration:
       allOf:
       - $ref: '#/components/schemas/IntegrationBase'
@@ -12984,6 +12998,20 @@ components:
             call the messenger.
           items:
             $ref: '#/components/schemas/TeamMentionInput'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     TeamIdpEntry:
       type: object
       description: An identity provider entry of a Team.
@@ -13479,6 +13507,20 @@ components:
           description: From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.
           items:
             $ref: '#/components/schemas/RotationLayerInput'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     Schedule:
       type: object
       required:
@@ -13526,6 +13568,13 @@ components:
           description: From the lowest to the highest.
           items:
             $ref: '#/components/schemas/RotationLayer'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          description: The name of the tool that keeps the Schedule as code, such as `terraform`, or null when none does
+            (C-33.FR-11); see `ScheduleInput`.
+          example: terraform
         created_at:
           type: string
           format: date-time
@@ -14103,6 +14152,21 @@ components:
             type: string
         policy:
           $ref: '#/components/schemas/RoutePolicy'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any
+            Route.
+          example: terraform
     PublicId:
       type: string
       pattern: ^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$
@@ -18171,6 +18235,20 @@ components:
             replaced as a whole.
           items:
             $ref: '#/components/schemas/EscalationStepInput'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     EscalationChainRouteReferrer:
       type: object
       required:
@@ -18294,6 +18372,13 @@ components:
           description: What the chain cannot do — `pages_nobody` first — then what its steps cannot do, by step.
           items:
             $ref: '#/components/schemas/EscalationChainWarning'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          description: The name of the tool that keeps the chain as code, such as `terraform`, or null when none does
+            (C-33.FR-11); see `EscalationChainInput`.
+          example: terraform
         created_at:
           type: string
           format: date-time
@@ -19689,6 +19774,20 @@ components:
           items:
             $ref: '#/components/schemas/LookupEntry'
           description: Rows. The keys of `values` must be exactly `columns` (`422` otherwise).
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
       description: A table of keys and columns. A template reads one cell with `lookup "<table>" <key> "<column>"`, for example
         `lookup "grafana" .Labels.cluster "datasource_uid"`. The built-in "Explore" rule uses a table with the columns `address`
         and `datasource_uid`, one row per environment or cluster.
@@ -19760,6 +19859,20 @@ components:
         url_template:
           type: string
           description: Go template that may call `lookup table key column`.
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     LinkRule:
       allOf:
       - $ref: '#/components/schemas/LinkRuleBase'

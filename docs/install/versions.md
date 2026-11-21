@@ -286,6 +286,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       while it builds, writes to that table wait: ingestion and Alert Group changes for `alert_groups` and `deliveries`,
       Thread replies for `thread_replies`. Each runs under a `lock_timeout` of 5 seconds and a `statement_timeout` of
       5 minutes.
+    - Migration 0056 adds `managed_by`, the name of the tool that keeps an object as code, such as the Terraform
+      provider, to Integrations, Routes, Teams, Schedules, Escalation chains, Lookup tables, Link rules, Connections,
+      Destinations, the Organization's settings, the Outbound address policy and the OIDC settings, null on every
+      object after the upgrade. It is a mark only and changes nothing else. It is expand only: a replica without it
+      neither reads nor writes the mark, and keeps it on the objects it saves.
 
     **Breaking changes in 0.2.0.** Four changes can break an installation or a client that worked on 0.1; check them
     before you upgrade:
@@ -1123,6 +1128,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
     Going back below 0052, 0053, 0054 or 0055 drops its index and loses nothing else; the queries it served read more
     rows until it is back.
+
+    Going back below 0056 loses only the marks `managed_by`: every object stays as it was, and a tool marks the objects
+    it manages again when it next writes them.
 
     **Going back to 0.1.** Nothing runs down migrations in an installation: `muster migrate` takes no arguments, and the
     "Going back below 00NN" sentences above describe what the down migrations drop, which only Muster's tests run;

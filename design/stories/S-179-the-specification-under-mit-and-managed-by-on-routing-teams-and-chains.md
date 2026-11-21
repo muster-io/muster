@@ -10,36 +10,50 @@ files_touched:
   - api/openapi.yaml
   - api/README.md
   - NOTICE
-  - internal/db/migrations/0055_managed_by.up.sql
-  - internal/db/migrations/0055_managed_by.down.sql
+  - README.md
+  - internal/db/migrations/0056_managed_by.up.sql
+  - internal/db/migrations/0056_managed_by.down.sql
   - internal/db/migrate_test.go
+  - internal/db/db_test.go
   - design/db/schema.md
   - docs/install/versions.md
   - internal/managedby/managedby.go
   - internal/managedby/managedby_test.go
   - internal/integrations/query.sql
   - internal/integrations/integrations.go
+  - internal/integrations/integrations_test.go
   - internal/routing/query.sql
   - internal/routing/routes.go
+  - internal/routing/routes_test.go
   - internal/teams/query.sql
   - internal/teams/teams.go
+  - internal/teams/teams_test.go
   - internal/schedules/query.sql
   - internal/schedules/schedules.go
+  - internal/schedules/schedules_test.go
   - internal/escalation/query.sql
   - internal/escalation/chains.go
+  - internal/escalation/chains_test.go
+  - internal/escalation/fake_test.go
   - internal/links/query.sql
   - internal/links/lookup.go
   - internal/links/rules.go
+  - internal/links/lookup_test.go
+  - internal/links/rules_test.go
+  - internal/oidc/query.sql
   - internal/api/integrations.go
   - internal/api/routes.go
   - internal/api/teams.go
+  - internal/api/teams_test.go
   - internal/api/schedules.go
   - internal/api/escalationchains.go
   - internal/api/links.go
   - test/e2e/managed_by_test.go
+  - design/stories/S-180-managed-by-on-connections-destinations-and-the-settings-objects.md
+  - design/stories/README.md
 acceptance:
   - "[C-33.FR-2] `api/openapi.yaml` has `info.license` `MIT` with the identifier `MIT`; `NOTICE` lists it beside `api/bridge.yaml` as an MIT part of the repository; `api/README.md` says that the specification is MIT so that clients such as the Terraform provider may carry any licence; `make lint` and `make licenses` pass."
-  - "[C-33.FR-11] Migration 0055 adds a nullable `managed_by text` to `integrations`, `routes`, `teams`, `schedules`, `escalation_chains`, `lookup_tables`, `link_rules`, `connections`, `destinations`, `organizations`, `outbound_policies` and `oidc_settings`, with no default and no CHECK; its down step drops them; `migrate_test.go` runs it up and down over a database at 0054."
+  - "[C-33.FR-11] Migration 0056 adds a nullable `managed_by text` to `integrations`, `routes`, `teams`, `schedules`, `escalation_chains`, `lookup_tables`, `link_rules`, `connections`, `destinations`, `organizations`, `outbound_policies` and `oidc_settings`, with no default and no CHECK; its down step drops them; `migrate_test.go` runs it up and down over a database at 0055."
   - "[C-33.FR-11] `managedby.Validate` accepts `terraform`, `opentofu`, `pulumi.v2` and a value of 32 characters, and refuses the empty string, `Terraform`, `-tf`, `a b` and a value of 33 characters (`managedby_test.go`)."
   - "[C-33.FR-11, C-33.AC-3] For an Integration, a Route, the Default route, a Team, a Schedule, an Escalation chain, a Lookup table and a Link rule: a create with `managed_by` `terraform` reads it back; a create without it reads null; an update without the field keeps `terraform`; an update with null clears it; an update with `Terraform` or with a value of 33 characters is refused with `422` and the error `invalid_format` at `/managed_by` and changes nothing; the Audit log entry of each change shows `managed_by` in its diff (`TestManagedBy`, `managed_by_test.go`)."
   - "[C-33.FR-11] The mark changes nothing else: a Route marked `terraform` routes, delivers and is reordered as before, and an update through the web session with its CSRF token succeeds on a marked Team (`TestManagedBy`)."
@@ -71,21 +85,24 @@ issue: 697
   `NOTICE`, under "MIT-licensed parts", lists `api/openapi.yaml  the API specification; its info.license says MIT`
   beside `api/bridge.yaml`; `api/README.md` gains a paragraph: the specification is MIT, as the Bridge protocol is, so
   that clients generated from it — the Terraform provider in `muster-io/terraform-provider-muster` among them — may
-  carry any licence, while the server that implements it stays AGPL-3.0-only. Nothing else in the repository changes
-  licence; the licence-header check already skips YAML specifications.
-- **Migration** `0055_managed_by` (expand only): `ALTER TABLE … ADD COLUMN managed_by text` on the twelve tables of
+  carry any licence, while the server that implements it stays AGPL-3.0-only; the section "Licence" of `README.md`,
+  which names the MIT parts, names it too. Nothing else in the repository changes licence; the licence-header check
+  already skips YAML specifications.
+- **Migration** `0056_managed_by` (expand only): `ALTER TABLE … ADD COLUMN managed_by text` on the twelve tables of
   C-33.FR-11, nullable, without default, CHECK or index — the format is checked by the domain packages, so that a
   later change of the format needs no migration. `schema.md` describes the column once, in a short section that names
-  the tables; `docs/install/versions.md` notes migration 0055 under the release that carries it, and that going back
-  below it loses only the marks.
+  the tables; `docs/install/versions.md` notes migration 0056 under the release that carries it, and that going back
+  below it loses only the marks. `internal/oidc/query.sql`'s `GetSettings`, which lists every column of
+  `oidc_settings` so that sqlc reads it into the table's model, lists `managed_by` too, unread until S-180.
 - **Value** (`internal/managedby`): `Validate(s string) error` accepts 1 to 32 characters of `[a-z0-9._-]` starting
   with `[a-z0-9]`; the domain packages call it and turn its error into a `422` with the error `invalid_format` at
   `/managed_by`, the answer that `x-unprocessable` gives for the same value from the request validation (api/README.md).
 - **API** (`api/openapi.yaml`): the property `managed_by`, `type: [string, "null"]`, `maxLength: 32`, with the
   pattern `^[a-z0-9][a-z0-9._-]{0,31}$`, `x-unprocessable: true` as a Team's `slug` has, and the description of
-  C-33.FR-11, on `IntegrationInput`, `RouteInput`,
+  C-33.FR-11, on `IntegrationBase` (which `IntegrationInput` and the read `Integration` extend), `RouteInput`,
   `TeamInput`, `ScheduleInput`, `EscalationChainInput`, `LookupTableBase` and `LinkRuleBase`, so that the reads that
-  extend them carry it too. In the reads it is always sent, null when no tool manages the object, but it is not added
+  extend them carry it too; the reads `Schedule` and `EscalationChain`, which extend nothing, get the property as well,
+  without `x-unprocessable`. In the reads it is always sent, null when no tool manages the object, but it is not added
   to their `required` lists: clients and web tests that build reads by hand keep compiling, as with any additive field
   of a `0.2.x` release. The schemas of S-180 are left to it.
 - **Writes**: create stores the value or null; update keeps the stored value when the field is left out and clears it
@@ -97,7 +114,7 @@ issue: 697
 ## Steps
 
 1. Change the licence in the spec, `NOTICE` and `api/README.md`. Check: `make lint`, `make licenses`.
-2. Write the migration with its test and `schema.md`. Check: `go test -tags integration -run TestMigrat ./internal/db/`.
+2. Write the migration with its test and `schema.md`. Check: `go test -tags integration -run 'TestIntegrationManagedBy|TestIntegrationMigrate$' ./internal/db/`.
 3. Add `internal/managedby` with its test. Check: `go test ./internal/managedby/`.
 4. Add the field to the spec and run `make generate`; carry it through the queries, the domain packages and the
    handlers of the seven kinds. Check: `make generate-check`, the packages' tests.
@@ -114,22 +131,27 @@ curl -s localhost:8080/api/v1/openapi.yaml | grep -A2 '^  license:'
 #     name: MIT
 #     identifier: MIT
 R=$(curl -s "${H[@]}" localhost:8080/api/v1/route-profiles | jq -c '.items[] | select(.id=="paging") | .policy')
-ID=$(curl -s "${H[@]}" -d "{\"name\":\"tf-route\",\"matchers\":[],\"group_key\":[\"alertname\"],\"policy\":$R,\"managed_by\":\"terraform\"}" \
+# An update replaces the writable fields, so each PUT sends the whole RouteInput: a body without its required fields
+# is a 400 of the request validation.
+B="\"matchers\":[],\"group_key\":[\"alertname\"],\"policy\":$R"
+ID=$(curl -s "${H[@]}" -d "{\"name\":\"tf-route\",$B,\"managed_by\":\"terraform\"}" \
   localhost:8080/api/v1/routes | jq -r .id)
 curl -s "${H[@]}" localhost:8080/api/v1/routes/$ID | jq -c '{managed_by, etag}'
 # {"managed_by":"terraform","etag":"…"}
 E=$(curl -s "${H[@]}" localhost:8080/api/v1/routes/$ID | jq -r .etag)
-curl -s -o /dev/null -w '%{http_code}\n' "${H[@]}" -H "If-Match: $E" -X PUT -d '{"name":"tf-route-2"}' localhost:8080/api/v1/routes/$ID
+curl -s -o /dev/null -w '%{http_code}\n' "${H[@]}" -H "If-Match: $E" -X PUT -d "{\"name\":\"tf-route-2\",$B}" \
+  localhost:8080/api/v1/routes/$ID
 # 200
 curl -s "${H[@]}" localhost:8080/api/v1/routes/$ID | jq -r .managed_by          # terraform (kept)
 E=$(curl -s "${H[@]}" localhost:8080/api/v1/routes/$ID | jq -r .etag)
-curl -s "${H[@]}" -H "If-Match: $E" -X PUT -d '{"managed_by":"Terraform"}' localhost:8080/api/v1/routes/$ID |
-  jq -c '{status, e: .errors[0] | {pointer, code}}'
+curl -s "${H[@]}" -H "If-Match: $E" -X PUT -d "{\"name\":\"tf-route-2\",$B,\"managed_by\":\"Terraform\"}" \
+  localhost:8080/api/v1/routes/$ID | jq -c '{status, e: .errors[0] | {pointer, code}}'
 # {"status":422,"e":{"pointer":"/managed_by","code":"invalid_format"}}
-curl -s "${H[@]}" -H "If-Match: $E" -X PUT -d '{"managed_by":null}' localhost:8080/api/v1/routes/$ID | jq -r .managed_by
+curl -s "${H[@]}" -H "If-Match: $E" -X PUT -d "{\"name\":\"tf-route-2\",$B,\"managed_by\":null}" \
+  localhost:8080/api/v1/routes/$ID | jq -r .managed_by
 # null
-curl -s "${H[@]}" "localhost:8080/api/v1/audit-log?limit=3" | jq -c '[.items[].diff[]? | select(.pointer=="/managed_by")]'
-# the entry of the last change, {"pointer":"/managed_by","before":"terraform","after":null} among them
+curl -s "${H[@]}" "localhost:8080/api/v1/audit-log?limit=1&resource_id=$ID" | jq -c '.items[0].diff'
+# [{"pointer":"/managed_by","before":"terraform"}] — a null after is left out of the diff
 psql "$MUSTER_DATABASE_URL" -Atc \
   "select count(*) from information_schema.columns where column_name='managed_by'"   # 12
 ```
@@ -144,9 +166,15 @@ None.
 ## Notes
 
 - Suggested commit: `feat(api): publish the specification under MIT and mark configuration managed by a tool`.
-- The migration is 0055, as the orchestrator assigned it; `migrate_test.go`, `schema.md` and `versions.md` use it.
+- The migration is 0056, as the orchestrator assigned it: 0055 went to the deliveries retention index of #689 after
+  this story was written. `migrate_test.go`, `db_test.go` (the newest version it names), `schema.md` and
+  `versions.md` use it.
 - This story, S-180 and S-181 ship in 0.2.0, as the maintainer decided, so 0.2.0 is the provider's minimum version
-  (C-33.FR-4); `versions.md` notes 0055 under 0.2.0.
+  (C-33.FR-4); `versions.md` notes 0056 under 0.2.0.
+- A save of a Lookup table or a Link rule that changes only the mark skips the re-render of the links of the open Root
+  messages that its other changes request (`managedby.Only` over the Audit log diff), because the mark changes nothing
+  else; the saves of the other five kinds already request their re-renders and evaluations only for the fields that
+  cause them.
 - The open stories of the stage "L2 Paging" change some of the same files (`internal/escalation`, the chain handlers);
   the implementer rebases on them rather than waiting for them, since nothing here depends on their behaviour.
 - The licence change is the one ADR-0001 already decided for "the L2 change of the specification"; this is that

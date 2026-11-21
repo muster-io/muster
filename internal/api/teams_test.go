@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,12 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/escalation"
+	"github.com/muster-io/muster/internal/integrations"
+	"github.com/muster-io/muster/internal/links"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/teams"
 )
 
@@ -485,6 +491,110 @@ func TestSlugUnprocessable(t *testing.T) {
 	}
 	if len(ft.inputs) != 0 {
 		t.Error("a refused slug reached the Teams")
+	}
+}
+
+// TestManagedByAPI is C-33.FR-11 on the API: managed_by reaches the domain as given — omitted keeps, null clears, a
+// value sets — a read always carries it, null for none, and a value outside the format is refused by the request
+// validation with the 422 invalid_format at /managed_by that the domain answers (x-unprocessable), while null passes.
+func TestManagedByAPI(t *testing.T) {
+	if got := managedByIn(nullable.Nullable[string]{}); got.Given {
+		t.Errorf("omitted = %+v", got)
+	}
+	if got := managedByIn(nullable.NewNullNullable[string]()); !got.Given || got.Value != nil {
+		t.Errorf("null = %+v", got)
+	}
+	if got := managedByIn(nullable.NewNullableWithValue("terraform")); !got.Given || got.Value == nil ||
+		*got.Value != "terraform" {
+		t.Errorf("a value = %+v", got)
+	}
+	if got := managedByOf(nil); !got.IsSpecified() || !got.IsNull() {
+		t.Errorf("read of none = %v", got)
+	}
+	mark := "terraform"
+	if got := managedByOf(&mark); got.MustGet() != "terraform" {
+		t.Errorf("read of terraform = %v", got)
+	}
+	x, ft, _ := newTeamsAPI(t)
+	for _, v := range []string{"Terraform", strings.Repeat("a", 33), "-tf", "a b", ""} {
+		status, _, ptr, code := firstProblemError(t, x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams",
+			`{"name":"x","slug":"x","own_working_hours":false,"managed_by":"`+v+`"}`))
+		if status != http.StatusUnprocessableEntity || ptr != "/managed_by" || code != fieldInvalidFormat {
+			t.Errorf("%q = %d %s %s", v, status, ptr, code)
+		}
+	}
+	if len(ft.inputs) != 0 {
+		t.Error("a refused managed_by reached the Teams")
+	}
+	a := x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams", `{"name":"x","slug":"x","own_working_hours":false,`+
+		`"managed_by":null}`)
+	if a.status != http.StatusCreated || len(ft.inputs) != 1 || !ft.inputs[0].ManagedBy.Given ||
+		ft.inputs[0].ManagedBy.Value != nil || !strings.Contains(string(a.body), `"managed_by":null`) {
+		t.Errorf("null = %d %s, %+v", a.status, a.body, ft.inputs)
+	}
+}
+
+// TestManagedByOperations: exactly the creates and updates of the seven kinds of S-179 carry managed_by marked
+// x-unprocessable, so that a value outside its format answers the domain's 422 on each of them.
+func TestManagedByOperations(t *testing.T) {
+	doc, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, op := range readOperations(doc) {
+		if op.unprocessable["/managed_by"] {
+			got = append(got, op.id)
+		}
+	}
+	slices.Sort(got)
+	want := []string{"createEscalationChain", "createIntegration", "createLinkRule", "createLookupTable", "createRoute",
+		"createSchedule", "createTeam", "updateEscalationChain", "updateIntegration", "updateLinkRule",
+		"updateLookupTable", "updateRoute", "updateSchedule", "updateTeam"}
+	if !slices.Equal(got, want) {
+		t.Errorf("operations with managed_by x-unprocessable = %v, want %v", got, want)
+	}
+}
+
+// TestManagedByMappers: every input mapper of the seven kinds hands managed_by to its domain as given, and every read
+// mapper sends the domain's mark, null for none.
+func TestManagedByMappers(t *testing.T) {
+	set := nullable.NewNullableWithValue("terraform")
+	inputs := map[string]managedby.Input{
+		"integration":      integrationInputOf(gen.IntegrationInput{ManagedBy: set}).ManagedBy,
+		"route":            routeInputOf(gen.RouteInput{ManagedBy: set}).ManagedBy,
+		"team":             teamInputOf(gen.TeamInput{ManagedBy: set}).ManagedBy,
+		"schedule":         scheduleInputOf(gen.ScheduleInput{ManagedBy: set}).ManagedBy,
+		"escalation chain": escalationInputOf(gen.EscalationChainInput{ManagedBy: set}).ManagedBy,
+		"lookup table":     tableInputOf(gen.LookupTableBase{ManagedBy: set}).ManagedBy,
+		"link rule":        ruleInputOf(gen.LinkRuleBase{ManagedBy: set}).ManagedBy,
+	}
+	for kind, in := range inputs {
+		if !in.Given || in.Value == nil || *in.Value != "terraform" {
+			t.Errorf("%s input = %+v", kind, in)
+		}
+	}
+	x, _, _ := newIntegrationsAPI(t)
+	for _, mark := range []*string{nil, new("terraform")} {
+		reads := map[string]nullable.Nullable[string]{
+			"integration":      x.srv.integrationOf(integrations.Integration{ManagedBy: mark}, 0).ManagedBy,
+			"route":            routeOf(routing.Route{ManagedBy: mark}).ManagedBy,
+			"team":             teamOf(teams.Team{ManagedBy: mark}).ManagedBy,
+			"schedule":         scheduleOf(schedules.Schedule{ManagedBy: mark}).ManagedBy,
+			"escalation chain": escalationChainOf(escalation.Chain{ManagedBy: mark}).ManagedBy,
+			"lookup table":     lookupTableOf(links.Table{ManagedBy: mark}).ManagedBy,
+			"link rule":        linkRuleOf(links.Rule{ManagedBy: mark}).ManagedBy,
+		}
+		for kind, got := range reads {
+			switch {
+			case !got.IsSpecified():
+				t.Errorf("%s read leaves managed_by out", kind)
+			case mark == nil && !got.IsNull():
+				t.Errorf("%s read of none = %v", kind, got)
+			case mark != nil && (got.IsNull() || got.MustGet() != *mark):
+				t.Errorf("%s read of %s = %v", kind, *mark, got)
+			}
+		}
 	}
 }
 

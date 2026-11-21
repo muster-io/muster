@@ -35,6 +35,7 @@ import (
 	"github.com/muster-io/muster/internal/integrations/dbgen"
 	"github.com/muster-io/muster/internal/internalalerts"
 	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -170,6 +171,8 @@ type Integration struct {
 	Warnings  []Warning
 	CreatedAt time.Time
 	Version   int64
+	// ManagedBy is the tool that keeps the Integration as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 }
 
 // Heartbeat is the stored Heartbeat of an Integration: its settings and its state.
@@ -190,6 +193,8 @@ type Input struct {
 	StaticLabels           map[string]string
 	DuplicateWindowSeconds int64
 	Heartbeat              HeartbeatInput
+	// ManagedBy is the mark of the tool that keeps the Integration as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // HeartbeatInput is the Heartbeat settings of an Input.
@@ -579,6 +584,9 @@ func check(in Input) error {
 		return &FieldError{Pointer: "/heartbeat/timeout_seconds", Code: CodeOutOfRange,
 			Detail: "The Heartbeat timeout is at least 1 second."}
 	}
+	if in.ManagedBy.Check() != nil {
+		return &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
+	}
 	return nil
 }
 
@@ -654,7 +662,7 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input) (Integration,
 	if _, err := q.InsertIntegration(ctx, dbgen.InsertIntegrationParams{
 		OrgID: s.orgID, PublicID: id, Name: in.Name, Description: description, ConnectionMode: in.ConnectionMode,
 		StaticLabels: labels, DuplicateWindowSeconds: in.DuplicateWindowSeconds, HeartbeatEnabled: in.Heartbeat.Enabled,
-		HeartbeatTimeoutSeconds: timeout, Now: s.clock.Now().UTC(),
+		HeartbeatTimeoutSeconds: timeout, ManagedBy: managedby.Text(in.ManagedBy.Apply(nil)), Now: s.clock.Now().UTC(),
 	}); err != nil {
 		return Integration{}, fmt.Errorf("create the integration: %w", nameTaken(err))
 	}
@@ -687,6 +695,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		next := before
 		next.Name, next.StaticLabels, next.DuplicateWindowSeconds = in.Name, in.StaticLabels, in.DuplicateWindowSeconds
 		next.Heartbeat.Enabled = in.Heartbeat.Enabled
+		next.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -705,7 +714,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if err := q.UpdateIntegration(ctx, dbgen.UpdateIntegrationParams{
 			OrgID: s.orgID, ID: before.ID, Name: next.Name, Description: next.Description, StaticLabels: labels,
 			DuplicateWindowSeconds: next.DuplicateWindowSeconds, HeartbeatEnabled: next.Heartbeat.Enabled,
-			HeartbeatTimeoutSeconds: next.Heartbeat.TimeoutSeconds, Now: s.clock.Now().UTC(),
+			HeartbeatTimeoutSeconds: next.Heartbeat.TimeoutSeconds, ManagedBy: managedby.Text(next.ManagedBy),
+			Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the integration %s: %w", before.PublicID, nameTaken(err))
 		}
@@ -871,6 +881,7 @@ type view struct {
 	StaticLabels           map[string]string `json:"static_labels"`
 	DuplicateWindowSeconds int64             `json:"duplicate_window_seconds"`
 	Heartbeat              heartbeatView     `json:"heartbeat"`
+	ManagedBy              *string           `json:"managed_by"`
 }
 
 type heartbeatView struct {
@@ -885,7 +896,8 @@ func viewOf(in Integration) view {
 	}
 	return view{Name: in.Name, Description: in.Description, ConnectionMode: in.ConnectionMode, StaticLabels: labels,
 		DuplicateWindowSeconds: in.DuplicateWindowSeconds,
-		Heartbeat:              heartbeatView{Enabled: in.Heartbeat.Enabled, TimeoutSeconds: in.Heartbeat.TimeoutSeconds}}
+		Heartbeat:              heartbeatView{Enabled: in.Heartbeat.Enabled, TimeoutSeconds: in.Heartbeat.TimeoutSeconds},
+		ManagedBy:              in.ManagedBy}
 }
 
 func integrationOf(r dbgen.GetIntegrationRow) (Integration, error) {
@@ -899,6 +911,7 @@ func integrationOf(r dbgen.GetIntegrationRow) (Integration, error) {
 		Heartbeat: Heartbeat{Enabled: r.HeartbeatEnabled, TimeoutSeconds: r.HeartbeatTimeoutSeconds,
 			State: r.HeartbeatState, LastSignalAt: timeOf(r.HeartbeatLastSignalAt), LostSince: timeOf(r.HeartbeatLostSince)},
 		SnapshotCount: r.SnapshotCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
+		ManagedBy: managedby.Of(r.ManagedBy),
 	}, nil
 }
 
