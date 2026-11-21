@@ -134,11 +134,14 @@
   Destinations, C-32.FR-10),
   [`0053_alert_groups_evaluated_index`](../../internal/db/migrations/0053_alert_groups_evaluated_index.up.sql)
   (`alert_groups_evaluated_idx`, the open Alert Groups and those in their Grace period that each batch of the
-  evaluation of the Teams lists by id, C-25.FR-13) and
+  evaluation of the Teams lists by id, C-25.FR-13),
   [`0054_deliveries_alert_group_pending_index`](../../internal/db/migrations/0054_deliveries_alert_group_pending_index.up.sql)
   (`deliveries_alert_group_pending_idx`, the pending deliveries of Alert Groups by Alert Group, from which each batch of
   the walks of a change of configuration lists the resolved Alert Groups whose final edit waits, C-12.FR-12,
-  C-26.FR-9), in
+  C-26.FR-9) and
+  [`0055_deliveries_retention_index`](../../internal/db/migrations/0055_deliveries_retention_index.up.sql)
+  (`deliveries_retention_idx`, the deliveries of Alert Groups that are not pending by their last change, which the
+  retention of deliveries walks, C-09.FR-16), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1607,7 +1610,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   `deliveries_alert_group_pending_idx` `(org_id, alert_group_id) WHERE state = 'pending' AND alert_group_id IS NOT
   NULL` (migration 0054) gives the walks of a change of configuration the resolved Alert Groups whose final edit
   waits, by Alert Group after the cursor, without reading `deliveries_alert_group_key`, which keeps every delivery ever
-  made, from the cursor (`ListOpenGroups…After`, `ListEvaluatedGroupsAfter`); `message_id` and
+  made, from the cursor (`ListOpenGroups…After`, `ListEvaluatedGroupsAfter`); `deliveries_retention_idx`
+  `(org_id, updated_at) WHERE state <> 'pending' AND alert_group_id IS NOT NULL` (migration 0055) gives the retention
+  of deliveries those last changed before its cutoff, almost all of which it deletes (§6); `message_id` and
   `thread_anchor_id` indexes resolve incoming Telegram updates and button presses to their delivery;
   `actual_button_key_id` answers "does an open Root message still depend on this key" on the Keyring page;
   `deliveries_superseded_idx` finds the delivery of an older Bridge Root message.
@@ -2530,7 +2535,9 @@ since the foreign-key check of a new item takes `FOR KEY SHARE` on its call. The
 | Alert Group summary rows | `alert_groups` | — | `retention.alert_group_summaries`, 2 years after resolution | batched `DELETE` (cascades Notes, deliveries, timers, queues) |
 | Notes | `notes` | — | as long as their summary row | the cascade from the summary row; never the details purge |
 | Calls through Notification gateways | `gateway_calls`, `gateway_call_items` | — | items as long as their Alert Group; the text of a call until it ends; an ended call until it has no item left | the cascade from the summary row for the items; then batched `DELETE` of the ended calls without items in the same Leader task `alert_group_retention` |
-| Queue rows | `thread_replies`, `webhook_events`, `deliveries` of long-resolved Alert Groups | — | while needed, then `retention.alert_details` | batched `DELETE` |
+| Thread replies and outgoing webhook events | `thread_replies`, `webhook_events` | — | while needed (pending), then `retention.alert_details` after they were created | batched `DELETE` of the sent, dropped, delivered and Not delivered rows in the Leader tasks `thread_reply_retention` and `webhook_event_retention` |
+| Deliveries of Alert Groups (the delivery state and the Root message's record) | `deliveries` with `alert_group_id` | — | `retention.alert_details` after their Alert Group resolved and after their last change, and longer while a worker still needs one: pending, under a lease that has not run out, or with a Thread reply collecting or pending; hidden from the Alert Group page once its details are removed | batched `DELETE` in the Leader task `alert_group_retention`, with their Thread replies by cascade; the cascade from the summary row for the rest. An Unresolve after that publishes a new Root message in each Destination its Route and Teams name then, instead of editing the old one |
+| Deliveries of Storm summaries | `deliveries` with `storm_id` | — | as long as their Storm | the cascade from the Storm; no retention removes Storms yet |
 | Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, handled Bridge event ids, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure, setup links `auth.password_setup_prune_after` after they expired, Account link requests `account_link.request_prune_after` after they expired, `bridge_events_seen` `bridge.event_dedup_window` after `seen_at` | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions, throttles and setup links, each later short-lived table added by its story |
 | Request log | `request_log` | — (bounded per owner; ADR-0006 keeps partitions for tables that grow with their retention period) | the newest `request_log.max_records` of each Connection, each outgoing webhook Destination and the records without an owner, none older than `request_log.max_age` | batched `DELETE`, 5,000 rows per statement until a batch comes back short, by the Leader task `request_log_pruning` every minute and when the development clock moves |
 
@@ -2574,7 +2581,20 @@ development clock moves. Per Organization, at one business time, it deletes firs
 ended `retention.alert_details` ago, then the `alert_groups` resolved `retention.alert_group_summaries` ago, 5,000 rows
 per statement (`FOR UPDATE SKIP LOCKED`) until a batch comes back short; their Notes, timers, deliveries and queue rows
 go by cascade, and so do the items of the calls through Notification gateways about them. The same task then deletes,
-in batches of 5,000 at the same business time, the ended calls without an item left (`PruneEndedCalls`); their texts,
+in batches of 5,000 at the same business time, the `deliveries` of the Alert Groups resolved `retention.alert_details`
+ago and last changed before then (`DeleteExpiredDeliveries`, in the `delivery` package that owns them, counted with the
+details), skipping those a worker still needs — `pending`, under a lease that has not run out on the real clock
+(`lease_until` after the real time the task passes; a lease that ran out, kept by a withheld Publication or by a
+replica that stopped, holds nothing, as no worker claims a delivery that is not pending) or with a Thread reply
+`collecting` or `pending` — and rows another transaction holds; their Thread replies go by cascade. A delivery that an
+Unresolve makes pending meanwhile is checked again on its new row and kept. With them goes the Root message's record:
+the Alert Group page no longer shows the delivery state, and an Unresolve after that publishes a new Root message in
+each Destination its Route and Teams name then, instead of editing the old one. The query walks `deliveries_retention_idx` (migration 0055) by
+`updated_at`: the rows before the cutoff are almost all deleted, so a run reads few more than it deletes, where a walk
+of the Alert Groups resolved before the cutoff read every summary row kept for `retention.alert_group_summaries`
+(1.4 s per run for 640,000 of them on the development PostgreSQL, against 10 ms through the index). A final edit after the resolution defers its
+delivery by as long. Then it deletes, in batches of 5,000 at the same business time, the ended calls without an item
+left (`PruneEndedCalls`); their texts,
 which named the Alert Groups, were cleared when they ended. Two references between summary rows have no cascade: `firing_again_after_id` becomes null when the
 earlier Alert Group goes (migration 0003; the later one loses the notice `firing_again_after_manual_resolve`), and a
 summary row that an Alert of another Alert Group still names in `moved_to_alert_group_id` waits until that row's

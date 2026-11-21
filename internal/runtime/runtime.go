@@ -1286,11 +1286,20 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 }
 
 // alertGroupRetention is the Leader task alert_group_retention: the Alert Group retention of the Organization orgID at
-// now, then the ended calls through Notification gateways whose Alert Groups it deleted (C-09.FR-16, C-30.FR-4). It returns what the Alert Group retention deleted; the calls follow it, unlogged.
+// now, then the deliveries of the Alert Groups resolved retention.alert_details ago, counted with the details, then
+// the ended calls through Notification gateways whose Alert Groups it deleted (C-09.FR-16, C-30.FR-4). It returns
+// what the Alert Group retention and the retention of deliveries deleted; the calls follow it, unlogged.
 func (p *process) alertGroupRetention(ctx context.Context, orgID int64, now time.Time) (int64, int64, error) {
 	details, summaries, err := groups.RetentionTask(p.db.GroupsStore())(ctx, orgID, now)
 	if err != nil {
 		return details, summaries, err
+	}
+	if orgID == p.orgID {
+		n, err := p.delivery.PruneDeliveries(ctx, now)
+		details += n
+		if err != nil {
+			return details, summaries, err
+		}
 	}
 	_, err = gateways.NewCallPruner(p.db.AccountLinksDB()).Calls(ctx, orgID, now)
 	return details, summaries, err

@@ -475,6 +475,24 @@ func (fakeGroupsStore) NextOpenGroupUpdate(context.Context, groupsdb.NextOpenGro
 	return time.Time{}, nil
 }
 
+// The Alert Group retention reads its periods and finds nothing to delete.
+func (fakeGroupsStore) GetRetentionPeriods(context.Context, int64) (groupsdb.GetRetentionPeriodsRow, error) {
+	return groupsdb.GetRetentionPeriodsRow{RetentionAlertDetailsDays: 90, RetentionAlertGroupSummariesDays: 730}, nil
+}
+
+func (fakeGroupsStore) DeleteExpiredMemberships(context.Context, groupsdb.DeleteExpiredMembershipsParams) (int64,
+	error) {
+	return 0, nil
+}
+
+func (fakeGroupsStore) DeleteExpiredRunSteps(context.Context, groupsdb.DeleteExpiredRunStepsParams) (int64, error) {
+	return 0, nil
+}
+
+func (fakeGroupsStore) DeleteExpiredGroups(context.Context, groupsdb.DeleteExpiredGroupsParams) (int64, error) {
+	return 0, nil
+}
+
 // TimersStore has no timers.
 func (f *fakeDB) TimersStore() timers.Store { return fakeTimersStore{} }
 
@@ -1768,6 +1786,23 @@ func TestGroupTimer(t *testing.T) {
 	if after, err := h(t.Context(), nil, 7, timers.Timer{AlertGroupID: &id}); after == nil || err != nil ||
 		len(fired) != 1 || fired[0] != 42 {
 		t.Errorf("fire = %v, fired %v", err, fired)
+	}
+}
+
+// TestAlertGroupRetentionDeliveries: the Leader task alert_group_retention removes the deliveries of this process's
+// Organization after its Alert Group retention (#660), and stops at their failure; another Organization goes on to
+// the calls through Notification gateways.
+func TestAlertGroupRetentionDeliveries(t *testing.T) {
+	business := clock.NewManual(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))
+	p := &process{orgID: 1, db: &fakeDB{}, delivery: delivery.New(delivery.Config{OrgID: 1,
+		Store: delivery.NewStore(noDB{}, noDB{}), Business: business})}
+	if _, _, err := p.alertGroupRetention(t.Context(), 1, business.Now()); !errors.Is(err, errNoDB) ||
+		!strings.Contains(err.Error(), "retention.alert_details") {
+		t.Errorf("this organization = %v", err)
+	}
+	if _, _, err := p.alertGroupRetention(t.Context(), 2, business.Now()); err == nil ||
+		strings.Contains(err.Error(), "retention.alert_details") {
+		t.Errorf("another organization = %v", err)
 	}
 }
 

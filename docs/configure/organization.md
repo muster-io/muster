@@ -171,8 +171,9 @@ The screenshot is of a development installation, whose test chat servers listen 
 :   Snapshots kept as received, for debugging, previews and replay.
 
 **Alert details (days)** (`retention.alert_details`, 90)
-:   Alerts inside Alert Groups, Timeline entries, delivery events and the steps of the runs of
-    [Escalation chains](../concepts/escalation-chains.md#when-chains-run). Never Notes.
+:   Alerts inside Alert Groups, Timeline entries, delivery events, the steps of the runs of
+    [Escalation chains](../concepts/escalation-chains.md#when-chains-run) and the delivery state of each Destination.
+    Never Notes.
 
 **Alert Group summaries (days)** (`retention.alert_group_summaries`, 730)
 :   The summary row of an Alert Group, with its Notes, and the calls through Notification gateways about it.
