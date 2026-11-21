@@ -4,6 +4,7 @@
 package notificationrules
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/muster-io/muster/internal/notificationrules/dbgen"
@@ -22,7 +23,8 @@ func set(t *testing.T, raw string) Set {
 // TestWithCall is C-31.FR-2, FR-5 and C-31.AC-6: with the default rules the state call makes the important rule
 // exactly a call through the gateway, a Mention, a wait of 5 minutes and a Mention — the call and the first Mention at
 // the same moment — and leaves the normal rule a Mention; an important rule that already calls through that gateway
-// gets no second call, one that calls through another gets this one too; a call that would pass 10 actions is refused.
+// gets no second call, one that calls through another gets this one too; a call that brings the important rule to
+// exactly 10 actions is added, one that would pass 10 is refused.
 func TestWithCall(t *testing.T) {
 	got, fe := WithCall(Defaults(), gwA)
 	if fe != nil || string(got.JSON()) != `{"normal":[{"kind":"mention"}],"important":[{"kind":"call","gateway_id":`+
@@ -44,6 +46,12 @@ func TestWithCall(t *testing.T) {
 	}
 	if _, fe := WithCall(full, gwA); fe == nil || fe.Pointer != "/state" || fe.Code != CodeOutOfRange {
 		t.Errorf("10 actions: %v", fe)
+	}
+	nine := Defaults()
+	nine.Important = slices.Clone(full.Important[:MaxActions-1])
+	want := append([]Action{{Kind: KindCall, GatewayID: gwA}}, nine.Important...)
+	if got, fe := WithCall(nine, gwA); fe != nil || !slices.Equal(got.Important, want) {
+		t.Errorf("9 actions = %s, %v", got.JSON(), fe)
 	}
 	// The Organization's rules are copied, never changed.
 	org := Defaults()
