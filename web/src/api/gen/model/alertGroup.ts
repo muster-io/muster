@@ -57,7 +57,7 @@ export interface AlertGroup {
   next_notice?: NextNotice;
   /** Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached. */
   delivery_problem: boolean;
-  /** Alerts and Timeline were removed by retention; only the summary row and its Notes remain. */
+  /** Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain. */
   details_removed?: boolean;
   group_labels?: Labels;
   common_labels?: Labels;

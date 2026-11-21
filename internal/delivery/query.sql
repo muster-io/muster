@@ -1249,6 +1249,34 @@ SELECT retention_alert_details_days
 FROM organizations
 WHERE id = @org_id;
 
+-- DeleteExpiredDeliveries deletes at most @batch_size deliveries of Alert Groups resolved before @cutoff and last
+-- changed before it, their Thread replies by cascade (C-09.FR-16, C-11.FR-16), skipping the ones a worker still needs —
+-- pending, under a lease that has not run out at the real time @real_now, or with a Thread reply still collecting or
+-- pending — and rows another transaction holds. A lease that ran out, kept by a withheld Publication or by a replica
+-- that stopped, holds nothing: no worker claims a delivery that is not pending. A delivery
+-- that changed meanwhile is checked again on its new row: the Unresolve that makes it pending commits with the change
+-- of its Alert Group. It walks deliveries_retention_idx by updated_at, whose rows before @cutoff are almost all
+-- deleted, instead of every Alert Group resolved before @cutoff, whose summary rows stay for
+-- retention.alert_group_summaries; a final edit after the resolution only defers its delivery by as long. The
+-- deliveries of Storm summaries go with their Storms.
+-- name: DeleteExpiredDeliveries :execrows
+DELETE FROM deliveries t
+WHERE t.org_id = @org_id AND t.id IN (SELECT d.id
+                                      FROM deliveries d
+                                      JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+                                      WHERE d.org_id = @org_id AND d.state <> 'pending'
+                                        AND d.alert_group_id IS NOT NULL AND d.updated_at < @cutoff::timestamptz
+                                        AND (d.lease_owner IS NULL OR d.lease_until <= @real_now::timestamptz)
+                                        AND g.org_id = @org_id AND g.status = 'resolved'
+                                        AND g.resolved_at < @cutoff::timestamptz
+                                        AND NOT EXISTS (SELECT 1
+                                                        FROM thread_replies r
+                                                        WHERE r.org_id = @org_id AND r.delivery_id = d.id
+                                                          AND r.state IN ('collecting', 'pending'))
+                                      ORDER BY d.updated_at, d.id
+                                      LIMIT @batch_size
+                                      FOR UPDATE OF d SKIP LOCKED);
+
 -- DeleteExpiredReplies deletes at most @batch_size Thread replies that are sent, dropped or not delivered and were
 -- created before @cutoff, skipping rows another transaction holds.
 -- name: DeleteExpiredReplies :execrows
