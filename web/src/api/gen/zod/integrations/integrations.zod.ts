@@ -21,6 +21,10 @@ export const ListIntegrationsQueryParams = zod.object({
 
 
 
+export const listIntegrationsResponseItemsItemOneManagedByMax = 32;
+
+
+export const listIntegrationsResponseItemsItemOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listIntegrationsResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -30,7 +34,8 @@ export const ListIntegrationsResponse = zod.object({
   "description": zod.string().optional(),
   "connection_mode": zod.enum(['webhook_only']).describe('The Connection mode; in L1 the only mode is `webhook_only` (webhook-only in the glossary).'),
   "static_labels": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
-  "duplicate_window_seconds": zod.int().min(1)
+  "duplicate_window_seconds": zod.int().min(1),
+  "managed_by": zod.string().max(listIntegrationsResponseItemsItemOneManagedByMax).regex(listIntegrationsResponseItemsItemOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(listIntegrationsResponseItemsItemTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('True for the "Muster" Integration of Internal alerts; it cannot be edited or deleted and has no tokens.'),
@@ -66,6 +71,10 @@ export const ListIntegrationsResponse = zod.object({
  */
 
 
+export const createIntegrationBodyOneManagedByMax = 32;
+
+
+export const createIntegrationBodyOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 
@@ -74,7 +83,8 @@ export const CreateIntegrationBody = zod.object({
   "description": zod.string().optional(),
   "connection_mode": zod.enum(['webhook_only']).describe('The Connection mode; in L1 the only mode is `webhook_only` (webhook-only in the glossary).'),
   "static_labels": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
-  "duplicate_window_seconds": zod.int().min(1)
+  "duplicate_window_seconds": zod.int().min(1),
+  "managed_by": zod.string().max(createIntegrationBodyOneManagedByMax).regex(createIntegrationBodyOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "heartbeat": zod.object({
   "enabled": zod.boolean(),
@@ -84,6 +94,10 @@ export const CreateIntegrationBody = zod.object({
 
 
 
+export const createIntegrationResponseOneManagedByMax = 32;
+
+
+export const createIntegrationResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createIntegrationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -92,7 +106,8 @@ export const CreateIntegrationResponse = zod.object({
   "description": zod.string().optional(),
   "connection_mode": zod.enum(['webhook_only']).describe('The Connection mode; in L1 the only mode is `webhook_only` (webhook-only in the glossary).'),
   "static_labels": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
-  "duplicate_window_seconds": zod.int().min(1)
+  "duplicate_window_seconds": zod.int().min(1),
+  "managed_by": zod.string().max(createIntegrationResponseOneManagedByMax).regex(createIntegrationResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(createIntegrationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('True for the "Muster" Integration of Internal alerts; it cannot be edited or deleted and has no tokens.'),
@@ -133,6 +148,10 @@ export const GetIntegrationParams = zod.object({
 
 
 
+export const getIntegrationResponseOneManagedByMax = 32;
+
+
+export const getIntegrationResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getIntegrationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -141,7 +160,8 @@ export const GetIntegrationResponse = zod.object({
   "description": zod.string().optional(),
   "connection_mode": zod.enum(['webhook_only']).describe('The Connection mode; in L1 the only mode is `webhook_only` (webhook-only in the glossary).'),
   "static_labels": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
-  "duplicate_window_seconds": zod.int().min(1)
+  "duplicate_window_seconds": zod.int().min(1),
+  "managed_by": zod.string().max(getIntegrationResponseOneManagedByMax).regex(getIntegrationResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(getIntegrationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('True for the "Muster" Integration of Internal alerts; it cannot be edited or deleted and has no tokens.'),
@@ -187,6 +207,10 @@ export const UpdateIntegrationHeader = zod.object({
 
 
 
+export const updateIntegrationBodyOneManagedByMax = 32;
+
+
+export const updateIntegrationBodyOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 
@@ -195,7 +219,8 @@ export const UpdateIntegrationBody = zod.object({
   "description": zod.string().optional(),
   "connection_mode": zod.enum(['webhook_only']).describe('The Connection mode; in L1 the only mode is `webhook_only` (webhook-only in the glossary).'),
   "static_labels": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
-  "duplicate_window_seconds": zod.int().min(1)
+  "duplicate_window_seconds": zod.int().min(1),
+  "managed_by": zod.string().max(updateIntegrationBodyOneManagedByMax).regex(updateIntegrationBodyOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "heartbeat": zod.object({
   "enabled": zod.boolean(),
@@ -205,6 +230,10 @@ export const UpdateIntegrationBody = zod.object({
 
 
 
+export const updateIntegrationResponseOneManagedByMax = 32;
+
+
+export const updateIntegrationResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateIntegrationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -213,7 +242,8 @@ export const UpdateIntegrationResponse = zod.object({
   "description": zod.string().optional(),
   "connection_mode": zod.enum(['webhook_only']).describe('The Connection mode; in L1 the only mode is `webhook_only` (webhook-only in the glossary).'),
   "static_labels": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
-  "duplicate_window_seconds": zod.int().min(1)
+  "duplicate_window_seconds": zod.int().min(1),
+  "managed_by": zod.string().max(updateIntegrationResponseOneManagedByMax).regex(updateIntegrationResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(updateIntegrationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('True for the "Muster" Integration of Internal alerts; it cannot be edited or deleted and has no tokens.'),

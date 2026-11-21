@@ -114,7 +114,7 @@ func (e *retryEnv) waitForLock(t *testing.T, pid uint32, done <-chan error) {
 // migration leaves the session connection in its aborted transaction.
 func (e *retryEnv) checkVersion2(t *testing.T, wantDirty bool) {
 	t.Helper()
-	if v, dirty, err := schemaVersion(t.Context(), e.d.Pool); err != nil || v != 2 || dirty != wantDirty {
+	if v, dirty, err := SchemaVersion(t.Context(), e.d.Pool); err != nil || v != 2 || dirty != wantDirty {
 		t.Errorf("version %d, dirty %v, %v; want 2, dirty %v", v, dirty, err, wantDirty)
 	}
 }

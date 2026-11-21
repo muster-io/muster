@@ -154,7 +154,7 @@ func (s *Server) DeleteEscalationChain(ctx context.Context, req gen.DeleteEscala
 // escalationInputOf is a chain as internal/escalation takes it.
 func escalationInputOf(b gen.EscalationChainInput) escalation.Input {
 	in := escalation.Input{Name: b.Name, Description: b.Description, OwningTeamID: owningTeamOf(b.OwningTeamId),
-		Steps: make([]escalation.StepInput, len(b.Steps))}
+		Steps: make([]escalation.StepInput, len(b.Steps)), ManagedBy: managedByIn(b.ManagedBy)}
 	for i, st := range b.Steps {
 		in.Steps[i] = stepInputOf(st)
 	}
@@ -198,7 +198,7 @@ func escalationChainOf(c escalation.Chain) gen.EscalationChain {
 		Referrers: gen.EscalationChainReferrers{Routes: make([]gen.EscalationChainRouteReferrer, len(c.Referrers.Routes)),
 			Teams: make([]gen.EscalationChainTeamReferrer, len(c.Referrers.Teams))},
 		Destinations: make([]gen.DestinationRef, len(c.Destinations)),
-		Warnings:     make([]gen.EscalationChainWarning, len(c.Warnings))}
+		Warnings:     make([]gen.EscalationChainWarning, len(c.Warnings)), ManagedBy: managedByOf(c.ManagedBy)}
 	if o := c.OwningTeam; o != nil {
 		out.OwningTeam = teamRefOf(o.PublicID, o.Name, o.Slug, o.Deleted, true)
 		out.OwningTeamId = owningTeamIDOf(o.PublicID, true)

@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	cdb "github.com/muster-io/muster/internal/connections/dbgen"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
@@ -98,10 +99,23 @@ type conn struct {
 	payload *string
 }
 
-func newFakeDB(ssl bool) *fakeDB {
+// knownVersion is the newest migration of the binary, the schema version of the fake database by default.
+func knownVersion(t testing.TB) int64 {
+	t.Helper()
+	v, err := db.KnownVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return int64(v) //nolint:gosec // G115: the number of a migration file, four digits
+}
+
+func newFakeDB(t testing.TB, ssl bool) *fakeDB {
+	t.Helper()
 	return &fakeDB{answers: map[string]*rows{
 		"SHOW server_version_num":       {values: [][]any{{"170011"}}},
 		"SHOW server_version":           {values: [][]any{{"17.11 (Debian 17.11-1)"}}},
+		"to_regclass":                   {values: [][]any{{true}}},
+		"FROM schema_migrations":        {values: [][]any{{knownVersion(t), false}}},
 		"pg_stat_ssl":                   {values: [][]any{{ssl}}},
 		"pg_advisory_unlock":            {values: [][]any{{true}}},
 		"clock_timestamp":               {values: [][]any{{time.Now()}}},
@@ -249,12 +263,13 @@ func run(t *testing.T, d *fakeDB, env []string) (string, bool) {
 
 func TestEveryCheckPasses(t *testing.T) {
 	key, id := keys('a')
-	d := newFakeDB(true)
+	d := newFakeDB(t, true)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 	out, ok := run(t, d, environ(key,
 		"MUSTER_DATABASE_URL=postgres://muster:pw@127.0.0.1:1/muster?connect_timeout=1&sslmode=require"))
 	want := "OK   database: main and session connections reachable\n" +
 		"OK   postgresql_version: 17.11\n" +
+		fmt.Sprintf("OK   schema: version %d, as this binary knows\n", knownVersion(t)) +
 		"OK   session_connection: advisory locks and LISTEN work\n" +
 		"OK   tls_main: sslmode=require, the connection is encrypted\n" +
 		"OK   tls_session: sslmode=require, the connection is encrypted\n" +
@@ -263,7 +278,7 @@ func TestEveryCheckPasses(t *testing.T) {
 	if !ok || !strings.HasPrefix(out, want) || !strings.Contains(out, "OK   clock_skew: 0.0") {
 		t.Errorf("ok %v, output:\n%s\nwant:\n%s", ok, out, want)
 	}
-	if strings.Count(out, "\n") != 8 {
+	if strings.Count(out, "\n") != 9 {
 		t.Errorf("%d lines, want one per check", strings.Count(out, "\n"))
 	}
 }
@@ -271,7 +286,7 @@ func TestEveryCheckPasses(t *testing.T) {
 // TestUnencryptedConnectionsOnlyWarn: C-02.AC-13, sslmode=prefer against a server without TLS.
 func TestUnencryptedConnectionsOnlyWarn(t *testing.T) {
 	key, _ := keys('a')
-	d := newFakeDB(false)
+	d := newFakeDB(t, false)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 	out, ok := run(t, d, environ(key))
 	for _, want := range []string{
@@ -291,7 +306,7 @@ func TestUnencryptedConnectionsOnlyWarn(t *testing.T) {
 func TestKeyCanaryFails(t *testing.T) {
 	key, id := keys('a')
 	other, _ := keys('b')
-	d := newFakeDB(false)
+	d := newFakeDB(t, false)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 	out, ok := run(t, d, environ(other))
 	for _, want := range []string{
@@ -311,7 +326,7 @@ func TestOlderKeysInUse(t *testing.T) {
 	key, id := keys('a')
 	old, oldID := keys('b')
 	_, goneID := keys('c')
-	d := newFakeDB(true)
+	d := newFakeDB(t, true)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 	d.answers["FROM encrypted_values"] = &rows{values: [][]any{
 		{pgtype.Text{String: id, Valid: true}, int64(4)},
@@ -340,7 +355,7 @@ func TestKeysNotActiveYetAndRemovable(t *testing.T) {
 	key, id := keys('a')
 	old, oldID := keys('b')
 	added, addedID := keys('c')
-	d := newFakeDB(true)
+	d := newFakeDB(t, true)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 	out, ok := run(t, d, environ(key+","+added))
 	if want := "OK   keyring: key " + addedID + " is not active yet\n"; !ok || !strings.Contains(out, want) {
@@ -395,20 +410,20 @@ func TestFailingChecks(t *testing.T) {
 		{name: "organizations unreadable", setup: func(d *fakeDB) {
 			d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 			d.answers["FROM organizations"] = &rows{err: errors.New("boom")}
-		}, want: "FAIL keyring: list the organizations: boom\n", lines: 9},
+		}, want: "FAIL keyring: list the organizations: boom\n", lines: 10},
 		{name: "connections unreadable", setup: func(d *fakeDB) {
 			d.answers["ListConnections"] = &rows{err: errors.New("boom")}
-		}, want: "FAIL connections: list the connections: boom\n", lines: 9},
+		}, want: "FAIL connections: list the connections: boom\n", lines: 10},
 		{name: "destinations unreadable", setup: func(d *fakeDB) {
 			d.answers["ListMattermostDestinations"] = &rows{err: errors.New("boom")}
-		}, want: "FAIL connections: list the destinations: boom\n", lines: 9},
+		}, want: "FAIL connections: list the destinations: boom\n", lines: 10},
 		{name: "encrypted values unreadable", setup: func(d *fakeDB) {
 			d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 			d.answers["FROM encrypted_values"] = &rows{err: errors.New("boom")}
 		}, want: "FAIL keyring: count the encrypted values: boom\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			d := newFakeDB(true)
+			d := newFakeDB(t, true)
 			d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 			tt.setup(d)
 			env := tt.env
@@ -419,8 +434,76 @@ func TestFailingChecks(t *testing.T) {
 			if ok || !strings.Contains(out, tt.want) {
 				t.Errorf("ok %v, output:\n%s\nwant %q", ok, out, tt.want)
 			}
-			if want := cmp.Or(tt.lines, 8); strings.Count(out, "\n") != want {
+			if want := cmp.Or(tt.lines, 9); strings.Count(out, "\n") != want {
 				t.Errorf("%d lines, want %d", strings.Count(out, "\n"), want)
+			}
+		})
+	}
+}
+
+// TestSchemaCheck: the schema line, third after the PostgreSQL version, judges the schema version as the server does at
+// start; a dirty schema and one newer than the binary knows fail the doctor, an older or an empty one only warns.
+func TestSchemaCheck(t *testing.T) {
+	key, _ := keys('a')
+	known := knownVersion(t)
+	dirty := func(v int64) string {
+		return fmt.Sprintf("FAIL schema: dirty at version %d (schema_dirty): a migration failed halfway; see Upgrade "+
+			"notes in Requirements and tested versions", v)
+	}
+	for _, tt := range []struct {
+		name  string
+		setup func(*fakeDB)
+		want  string
+		ok    bool
+	}{
+		{name: "current", setup: func(*fakeDB) {},
+			want: fmt.Sprintf("OK   schema: version %d, as this binary knows", known), ok: true},
+		{name: "older", setup: func(d *fakeDB) {
+			d.answers["FROM schema_migrations"] = &rows{values: [][]any{{known - 1, false}}}
+		}, want: fmt.Sprintf("WARN schema: version %d, older than this binary's %d; muster migrate applies the rest",
+			known-1, known), ok: true},
+		{name: "no schema_migrations table", setup: func(d *fakeDB) {
+			d.answers["to_regclass"] = &rows{values: [][]any{{false}}}
+		}, want: fmt.Sprintf("WARN schema: no migration has run yet, this binary knows version %d; muster migrate "+
+			"applies them", known), ok: true},
+		{name: "no version recorded", setup: func(d *fakeDB) {
+			d.answers["FROM schema_migrations"] = &rows{values: [][]any{}}
+		}, want: fmt.Sprintf("WARN schema: no migration has run yet, this binary knows version %d; muster migrate "+
+			"applies them", known), ok: true},
+		{name: "dirty", setup: func(d *fakeDB) {
+			d.answers["FROM schema_migrations"] = &rows{values: [][]any{{known, true}}}
+		}, want: dirty(known)},
+		{name: "dirty and too new", setup: func(d *fakeDB) {
+			d.answers["FROM schema_migrations"] = &rows{values: [][]any{{known + 1, true}}}
+		}, want: dirty(known + 1)},
+		{name: "too new", setup: func(d *fakeDB) {
+			d.answers["FROM schema_migrations"] = &rows{values: [][]any{{known + 1, false}}}
+		}, want: fmt.Sprintf("FAIL schema: version %d is newer than this binary knows (%d) (schema_too_new)", known+1,
+			known)},
+		{name: "unreadable", setup: func(d *fakeDB) {
+			d.answers["to_regclass"] = &rows{err: errors.New("boom")}
+		}, want: "FAIL schema: read the schema version: boom"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newFakeDB(t, true)
+			d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
+			tt.setup(d)
+			out, ok := run(t, d, environ(key,
+				"MUSTER_DATABASE_URL=postgres://muster:pw@127.0.0.1:1/muster?connect_timeout=1&sslmode=require"))
+			lines := strings.Split(out, "\n")
+			if ok != tt.ok || len(lines) < 3 || lines[2] != tt.want {
+				t.Errorf("ok %v, output:\n%s\nwant ok %v and the third line %q", ok, out, tt.ok, tt.want)
+			}
+			// Every other check still ran, and none of them failed.
+			if n := strings.Count(out, "\n"); n != 9 {
+				t.Errorf("%d lines, want one per check:\n%s", n, out)
+			}
+			wantFails := 1
+			if tt.ok {
+				wantFails = 0
+			}
+			if fails := strings.Count("\n"+out, "\nFAIL "); fails != wantFails {
+				t.Errorf("%d failed checks, want %d:\n%s", fails, wantFails, out)
 			}
 		})
 	}
@@ -429,7 +512,7 @@ func TestFailingChecks(t *testing.T) {
 // TestDevelopmentKey: only muster dev doctor accepts the published development key, as only the server in development
 // mode does.
 func TestDevelopmentKey(t *testing.T) {
-	d := newFakeDB(true)
+	d := newFakeDB(t, true)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, keyring.DevelopmentKey)}}
 	out, ok := run(t, d, environ(keyring.DevelopmentKey))
 	if ok || !strings.Contains(out, "FAIL key_canary: MUSTER_SECRET_KEYS holds the published development key") {
@@ -445,7 +528,7 @@ func TestDevelopmentKey(t *testing.T) {
 
 func TestClockSkewOnlyWarns(t *testing.T) {
 	key, _ := keys('a')
-	d := newFakeDB(true)
+	d := newFakeDB(t, true)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 	d.answers["clock_timestamp"] = &rows{values: [][]any{{time.Now().Add(-3 * time.Second)}}}
 	out, ok := run(t, d, environ(key))
@@ -479,7 +562,7 @@ func TestUnreachableDatabase(t *testing.T) {
 }
 
 func TestReadOnly(t *testing.T) {
-	d := newFakeDB(true)
+	d := newFakeDB(t, true)
 	conns := d.connections()
 	if err := readOnly(t.Context(), conns); err != nil {
 		t.Fatal(err)
@@ -540,7 +623,7 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := newFakeDB(true)
+	d := newFakeDB(t, true)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{s.row}}
 	tgCiphertext, tgKeyID, err := k.Encrypt("connections.bot_token", []byte(doctorTelegramToken))
 	if err != nil {
@@ -651,7 +734,7 @@ func TestMessengerChecks(t *testing.T) {
 		"FAIL destination br-no-bot: channel: " + fakebridge.MessageNotMember + "\n" +
 		"OK   destination sl-alerts: ok\n" +
 		"FAIL destination sl-no-bot: channel: Invite the bot to the channel: /invite @muster-dev-bot\n"
-	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 20 || strings.Contains(out, doctorToken) ||
+	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 21 || strings.Contains(out, doctorToken) ||
 		strings.Contains(out, doctorTelegramToken) || strings.Contains(out, fakebridge.Token) ||
 		strings.Contains(out, fakeslack.BotToken) || strings.Contains(out, fakeslack.AppToken) {
 		t.Errorf("ok %v, output:\n%s\nwant the end:\n%s", ok, out, want)

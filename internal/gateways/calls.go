@@ -182,6 +182,7 @@ type CallQueries interface {
 	StartCall(ctx context.Context, arg dbgen.StartCallParams) (int64, error)
 	RenewCallLease(ctx context.Context, arg dbgen.RenewCallLeaseParams) (int64, error)
 	RescheduleCall(ctx context.Context, arg dbgen.RescheduleCallParams) (int64, error)
+	UnstartCall(ctx context.Context, arg dbgen.UnstartCallParams) (int64, error)
 	RecordCallRetry(ctx context.Context, arg dbgen.RecordCallRetryParams) (int64, error)
 	EndCall(ctx context.Context, arg dbgen.EndCallParams) (bool, error)
 	ReleaseWaitingCall(ctx context.Context, arg dbgen.ReleaseWaitingCallParams) error

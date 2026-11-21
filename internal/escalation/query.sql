@@ -20,7 +20,7 @@ WHERE org_id = @org_id AND id = @id;
 -- ListChains reads a page of the chains by name, after a cursor, with their owning Teams; @q matches the name ignoring
 -- case, and @team_ids, when given, keeps the chains those Teams own.
 -- name: ListChains :many
-SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.owning_team_id,
+SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.managed_by, c.owning_team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted, lower(c.name)::text AS sort_name
 FROM escalation_chains c
@@ -35,7 +35,7 @@ LIMIT @page_size;
 
 -- GetChain reads a chain with its owning Team.
 -- name: GetChain :one
-SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.owning_team_id,
+SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.managed_by, c.owning_team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted
 FROM escalation_chains c
@@ -70,15 +70,20 @@ FOR SHARE;
 
 -- InsertChain creates a chain.
 -- name: InsertChain :one
-INSERT INTO escalation_chains (org_id, public_id, name, description, owning_team_id, created_at, updated_at)
-VALUES (@org_id, @public_id, @name, @description, sqlc.narg('owning_team_id')::bigint, @now, @now)
+INSERT INTO escalation_chains (
+    org_id, public_id, name, description, owning_team_id, managed_by, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, @name, @description, sqlc.narg('owning_team_id')::bigint, sqlc.narg('managed_by')::text, @now,
+    @now
+)
 RETURNING id;
 
 -- UpdateChain replaces the fields of a chain and bumps its version.
 -- name: UpdateChain :exec
 UPDATE escalation_chains
 SET name = @name, description = @description, owning_team_id = sqlc.narg('owning_team_id')::bigint,
-    updated_at = @now, version = version + 1
+    managed_by = sqlc.narg('managed_by')::text, updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- DeleteChain deletes a chain; its steps, their people and the entries of deleted Routes go with it.

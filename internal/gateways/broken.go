@@ -39,8 +39,10 @@ import (
 // successful probe, or a successful check of the Connection,
 // ends the state, resolves the alert and logs gateway_recovered, and a failed probe records its error as the reason.
 // Only calls set the state: deliveries to the Destinations of the same bridge never do, and the state never touches
-// them. The Leader exports muster_notification_gateway_broken (Export) and reconciles the state (Reconcile) in its task
-// delivery_queue.
+// them. The calls that one sender attempts at once make their gateway Broken as the calls of several replicas do, each
+// in a transaction of its own under the lock below; the sender learns whether the gateway is Broken once that
+// committed, so that no call of its round goes through the gateway after that was recorded (sender.go, gate). The Leader exports
+// muster_notification_gateway_broken (Export) and reconciles the state (Reconcile) in its task delivery_queue.
 //
 // Lock order. Every transaction of the Broken state — a Break, an end by a probe or a check, the record of a failed
 // probe, the resolve of an orphan alert — takes the advisory lock of the gateway's state first (db.GatewayStateLockClass,
@@ -210,16 +212,20 @@ func (b *Broken) lock(ctx context.Context, q BrokenQueries, id int64) error {
 // MusterNotificationGatewayBroken, the Connection's hint and gateway_broken once committed. A gateway that is Broken
 // already stays so with reason as its reason, and its Connection's hint is sent; a deleted Connection changes nothing.
 func (b *Broken) Break(ctx context.Context, g brokenGateway, cause, reason string) error {
-	return b.breakAfter(ctx, g, cause, reason, pgtype.Timestamptz{})
+	_, err := b.breakAfter(ctx, g, cause, reason, pgtype.Timestamptz{})
+	return err
 }
 
 // breakAfter is Break for a call that failed at failedAt, when valid: a gateway whose last Broken state ended since
-// is not made Broken again for it.
-func (b *Broken) breakAfter(ctx context.Context, g brokenGateway, cause, reason string, failedAt pgtype.Timestamptz) error {
+// is not made Broken again for it. broken is whether the gateway is Broken once it committed: made so now, or so
+// already.
+func (b *Broken) breakAfter(ctx context.Context, g brokenGateway, cause, reason string,
+	failedAt pgtype.Timestamptz) (broken bool, err error) {
 	now := b.now()
 	var row dbgen.BreakGatewayRow
 	broke := false
-	err := b.Store.InBrokenTx(ctx, func(q BrokenQueries) error {
+	err = b.Store.InBrokenTx(ctx, func(q BrokenQueries) error {
+		broken = false
 		if err := b.lock(ctx, q, g.id); err != nil {
 			return err
 		}
@@ -227,6 +233,7 @@ func (b *Broken) breakAfter(ctx context.Context, g brokenGateway, cause, reason 
 		row, err = q.BreakGateway(ctx, dbgen.BreakGatewayParams{OrgID: b.OrgID, ID: g.id, Reason: reason, Now: now,
 			NextProbe: now.Add(BrokenProbeInterval), FailedAt: failedAt})
 		broke = err == nil
+		broken = broke
 		if errors.Is(err, pgx.ErrNoRows) {
 			n, err := q.UpdateGatewayBrokenReason(ctx, dbgen.UpdateGatewayBrokenReasonParams{OrgID: b.OrgID,
 				ID: g.id, Reason: reason})
@@ -236,6 +243,7 @@ func (b *Broken) breakAfter(ctx context.Context, g brokenGateway, cause, reason 
 			if n == 0 {
 				return nil
 			}
+			broken = true
 			return q.Notify(ctx, db.Hint{OrgID: b.OrgID, Type: hintConnection, ID: g.publicID})
 		}
 		if err != nil {
@@ -248,13 +256,13 @@ func (b *Broken) breakAfter(ctx context.Context, g brokenGateway, cause, reason 
 		return q.Notify(ctx, db.Hint{OrgID: b.OrgID, Type: hintConnection, ID: row.PublicID})
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if broke {
 		b.Log.Log(ctx, logging.GatewayBroken, logging.F("connection", row.PublicID), logging.F("cause", cause),
 			logging.F("reason", reason))
 	}
-	return nil
+	return broken, nil
 }
 
 // end ends the Broken state of the gateway id through q at now, by a probe or a check, which the gateway keeps as the
@@ -387,8 +395,9 @@ func (b *Broken) Reconcile(ctx context.Context) error {
 		if r.Reason == groups.PageCallBudgetUsed {
 			cause, reason = causeUnavailable, repeatedPrefix+reason
 		}
-		errs = append(errs, b.breakAfter(ctx, brokenGateway{id: r.ID, publicID: r.PublicID}, cause, reason,
-			pgtype.Timestamptz{Time: r.EndedAt, Valid: true}))
+		_, err := b.breakAfter(ctx, brokenGateway{id: r.ID, publicID: r.PublicID}, cause, reason,
+			pgtype.Timestamptz{Time: r.EndedAt, Valid: true})
+		errs = append(errs, err)
 	}
 	return errors.Join(append(errs, b.resolveOrphans(ctx))...)
 }

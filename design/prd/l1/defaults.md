@@ -108,6 +108,8 @@ From 0.2.0 the profile On-call is called Paging (C-26.FR-11).
 | `route.team` | none (no owning Team) | none | C-25, C-26 | decided |
 | `route.escalation_chains` | none | none | C-32 | decided |
 | `route.message_labels` | computed while the Route sets none: the labels of the Group key except `alertname` and `organization.severity_label`, plus the Team label and `namespace` | same | C-29 | decided |
+| `route.message_layout` | Muster's default, the layout of C-29.FR-1, until an Admin saves the Route's own (C-38.FR-1) | same | C-38 | decided |
+| `route.message_layout_alerts_listed` | `message.compact_alerts_listed`; from 1 to 20, otherwise `422` (`out_of_range`) | same | C-38 | P-93 |
 | `route.group_key` | `alertname`, `severity`, `cluster` | same | C-08 | decided |
 | `route.reopen_window` | 15 min | 15 min | C-09 | decided |
 | `route.grace_period` | 15 min | 15 min | C-09 | decided |
@@ -131,6 +133,8 @@ Other lifecycle values:
 | `routing.group_key_preview_examples` | the 5 largest Alert Groups for each key | built in | C-08 | decided |
 | `routing.group_key_preview_max_alerts` | 10,000 Alerts, the newest first (the active Alerts of NFR-1) | built in | C-08 | decided |
 | `alert_group.list_range` | last 7 days (lifetime overlapping the range) | request | C-09 | decided |
+| `dashboard.refresh_interval` | 5 min: the dashboard on the Home page reads its figures again while the page is visible; the counts of open Alert Groups follow live updates instead (C-40.FR-8) | built in | C-40 | decided |
+| `dashboard.noisy_alerts` | 10 titles, each with more than one Alert Group in the period (C-40.FR-7) | built in | C-40 | decided |
 | `alert_group.note_max_length` | 4,000 characters | built in | C-10 | decided |
 | `alert_group.bulk_max` | 100 Alert Groups per bulk command | built in | C-10 | decided |
 | `alert_group.attach_max` | 100 Alert Groups attached to one main Alert Group | built in | C-37 | decided |
@@ -157,6 +161,8 @@ Other lifecycle values:
 | `organization.buttons` | all: every button — Acknowledge, Resolve, each Snooze duration, durations added to a Route later included, and both Snooze presets — until an Admin lists the buttons | Organization | C-28 | decided |
 | `destination.buttons` | as in the Organization (`organization.buttons`) | Destination | C-28 | decided |
 | `message.compact_alerts_listed` | 5 values of the distinguishing label, then "…and K more" (C-29.FR-3) | built in | C-29 | P-83 |
+| `message.layout_fields` | 10 fields in a Route's message layout; above that `422` (`too_long`) | built in | C-38 | P-94 |
+| `message.layout_preview_groups` | the 20 most recent Alert Groups of the Route offered by the layout preview | built in | C-38 | P-95 |
 
 ## Connections and Destinations
 
@@ -196,6 +202,7 @@ Other lifecycle values:
 | `slack.press_deadline` | 30 s from the hand-over of a press to the end of its Command, its wait for a slot included: the time Mattermost waits for the answer to a press ([F-032](../../facts.md#rate-limit-and-server-settings)); a press that runs out of it is answered that it failed | built in | C-24 | decided |
 | `slack.max_waiting_presses` | 64 Slack presses waiting for a slot in a process; one more is dropped, unanswered and logged, which bounds the memory a replayed signed request can hold | built in | C-24 | decided |
 | `slack.parallel_presses` | 2 Slack presses handled at the same time per replica, over all its Slack Connections and both event modes, like `bridge.parallel_events`; the others wait, already confirmed | built in | C-24 | decided |
+| `destination_test.idle_timeout` | 1 h on the business clock without a step: the step-by-step test of a Destination then ends, and its Test messages stay (C-42.FR-1) | built in | C-42 | decided |
 
 ## Request log
 

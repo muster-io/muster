@@ -23,6 +23,8 @@
   Group of one of its Routes or from a built-in example, marked "🧪 Test message", through the interactive path
   (C-11.FR-2). For an outgoing webhook it sends the event `test` (C-15.FR-2) in events mode and the "create" request in
   template mode — both, one after the other, when the Destination uses both.
+  _Revised for L2 (2026-11-21, #375):_ from C-38 the message layout editor sends a test message with the layout it has
+  not saved yet, built from the Alert Group its preview shows, of whichever Route (C-38.FR-17).
 - **C-16.FR-2** The result shows the request (Secrets, the Signing secret and tokens masked), the response status and
   body (truncated, shown as untrusted text, masked), extracted values, duration and the error class. When no limiter
   token is free within `delivery.interactive_budget`, nothing is sent and the step's error class is `limited`.

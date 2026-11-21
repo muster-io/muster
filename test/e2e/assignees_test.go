@@ -380,8 +380,14 @@ func TestAssignees(t *testing.T) {
 		if got := e.changesOf(g); !slices.Equal(got, []string{"ivan", "petr"}) {
 			t.Errorf("assignees_changed %q", got)
 		}
-		if strings.Contains(e.rootText(g, "ch-infra-notice"), "ivan") {
-			t.Errorf("the replaced assignee in %q", e.rootText(g, "ch-infra-notice"))
+		// Delivery edits the Root message after the change: wait for the render naming petr, which replaced ivan.
+		var text string
+		eventually(t, "the new assignee in the Root message", func() bool {
+			text = e.rootText(g, "ch-infra-notice")
+			return strings.Contains(text, "Assignees: @petr (devops)")
+		})
+		if strings.Contains(text, "ivan") {
+			t.Errorf("the replaced assignee in %q", text)
 		}
 	})
 

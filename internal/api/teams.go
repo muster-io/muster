@@ -11,6 +11,7 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams"
 )
@@ -210,7 +211,8 @@ func (s *Server) RemoveTeamUser(ctx context.Context, req gen.RemoveTeamUserReque
 
 // teamInputOf is a Team as internal/teams takes it.
 func teamInputOf(b gen.TeamInput) teams.Input {
-	in := teams.Input{Name: b.Name, Slug: b.Slug, Description: b.Description, OwnWorkingHours: b.OwnWorkingHours}
+	in := teams.Input{Name: b.Name, Slug: b.Slug, Description: b.Description, OwnWorkingHours: b.OwnWorkingHours,
+		ManagedBy: managedByIn(b.ManagedBy)}
 	if w := b.WorkingHours; w != nil {
 		hours := workingHoursIn(*w)
 		in.WorkingHours = &hours
@@ -354,7 +356,7 @@ func teamOf(t teams.Team) gen.Team {
 		OwnWorkingHours: t.Own != nil, WorkingHours: workingHoursOf(t.WorkingHours),
 		IdpEntries: idpEntriesOf(t.IdpEntries), UserCount: int(t.UserCount), CreatedAt: t.CreatedAt.UTC(), Etag: &tag,
 		Matchers: ms, DestinationEntries: entries, Destinations: dests, ChainEntries: chainEntries, Chains: chains,
-		TeamMentions: mentions, MentionConnections: conns}
+		TeamMentions: mentions, MentionConnections: conns, ManagedBy: managedByOf(t.ManagedBy)}
 }
 
 // teamUserOf is the API form of a person in a Team.
@@ -384,6 +386,26 @@ func owningTeamOf(v nullable.Nullable[gen.NullablePublicId]) *string {
 		id = v.MustGet()
 	}
 	return &id
+}
+
+// managedByIn is the field managed_by of an input as the domain packages take it (C-33.FR-11): omitted keeps the stored
+// mark on an update, null clears it.
+func managedByIn(v nullable.Nullable[string]) managedby.Input {
+	if !v.IsSpecified() {
+		return managedby.Input{}
+	}
+	if v.IsNull() {
+		return managedby.Clear
+	}
+	return managedby.Set(v.MustGet())
+}
+
+// managedByOf is the managed_by that a read always carries, null for none.
+func managedByOf(mark *string) nullable.Nullable[string] {
+	if mark == nil {
+		return nullable.NewNullNullable[string]()
+	}
+	return nullable.NewNullableWithValue(*mark)
 }
 
 // teamRefOf is the API form of the Team that owns an object, null for none.
