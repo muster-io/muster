@@ -291,15 +291,19 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   describes the views By Team and By people, that the first acknowledgement gets the credit and why a Takeover does
   not move it, the row "Unknown" and the Alert Groups acknowledged before 0.2.0, and the filters, with screenshots of
   By Team and By people (C-21.FR-9).
-- **C-09.FR-16** Alerts inside Alert Groups, Timeline entries and the delivery events about Alert Groups are kept for
+- **C-09.FR-16** Alerts inside Alert Groups, Timeline entries, the delivery events about Alert Groups and the delivery
+  state of each Destination (C-11.FR-16), with its link to the Root message, are kept for
   `retention.alert_details`, Alert Group summary rows — with the title and `summary` — for
   `retention.alert_group_summaries`. Notes (C-10) are kept as long as the summary row, not with the details: removing
   the details never removes Notes, and Notes are deleted together with the summary row. The list and search cover the
-  summary rows; an Alert Group whose details were removed opens as its summary and its Notes with the notice "Alerts
-  and Timeline of this Alert Group were removed after {period}".
+  summary rows; an Alert Group whose details were removed opens as its summary and its Notes with the notice "Alerts,
+  Timeline and delivery state of this Alert Group were removed after {period}".
   _Revised for L2 (2026-11-17, #585):_ the steps of the runs of Escalation chains ("How it went", C-32.FR-18) are kept
   with the details, for `retention.alert_details`: they are removed with them, and "How it went" gives a run whose
   details were removed without its steps.
+  _Revised for L2 (2026-11-21, #660):_ the delivery state goes with the details: the Alert Group page no longer shows
+  it, and an Unresolve after that publishes a new Root message in each Destination its Route and Teams name then,
+  instead of editing the old one.
 - **C-09.FR-21** The Integration delete dialog (C-05) shows how many open Alert Groups will be resolved.
 
 ## UI
@@ -361,8 +365,8 @@ Checked with the fake Alertmanager, through the API and the UI.
   started, the statistics page shows 3 Alert Groups and a median time to resolve of 20 minutes, split by the days they
   started; the same Alert Groups are counted under their Integration.
 - **C-09.AC-18** With a virtual clock, once `retention.alert_details` has passed for a resolved Alert Group and its
-  partitions are dropped, search still finds it by its title, and its page shows the summary with the notice "Alerts
-  and Timeline of this Alert Group were removed after {period}".
+  partitions are dropped, search still finds it by its title, and its page shows the summary with the notice "Alerts,
+  Timeline and delivery state of this Alert Group were removed after {period}".
 - **C-09.AC-19** In a real browser 360 CSS pixels wide, the Alert Group list and the Alert Group page have no horizontal
   page scrolling, and a responder can pick the Firing tab, open an Alert Group and read its Alerts and Timeline.
 - **C-09.AC-20** An Alert Group of `KubePodCrashLooping` Alerts whose first `summary` is "Pod postgres-0 is crash

@@ -44,7 +44,7 @@ test.describe.configure({ mode: "serial" });
 const REPLACEMENT =
   "Alerts were replaced because pod changed. Consider removing Instance labels from the rule, for example without(pod, instance).";
 const REMOVED =
-  "Alerts and Timeline of this Alert Group were removed after 90 days; only its summary and Notes are kept.";
+  "Alerts, Timeline and delivery state of this Alert Group were removed after 90 days; only its summary and Notes are kept.";
 
 let integrationId = "";
 let routeId = "";
@@ -243,6 +243,7 @@ test("shows the header, notices, Alerts, labels, Timeline and previous Alert Gro
   await page.goto(`/alert-groups/${g2.id}`);
   await expect(page.getByTestId("notice-details_removed")).toHaveText(REMOVED);
   await expect(page.getByTestId("alert-group-alerts")).toHaveCount(0);
+  await expect(page.getByTestId("alert-group-deliveries")).toHaveCount(0);
   await expect(page.getByTestId("alert-group-title")).toHaveText("DiskFull");
   await shot(page, "alert-group-page-details-removed");
   expect(csp).toEqual([]);

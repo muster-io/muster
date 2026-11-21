@@ -128,7 +128,7 @@ export const ListAlertGroupsResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -447,7 +447,7 @@ export const GetAlertGroupResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -1016,6 +1016,7 @@ export const ListRelatedAlertGroupsResponse = zod.object({
 })
 
 /**
+ * The delivery state of the Alert Group in each Destination. The retention removes it with the details once `retention.alert_details` has passed since the Alert Group resolved (`details_removed`), and it is no longer listed.
  * @summary Read delivery state per Destination
  */
 export const listAlertGroupDeliveriesPathAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1160,7 +1161,7 @@ export const AcknowledgeAlertGroupResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -1340,7 +1341,7 @@ export const UnacknowledgeAlertGroupResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -1528,7 +1529,7 @@ export const ResolveAlertGroupResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -1708,7 +1709,7 @@ export const UnresolveAlertGroupResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -1895,7 +1896,7 @@ export const SnoozeAlertGroupResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -2075,7 +2076,7 @@ export const UnsnoozeAlertGroupResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
@@ -2334,7 +2335,7 @@ export const AnswerReminderResponse = zod.object({
   "at": zod.iso.datetime({"offset":true})
 }).optional().describe('The next scheduled ack timeout notice or Reminder.'),
   "delivery_problem": zod.boolean().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
-  "details_removed": zod.boolean().optional().describe('Alerts and Timeline were removed by retention; only the summary row and its Notes remain.'),
+  "details_removed": zod.boolean().optional().describe('Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.'),
   "group_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_labels": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),
   "common_annotations": zod.record(zod.string(), zod.string()).optional().describe('Label names and values.'),

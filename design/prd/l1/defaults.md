@@ -235,7 +235,7 @@ Other lifecycle values:
 | `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention; a User follows them "As in the Organization" until they choose "Call" or "Don't call", which keep the rules as they were then, or custom rules are set through the API or by an Admin (C-31.FR-2) | Organization | C-31 | decided |
 | `organization.instance_labels` | `pod`, `instance`, `container`, `endpoint` | Organization | C-09, C-20 | decided |
 | `retention.stored_snapshots` | 14 days | Organization | C-05, C-20 | decided |
-| `retention.alert_details` | 90 days (Alerts in Alert Groups, Timeline entries, delivery events and, from L2, the steps of the runs of Escalation chains; never Notes) | Organization | C-09, C-20, C-32 | decided |
+| `retention.alert_details` | 90 days (Alerts in Alert Groups, Timeline entries, delivery events and, from L2, the steps of the runs of Escalation chains and the delivery state of each Destination; never Notes) | Organization | C-09, C-20, C-32 | decided |
 | `retention.alert_group_summaries` | 2 years (summary rows with their Notes); at least `retention.alert_details`, otherwise `422` | Organization | C-09, C-20 | decided |
 | `retention.audit_log` | 1 year; from L2 also the ended Maintenance windows (C-34) | Organization | C-03, C-20, C-34 | decided |
 | `organization.outbound_policy` | standard (private allowed, loopback blocked) | Organization | C-02, C-20 | decided |

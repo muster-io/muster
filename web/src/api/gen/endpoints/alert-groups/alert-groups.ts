@@ -1009,6 +1009,7 @@ export const getListAlertGroupDeliveriesUrl = (alertGroupId: string,) => {
 }
 
 /**
+ * The delivery state of the Alert Group in each Destination. The retention removes it with the details once `retention.alert_details` has passed since the Alert Group resolved (`details_removed`), and it is no longer listed.
  * @summary Read delivery state per Destination
  */
 export const listAlertGroupDeliveries = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupDeliveryList> => {
