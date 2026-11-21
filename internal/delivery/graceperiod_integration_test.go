@@ -7,6 +7,7 @@ package delivery_test
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -82,7 +83,8 @@ func TestIntegrationGracePeriodEndWithLineTemplate(t *testing.T) {
 		resolved := l.group(t, "GraceDisk")
 		l.round(t, w)
 		pubs := only(to(l.rec.Calls(), "DSAAAAAAAAAAA1"), deliverytest.MethodPublish)
-		if len(pubs) != 1 || !listed(pubs[0].Message, "db1 Disk full", "db2 Disk full") ||
+		if len(pubs) != 1 || pubs[0].Message.Heading == nil ||
+			!listed(pubs[0].Message, "db1 Disk full", "db2 Disk full") ||
 			len(only(to(l.rec.Calls(), "DSAAAAAAAAAAGT"), deliverytest.MethodPublish)) != 1 {
 			t.Fatalf("the publication with the line template: %s %+v", methods(l.rec.Calls()), pubs)
 		}
@@ -98,7 +100,8 @@ func TestIntegrationGracePeriodEndWithLineTemplate(t *testing.T) {
 		gid := l.groupID(t, resolved)
 		v, err := l.groups.Get(ctx, resolved)
 		if err != nil || v.Status != groups.StatusResolved || len(v.Notices) != 1 ||
-			v.Notices[0].Kind != groups.NoticeAlertsStillFiring || *v.Notices[0].Count != 2 {
+			v.Notices[0].Kind != groups.NoticeAlertsStillFiring || v.Notices[0].Count == nil ||
+			*v.Notices[0].Count != 2 {
 			t.Fatalf("resolved %+v, %v", v, err)
 		}
 		if n := l.count(t, `SELECT count(*) FROM timers WHERE kind = 'grace_period_end' AND alert_group_id = $1`,
@@ -112,8 +115,12 @@ func TestIntegrationGracePeriodEndWithLineTemplate(t *testing.T) {
 		}
 		l.round(t, w)
 		l.rec.Reset()
+		// The template-mode webhook's delivery of the resolved Alert Group, before the Grace period ends.
+		const hookVersion = `SELECT desired_version FROM deliveries WHERE alert_group_id = $1 AND destination_id = $2`
+		hookBefore := l.count(t, hookVersion, gid, hook)
 
-		// The Grace period ends: the timer fires as the runtime's handler fires it.
+		// The Grace period ends: the timer fires through a handler that does what runtime.go's groupTimer handler for
+		// grace_period_end does.
 		grace := &timers.Worker{Store: timers.NewStore(l.d.Pool), Lease: db.Lease{Owner: "grace",
 			Duration: timers.Lease, Clocks: clock.Clocks{Business: l.business, Real: l.real}},
 			Organizations: func(context.Context) ([]int64, error) { return []int64{l.orgID}, nil }, Log: l.logger,
@@ -144,7 +151,8 @@ func TestIntegrationGracePeriodEndWithLineTemplate(t *testing.T) {
 		again := l.group(t, "GraceDisk")
 		v, err = l.groups.Get(ctx, again)
 		if err != nil || again == resolved || v.Status != groups.StatusFiring || len(v.Notices) != 1 ||
-			v.Notices[0].Kind != groups.NoticeFiringAgainAfterManualResolve || *v.Notices[0].ResolvedNumber != number {
+			v.Notices[0].Kind != groups.NoticeFiringAgainAfterManualResolve || v.Notices[0].ResolvedNumber == nil ||
+			*v.Notices[0].ResolvedNumber != number {
 			t.Errorf("firing again %+v, %v", v, err)
 		}
 		if n := l.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id IN ($1, $2)
@@ -179,9 +187,33 @@ func TestIntegrationGracePeriodEndWithLineTemplate(t *testing.T) {
 			}
 		}
 		if len(edited) != 1 || edited[0].Message.AlertsLine != nil || edited[0].Message.Colour != messages.ColourResolved ||
-			len(published) != 1 || published[0].Message.Heading.Number == number ||
+			len(published) != 1 || published[0].Message.Heading == nil || published[0].Message.Heading.Number == number ||
 			!listed(published[0].Message, "db1 Disk full", "db2 Disk full") {
 			t.Errorf("after the grace period: %s, edited %+v, published %+v", methods(l.rec.Calls()), edited, published)
+		}
+		// The template-mode webhook: the resolved Alert Group's request state, rendered again without Alerts, is sent
+		// as one update and delivered without an error.
+		var hooked []deliverytest.Call
+		for _, c := range to(l.rec.Calls(), "DSAAAAAAAAAAGT") {
+			var st delivery.RequestState
+			if c.Method == deliverytest.MethodUpdate && c.Webhook != nil && json.Unmarshal(c.Webhook.State, &st) == nil &&
+				st.Group != nil && st.Group.AlertGroup.Number == number {
+				if len(st.Group.Alerts) != 0 || st.Group.AlertGroup.Status != string(groups.StatusResolved) {
+					t.Errorf("the webhook's request state of #%d: %s", number, c.Webhook.State)
+				}
+				hooked = append(hooked, c)
+			}
+		}
+		var state string
+		var errorClass *string
+		if err := l.d.Pool.QueryRow(ctx, `SELECT state, last_error_class FROM deliveries WHERE alert_group_id = $1
+			AND destination_id = $2`, gid, hook).Scan(&state, &errorClass); err != nil {
+			t.Fatal(err)
+		}
+		if after := l.count(t, hookVersion, gid, hook); len(hooked) != 1 || after <= hookBefore || state != "delivered" ||
+			errorClass != nil {
+			t.Errorf("the template-mode webhook after the grace period: %d updates, desired version %d → %d, state %s, "+
+				"error class %v", len(hooked), hookBefore, after, state, errorClass)
 		}
 		if n := l.count(t, `SELECT count(*) FROM webhook_events WHERE destination_id = $1 AND alert_group_id = $2`,
 			events, l.groupID(t, again)); n == 0 {
