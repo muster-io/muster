@@ -34,8 +34,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   the API and the bot sends a direct message, which a bot can do knowing only the user's id
   ([F-028](../../facts.md#threads-and-direct-messages)), with a code and the warning "You requested a link to Muster. Do
   not share this code." The code follows `account_link.mattermost_code` (length without look-alike characters, validity,
-  attempts); code requests are limited by `account_link.mattermost_code_requests`, per requesting User and per target
-  account. After the code is entered, the bot confirms "Linked to Muster user {name}".
+  attempts); code requests are limited by `account_link.mattermost_code_requests`, per requesting User, per requesting
+  User and target account, and at most 10 codes per hour to one account across Users, beyond which a request is
+  answered as sent and nothing is sent. After the code is entered, the bot confirms "Linked to Muster user {name}".
 - **C-18.FR-4** A messenger account is linked to exactly one User. A User has at most one account per identity space —
   one Telegram account in all, one account per Mattermost Connection, per Bridge Connection (C-22.FR-15) and per Slack
   Connection (C-24.FR-12); a new link replaces the previous one.

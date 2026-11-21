@@ -214,9 +214,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   the email instead." The bot then sends the code by direct message — `chat.postMessage` to the account's user id
   (F-096) — with the warning "You requested a link to Muster. Do not share this code."; the user types the code into the
   profile, and after it is confirmed the bot sends "Linked to Muster user {name}". Codes follow
-  `account_link.slack_code` and are limited by `account_link.slack_code_requests`, per requesting User and per target
-  account; a wrong code is refused as for Mattermost, with the attempts left. The link stores the account's user id, its
-  name and its display name — `profile.display_name`, else `profile.real_name` — which names the account where Muster
+  `account_link.slack_code` and are limited by `account_link.slack_code_requests`, per requesting User, per requesting
+  User and target account, and at most 10 codes per hour to one account across Users, beyond which a request is
+  answered as sent and nothing is sent; a wrong code is refused as for Mattermost, with the attempts left. The link
+  stores the account's user id, its name and its display name — `profile.display_name`, else `profile.real_name` — which names the account where Muster
   shows the link; Mentions and the footer write it as `<@U…>` (FR-6). The
   link-making messages are interactive calls (C-18.FR-11). The app's Messages tab stays on and read-only, so the person
   sees the code and cannot write to the bot (F-096); Slack documents that with the tab off it refuses the direct message

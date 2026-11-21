@@ -10,7 +10,7 @@ export type BridgeConnectionInput = BridgeConnectionBase & {
   type: BridgeConnectionInputType;
   /** Write-only Secret. Omit on update to keep the stored one; a new `base_url` needs it again. */
   bot_token?: string;
-  /** Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it. */
+  /** Write-only Secret in the Standard Webhooks form, `whsec_` and the base64 of a key of at least 24 bytes, such as 32 random bytes; a shorter key is `invalid_format`. Required with `event_delivery` `push`. Omit on update to keep the stored one, even one shorter than 24 bytes saved before that minimum, which `warnings` reports; a save in `poll` clears it. */
   push_secret?: string;
   proxy: ProxyConfigInput;
 };

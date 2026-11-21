@@ -346,7 +346,7 @@ export const WEBHOOK_CALL_FAILED = "webhook_call_failed";
 /** The code of a Bridge base URL that breaks the rules of C-22.FR-1. */
 export const BRIDGE_BASE_URL_FORMAT = "bridge_base_url_format";
 
-/** The code of a push secret that is not whsec_ followed by base64. */
+/** The code of a push secret that is not whsec_ followed by the base64 of at least 24 bytes. */
 export const PUSH_SECRET_FORMAT = "push_secret_format";
 
 /** The code of a Slack bot token that does not start with xoxb-. */
@@ -1022,6 +1022,10 @@ export function ConnectionForm({
                               connection?.type === "bridge"
                                 ? connection.push_secret_status
                                 : undefined
+                            }
+                            pushSecretTooShort={
+                              connection?.type === "bridge" &&
+                              connection.warnings.includes("push_secret_too_short")
                             }
                             callbackUrl={
                               connection?.type === "bridge" ? connection.callback_url : undefined

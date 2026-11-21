@@ -8,6 +8,12 @@ someone must look within the hour, WARN that the line is needed for an investiga
 is impossible without it; `MUSTER_LOG_LEVEL` sets the lowest level written. The capability is the one that logs
 the event.
 
+### `account_link_code_withheld`
+
+INFO · fields: `messenger`, `connection`, `user` · C-18
+
+A User asked for a link code to a Mattermost, Bridge or Slack account that had received the codes account_link.mattermost_code_requests, account_link.bridge_code_requests or account_link.slack_code_requests allow within the hour across Users, so that nothing was sent and the request was answered as if it had been: messenger is mattermost, bridge or slack, connection the public_id of the Connection, user the public_id of the requesting User. Never carries the account, the handle or the code.
+
 ### `account_link_linked`
 
 INFO · fields: `messenger`, `connection`, `user`, `error` · C-18

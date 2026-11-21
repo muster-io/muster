@@ -43,7 +43,8 @@ Flags, before or after <url>:
                              notification and notification_acknowledged are skipped
   --push-listen <addr>       where the push listener listens (default 127.0.0.1:0)
   --push-url <url>           where the bridge reaches the push listener (default: the listener's own address)
-  --push-secret-file <file>  the push secret, whsec_ followed by base64, instead of a generated one
+  --push-secret-file <file>  the push secret, whsec_ followed by base64 of at least 24 bytes, instead of a
+                             generated one
   --no-interactive           skip press, push and notification_acknowledged, which need a person
 
 Exits 0 when no step failed, 1 when one did, 2 on a usage error, also after info when a bridge in the role messenger
@@ -141,7 +142,8 @@ func BridgeCheckCommand(ctx context.Context, args []string, stdout, stderr io.Wr
 			return bridgeUsageError(stderr, err.Error())
 		}
 		if !bridge.ValidPushSecret(pushSecret) {
-			return bridgeUsageError(stderr, "--push-secret-file does not hold whsec_ followed by base64")
+			return bridgeUsageError(stderr,
+				"--push-secret-file does not hold whsec_ followed by base64 of at least 24 bytes")
 		}
 	}
 	failed, err := bridge.RunConformance(ctx, bridge.ConformanceConfig{BaseURL: base, Token: token,

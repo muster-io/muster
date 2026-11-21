@@ -1089,7 +1089,9 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
 - **`account_link_requests`** — pending links started from the web session: the hashed Telegram token (looked up by
   hash alone when `/start` arrives, so it has a unique partial index) or the hashed Mattermost code with its target
   account and `attempts` (`account_link.mattermost_code`). Two indexes back the request limits per requesting User and
-  per target account (`account_link.mattermost_code_requests`). A Bridge request (migration 0012, C-22.FR-15) has a
+  per target account (`account_link.mattermost_code_requests`); the per-target index also serves the count of one
+  User's requests for the account, which filters the account's rows of the hour by `user_id`, as the per-target
+  indexes of Bridge and Slack do for theirs. A Bridge request (migration 0012, C-22.FR-15) has a
   `method`: `token`, the hashed token a person sends to the bot, which an `account_link` event names alone, so that it
   is found by its hash through its own partial unique index `account_link_requests_bridge_token_key`
   (`messenger = 'bridge' AND method = 'token'`), beside the Telegram one; or `code`, the hashed code sent by direct

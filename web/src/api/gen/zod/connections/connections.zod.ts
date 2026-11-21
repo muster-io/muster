@@ -154,6 +154,7 @@ export const ListConnectionsResponse = zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "warnings": zod.array(zod.enum(['push_secret_too_short'])).describe('Problems of the saved settings that do not stop the Connection. `push_secret_too_short` (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more ends the warning.'),
   "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
   "info": zod.union([zod.object({
   "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
@@ -346,7 +347,7 @@ export const CreateConnectionBody = zod.union([zod.object({
 }).describe('A rate limit of `limit` calls per `per_seconds`.')
 }).and(zod.object({
   "bot_token": zod.string().optional().describe('Write-only Secret. Omit on update to keep the stored one; a new `base_url` needs it again.'),
-  "push_secret": zod.string().optional().describe('Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.'),
+  "push_secret": zod.string().optional().describe('Write-only Secret in the Standard Webhooks form, `whsec_` and the base64 of a key of at least 24 bytes, such as 32 random bytes; a shorter key is `invalid_format`. Required with `event_delivery` `push`. Omit on update to keep the stored one, even one shorter than 24 bytes saved before that minimum, which `warnings` reports; a save in `poll` clears it.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -509,6 +510,7 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "warnings": zod.array(zod.enum(['push_secret_too_short'])).describe('Problems of the saved settings that do not stop the Connection. `push_secret_too_short` (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more ends the warning.'),
   "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
   "info": zod.union([zod.object({
   "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
@@ -938,6 +940,7 @@ export const GetConnectionResponse = zod.union([zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "warnings": zod.array(zod.enum(['push_secret_too_short'])).describe('Problems of the saved settings that do not stop the Connection. `push_secret_too_short` (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more ends the warning.'),
   "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
   "info": zod.union([zod.object({
   "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
@@ -1139,7 +1142,7 @@ export const UpdateConnectionBody = zod.union([zod.object({
 }).describe('A rate limit of `limit` calls per `per_seconds`.')
 }).and(zod.object({
   "bot_token": zod.string().optional().describe('Write-only Secret. Omit on update to keep the stored one; a new `base_url` needs it again.'),
-  "push_secret": zod.string().optional().describe('Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.'),
+  "push_secret": zod.string().optional().describe('Write-only Secret in the Standard Webhooks form, `whsec_` and the base64 of a key of at least 24 bytes, such as 32 random bytes; a shorter key is `invalid_format`. Required with `event_delivery` `push`. Omit on update to keep the stored one, even one shorter than 24 bytes saved before that minimum, which `warnings` reports; a save in `poll` clears it.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -1302,6 +1305,7 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "warnings": zod.array(zod.enum(['push_secret_too_short'])).describe('Problems of the saved settings that do not stop the Connection. `push_secret_too_short` (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more ends the warning.'),
   "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
   "info": zod.union([zod.object({
   "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),

@@ -572,7 +572,11 @@ func (s *Server) bridgeConnectionOf(c connections.Connection) (gen.Connection, e
 		BotTokenStatus: keyStatusOf(c.BotToken), PushSecretStatus: keyStatusOf(c.PushSecret), CallbackUrl: &callback,
 		Proxy:            proxyOf(c.Proxy, c.ProxyPassword),
 		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
-		DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt, Etag: &tag}
+		DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt, Etag: &tag,
+		Warnings: make([]gen.BridgeConnectionWarnings, 0, len(c.Warnings))}
+	for _, w := range c.Warnings {
+		b.Warnings = append(b.Warnings, gen.BridgeConnectionWarnings(w))
+	}
 	info := bridgeInfoOf(c.BridgeInfo)
 	b.Info = info
 	if c.BridgeInfoReadAt != nil && !info.IsNull() {

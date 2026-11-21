@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/muster-io/muster/internal/accountlinks/dbgen"
-	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/publicid"
@@ -25,10 +24,11 @@ const (
 	// minutes, at most 5 attempts.
 	SlackCodeTTL     = 10 * time.Minute
 	SlackMaxAttempts = 5
-	// SlackCodeRequestsPerUser and SlackCodeRequestsPerTarget are account_link.slack_code_requests: code requests per
-	// requesting User and per target account within CodeRequestWindow.
+	// SlackCodeRequestsPerUser, SlackCodeRequestsPerTarget and SlackCodesPerTarget are account_link.slack_code_requests
+	// within CodeRequestWindow, as CodeRequestsPerUser, CodeRequestsPerTarget and CodesPerTarget are Mattermost's.
 	SlackCodeRequestsPerUser   = 5
 	SlackCodeRequestsPerTarget = 3
+	SlackCodesPerTarget        = 10
 )
 
 // CodeHandleAmbiguous is the field error of a name that several Slack accounts have.
@@ -80,9 +80,10 @@ type SlackStarted struct {
 
 // StartSlack starts a link of the requesting User to the account of the Slack Connection connectionPublicID that
 // handle names, an email or a name (C-24.FR-12): handle is trimmed and may not be empty. Code requests beyond
-// account_link.slack_code_requests within the last hour — of the User, or for the target account — are a
-// *RateLimitedError until the oldest one counted is an hour old; the User's are counted before the account is looked
-// up, and both again in the transaction that stores the request, under the lock of the User and of the target
+// account_link.slack_code_requests within the last hour — of the User, or of the User for the target account — are a
+// *RateLimitedError until the oldest one counted is an hour old, and a request beyond the codes the account receives
+// within the hour across Users is answered as StartMattermost answers it; the User's are counted before the account is
+// looked up, and all again in the transaction that stores the request, under the lock of the User and of the target
 // account. With one limiter token of the interactive path, taken before anything is stored: the account is found by
 // the bot (none: FieldError handle_not_found; several with the name: FieldError handle_ambiguous); an account linked to
 // another User is ErrLinkedElsewhere, recorded as link_rejected with conflict; otherwise the User's pending Slack
@@ -146,13 +147,14 @@ func (s *Service) startSlack(ctx context.Context, b SlackBot, r Requester, conn 
 	}
 	var (
 		conflict bool
+		withhold bool
 		lang     string
 		reqID    int64
 		started  = SlackStarted{RequestPublicID: publicid.New(publicid.AccountLinkRequest),
 			ExpiresAt: now.Add(SlackCodeTTL), AttemptsRemaining: SlackMaxAttempts}
 	)
 	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
-		conflict = false
+		conflict, withhold = false, false
 		u, err := q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: r.UserID})
 		if err != nil {
 			return fmt.Errorf("lock the user: %w", err)
@@ -161,7 +163,7 @@ func (s *Service) startSlack(ctx context.Context, b SlackBot, r Requester, conn 
 		if err := s.slackUserCodeLimit(ctx, q, u.ID, now); err != nil {
 			return err
 		}
-		if err := s.slackTargetCodeLimit(ctx, q, conn.id, acct.ID, now); err != nil {
+		if withhold, err = s.targetCodeLimit(ctx, q, MessengerSlack, conn.id, acct.ID, u.ID, now); err != nil {
 			return err
 		}
 		other, err := q.GetAccountLinkBySpace(ctx, dbgen.GetAccountLinkBySpaceParams{OrgID: s.cfg.OrgID,
@@ -177,9 +179,13 @@ func (s *Service) startSlack(ctx context.Context, b SlackBot, r Requester, conn 
 			OrgID: s.cfg.OrgID, UserID: u.ID, ConnectionID: conn.id}); err != nil {
 			return fmt.Errorf("void the earlier link requests: %w", err)
 		}
+		secret, err := s.secretHash(code, withhold)
+		if err != nil {
+			return err
+		}
 		reqID, err = q.InsertLinkRequest(ctx, dbgen.InsertLinkRequestParams{OrgID: s.cfg.OrgID,
 			PublicID: started.RequestPublicID, UserID: u.ID, Messenger: MessengerSlack, ConnectionID: conn.id,
-			SecretHash: hash(code), TargetExternalID: optText(&acct.ID), TargetUsername: optText(a.username),
+			SecretHash: secret, TargetExternalID: optText(&acct.ID), TargetUsername: optText(a.username),
 			TargetDisplayName: optText(a.displayName), CreatedAt: now, ExpiresAt: started.ExpiresAt})
 		if err != nil {
 			return fmt.Errorf("store the link request: %w", err)
@@ -192,6 +198,10 @@ func (s *Service) startSlack(ctx context.Context, b SlackBot, r Requester, conn 
 	if conflict {
 		s.logRejected(ctx, MessengerSlack, conn.publicID, ReasonConflict, nil)
 		return SlackStarted{}, ErrLinkedElsewhere
+	}
+	if withhold {
+		s.logWithheld(ctx, MessengerSlack, conn.publicID, r.UserPublicID)
+		return started, nil
 	}
 	err = b.SendCode(ctx, acct.ID, logging.Secret(code), messages.T(lang, "accountLink.code",
 		messages.Args{"code": code}))
@@ -222,27 +232,6 @@ func (s *Service) slackUserCodeLimit(ctx context.Context, q Queries, userID int6
 		return fmt.Errorf("count the link code requests: %w", err)
 	}
 	if n.Requests >= SlackCodeRequestsPerUser {
-		return &RateLimitedError{RetryAfter: n.Oldest.Add(CodeRequestWindow).Sub(now)}
-	}
-	return nil
-}
-
-// slackTargetCodeLimit takes the lock of the code requests for the account target of the Slack Connection connID
-// until the transaction of q ends, then refuses a request beyond account_link.slack_code_requests within the hour
-// before now with a *RateLimitedError.
-func (s *Service) slackTargetCodeLimit(ctx context.Context, q Queries, connID int64, target string,
-	now time.Time) error {
-	if err := q.LockCodeTarget(ctx, dbgen.LockCodeTargetParams{LockClass: db.AccountLinkCodeTargetLockClass,
-		OrgID: s.cfg.OrgID, ConnectionID: connID, TargetExternalID: target}); err != nil {
-		return fmt.Errorf("lock the link code requests of the account: %w", err)
-	}
-	n, err := q.CountTargetSlackCodeRequests(ctx, dbgen.CountTargetSlackCodeRequestsParams{
-		Since: now.Add(-CodeRequestWindow), OrgID: s.cfg.OrgID, ConnectionID: connID,
-		TargetExternalID: optText(&target)})
-	if err != nil {
-		return fmt.Errorf("count the link code requests: %w", err)
-	}
-	if n.Requests >= SlackCodeRequestsPerTarget {
 		return &RateLimitedError{RetryAfter: n.Oldest.Add(CodeRequestWindow).Sub(now)}
 	}
 	return nil
