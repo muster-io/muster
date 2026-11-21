@@ -3457,9 +3457,17 @@ the reason: <code>no_account_link</code>, <code>bridge_cannot_mention_people</co
 message that ends Not delivered records none, nor does a Quiet message or an edit, since neither mentions anyone. The
 first publication of a Storm summary belongs to no Alert Group, so its undelivered Mentions appear in no Timeline. They
 still warn on the Destination.</p>
+<p>A group, a Team mention or everyone in the chat that a bridge's line of Mentions has no room for is recorded the same
+way, with <code>message_too_long</code>: "Mention not delivered" names the group's name or the word of everyone (<code>mention</code> in
+the API, in place of the person), the entry that named it and the Loud event. A <code>{{ mention "here" }}</code> or group token
+of a template that the line leaves out names no entry and no event: the Timeline still records it, but no warning
+follows, since the Destination has no entry to show it on. A group or a mention of everyone that the bridge no longer
+declares when the message is sent is not sent at all, so it is not recorded as left out either. Neither is the Team
+or everyone that a Page names, which no entry names.</p>
 <p>The Destination page warns about each person and entry whose latest "Mention not delivered" is not followed by a
-delivered Mention of that person through that entry. The API reads the warnings in <code>mention_warnings</code> of every
-Destination, each with the person, the entry, the messenger, the reason and since when. For example: "Mention not
+delivered Mention of that person through that entry, and in the same way about each group, Team mention and everyone
+in the chat left out through an entry. The API reads the warnings in <code>mention_warnings</code> of every Destination, each
+with the person or the <code>mention</code>, the entry, the messenger, the reason and since when. For example: "Mention not
 delivered: @petr, On-call of payments, has no linked Mattermost account."</p>
 <p>The warning clears by itself, because Muster computes it from the delivery events and never stores it:</p>
 <ul>
@@ -3468,7 +3476,9 @@ delivered: @petr, On-call of payments, has no linked Mattermost account."</p>
 <li>When their link is fixed so that a marker can be written for it, the next Loud message that mentions them through
   that entry clears it.</li>
 <li>When the message's line of Mentions had no room for them, a later Loud message whose line has room for them clears
-  it.</li>
+  it. The same holds for a group, a Team mention or everyone in the chat. Its warning names the group as it was then:
+  when a Team's mention is renamed, the warning about the old name stays until retention removes it or a message
+  carries that name again.</li>
 <li>When the events behind it are older than <code>retention.alert_details</code>, which removes them, the warning goes too.</li>
 </ul>
 <p>A warning whose entry was removed from the Destination since goes at once. So does the warning of a deleted User.</p>

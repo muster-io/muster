@@ -3527,7 +3527,9 @@ link; a bridge that nevertheless receives a <code>group</code> or an <code>every
 changed since, shows the marker's link text, which notifies nobody, and never refuses the message. See
 <a href="../../concepts/mentions/#undelivered-mentions">Whom a message mentions</a>. That copy is at most <code>bridge.info_max_age</code> (10 minutes) old: Muster reads <code>info</code> again when it is older, and when a
 Connection check runs. A long line of Mentions keeps, in their order, the whole markers that fit half of the
-bridge's longest text, with their entries, and leaves out the others. Only the Owner's Mentions — of a Reminder, an
+bridge's longest text, with their entries, and leaves out the others: each person, group, Team mention or mention
+of everyone left out, a template's token included, is recorded as "Mention not delivered" with the reason
+<code>message_too_long</code>. Only the Owner's Mentions — of a Reminder, an
 auto-unacknowledge or a Takeover — the footer and the Assignees name a person without one, by their display name as
 text. A Root message of a Destination that mentions the Team payments, <code>here</code> and Alice starts:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
