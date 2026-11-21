@@ -32,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
@@ -2778,6 +2779,180 @@ func TestSaveMentionEntries(t *testing.T) {
 		UserID: "SR0000000000ZZ"})}
 	if _, err := s.Create(ctx, saver, in); !errors.As(err, new(*mentions.FieldError)) {
 		t.Errorf("an unknown user in an entry = %v", err)
+	}
+}
+
+// lastMark is the change of /managed_by in the diff of the newest Audit log entry of w, if any.
+func lastMark(t *testing.T, w *saveWriter) (audit.Change, bool) {
+	t.Helper()
+	var d []audit.Change
+	if err := json.Unmarshal(w.audit[len(w.audit)-1].Diff, &d); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range d {
+		if c.Pointer == managedby.Pointer {
+			return c, true
+		}
+	}
+	return audit.Change{}, false
+}
+
+// TestManagedBy is C-33.FR-11 on Destinations of every type: a creation stores the mark or none and records it in
+// its diff; a value outside the format is refused at /managed_by before the Destination check and before anything is
+// written; an update that omits the mark keeps it and records no change of it, null clears it. A save of the mark
+// alone of a Mattermost Destination and of an outgoing webhook writes it, records only /managed_by and requests no
+// re-render, no rename and no change of the proxy password.
+func TestManagedBy(t *testing.T) {
+	s, store, w, checker, _ := newSaver(t)
+	ctx := t.Context()
+	marks := map[string]func() pgtype.Text{
+		TypeMattermost: func() pgtype.Text { return w.inserted[len(w.inserted)-1].ManagedBy },
+		TypeTelegram:   func() pgtype.Text { return w.tgIns[len(w.tgIns)-1].ManagedBy },
+		TypeBridge:     func() pgtype.Text { return w.brIns[len(w.brIns)-1].ManagedBy },
+		TypeSlack:      func() pgtype.Text { return w.slIns[len(w.slIns)-1].ManagedBy },
+		TypeWebhook:    func() pgtype.Text { return w.hooks[len(w.hooks)-1].ManagedBy },
+	}
+	inputs := map[string]func(name string) Input{
+		TypeMattermost: func(name string) Input { return mattermostInput(name, "ch-alerts") },
+		TypeTelegram:   func(name string) Input { return telegramInput(name, "@muster_alerts") },
+		TypeBridge:     func(name string) Input { return bridgeInput(name, "ch-alerts") },
+		TypeSlack:      func(name string) Input { return slackInput(name, "C0FAKEALERTS") },
+		TypeWebhook:    func(name string) Input { return webhookInput(name, "https://example.org/"+name) },
+	}
+	for _, typ := range []string{TypeMattermost, TypeTelegram, TypeBridge, TypeSlack, TypeWebhook} {
+		in := inputs[typ]("tf-" + typ)
+		in.ManagedBy = managedby.Set("terraform")
+		d, err := s.Create(ctx, saver, in)
+		if err != nil || d.ManagedBy == nil || *d.ManagedBy != "terraform" || marks[typ]().String != "terraform" {
+			t.Fatalf("%s: create with terraform = %+v, %v", typ, d.ManagedBy, err)
+		}
+		if c, ok := lastMark(t, w); !ok || c.After != "terraform" || c.Before != nil {
+			t.Errorf("%s: the Audit log of the creation: %s", typ, w.audit[len(w.audit)-1].Diff)
+		}
+		d, err = s.Create(ctx, saver, inputs[typ]("plain-"+typ))
+		if err != nil || d.ManagedBy != nil || marks[typ]().Valid {
+			t.Errorf("%s: create without = %+v, %v", typ, d.ManagedBy, err)
+		}
+		if _, ok := lastMark(t, w); ok {
+			t.Errorf("%s: a creation without the mark records it", typ)
+		}
+		entries, checks := len(w.audit), len(checker.calls)
+		for _, v := range []string{"Terraform", strings.Repeat("a", 33), ""} {
+			bad := inputs[typ]("bad-" + typ)
+			bad.ManagedBy = managedby.Set(v)
+			assertField(t, typ+" "+v, func() error { _, err := s.Create(ctx, saver, bad); return err },
+				"/managed_by", CodeInvalidFormat)
+		}
+		if len(w.audit) != entries || len(checker.calls) != checks {
+			t.Errorf("%s: a refused mark wrote or checked", typ)
+		}
+	}
+
+	// A Mattermost Destination: an update without the mark keeps it.
+	var renamed []string
+	s.writer.Renamed = func(_ context.Context, _ dbgen.DBTX, publicID, name string) error {
+		renamed = append(renamed, publicID+"="+name)
+		return nil
+	}
+	store.rows[0].ManagedBy = txt("terraform")
+	d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", new(int64(2)), mattermostInput("ops-renamed", "chan"))
+	if err != nil || d.ManagedBy == nil || *d.ManagedBy != "terraform" || w.updated[0].ManagedBy.String != "terraform" {
+		t.Fatalf("update without = %+v, %v", d.ManagedBy, err)
+	}
+	if _, ok := lastMark(t, w); ok {
+		t.Error("an update without the mark recorded a change of it")
+	}
+	store.rows[0].Name, store.rows[0].Version = "ops-renamed", 3
+	store.rows[0].MattermostTeamName, store.rows[0].MattermostChannelName = txt("dev"), txt("alerts")
+	store.rows[0].LimiterLimit, store.rows[0].LimiterPerSeconds = 5, 1
+	store.rows[0].MattermostTeamID = txt("team-dev")
+	w.versions["DSAAAAAAAAAAA1"] = 3
+
+	// A refused value is refused before the check and changes nothing.
+	updated, checks, entries := len(w.updated), len(checker.calls), len(w.audit)
+	bad := mattermostInput("ops-renamed", "chan")
+	bad.ManagedBy = managedby.Set("Terraform")
+	assertField(t, "update with Terraform", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, bad)
+		return err
+	}, "/managed_by", CodeInvalidFormat)
+	if len(w.updated) != updated || len(checker.calls) != checks || len(w.audit) != entries {
+		t.Error("a refused mark wrote or checked")
+	}
+
+	// The mark alone is written and recorded, and requests nothing else.
+	reRenders := len(w.updates)
+	only := mattermostInput("ops-renamed", "chan")
+	only.ManagedBy = managedby.Set("opentofu")
+	d, err = s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, only)
+	if err != nil || len(w.updated) != updated+1 || w.updated[updated].ManagedBy.String != "opentofu" ||
+		d.ManagedBy == nil || *d.ManagedBy != "opentofu" || d.Version != 4 {
+		t.Fatalf("mark only = %+v, %v", d.ManagedBy, err)
+	}
+	var diff []audit.Change
+	_ = json.Unmarshal(w.audit[len(w.audit)-1].Diff, &diff)
+	if len(diff) != 1 || diff[0].Pointer != "/managed_by" || diff[0].Before != "terraform" ||
+		diff[0].After != "opentofu" || len(w.updates) != reRenders || len(renamed) != 1 {
+		t.Errorf("mark only: diff %s, %d re-renders, renamed %v", w.audit[len(w.audit)-1].Diff,
+			len(w.updates)-reRenders, renamed)
+	}
+
+	// Null clears it.
+	store.rows[0].ManagedBy, store.rows[0].Version, w.versions["DSAAAAAAAAAAA1"] = txt("opentofu"), 4, 4
+	cleared := mattermostInput("ops-renamed", "chan")
+	cleared.ManagedBy = managedby.Clear
+	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, cleared); err != nil || d.ManagedBy != nil ||
+		w.updated[len(w.updated)-1].ManagedBy.Valid {
+		t.Errorf("update with null = %+v, %v", d.ManagedBy, err)
+	}
+	if c, ok := lastMark(t, w); !ok || c.Before != "opentofu" || c.After != nil {
+		t.Errorf("the Audit log of clearing: %s", w.audit[len(w.audit)-1].Diff)
+	}
+
+	// An outgoing webhook: a save of the mark alone keeps the proxy password.
+	store.rows[2].ManagedBy = txt("terraform")
+	hook := webhookInput("hook", "https://example.org/v2")
+	hook.Webhook.Proxy = proxyconf.Input{Enabled: true, Address: new("proxy:3128")}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", new(int64(4)), hook); err != nil ||
+		w.hookSets[0].ManagedBy.String != "terraform" {
+		t.Fatalf("webhook update without = %v, %+v", err, w.hookSets)
+	}
+	hook.Webhook.Events.URL = "https://example.org"
+	store.rows[2].LimiterLimit, store.rows[2].LimiterPerSeconds = 5, 1
+	hook.ManagedBy = managedby.Clear
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, hook); err != nil || len(w.hookSets) != 2 ||
+		w.hookSets[1].ManagedBy.Valid || w.hookSets[1].PasswordGiven {
+		t.Fatalf("webhook mark only = %v, %+v", err, w.hookSets)
+	}
+	_ = json.Unmarshal(w.audit[len(w.audit)-1].Diff, &diff)
+	if len(diff) != 1 || diff[0].Pointer != "/managed_by" || diff[0].Before != "terraform" {
+		t.Errorf("webhook mark only: diff %s", w.audit[len(w.audit)-1].Diff)
+	}
+
+	// Telegram, Bridge and Slack Destinations keep the mark on an update without it and clear it with null.
+	store.rows = append(store.rows, bridgeRow(), slackRow())
+	sets := map[string]func() pgtype.Text{
+		"DSAAAAAAAAAAA2": func() pgtype.Text { return w.tgSets[len(w.tgSets)-1].ManagedBy },
+		"DSAAAAAAAAAAA4": func() pgtype.Text { return w.brSets[len(w.brSets)-1].ManagedBy },
+		"DSAAAAAAAAAAA5": func() pgtype.Text { return w.slSets[len(w.slSets)-1].ManagedBy },
+	}
+	for i, tc := range []struct {
+		id string
+		in Input
+	}{{"DSAAAAAAAAAAA2", telegramInput("alerts", "@alerts")}, {"DSAAAAAAAAAAA4", bridgeInput("alerts-br", "ch-alerts")},
+		{"DSAAAAAAAAAAA5", slackInput("alerts-sl", "C0FAKEALERTS")}} {
+		row := &store.rows[[]int{1, 3, 4}[i]]
+		row.ManagedBy, w.versions[tc.id] = txt("terraform"), row.Version
+		if _, err := s.Update(ctx, saver, tc.id, nil, tc.in); err != nil || sets[tc.id]().String != "terraform" {
+			t.Errorf("%s: update without = %v, %+v", tc.id, err, sets[tc.id]())
+		}
+		tc.in.ManagedBy = managedby.Clear
+		if _, err := s.Update(ctx, saver, tc.id, nil, tc.in); err != nil || sets[tc.id]().Valid {
+			t.Errorf("%s: update with null = %v, %+v", tc.id, err, sets[tc.id]())
+		}
+		if c, ok := lastMark(t, w); !ok || c.Before != "terraform" || c.After != nil {
+			t.Errorf("%s: the Audit log of clearing: %s", tc.id, w.audit[len(w.audit)-1].Diff)
+		}
 	}
 }
 

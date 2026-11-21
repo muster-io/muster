@@ -36,9 +36,10 @@ SELECT policy, allowed, denied
 FROM outbound_policies
 WHERE org_id = @org_id;
 
--- GetOutboundPolicySettings reads the outbound address policy as the API shows it, with its version, the ETag.
+-- GetOutboundPolicySettings reads the outbound address policy as the API shows it, with its version, the ETag, and the
+-- mark of the tool that keeps it as code (C-33.FR-11).
 -- name: GetOutboundPolicySettings :one
-SELECT policy, allowed, denied, version
+SELECT policy, allowed, denied, version, managed_by
 FROM outbound_policies
 WHERE org_id = @org_id;
 
@@ -49,10 +50,11 @@ FROM outbound_policies
 WHERE org_id = @org_id
 FOR UPDATE;
 
--- UpdateOutboundPolicy replaces the outbound address policy and its lists and moves its version.
+-- UpdateOutboundPolicy replaces the outbound address policy, its lists and its mark managed_by, and moves its version.
 -- name: UpdateOutboundPolicy :execrows
 UPDATE outbound_policies
-SET policy = @policy, allowed = @allowed, denied = @denied, version = version + 1, updated_at = @updated_at
+SET policy = @policy, allowed = @allowed, denied = @denied, managed_by = sqlc.narg('managed_by')::text,
+    version = version + 1, updated_at = @updated_at
 WHERE org_id = @org_id;
 
 -- ListSeverityValues counts the Alerts last seen at @since or later by their value of the label @label, the most
@@ -75,7 +77,7 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
        outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons, team_label,
-       notification_rules
+       notification_rules, managed_by
 FROM organizations
 WHERE id = @org_id;
 
@@ -126,6 +128,7 @@ SET name                                         = @name,
     buttons                                      = coalesce(sqlc.narg('buttons')::jsonb, buttons),
     team_label                                   = coalesce(sqlc.narg('team_label')::text, team_label),
     notification_rules = coalesce(sqlc.narg('notification_rules')::jsonb, notification_rules),
+    managed_by = sqlc.narg('managed_by')::text,
     teams_version = teams_version + CASE WHEN team_label <> coalesce(sqlc.narg('team_label')::text, team_label)
                                          THEN 1 ELSE 0 END,
     outgoing_heartbeat_last_attempt_at = CASE WHEN @url_changed::boolean THEN NULL

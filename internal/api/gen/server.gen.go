@@ -5383,7 +5383,10 @@ type BridgeConnection struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as read. The password is a Secret.
 	Proxy ProxyConfig `json:"proxy"`
@@ -5414,9 +5417,12 @@ type BridgeConnectionBase struct {
 	EventDelivery BridgeEventDelivery `json:"event_delivery"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
-	Limiter Limiter                  `json:"limiter"`
-	Name    string                   `json:"name"`
-	Type    BridgeConnectionBaseType `json:"type"`
+	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
+	Type      BridgeConnectionBaseType  `json:"type"`
 }
 
 // BridgeConnectionBaseType defines model for BridgeConnectionBase.Type.
@@ -5457,7 +5463,10 @@ type BridgeConnectionInput struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy ProxyConfigInput `json:"proxy"`
@@ -5494,6 +5503,9 @@ type BridgeDestination struct {
 
 	// Limiter `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
@@ -5535,6 +5547,9 @@ type BridgeDestinationInput struct {
 
 	// Limiter `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — a Bridge takes the words of everyone its bridge declares in `everyone_mentions`, groups and Teams only when it declares `group_mentions`, and any person — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
 	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
@@ -7245,7 +7260,10 @@ type MattermostConnection struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as read. The password is a Secret.
 	Proxy     ProxyConfig              `json:"proxy"`
@@ -7259,7 +7277,10 @@ type MattermostConnectionType string
 // MattermostConnectionBase defines model for MattermostConnectionBase.
 type MattermostConnectionBase struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
-	Limiter   Limiter                      `json:"limiter"`
+	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string]    `json:"managed_by,omitempty"`
 	Name      string                       `json:"name"`
 	ServerUrl string                       `json:"server_url"`
 	Type      MattermostConnectionBaseType `json:"type"`
@@ -7294,7 +7315,10 @@ type MattermostConnectionInput struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy     ProxyConfigInput              `json:"proxy"`
@@ -7325,6 +7349,9 @@ type MattermostDestination struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
@@ -7366,6 +7393,9 @@ type MattermostDestinationInput struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — Mattermost has no `everyone` — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
 	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
@@ -7934,6 +7964,9 @@ type OidcSettings struct {
 	GroupsClaim   string             `json:"groups_claim"`
 	IssuerUrl     string             `json:"issuer_url"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The OIDC settings exist once and read null until a write sets it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// Proxy Per-client proxy as read. The password is a Secret.
 	Proxy ProxyConfig `json:"proxy"`
 
@@ -7966,6 +7999,9 @@ type OidcSettingsBase struct {
 	GroupsClaim   string             `json:"groups_claim"`
 	IssuerUrl     string             `json:"issuer_url"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The OIDC settings exist once and read null until a write sets it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// Scopes Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.
 	Scopes             *[]string `json:"scopes,omitempty"`
 	SkipTotpWithIdpMfa bool      `json:"skip_totp_with_idp_mfa"`
@@ -7995,6 +8031,9 @@ type OidcSettingsInput struct {
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
 	GroupsClaim   string             `json:"groups_claim"`
 	IssuerUrl     string             `json:"issuer_url"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The OIDC settings exist once and read null until a write sets it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy ProxyConfigInput `json:"proxy"`
@@ -8101,7 +8140,10 @@ type Organization struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id             PublicId `json:"id"`
 	InstanceLabels []string `json:"instance_labels"`
-	Name           string   `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Organization's settings are one object with one mark, null until a write sets it, whichever page of the web UI edits them.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
 	NotificationRules NotificationRuleSet `json:"notification_rules"`
@@ -8160,7 +8202,10 @@ type OrganizationBase struct {
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
 	InstanceLabels   []string `json:"instance_labels"`
-	Name             string   `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Organization's settings are one object with one mark, null until a write sets it, whichever page of the web UI edits them.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
 	NotificationRules *NotificationRuleSet `json:"notification_rules,omitempty"`
@@ -8217,7 +8262,10 @@ type OrganizationInput struct {
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
 	InstanceLabels   []string `json:"instance_labels"`
-	Name             string   `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Organization's settings are one object with one mark, null until a write sets it, whichever page of the web UI edits them.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
 	NotificationRules *NotificationRuleSet `json:"notification_rules,omitempty"`
@@ -8276,8 +8324,11 @@ type OutboundPolicy struct {
 	Denied []string `json:"denied"`
 
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
-	Etag   *string              `json:"etag,omitempty"`
-	Policy OutboundPolicyPolicy `json:"policy"`
+	Etag *string `json:"etag,omitempty"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The policy exists once and reads null until a write sets it; a write that changes only the mark leaves the policy that every replica applies as it is.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Policy    OutboundPolicyPolicy      `json:"policy"`
 }
 
 // OutboundPolicyPolicy defines model for OutboundPolicy.Policy.
@@ -9573,7 +9624,10 @@ type SlackConnection struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as read. The password is a Secret.
 	Proxy ProxyConfig `json:"proxy"`
@@ -9604,9 +9658,12 @@ type SlackConnectionBase struct {
 	EventMode SlackEventMode `json:"event_mode"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
-	Limiter Limiter                 `json:"limiter"`
-	Name    string                  `json:"name"`
-	Type    SlackConnectionBaseType `json:"type"`
+	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
+	Type      SlackConnectionBaseType   `json:"type"`
 }
 
 // SlackConnectionBaseType defines model for SlackConnectionBase.Type.
@@ -9647,7 +9704,10 @@ type SlackConnectionInput struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy ProxyConfigInput `json:"proxy"`
@@ -9684,6 +9744,9 @@ type SlackDestination struct {
 
 	// Limiter `destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
@@ -9725,6 +9788,9 @@ type SlackDestinationInput struct {
 
 	// Limiter `destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — Slack has no `all` and no `everyone`, and takes groups and Teams only while the last check of its Connection found `usergroups:read`, a group with its `group_id` — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
 	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
@@ -10221,7 +10287,10 @@ type TelegramConnection struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as read. The password is a Secret.
 	Proxy      ProxyConfig                  `json:"proxy"`
@@ -10242,7 +10311,10 @@ type TelegramConnectionBase struct {
 	BotApiBaseUrl string `json:"bot_api_base_url"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
-	Limiter    Limiter                    `json:"limiter"`
+	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy  nullable.Nullable[string]  `json:"managed_by,omitempty"`
 	Name       string                     `json:"name"`
 	Type       TelegramConnectionBaseType `json:"type"`
 	UpdateMode TelegramUpdateMode         `json:"update_mode"`
@@ -10281,7 +10353,10 @@ type TelegramConnectionInput struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
-	Name    string  `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy      ProxyConfigInput            `json:"proxy"`
@@ -10321,6 +10396,9 @@ type TelegramDestination struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
@@ -10362,6 +10440,9 @@ type TelegramDestinationInput struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — Telegram takes only people and the On-call — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
 	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
@@ -11080,6 +11161,9 @@ type WebhookDestination struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// MentionEntries The Mention entries in order, each with what it mentions now.
 	MentionEntries []MentionEntry `json:"mention_entries"`
 
@@ -11127,6 +11211,9 @@ type WebhookDestinationBase struct {
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — an outgoing webhook takes every target, as data — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
 	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`
 
@@ -11157,6 +11244,9 @@ type WebhookDestinationInput struct {
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
 	Limiter Limiter `json:"limiter"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// MentionEntries The Mention entries (C-28.FR-1, FR-2), in order, each a target and the Loud events it applies to; omitted on create is none, which mentions nobody, and omitted on an update keeps them. A target the Destination's Connection cannot mention is refused with `422` `mention_unsupported` at `/mention_entries/{i}/target` — an outgoing webhook takes every target, as data — and an entry whose target equals a stored one is kept whatever the Connection can mention now. An unknown or deleted User or Team is refused with `unknown_id` at its `user_id` or `team_id` unless the entry's target equals a stored one, and a target listed twice with `duplicate` at `/mention_entries/{i}/target`.
 	MentionEntries *[]MentionEntryInput `json:"mention_entries,omitempty"`

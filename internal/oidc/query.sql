@@ -26,14 +26,14 @@ INSERT INTO oidc_settings (
     org_id, enabled, display_name, issuer_url, client_id, client_secret_ciphertext, client_secret_key_id,
     client_secret_updated_at, client_secret_expires_on, scopes, groups_claim, group_mappings, role_mappings,
     unmatched_role, sync_role, skip_totp_with_idp_mfa, proxy, proxy_password_ciphertext, proxy_password_key_id,
-    proxy_password_updated_at, version, updated_at
+    proxy_password_updated_at, managed_by, version, updated_at
 )
 VALUES (
     @org_id, @enabled, sqlc.narg('display_name'), @issuer_url, @client_id, sqlc.narg('client_secret_ciphertext'),
     sqlc.narg('client_secret_key_id'), sqlc.narg('client_secret_updated_at'), sqlc.narg('client_secret_expires_on'),
     @scopes, @groups_claim, @group_mappings, @role_mappings, @unmatched_role, @sync_role, @skip_totp_with_idp_mfa,
     @proxy, sqlc.narg('proxy_password_ciphertext'), sqlc.narg('proxy_password_key_id'),
-    sqlc.narg('proxy_password_updated_at'), 1, @updated_at
+    sqlc.narg('proxy_password_updated_at'), sqlc.narg('managed_by')::text, 1, @updated_at
 )
 ON CONFLICT (org_id) DO NOTHING;
 
@@ -51,7 +51,7 @@ SET enabled = @enabled, display_name = sqlc.narg('display_name'), issuer_url = @
     sync_role = @sync_role, skip_totp_with_idp_mfa = @skip_totp_with_idp_mfa, proxy = @proxy,
     proxy_password_ciphertext = sqlc.narg('proxy_password_ciphertext'),
     proxy_password_key_id = sqlc.narg('proxy_password_key_id'),
-    proxy_password_updated_at = sqlc.narg('proxy_password_updated_at'),
+    proxy_password_updated_at = sqlc.narg('proxy_password_updated_at'), managed_by = sqlc.narg('managed_by')::text,
     groups_claim_missing_since = CASE
         WHEN groups_claim = @groups_claim AND issuer_url = @issuer_url AND client_id = @client_id
             AND scopes = @scopes THEN groups_claim_missing_since

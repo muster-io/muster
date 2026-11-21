@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
@@ -213,6 +214,8 @@ type Input struct {
 	// OwningTeamID is the public_id of the Team that owns the Destination (C-25.FR-2): nil keeps the stored one on an
 	// update and is none on a creation, and an empty string clears it.
 	OwningTeamID *string
+	// ManagedBy is the mark of the tool that keeps the Destination as code (C-33.FR-11).
+	ManagedBy managedby.Input
 	// entries are the Mention entries the save writes, validated, which validate sets.
 	entries []mentions.EntryInput
 }
@@ -328,6 +331,12 @@ func planOwner(in Input, d *Destination) {
 	default:
 		d.OwningTeam = &TeamRef{PublicID: *in.OwningTeamID}
 	}
+}
+
+// planMark sets on d the mark managed_by that in asks for (C-33.FR-11): omitted keeps d's, none on a creation, and null
+// clears it.
+func planMark(in Input, d *Destination) {
+	d.ManagedBy = in.ManagedBy.Apply(d.ManagedBy)
 }
 
 // lockOwner reads the owning Team that in gives d, in share mode, in the transaction of the save and before the
@@ -514,11 +523,14 @@ type view struct {
 	Limiter        Limiter               `json:"limiter"`
 	// OwningTeam is the public_id of the Team that owns the Destination, null for none.
 	OwningTeam *string `json:"owning_team_id"`
+	// ManagedBy is the mark of the tool that keeps the Destination as code, null for none (C-33.FR-11).
+	ManagedBy *string `json:"managed_by"`
 }
 
 func viewOf(d Destination) (view, error) {
 	v := view{Name: d.Name, Connection: d.Connection, TeamID: d.MattermostTeamID, ChannelID: d.MattermostChannelID,
-		Mode: d.WebhookMode, Limiter: Limiter{Limit: d.LimiterLimit, PerSeconds: d.LimiterPerSeconds}}
+		Mode: d.WebhookMode, Limiter: Limiter{Limit: d.LimiterLimit, PerSeconds: d.LimiterPerSeconds},
+		ManagedBy: d.ManagedBy}
 	if d.OwningTeam != nil {
 		v.OwningTeam = &d.OwningTeam.PublicID
 	}
@@ -660,6 +672,9 @@ func proxyOf(p Proxy) proxyconf.Config {
 // validate checks the common fields of in, the fields of its type, its Mention entries or settings and the button set
 // of a messenger Destination, before the Destination check; stored is nil on a creation.
 func (s *Service) validate(ctx context.Context, in *Input, stored *Destination) error {
+	if in.ManagedBy.Check() != nil {
+		return &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
+	}
 	if err := s.validateFields(ctx, in, stored); err != nil {
 		return err
 	}
@@ -844,6 +859,7 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
 	planOwner(in, &d)
+	planMark(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -855,7 +871,8 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 		p := dbgen.InsertWebhookDestinationParams{OrgID: s.orgID, PublicID: d.PublicID, Name: d.Name,
 			WebhookMode: text(d.WebhookMode), WebhookEventsConfig: d.EventsConfig,
 			WebhookTemplateConfig: d.TemplateConfig, Proxy: sec.proxy.JSON(), SigningSecretCiphertext: signing.Ciphertext, SigningSecretKeyID: nonEmpty(signing.KeyID), Now: now,
-			Mentions: nobodyJSON(), LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds}
+			Mentions: nobodyJSON(), LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
+			ManagedBy: managedby.Text(d.ManagedBy)}
 		if sec.password.Set() {
 			p.ProxyPasswordCiphertext, p.ProxyPasswordKeyID = sec.password.Ciphertext, nonEmpty(sec.password.KeyID)
 			p.ProxyPasswordUpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
@@ -903,6 +920,7 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 		return Destination{}, err
 	}
 	planOwner(in, &d)
+	planMark(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -929,7 +947,7 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 			WebhookEventsConfig: d.EventsConfig, WebhookTemplateConfig: d.TemplateConfig, Proxy: sec.proxy.JSON(),
 			PasswordGiven: sec.given, Now: now,
 			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, OrgID: s.orgID,
-			ID: before.ID}
+			ID: before.ID, ManagedBy: managedby.Text(d.ManagedBy)}
 		if sec.password.Set() {
 			p.ProxyPasswordCiphertext, p.ProxyPasswordKeyID = sec.password.Ciphertext, nonEmpty(sec.password.KeyID)
 		}
@@ -1102,6 +1120,7 @@ func (s *Service) create(ctx context.Context, r Requester, in Input) (Destinatio
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
 	planOwner(in, &d)
+	planMark(in, &d)
 	withButtons(&d, in)
 	after, err := viewOf(d)
 	if err != nil {
@@ -1119,7 +1138,8 @@ func (s *Service) create(ctx context.Context, r Requester, in Input) (Destinatio
 			TeamID: text(d.MattermostTeamID), ChannelID: text(d.MattermostChannelID),
 			TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName), Mentions: nobodyJSON(),
 			Buttons:      d.Buttons.JSON(),
-			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
+			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
+			ManagedBy: managedby.Text(d.ManagedBy), Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
@@ -1196,6 +1216,7 @@ func (s *Service) update(ctx context.Context, r Requester, publicID string, vers
 		return Destination{}, err
 	}
 	planOwner(in, &d)
+	planMark(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1227,7 +1248,8 @@ func (s *Service) update(ctx context.Context, r Requester, publicID string, vers
 				TeamID: text(d.MattermostTeamID), ChannelID: text(d.MattermostChannelID),
 				TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName),
 				Buttons:      d.Buttons.JSON(),
-				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now}); err != nil {
+				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
+				ManagedBy: managedby.Text(d.ManagedBy), Now: now}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
@@ -1606,6 +1628,7 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 	withButtons(&d, in)
 	telegramFound(&d, checked.Check)
 	planOwner(in, &d)
+	planMark(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1624,7 +1647,7 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 			DiscussionChatID: pgtype.Int8{Int64: c.GroupID, Valid: true}, ChannelTitle: text(d.TelegramChannelTitle),
 			DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: nobodyJSON(),
 			Buttons: d.Buttons.JSON(), LimiterLimit: d.LimiterLimit,
-			LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
+			LimiterPerSeconds: d.LimiterPerSeconds, ManagedBy: managedby.Text(d.ManagedBy), Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
@@ -1667,6 +1690,7 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 		return Destination{}, err
 	}
 	planOwner(in, &d)
+	planMark(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1701,7 +1725,7 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 				DiscussionChatID: pgtype.Int8{Int64: c.GroupID, Valid: true}, ChannelTitle: text(d.TelegramChannelTitle),
 				DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Buttons: d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
-				Now: s.writer.Business.Now().UTC()}); err != nil {
+				ManagedBy: managedby.Text(d.ManagedBy), Now: s.writer.Business.Now().UTC()}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
@@ -1840,6 +1864,7 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	planOwner(in, &d)
+	planMark(in, &d)
 	withButtons(&d, in)
 	after, err := viewOf(d)
 	if err != nil {
@@ -1856,7 +1881,8 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: nobodyJSON(),
 			Buttons:      d.Buttons.JSON(),
-			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
+			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
+			ManagedBy: managedby.Text(d.ManagedBy), Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
@@ -1894,6 +1920,7 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 		return Destination{}, err
 	}
 	planOwner(in, &d)
+	planMark(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1922,7 +1949,7 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 				ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName),
 				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
-				Now: s.writer.Business.Now().UTC()}); err != nil {
+				ManagedBy: managedby.Text(d.ManagedBy), Now: s.writer.Business.Now().UTC()}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
@@ -2040,6 +2067,7 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	planOwner(in, &d)
+	planMark(in, &d)
 	withButtons(&d, in)
 	after, err := viewOf(d)
 	if err != nil {
@@ -2056,7 +2084,8 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: nobodyJSON(),
 			Buttons:      d.Buttons.JSON(),
-			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
+			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
+			ManagedBy: managedby.Text(d.ManagedBy), Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
@@ -2094,6 +2123,7 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 		return Destination{}, err
 	}
 	planOwner(in, &d)
+	planMark(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -2122,7 +2152,7 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 				ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName),
 				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
-				Now: s.writer.Business.Now().UTC()}); err != nil {
+				ManagedBy: managedby.Text(d.ManagedBy), Now: s.writer.Business.Now().UTC()}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++

@@ -29,6 +29,7 @@ import (
 	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/proxyconf"
@@ -125,6 +126,9 @@ type Organization struct {
 	NotificationRules     notificationrules.Set
 	NotificationRuleViews notificationrules.SetView
 	Version               int64
+	// ManagedBy is the tool that keeps the Organization's settings as code, nil for none (C-33.FR-11): one mark for
+	// the one object, whichever page of the web UI edits it.
+	ManagedBy *string
 }
 
 // SecretInput is a Secret field of an update: omitted keeps the stored value, null clears it, a value replaces it.
@@ -161,6 +165,8 @@ type Input struct {
 	HeartbeatProxy        ProxyInput
 	// NotificationRules are organization.notification_rules; nil keeps the stored ones.
 	NotificationRules *notificationrules.SetInput
+	// ManagedBy is the mark of the tool that keeps the settings as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // ButtonSetInput is the Organization's button set as an update writes it: every button, or the items, which Items
@@ -332,7 +338,8 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 			URL:           SecretState{Set: row.OutgoingHeartbeatUrlSet, UpdatedAt: timePtr(row.OutgoingHeartbeatUrlUpdatedAt)},
 			ProxyPassword: SecretState{Set: row.OutgoingHeartbeatProxyPasswordSet, UpdatedAt: timePtr(row.OutgoingHeartbeatProxyPasswordUpdatedAt)},
 		},
-		Version: row.Version,
+		Version:   row.Version,
+		ManagedBy: managedby.Of(row.ManagedBy),
 	}
 	if o.InstanceLabels == nil {
 		o.InstanceLabels = []string{}
@@ -374,7 +381,8 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 // of the open Alert Groups in the same way, with a row team_evaluation without a Team (C-25.FR-13). An update that
 // changes nothing writes nothing. A new or cleared URL clears the result
 // of the last outgoing heartbeat and also sends a system-status hint. Severity levels and Instance labels apply from
-// the next evaluation: their readers read them in their own transactions (C-20.FR-2).
+// the next evaluation: their readers read them in their own transactions (C-20.FR-2). The mark managed_by (C-33.FR-11)
+// is recorded like any field and requests nothing: a save that changes only the mark re-renders nothing.
 func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
 	in Input) (Organization, error) {
 	var out Organization
@@ -478,6 +486,7 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			Buttons:                          set,
 			TeamLabel:                        pgtype.Text{String: after.TeamLabel, Valid: true},
 			NotificationRules:                after.NotificationRules.JSON(),
+			ManagedBy:                        managedby.Text(after.ManagedBy),
 			UrlChanged:                       urlChanged,
 			Now:                              now,
 		}); err != nil {
@@ -623,6 +632,7 @@ func applyInput(before Organization, in Input) (Organization, error) {
 			Detail: fmt.Sprintf("The URL is not an absolute http or https URL with a host and without a fragment, "+
 				"of at most %d characters.", maxHeartbeatURL)}
 	}
+	after.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 	return after, nil
 }
 
@@ -710,6 +720,7 @@ type view struct {
 	OutgoingHeartbeat     heartbeatView     `json:"outgoing_heartbeat"`
 	// NotificationRules are diffed rule by rule: /notification_rules/normal and /notification_rules/important.
 	NotificationRules notificationrules.Set `json:"notification_rules"`
+	ManagedBy         *string               `json:"managed_by"`
 }
 
 // retentionView is what the diff shows of the retention periods.
@@ -739,6 +750,7 @@ func viewOf(o Organization) view {
 		TOTPRequired: string(o.TOTPRequired), OIDCTokenGraceSeconds: int64(o.OIDCTokenGrace / time.Second),
 		OutgoingHeartbeat: heartbeatView{Proxy: o.OutgoingHeartbeat.Proxy},
 		NotificationRules: o.NotificationRules,
+		ManagedBy:         o.ManagedBy,
 	}
 }
 
@@ -864,6 +876,9 @@ func validate(in Input) *FieldError {
 	if in.OIDCTokenGraceSeconds < 1 || in.OIDCTokenGraceSeconds > MaxOIDCTokenGraceSeconds {
 		return &FieldError{Pointer: "/oidc_token_grace_seconds", Code: CodeOutOfRange,
 			Detail: fmt.Sprintf("The grace period is not from 1 to %d seconds.", MaxOIDCTokenGraceSeconds)}
+	}
+	if in.ManagedBy.Check() != nil {
+		return &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
 	}
 	return nil
 }

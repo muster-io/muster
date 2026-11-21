@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
@@ -298,7 +299,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	s.row.OidcTokenGraceSeconds = arg.OidcTokenGraceSeconds
 	s.row.TotpRequired, s.row.Version = arg.TotpRequired, s.row.Version+1
 	s.row.OutgoingHeartbeatProxy, s.row.Buttons, s.row.TeamLabel = arg.Proxy, arg.Buttons, arg.TeamLabel.String
-	s.row.NotificationRules = arg.NotificationRules
+	s.row.NotificationRules, s.row.ManagedBy = arg.NotificationRules, arg.ManagedBy
 	s.row.OutgoingHeartbeatUrlSet, s.row.OutgoingHeartbeatUrlUpdatedAt = arg.UrlCiphertext != nil, arg.UrlUpdatedAt
 	s.row.OutgoingHeartbeatProxyPasswordSet = arg.ProxyPasswordCiphertext != nil
 	s.row.OutgoingHeartbeatProxyPasswordUpdatedAt = arg.ProxyPasswordUpdatedAt
@@ -353,7 +354,7 @@ func (s *fakeSettings) UpdateOutboundPolicy(_ context.Context, arg dbgen.UpdateO
 	}
 	s.policyUps = append(s.policyUps, arg)
 	s.policy = dbgen.GetOutboundPolicySettingsRow{Policy: arg.Policy, Allowed: arg.Allowed, Denied: arg.Denied,
-		Version: s.policy.Version + 1}
+		Version: s.policy.Version + 1, ManagedBy: arg.ManagedBy}
 	return 1, nil
 }
 
@@ -1284,6 +1285,150 @@ func TestMessageSettingsRows(t *testing.T) {
 		}
 	}
 	s.fail = map[string]error{}
+}
+
+// markDiff is the diff of the Audit log entry a.
+func markDiff(t *testing.T, a auditdb.InsertAuditEntryParams) []audit.Change {
+	t.Helper()
+	var d []audit.Change
+	if err := json.Unmarshal(a.Diff, &d); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// TestManagedBy is C-33.FR-11 on the Organization's settings and the Outbound address policy, which exist once: each
+// reads null until a write sets the mark; a write with it sets it, one without keeps it, null clears it, and a value
+// outside the format is refused at /managed_by and writes nothing; the Audit log diff carries each change. A save of
+// the mark alone of the settings requests no re-render and one of the policy sends no NOTIFY, runs no hook and logs no
+// outbound_policy_updated; a change of the time zone of a marked Organization still re-renders the open Root messages.
+func TestManagedBy(t *testing.T) {
+	s := newFakeSettings(t)
+	var log bytes.Buffer
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0)).WithLog(logging.New(&log, logging.LevelInfo))
+	hooks := 0
+	svc.WithOutboundPolicyChanged(func() { hooks++ })
+	ctx := t.Context()
+	o, err := svc.Get(ctx)
+	if err != nil || o.ManagedBy != nil {
+		t.Fatalf("the settings start marked: %v, %v", o.ManagedBy, err)
+	}
+	for _, v := range []string{"Terraform", strings.Repeat("a", 33), ""} {
+		in := inputOf(o)
+		in.Name, in.ManagedBy = "Renamed", managedby.Set(v)
+		_, err := svc.Update(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, in)
+		if fe, ok := errors.AsType[*FieldError](err); !ok || fe.Pointer != "/managed_by" || fe.Code != CodeInvalidFormat {
+			t.Errorf("settings with %q = %v", v, err)
+		}
+	}
+	if len(s.updates) != 0 || len(s.audit) != 0 {
+		t.Fatal("a refused mark wrote the settings")
+	}
+	in := inputOf(o)
+	in.ManagedBy = managedby.Set("terraform")
+	got, err := svc.Update(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil || got.ManagedBy == nil || *got.ManagedBy != "terraform" || got.Version != 2 ||
+		s.updates[0].ManagedBy.String != "terraform" || len(s.buttonUpdates) != 0 || len(s.woken) != 0 {
+		t.Fatalf("mark the settings = %v, %v, %d re-renders", got.ManagedBy, err, len(s.buttonUpdates))
+	}
+	if d := markDiff(t, s.audit[0]); len(d) != 1 || d[0].Pointer != "/managed_by" || d[0].After != "terraform" ||
+		d[0].Before != nil || !strings.Contains(log.String(), `"fields":"/managed_by"`) {
+		t.Errorf("the Audit log of the mark: %s, log %s", s.audit[0].Diff, log.String())
+	}
+	if again, _ := svc.Get(ctx); again.ManagedBy == nil || *again.ManagedBy != "terraform" {
+		t.Errorf("read after the mark = %v", again.ManagedBy)
+	}
+	in = inputOf(got)
+	in.TimeZone = "Europe/Berlin"
+	got, err = svc.Update(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil || got.ManagedBy == nil || *got.ManagedBy != "terraform" || len(s.buttonUpdates) != 1 ||
+		s.buttonUpdates[0].Kind != KindMessageSettings {
+		t.Errorf("a new time zone of a marked Organization = %v, %v, rows %+v", got.ManagedBy, err, s.buttonUpdates)
+	}
+	if d := markDiff(t, s.audit[1]); len(d) != 1 || d[0].Pointer != "/time_zone" {
+		t.Errorf("an update without the mark recorded %s", s.audit[1].Diff)
+	}
+	in = inputOf(got)
+	in.ManagedBy = managedby.Clear
+	if got, err = svc.Update(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil || got.ManagedBy != nil {
+		t.Errorf("clear the settings = %v, %v", got.ManagedBy, err)
+	}
+	if d := markDiff(t, s.audit[2]); len(d) != 1 || d[0].Before != "terraform" || d[0].After != nil {
+		t.Errorf("the Audit log of clearing: %s", s.audit[2].Diff)
+	}
+	// The mark and a new time zone in one save, as a tool's first apply sends them (C-33.FR-14): the re-render is
+	// requested as without the mark.
+	in = inputOf(got)
+	in.TimeZone, in.ManagedBy = "Asia/Tokyo", managedby.Set("opentofu")
+	if got, err = svc.Update(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		got.ManagedBy == nil || *got.ManagedBy != "opentofu" || len(s.buttonUpdates) != 2 ||
+		s.buttonUpdates[1].Kind != KindMessageSettings {
+		t.Errorf("the mark and a new time zone = %v, %v, rows %+v", got.ManagedBy, err, s.buttonUpdates)
+	}
+	if d := markDiff(t, s.audit[3]); len(d) != 2 || d[0].Pointer != "/time_zone" || d[1].Pointer != "/managed_by" {
+		t.Errorf("the Audit log of the mark and a new time zone: %s", s.audit[3].Diff)
+	}
+
+	// The Outbound address policy.
+	p, err := svc.OutboundPolicy(ctx)
+	if err != nil || p.ManagedBy != nil {
+		t.Fatalf("the policy starts marked: %v, %v", p.ManagedBy, err)
+	}
+	policy := OutboundPolicyInput{Mode: p.Mode, Allowed: p.Allowed, Denied: p.Denied}
+	bad := policy
+	bad.ManagedBy = managedby.Set("Terraform")
+	if _, err := svc.UpdateOutboundPolicy(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, bad); !errors.As(err,
+		new(*FieldError)) || len(s.policyUps) != 0 {
+		t.Errorf("policy with Terraform = %v", err)
+	}
+	log.Reset()
+	entries, hints := len(s.audit), len(s.hints)
+	mark := policy
+	mark.ManagedBy = managedby.Set("terraform")
+	p, err = svc.UpdateOutboundPolicy(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, mark)
+	if err != nil || p.ManagedBy == nil || *p.ManagedBy != "terraform" || p.Version != 2 || len(s.policyUps) != 1 {
+		t.Fatalf("mark the policy = %v, %v", p.ManagedBy, err)
+	}
+	if len(s.notified) != 0 || hooks != 0 || strings.Contains(log.String(), "outbound_policy_updated") ||
+		len(s.hints) != hints+1 || len(s.audit) != entries+1 {
+		t.Errorf("a mark alone: notified %v, hooks %d, log %s", s.notified, hooks, log.String())
+	}
+	if d := markDiff(t, s.audit[entries]); len(d) != 1 || d[0].Pointer != "/managed_by" || d[0].After != "terraform" ||
+		s.audit[entries].Action != ActionOutboundPolicyUpdated {
+		t.Errorf("the Audit log of the policy's mark: %s", s.audit[entries].Diff)
+	}
+	strict := policy
+	strict.Mode = OutboundStrict
+	if p, err := svc.UpdateOutboundPolicy(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, strict); err != nil ||
+		p.ManagedBy == nil || *p.ManagedBy != "terraform" || len(s.notified) != 1 || hooks != 1 {
+		t.Errorf("a change of the marked policy = %v, %v, notified %v", p.ManagedBy, err, s.notified)
+	}
+	strict.ManagedBy = managedby.Clear
+	if p, err := svc.UpdateOutboundPolicy(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, strict); err != nil ||
+		p.ManagedBy != nil {
+		t.Errorf("clear the policy = %v, %v", p.ManagedBy, err)
+	}
+	if d := markDiff(t, s.audit[len(s.audit)-1]); len(d) != 1 || d[0].Before != "terraform" || d[0].After != nil {
+		t.Errorf("the Audit log of clearing the policy: %s", s.audit[len(s.audit)-1].Diff)
+	}
+	// The mark and a new policy in one save, as a tool's first apply sends them (C-33.FR-14): every replica applies the
+	// new policy as without the mark.
+	log.Reset()
+	notified, ran := len(s.notified), hooks
+	mixed := policy
+	mixed.ManagedBy = managedby.Set("opentofu")
+	if p, err := svc.UpdateOutboundPolicy(ctx, actor, audit.TransportAPI, netip.Addr{}, nil, mixed); err != nil ||
+		p.Mode != OutboundStandard || p.ManagedBy == nil || *p.ManagedBy != "opentofu" {
+		t.Fatalf("the mark and a new policy = %+v, %v", p, err)
+	}
+	if len(s.notified) != notified+1 || hooks != ran+1 || !strings.Contains(log.String(), `"event":"outbound_policy_updated"`) {
+		t.Errorf("the mark and a new policy: notified %v, hooks %d, log %s", s.notified, hooks-ran, log.String())
+	}
+	if d := markDiff(t, s.audit[len(s.audit)-1]); len(d) != 2 || d[0].Pointer != "/policy" ||
+		d[0].Before != string(OutboundStrict) || d[1].Pointer != "/managed_by" || d[1].After != "opentofu" {
+		t.Errorf("the Audit log of the mark and a new policy: %s", s.audit[len(s.audit)-1].Diff)
+	}
 }
 
 // ruleInput is an action of a request body.

@@ -51,7 +51,7 @@ type operation struct {
 const xUnprocessable = "x-unprocessable"
 
 // unprocessableFields are the pointers of the top-level properties of op's JSON request body marked x-unprocessable,
-// through allOf.
+// through allOf and the variants of oneOf.
 func unprocessableFields(op *openapi3.Operation) map[string]bool {
 	if op.RequestBody == nil || op.RequestBody.Value == nil {
 		return nil
@@ -69,6 +69,14 @@ func unprocessableFields(op *openapi3.Operation) map[string]bool {
 			}
 		}
 		for _, sub := range s.AllOf {
+			if sub.Value != nil {
+				walk(sub.Value)
+			}
+		}
+		// The variants of a body of several types, such as a Connection's, each validated by its type. Their sets are
+		// merged by pointer, which holds only while the variants that share a property agree on whether it is
+		// x-unprocessable: TestUnprocessableVariantsAgree checks that for every operation.
+		for _, sub := range s.OneOf {
 			if sub.Value != nil {
 				walk(sub.Value)
 			}
@@ -124,14 +132,30 @@ func formatFailures(err error, fields map[string]bool, pointers *[]string) bool 
 		if multi, ok := errors.AsType[openapi3.MultiError](e.Origin); ok {
 			return formatFailures(multi, fields, pointers)
 		}
-		ptr := pointerOf(e.JSONPointer())
-		if !formatKeywords[e.SchemaField] || !fields[ptr] {
+		ptr, format := pointerOf(e.JSONPointer()), formatKeywords[e.SchemaField]
+		if e.SchemaField == "" {
+			ptr, format = formatMessage(e.Reason)
+		}
+		if !format || !fields[ptr] {
 			return false
 		}
 		*pointers = append(*pointers, ptr)
 		return true
 	}
 	return false
+}
+
+// formatMessage reads an error of the JSON Schema 2020-12 validator that kin-openapi uses for OpenAPI 3.1 when it can
+// compile the schema, such as a body schema without references (pointerMessage, see bodyItems): the pointer, and
+// whether the message is the failure of a format keyword — minLength, maxLength, or a pattern, whose message quotes
+// the value and the pattern, `'<value>' does not match pattern '<pattern>'`.
+func formatMessage(reason string) (string, bool) {
+	ptr, msg, ok := pointerMessage(reason)
+	if !ok {
+		return "", false
+	}
+	return ptr, strings.HasPrefix(msg, "minLength: ") || strings.HasPrefix(msg, "maxLength: ") ||
+		strings.Contains(msg, "' does not match pattern '")
 }
 
 // permissionCheckDispatcher is the value of x-permission-check that leaves the Permission to the dispatcher.

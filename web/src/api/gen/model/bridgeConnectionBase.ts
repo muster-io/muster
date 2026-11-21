@@ -14,4 +14,11 @@ export interface BridgeConnectionBase {
   base_url: string;
   event_delivery: BridgeEventDelivery;
   limiter: Limiter;
+  /**
+     * The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+     * @maxLength 32
+     * @nullable
+     * @pattern ^[a-z0-9][a-z0-9._-]{0,31}$
+     */
+  managed_by?: string | null;
 }

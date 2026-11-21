@@ -11517,6 +11517,21 @@ components:
             user is created.'
         skip_totp_with_idp_mfa:
           type: boolean
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it. The OIDC settings exist once and read
+            null until a write sets it.
+          example: terraform
     OidcWarning:
       type: object
       required:
@@ -12064,6 +12079,21 @@ components:
             `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they
             change only through the API.'
           $ref: '#/components/schemas/NotificationRuleSet'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it. The Organization's settings are one
+            object with one mark, null until a write sets it, whichever page of the web UI edits them.
+          example: terraform
     Organization:
       allOf:
       - $ref: '#/components/schemas/OrganizationBase'
@@ -12147,6 +12177,22 @@ components:
           description: Denied networks, host names and domains. A denied entry always wins.
           items:
             type: string
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it. The policy exists once and reads null
+            until a write sets it; a write that changes only the mark leaves the policy that every replica applies as
+            it is.
+          example: terraform
         always_blocked:
           type: array
           readOnly: true
@@ -16592,6 +16638,20 @@ components:
           format: uri
         limiter:
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     MattermostConnection:
       allOf:
       - $ref: '#/components/schemas/MattermostConnectionBase'
@@ -16690,6 +16750,20 @@ components:
           $ref: '#/components/schemas/TelegramUpdateMode'
         limiter:
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     TelegramConnection:
       allOf:
       - $ref: '#/components/schemas/TelegramConnectionBase'
@@ -16777,6 +16851,20 @@ components:
           $ref: '#/components/schemas/BridgeEventDelivery'
         limiter:
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     BridgeConnection:
       allOf:
       - $ref: '#/components/schemas/BridgeConnectionBase'
@@ -16947,6 +17035,20 @@ components:
           $ref: '#/components/schemas/SlackEventMode'
         limiter:
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     SlackConnection:
       allOf:
       - $ref: '#/components/schemas/SlackConnectionBase'
@@ -18901,6 +19003,20 @@ components:
           $ref: '#/components/schemas/DestinationButtonSet'
         limiter:
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     TelegramDestinationInput:
       type: object
       description: A Telegram Destination is configured by its channel only; Muster finds the channel's discussion group
@@ -18958,6 +19074,20 @@ components:
           $ref: '#/components/schemas/DestinationButtonSet'
         limiter:
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     BridgeDestinationInput:
       type: object
       description: A Bridge Destination (C-22.FR-3) is a channel of the bridge's messenger, named by its id. Saving it
@@ -19020,6 +19150,20 @@ components:
           description: '`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits
             together, or half of the Connection''s `info.limits.send_per_second_per_channel` when its info has it.'
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     SlackDestinationInput:
       type: object
       description: A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection's workspace,
@@ -19083,6 +19227,20 @@ components:
         limiter:
           description: '`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     WebhookDestinationBase:
       type: object
       required:
@@ -19140,6 +19298,20 @@ components:
           $ref: '#/components/schemas/NullablePublicId'
         limiter:
           $ref: '#/components/schemas/Limiter'
+        managed_by:
+          type:
+          - string
+          - 'null'
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+          x-unprocessable: true
+          description: The name of the tool that keeps the object as code, such as `terraform`, or null when none does
+            (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a
+            digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the
+            Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be
+            refused. Omitted on a creation, none;
+            omitted on an update, kept; `null` clears it. Reads always carry it.
+          example: terraform
     DestinationReadFields:
       type: object
       required:

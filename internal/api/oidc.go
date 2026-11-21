@@ -57,12 +57,23 @@ func (s *Server) UpdateOidcSettings(ctx context.Context, req gen.UpdateOidcSetti
 	if req.Body == nil {
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
 	}
-	b := req.Body
+	st, err := s.oidc.Update(ctx, oidc.Requester{Actor: r.Actor, Transport: r.Transport, Address: r.Address}, version,
+		oidcInputOf(*req.Body))
+	if err != nil {
+		return nil, err
+	}
+	body := oidcSettingsOf(st)
+	return gen.UpdateOidcSettings200JSONResponse{Body: body,
+		Headers: gen.UpdateOidcSettings200ResponseHeaders{ETag: body.Etag}}, nil
+}
+
+// oidcInputOf is an update of the OIDC settings as internal/oidc takes it.
+func oidcInputOf(b gen.OidcSettingsInput) oidc.Input {
 	in := oidc.Input{
 		Enabled: b.Enabled, DisplayName: b.DisplayName, IssuerURL: b.IssuerUrl, ClientID: b.ClientId,
 		Scopes: b.Scopes, GroupsClaim: b.GroupsClaim, UnmatchedRole: string(b.UnmatchedRole), SyncRole: b.SyncRole,
 		SkipTOTPWithIDPMFA: b.SkipTotpWithIdpMfa, ExpiresOnSet: b.ClientSecretExpiresOn.IsSpecified(),
-		Proxy: proxyInput(b.Proxy),
+		Proxy: proxyInput(b.Proxy), ManagedBy: managedByIn(b.ManagedBy),
 	}
 	if b.ClientSecret != nil {
 		in.ClientSecret = keyring.Replace(logging.Secret(*b.ClientSecret))
@@ -75,14 +86,7 @@ func (s *Server) UpdateOidcSettings(ctx context.Context, req gen.UpdateOidcSetti
 		in.GroupMappings = append(in.GroupMappings, oidc.GroupMapping{Claim: deref(m.Claim), Group: m.Group,
 			Role: string(m.Role)})
 	}
-	st, err := s.oidc.Update(ctx, oidc.Requester{Actor: r.Actor, Transport: r.Transport, Address: r.Address}, version,
-		in)
-	if err != nil {
-		return nil, err
-	}
-	body := oidcSettingsOf(st)
-	return gen.UpdateOidcSettings200JSONResponse{Body: body,
-		Headers: gen.UpdateOidcSettings200ResponseHeaders{ETag: body.Etag}}, nil
+	return in
 }
 
 // proxyInput is the proxy object of an update: omitted fields keep their value, a null username or password clears it.
@@ -149,6 +153,7 @@ func oidcSettingsOf(st oidc.Settings) gen.OidcSettings {
 		UnmatchedRole: gen.OidcUnmatchedRole(st.UnmatchedRole), SyncRole: st.SyncRole,
 		SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: proxyOf(st.Proxy, st.ProxyPassword),
 		Warnings: warningsOf(st.Warnings), ClaimsSupported: &supported, Etag: &tag,
+		ManagedBy: managedByOf(st.ManagedBy),
 	}
 	// Only a display name the Admin set is returned, so that a read sent back unchanged does not turn the default —
 	// the host of the issuer URL — into a fixed name.

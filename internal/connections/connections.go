@@ -46,6 +46,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
@@ -215,6 +216,8 @@ type Connection struct {
 	DestinationCount     int64
 	CreatedAt            time.Time
 	Version              int64
+	// ManagedBy is the tool that keeps the Connection as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 	// Gateway is the state of a Notification gateway (C-30.FR-8), nil for a Connection that is none: a Bridge
 	// Connection whose stored info declares the role gateway, or that is Broken.
 	Gateway *GatewayState
@@ -247,6 +250,8 @@ type Input struct {
 	BotToken           keyring.SecretInput
 	Proxy              proxyconf.Input
 	Limiter            Limiter
+	// ManagedBy is the mark of the tool that keeps the Connection as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // ListFilter selects a page of Connections, of a type and of a role (bridge.RoleMessenger or bridge.RoleGateway) when
@@ -500,12 +505,13 @@ type view struct {
 	EventMode     string           `json:"event_mode,omitempty"`
 	Proxy         proxyconf.Config `json:"proxy"`
 	Limiter       Limiter          `json:"limiter"`
+	ManagedBy     *string          `json:"managed_by"`
 }
 
 func viewOf(c Connection) view {
 	return view{Name: c.Name, ServerURL: c.ServerURL, BotAPIBaseURL: c.BotAPIBaseURL, UpdateMode: c.UpdateMode,
 		BaseURL: c.BridgeBaseURL, EventDelivery: c.EventDelivery, EventMode: c.EventMode, Proxy: c.Proxy,
-		Limiter: c.Limiter}
+		Limiter: c.Limiter, ManagedBy: c.ManagedBy}
 }
 
 func resourceOf(c Connection) audit.Resource {
@@ -521,6 +527,8 @@ func check(in *Input, stored *Connection) error {
 			Detail: "The type is not mattermost, telegram, bridge or slack."}
 	case stored != nil && stored.Type != in.Type:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type of a Connection cannot change."}
+	case in.ManagedBy.Check() != nil:
+		return &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
 	}
 	in.Name = strings.TrimSpace(in.Name)
 	switch {
@@ -722,7 +730,8 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 		BotTokenCiphertext: token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: now,
 		Proxy: p.JSON(), ProxyPasswordCiphertext: password.Ciphertext, ProxyPasswordKeyID: nonEmpty(password.KeyID),
 		ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt), LimiterLimit: in.Limiter.Limit,
-		LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
+		LimiterPerSeconds: in.Limiter.PerSeconds, ManagedBy: managedby.Text(in.ManagedBy.Apply(nil)),
+		Now: now}); err != nil {
 		return Connection{}, "", fmt.Errorf("create the connection: %w", nameTaken(err))
 	}
 	row, err := s.row(ctx, q, id)
@@ -741,7 +750,9 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 // writes nothing. A Telegram Connection that enters the webhook mode, or changes its base URL or bot token in it, gets
 // a new secret token and setWebhook; one that leaves it gets deleteWebhook; both run before the update commits, and
 // when they fail nothing is saved. A Bridge given a new base URL or bot token has its info read once the update
-// committed (readSavedInfo), which never fails it; a save of its other fields calls nothing.
+// committed (readSavedInfo), which never fails it; a save of its other fields calls nothing. A save that changes only
+// the mark managed_by (C-33.FR-11) keeps every secret and what the last check learned, and calls nothing: it moves the
+// version and is recorded like any change.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Connection,
 	error) {
 	var out Connection
@@ -805,6 +816,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			in.UpdateMode
 		after.BridgeBaseURL, after.EventDelivery, after.EventMode = in.BridgeBaseURL, in.EventDelivery, in.EventMode
 		after.Proxy, after.Limiter = p, in.Limiter
+		after.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		diff := append(audit.Diff(viewOf(before), viewOf(after)), secretDiff...)
 		if len(diff) == 0 {
 			out = s.withBridgeWarnings(before, row)
@@ -836,7 +848,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			ForgetBot: forgot, ForgetUpdates: in.BotToken.Given,
 			Proxy: p.JSON(), ProxyPasswordCiphertext: password.Ciphertext,
 			ProxyPasswordKeyID: nonEmpty(password.KeyID), ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt),
-			LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
+			LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds,
+			ManagedBy: managedby.Text(after.ManagedBy), Now: now}); err != nil {
 			return fmt.Errorf("update the connection %s: %w", id, nameTaken(err))
 		}
 		if row, err = s.row(ctx, q, id); err != nil {
@@ -1568,7 +1581,8 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 		BotToken: storedToken(r).Status(), BotUsername: textOf(r.BotUsername),
 		BotUserID: textOf(r.BotUserID), Proxy: p, ProxyPassword: storedPassword(r).Status(),
 		Limiter:          Limiter{Limit: r.LimiterLimit, PerSeconds: r.LimiterPerSeconds},
-		DestinationCount: r.DestinationCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
+		DestinationCount: r.DestinationCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
+		ManagedBy: managedby.Of(r.ManagedBy)}
 	if len(r.BridgeInfo) > 0 && r.BridgeInfoReadAt.Valid {
 		at := r.BridgeInfoReadAt.Time.UTC()
 		c.BridgeInfo, c.BridgeInfoReadAt = json.RawMessage(r.BridgeInfo), &at
