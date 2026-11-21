@@ -38,6 +38,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
@@ -291,7 +292,7 @@ func (s *memStore) InsertConnection(_ context.Context, a dbgen.InsertConnectionP
 		BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt,
 		Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, LimiterLimit: a.LimiterLimit,
-		LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}}
+		LimiterPerSeconds: a.LimiterPerSeconds, ManagedBy: a.ManagedBy, CreatedAt: a.Now, Version: 1}}
 	return s.next, nil
 }
 
@@ -333,7 +334,7 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 		a.BotTokenUpdatedAt
 	r.ProxyPasswordCiphertext, r.ProxyPasswordKeyID, r.ProxyPasswordUpdatedAt = a.ProxyPasswordCiphertext,
 		a.ProxyPasswordKeyID, a.ProxyPasswordUpdatedAt
-	r.LimiterLimit, r.LimiterPerSeconds = a.LimiterLimit, a.LimiterPerSeconds
+	r.LimiterLimit, r.LimiterPerSeconds, r.ManagedBy = a.LimiterLimit, a.LimiterPerSeconds, a.ManagedBy
 	if a.ForgetBot {
 		r.BotUserID, r.BotUsername = pgtype.Text{}, pgtype.Text{}
 		r.BridgeInfo, r.BridgeInfoReadAt = nil, pgtype.Timestamptz{}
@@ -1151,6 +1152,216 @@ func (e *env) update(t *testing.T, id string, in connections.Input) error {
 	t.Helper()
 	_, err := e.svc.Update(t.Context(), by, id, nil, in)
 	return err
+}
+
+// markChange is the change of /managed_by in the diff of the Audit log entry a, if any.
+func markChange(t *testing.T, a auditdb.InsertAuditEntryParams) (audit.Change, bool) {
+	t.Helper()
+	for _, c := range diffOf(t, a) {
+		if c.Pointer == managedby.Pointer {
+			return c, true
+		}
+	}
+	return audit.Change{}, false
+}
+
+func markOf(c connections.Connection) string {
+	if c.ManagedBy == nil {
+		return "<none>"
+	}
+	return *c.ManagedBy
+}
+
+// TestManagedBy is C-33.FR-11 on Connections: a creation stores the mark or none, a read and the list carry it, an
+// update that omits it keeps it, null clears it, and a value outside the format is refused at /managed_by before
+// anything is written; the Audit log diff shows each change. A save that changes only the mark moves the version and
+// is recorded, and keeps the bot token and what the last check learned; the webhook of a Telegram Connection, the info
+// of a Bridge and the secrets of a Slack Connection stay as they are, and nothing is called. A demo renamed at start
+// keeps its mark.
+func TestManagedBy(t *testing.T) {
+	e := newTGEnv(t)
+	ctx := t.Context()
+	in := input("mm", e.fake.URL())
+	in.ManagedBy = managedby.Set("terraform")
+	c, err := e.svc.Create(ctx, by, in)
+	if err != nil || markOf(c) != "terraform" {
+		t.Fatalf("create with terraform = %s, %v", markOf(c), err)
+	}
+	if ch, ok := markChange(t, e.store.audit[0]); !ok || ch.After != "terraform" || ch.Before != nil {
+		t.Errorf("the Audit log of the creation: %s", e.store.audit[0].Diff)
+	}
+	plain := e.create(t, "plain")
+	if markOf(plain) != "<none>" {
+		t.Errorf("create without = %s", markOf(plain))
+	}
+	if _, ok := markChange(t, e.store.audit[1]); ok {
+		t.Errorf("a creation without the mark records it: %s", e.store.audit[1].Diff)
+	}
+	if got, err := e.svc.Get(ctx, c.PublicID); err != nil || markOf(got) != "terraform" {
+		t.Errorf("read = %s, %v", markOf(got), err)
+	}
+	page, err := e.svc.List(ctx, connections.ListFilter{Limit: 10})
+	if err != nil || len(page.Connections) != 2 || markOf(page.Connections[0]) != "terraform" ||
+		markOf(page.Connections[1]) != "<none>" {
+		t.Errorf("list = %+v, %v", page.Connections, err)
+	}
+	for _, v := range []string{"Terraform", strings.Repeat("a", 33), ""} {
+		bad := input("bad", e.fake.URL())
+		bad.ManagedBy = managedby.Set(v)
+		if fe := fieldError(func() error { _, err := e.svc.Create(ctx, by, bad); return err }()); fe == nil ||
+			fe.Pointer != "/managed_by" || fe.Code != connections.CodeInvalidFormat || fe.Detail != managedby.Detail {
+			t.Errorf("create with %q = %v", v, fe)
+		}
+	}
+	if len(e.store.rows) != 2 {
+		t.Fatalf("a refused mark created a Connection: %d rows", len(e.store.rows))
+	}
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	stored := e.store.rows[c.ID].row
+	keep := input("mm", e.fake.URL())
+	keep.BotToken = keyring.Keep
+
+	// An update that leaves the mark out keeps it.
+	renamed := keep
+	renamed.Name = "mm-2"
+	if u, err := e.svc.Update(ctx, by, c.PublicID, nil, renamed); err != nil || markOf(u) != "terraform" {
+		t.Errorf("update without = %s, %v", markOf(u), err)
+	}
+	if _, ok := markChange(t, e.store.audit[len(e.store.audit)-1]); ok {
+		t.Error("an update without the mark recorded a change of it")
+	}
+	keep.Name = "mm-2"
+
+	// A refused value changes nothing.
+	for _, v := range []string{"Terraform", strings.Repeat("a", 33)} {
+		bad := keep
+		bad.Name, bad.ManagedBy = "mm-3", managedby.Set(v)
+		version, entries := e.store.rows[c.ID].row.Version, len(e.store.audit)
+		if fe := fieldError(e.update(t, c.PublicID, bad)); fe == nil || fe.Pointer != "/managed_by" ||
+			fe.Code != connections.CodeInvalidFormat {
+			t.Errorf("update with %q = %v", v, fe)
+		}
+		if r := e.store.rows[c.ID].row; r.Version != version || r.Name != "mm-2" || len(e.store.audit) != entries {
+			t.Errorf("a refused %q wrote: version %d, name %s, %d entries", v, r.Version, r.Name, len(e.store.audit))
+		}
+	}
+
+	// A save of the mark alone keeps the secrets and what the check learned.
+	only := keep
+	only.ManagedBy = managedby.Set("opentofu")
+	version := e.store.rows[c.ID].row.Version
+	u, err := e.svc.Update(ctx, by, c.PublicID, nil, only)
+	row := e.store.rows[c.ID].row
+	last := e.store.updates[len(e.store.updates)-1]
+	if err != nil || markOf(u) != "opentofu" || u.Version != version+1 || u.BotUsername == nil ||
+		last.ForgetBot || last.ForgetUpdates || !bytes.Equal(row.BotTokenCiphertext, stored.BotTokenCiphertext) ||
+		!row.BotTokenUpdatedAt.Equal(stored.BotTokenUpdatedAt) {
+		t.Fatalf("mark only = %+v, %v", u, err)
+	}
+	a := e.store.audit[len(e.store.audit)-1]
+	if d := diffOf(t, a); len(d) != 1 || d[0].Pointer != "/managed_by" || d[0].Before != "terraform" ||
+		d[0].After != "opentofu" || a.Action != connections.ActionUpdated {
+		t.Errorf("the Audit log of the mark alone: %s %s", a.Action, a.Diff)
+	}
+	if !managedby.Only(diffOf(t, a)) || len(e.gateways) != 0 {
+		t.Errorf("a save of the mark alone called the gateways: %v", e.gateways)
+	}
+
+	// Null clears it.
+	cleared := keep
+	cleared.ManagedBy = managedby.Clear
+	if u, err := e.svc.Update(ctx, by, c.PublicID, nil, cleared); err != nil || u.ManagedBy != nil {
+		t.Errorf("update with null = %s, %v", markOf(u), err)
+	}
+	if ch, ok := markChange(t, e.store.audit[len(e.store.audit)-1]); !ok || ch.Before != "opentofu" || ch.After != nil {
+		t.Errorf("the Audit log of clearing: %s", e.store.audit[len(e.store.audit)-1].Diff)
+	}
+
+	// A Telegram Connection in the webhook mode keeps its webhook and its secret token, and calls nothing.
+	tg, err := e.svc.Create(ctx, by, e.input("tg", connections.ModeWebhook))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := e.svc.Hooked(ctx, tg.PublicID)
+	if err != nil || secret == "" {
+		t.Fatalf("hooked = %v", err)
+	}
+	calls := len(e.tg.Requests())
+	tgMark := e.input("tg", connections.ModeWebhook)
+	tgMark.BotToken, tgMark.ManagedBy = keyring.Keep, managedby.Set("terraform")
+	if u, err := e.svc.Update(ctx, by, tg.PublicID, nil, tgMark); err != nil || markOf(u) != "terraform" ||
+		u.Version != tg.Version+1 {
+		t.Fatalf("mark the Telegram Connection = %+v, %v", u, err)
+	}
+	if _, again, _ := e.svc.Hooked(ctx, tg.PublicID); again != secret || len(e.tg.Requests()) != calls ||
+		e.store.updates[len(e.store.updates)-1].ForgetUpdates {
+		t.Errorf("a save of the mark alone called Telegram (%d calls) or changed the secret token",
+			len(e.tg.Requests())-calls)
+	}
+
+	// A demo renamed at start keeps its mark.
+	if err := e.svc.EnsureDemo(ctx, connections.Demo{Name: "Dev Mattermost", ServerURL: e.fake.URL(),
+		BotToken: botToken}); err != nil {
+		t.Fatal(err)
+	}
+	demo := e.store.live(func(r dbgen.GetConnectionRow) bool { return r.Name == "Dev Mattermost" }).row
+	if demo.ManagedBy.Valid {
+		t.Errorf("the demo starts marked %s", demo.ManagedBy.String)
+	}
+	markDemo := input("Dev Mattermost", e.fake.URL())
+	markDemo.BotToken, markDemo.ManagedBy = keyring.Keep, managedby.Set("terraform")
+	if err := e.update(t, demo.PublicID, markDemo); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.EnsureDemo(ctx, connections.Demo{Name: "Example Mattermost", Was: "Dev Mattermost",
+		ServerURL: e.fake.URL(), BotToken: botToken}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.svc.Get(ctx, demo.PublicID); err != nil || got.Name != "Example Mattermost" ||
+		markOf(got) != "terraform" {
+		t.Errorf("the renamed demo = %s %s, %v", got.Name, markOf(got), err)
+	}
+	if _, ok := markChange(t, e.store.audit[len(e.store.audit)-1]); ok {
+		t.Error("the rename of the demo recorded a change of the mark")
+	}
+}
+
+// TestManagedByBridgeAndSlack: a save of the mark alone of a Bridge Connection in the push mode keeps its token and push
+// secret and reads no info, and one of a Slack Connection in the http mode keeps its tokens and Slack signing secret
+// and calls nothing (C-33.FR-11).
+func TestManagedByBridgeAndSlack(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	br := e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPush)
+	stored, requests := e.store.rows[br.ID].row, len(b.seen())
+	in := bridgeInput("br", b.srv.URL, connections.EventDeliveryPush)
+	in.BotToken, in.PushSecret, in.ManagedBy = keyring.Keep, keyring.Keep, managedby.Set("terraform")
+	u, err := e.svc.Update(ctx, by, br.PublicID, nil, in)
+	row := e.store.rows[br.ID].row
+	if err != nil || markOf(u) != "terraform" || len(b.seen()) != requests || u.BridgeInfo == nil ||
+		!bytes.Equal(row.BotTokenCiphertext, stored.BotTokenCiphertext) ||
+		!bytes.Equal(row.BridgePushSecretCiphertext, stored.BridgePushSecretCiphertext) ||
+		e.store.updates[len(e.store.updates)-1].ForgetBot {
+		t.Errorf("mark the Bridge = %s, %v, %d requests", markOf(u), err, len(b.seen())-requests)
+	}
+
+	s, f := newSlackEnv(t)
+	sl := s.createSlack(t, slackInput("sl", connections.EventModeHTTP))
+	slStored, slCalls := s.store.rows[sl.ID].row, len(f.Requests())
+	slIn := slackInput("sl", connections.EventModeHTTP)
+	slIn.BotToken, slIn.SlackSigningSecret, slIn.ManagedBy = keyring.Keep, keyring.Keep, managedby.Set("terraform")
+	u, err = s.svc.Update(ctx, by, sl.PublicID, nil, slIn)
+	slRow := s.store.rows[sl.ID].row
+	if err != nil || markOf(u) != "terraform" || len(f.Requests()) != slCalls ||
+		!bytes.Equal(slRow.BotTokenCiphertext, slStored.BotTokenCiphertext) ||
+		!bytes.Equal(slRow.SlackSigningSecretCiphertext, slStored.SlackSigningSecretCiphertext) {
+		t.Errorf("mark the Slack Connection = %s, %v, %d calls", markOf(u), err, len(f.Requests())-slCalls)
+	}
+	if d := diffOf(t, s.store.audit[len(s.store.audit)-1]); !managedby.Only(d) {
+		t.Errorf("the Audit log of the Slack mark: %+v", d)
+	}
 }
 
 // TestDelete is C-13.FR-6: a Connection that a Destination that is not deleted uses is in use; otherwise it is

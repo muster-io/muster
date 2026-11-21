@@ -461,7 +461,8 @@ func connectionInputOf(body gen.ConnectionInput) (connections.Input, error) {
 			"The body is not a Mattermost Connection.")
 	}
 	in := connections.Input{Type: kind, Name: m.Name, ServerURL: m.ServerUrl, Proxy: proxyInput(m.Proxy),
-		Limiter: connections.Limiter{Limit: int64(m.Limiter.Limit), PerSeconds: int64(m.Limiter.PerSeconds)}}
+		Limiter:   connections.Limiter{Limit: int64(m.Limiter.Limit), PerSeconds: int64(m.Limiter.PerSeconds)},
+		ManagedBy: managedByIn(m.ManagedBy)}
 	if m.BotToken != nil {
 		in.BotToken = keyring.Replace(logging.Secret(*m.BotToken))
 	}
@@ -477,7 +478,8 @@ func telegramInputOf(body gen.ConnectionInput) (connections.Input, error) {
 	}
 	in := connections.Input{Type: connections.TypeTelegram, Name: t.Name, BotAPIBaseURL: t.BotApiBaseUrl,
 		UpdateMode: string(t.UpdateMode), Proxy: proxyInput(t.Proxy),
-		Limiter: connections.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)}}
+		Limiter:   connections.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)},
+		ManagedBy: managedByIn(t.ManagedBy)}
 	if t.BotToken != nil {
 		in.BotToken = keyring.Replace(logging.Secret(*t.BotToken))
 	}
@@ -493,7 +495,8 @@ func bridgeInputOf(body gen.ConnectionInput) (connections.Input, error) {
 	}
 	in := connections.Input{Type: connections.TypeBridge, Name: b.Name, BridgeBaseURL: b.BaseUrl,
 		EventDelivery: string(b.EventDelivery), Proxy: proxyInput(b.Proxy),
-		Limiter: connections.Limiter{Limit: int64(b.Limiter.Limit), PerSeconds: int64(b.Limiter.PerSeconds)}}
+		Limiter:   connections.Limiter{Limit: int64(b.Limiter.Limit), PerSeconds: int64(b.Limiter.PerSeconds)},
+		ManagedBy: managedByIn(b.ManagedBy)}
 	if b.BotToken != nil {
 		in.BotToken = keyring.Replace(logging.Secret(*b.BotToken))
 	}
@@ -521,7 +524,7 @@ func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) 
 		ServerUrl: c.ServerURL, BotTokenStatus: keyStatusOf(c.BotToken), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
 		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
 		DestinationCount: int(c.DestinationCount), CallbackUrl: &callback, CreatedAt: c.CreatedAt, Etag: &tag,
-		GroupsRead: nullableBool(c.MattermostGroupsRead)}
+		GroupsRead: nullableBool(c.MattermostGroupsRead), ManagedBy: managedByOf(c.ManagedBy)}
 	if c.BotUsername != nil {
 		m.BotUsername.Set(*c.BotUsername)
 	} else {
@@ -542,7 +545,7 @@ func telegramConnectionOf(c connections.Connection) (gen.Connection, error) {
 		BotTokenStatus: keyStatusOf(c.BotToken), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
 		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
 		DestinationCount: int(c.DestinationCount), Warnings: make([]gen.TelegramConnectionWarnings, 0, len(c.Warnings)),
-		CreatedAt: c.CreatedAt, Etag: &tag}
+		CreatedAt: c.CreatedAt, Etag: &tag, ManagedBy: managedByOf(c.ManagedBy)}
 	for _, w := range c.Warnings {
 		t.Warnings = append(t.Warnings, gen.TelegramConnectionWarnings(w))
 	}
@@ -573,7 +576,7 @@ func (s *Server) bridgeConnectionOf(c connections.Connection) (gen.Connection, e
 		Proxy:            proxyOf(c.Proxy, c.ProxyPassword),
 		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
 		DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt, Etag: &tag,
-		Warnings: make([]gen.BridgeConnectionWarnings, 0, len(c.Warnings))}
+		Warnings: make([]gen.BridgeConnectionWarnings, 0, len(c.Warnings)), ManagedBy: managedByOf(c.ManagedBy)}
 	for _, w := range c.Warnings {
 		b.Warnings = append(b.Warnings, gen.BridgeConnectionWarnings(w))
 	}
@@ -638,8 +641,9 @@ func slackInputOf(body gen.ConnectionInput) (connections.Input, error) {
 			"The body is not a Slack Connection.")
 	}
 	in := connections.Input{Type: connections.TypeSlack, Name: sl.Name, EventMode: string(sl.EventMode),
-		Proxy:   proxyInput(sl.Proxy),
-		Limiter: connections.Limiter{Limit: int64(sl.Limiter.Limit), PerSeconds: int64(sl.Limiter.PerSeconds)}}
+		Proxy:     proxyInput(sl.Proxy),
+		Limiter:   connections.Limiter{Limit: int64(sl.Limiter.Limit), PerSeconds: int64(sl.Limiter.PerSeconds)},
+		ManagedBy: managedByIn(sl.ManagedBy)}
 	if sl.BotToken != nil {
 		in.BotToken = keyring.Replace(logging.Secret(*sl.BotToken))
 	}
@@ -666,7 +670,8 @@ func (s *Server) slackConnectionOf(c connections.Connection) (gen.Connection, er
 		AppId: nullableString(c.SlackAppID), Socket: slackSocketOf(c.SlackSocket),
 		UsergroupsRead: nullableBool(c.SlackUsergroupsRead),
 		Proxy:          proxyOf(c.Proxy, c.ProxyPassword), DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt,
-		Limiter: gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)}, Etag: &tag}
+		Limiter: gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)}, Etag: &tag,
+		ManagedBy: managedByOf(c.ManagedBy)}
 	var out gen.Connection
 	if err := out.FromSlackConnection(sl); err != nil {
 		return gen.Connection{}, err

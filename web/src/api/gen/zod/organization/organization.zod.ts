@@ -28,6 +28,10 @@ export const getOrganizationResponseOneNotificationRulesNormalItemGatewayIdRegEx
 export const getOrganizationResponseOneNotificationRulesNormalItemGatewayOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getOrganizationResponseOneNotificationRulesImportantItemGatewayIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getOrganizationResponseOneNotificationRulesImportantItemGatewayOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getOrganizationResponseOneManagedByMax = 32;
+
+
+export const getOrganizationResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 export const getOrganizationResponseTwoWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -93,7 +97,8 @@ export const GetOrganizationResponse = zod.object({
   "available": zod.boolean().optional().describe('Set in reads; false for a call that cannot run now, which stays in the rule.'),
   "unavailable_reason": zod.union([zod.enum(['gateway_deleted', 'no_confirmed_contact']).describe('`gateway_deleted`: the gateway of the call was deleted or is no Notification gateway any more; `no_confirmed_contact`: the person has no confirmed contact at it (never in the Organization\'s rules).'),zod.null()]).optional().describe('Set in reads; why `available` is false, null when it is true.')
 }).describe('One action of a Notification rule (C-31.FR-1): `mention`, a Mention in the Thread; `call`, a call through the Notification gateway `gateway_id`, required when more than one Notification gateway exists and otherwise the only one; `wait`, a wait of `wait_seconds` before the next action, a whole number of minutes from 1 to 60 (`notification_rule.limits`): a multiple of 60 from 60 to 3600, else `422` `out_of_range` at its `wait_seconds`, `required` without it. Actions without a wait between them happen at the same moment. Fields the kind does not take are ignored. `gateway`, `available` and `unavailable_reason` are set in reads and ignored in requests, so that a read can be sent back.'))
-}).describe('The Organization\'s default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.')
+}).describe('The Organization\'s default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.'),
+  "managed_by": zod.string().max(getOrganizationResponseOneManagedByMax).regex(getOrganizationResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Organization\'s settings are one object with one mark, null until a write sets it, whichever page of the web UI edits them.')
 }).and(zod.object({
   "id": zod.string().regex(getOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "working_hours": zod.object({
@@ -148,6 +153,10 @@ export const updateOrganizationBodyOneNotificationRulesNormalItemGatewayIdRegExp
 export const updateOrganizationBodyOneNotificationRulesNormalItemGatewayOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateOrganizationBodyOneNotificationRulesImportantItemGatewayIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateOrganizationBodyOneNotificationRulesImportantItemGatewayOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const updateOrganizationBodyOneManagedByMax = 32;
+
+
+export const updateOrganizationBodyOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateOrganizationBody = zod.object({
@@ -209,7 +218,8 @@ export const UpdateOrganizationBody = zod.object({
   "available": zod.boolean().optional().describe('Set in reads; false for a call that cannot run now, which stays in the rule.'),
   "unavailable_reason": zod.union([zod.enum(['gateway_deleted', 'no_confirmed_contact']).describe('`gateway_deleted`: the gateway of the call was deleted or is no Notification gateway any more; `no_confirmed_contact`: the person has no confirmed contact at it (never in the Organization\'s rules).'),zod.null()]).optional().describe('Set in reads; why `available` is false, null when it is true.')
 }).describe('One action of a Notification rule (C-31.FR-1): `mention`, a Mention in the Thread; `call`, a call through the Notification gateway `gateway_id`, required when more than one Notification gateway exists and otherwise the only one; `wait`, a wait of `wait_seconds` before the next action, a whole number of minutes from 1 to 60 (`notification_rule.limits`): a multiple of 60 from 60 to 3600, else `422` `out_of_range` at its `wait_seconds`, `required` without it. Actions without a wait between them happen at the same moment. Fields the kind does not take are ignored. `gateway`, `available` and `unavailable_reason` are set in reads and ignored in requests, so that a read can be sent back.'))
-}).optional().describe('The Organization\'s default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.')
+}).optional().describe('The Organization\'s default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.'),
+  "managed_by": zod.string().max(updateOrganizationBodyOneManagedByMax).regex(updateOrganizationBodyOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Organization\'s settings are one object with one mark, null until a write sets it, whichever page of the web UI edits them.')
 }).and(zod.object({
   "outgoing_heartbeat": zod.object({
   "url": zod.url().nullish().describe('Write-only Secret; such URLs carry tokens. Omit to keep the stored one; `null` clears it.'),
@@ -242,6 +252,10 @@ export const updateOrganizationResponseOneNotificationRulesNormalItemGatewayIdRe
 export const updateOrganizationResponseOneNotificationRulesNormalItemGatewayOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateOrganizationResponseOneNotificationRulesImportantItemGatewayIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateOrganizationResponseOneNotificationRulesImportantItemGatewayOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const updateOrganizationResponseOneManagedByMax = 32;
+
+
+export const updateOrganizationResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 export const updateOrganizationResponseTwoWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -307,7 +321,8 @@ export const UpdateOrganizationResponse = zod.object({
   "available": zod.boolean().optional().describe('Set in reads; false for a call that cannot run now, which stays in the rule.'),
   "unavailable_reason": zod.union([zod.enum(['gateway_deleted', 'no_confirmed_contact']).describe('`gateway_deleted`: the gateway of the call was deleted or is no Notification gateway any more; `no_confirmed_contact`: the person has no confirmed contact at it (never in the Organization\'s rules).'),zod.null()]).optional().describe('Set in reads; why `available` is false, null when it is true.')
 }).describe('One action of a Notification rule (C-31.FR-1): `mention`, a Mention in the Thread; `call`, a call through the Notification gateway `gateway_id`, required when more than one Notification gateway exists and otherwise the only one; `wait`, a wait of `wait_seconds` before the next action, a whole number of minutes from 1 to 60 (`notification_rule.limits`): a multiple of 60 from 60 to 3600, else `422` `out_of_range` at its `wait_seconds`, `required` without it. Actions without a wait between them happen at the same moment. Fields the kind does not take are ignored. `gateway`, `available` and `unavailable_reason` are set in reads and ignored in requests, so that a read can be sent back.'))
-}).describe('The Organization\'s default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.')
+}).describe('The Organization\'s default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.'),
+  "managed_by": zod.string().max(updateOrganizationResponseOneManagedByMax).regex(updateOrganizationResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Organization\'s settings are one object with one mark, null until a write sets it, whichever page of the web UI edits them.')
 }).and(zod.object({
   "id": zod.string().regex(updateOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "working_hours": zod.object({
@@ -339,10 +354,17 @@ export const UpdateOrganizationResponse = zod.object({
  * The outbound address policy with the rules that always apply. Needs `organization:read`.
  * @summary Read the outbound address policy
  */
+export const getOutboundPolicyResponseManagedByMax = 32;
+
+
+export const getOutboundPolicyResponseManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
+
+
 export const GetOutboundPolicyResponse = zod.object({
   "policy": zod.enum(['standard', 'strict']),
   "allowed": zod.array(zod.string()).describe('Allowed networks (CIDR), host names and domains.'),
   "denied": zod.array(zod.string()).describe('Denied networks, host names and domains. A denied entry always wins.'),
+  "managed_by": zod.string().max(getOutboundPolicyResponseManagedByMax).regex(getOutboundPolicyResponseManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The policy exists once and reads null until a write sets it; a write that changes only the mark leaves the policy that every replica applies as it is.'),
   "always_blocked": zod.array(zod.string()).optional().describe('Rules that always apply (link-local, cloud metadata, unspecified and multicast addresses); no allowed entry opens them.'),
   "etag": zod.string().optional().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })
@@ -355,16 +377,30 @@ export const UpdateOutboundPolicyHeader = zod.object({
   "If-Match": zod.string().describe('ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.')
 })
 
+export const updateOutboundPolicyBodyManagedByMax = 32;
+
+
+export const updateOutboundPolicyBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
+
+
 export const UpdateOutboundPolicyBody = zod.object({
   "policy": zod.enum(['standard', 'strict']),
   "allowed": zod.array(zod.string()).describe('Allowed networks (CIDR), host names and domains.'),
-  "denied": zod.array(zod.string()).describe('Denied networks, host names and domains. A denied entry always wins.')
+  "denied": zod.array(zod.string()).describe('Denied networks, host names and domains. A denied entry always wins.'),
+  "managed_by": zod.string().max(updateOutboundPolicyBodyManagedByMax).regex(updateOutboundPolicyBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The policy exists once and reads null until a write sets it; a write that changes only the mark leaves the policy that every replica applies as it is.')
 })
+
+export const updateOutboundPolicyResponseManagedByMax = 32;
+
+
+export const updateOutboundPolicyResponseManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
+
 
 export const UpdateOutboundPolicyResponse = zod.object({
   "policy": zod.enum(['standard', 'strict']),
   "allowed": zod.array(zod.string()).describe('Allowed networks (CIDR), host names and domains.'),
   "denied": zod.array(zod.string()).describe('Denied networks, host names and domains. A denied entry always wins.'),
+  "managed_by": zod.string().max(updateOutboundPolicyResponseManagedByMax).regex(updateOutboundPolicyResponseManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The policy exists once and reads null until a write sets it; a write that changes only the mark leaves the policy that every replica applies as it is.'),
   "always_blocked": zod.array(zod.string()).optional().describe('Rules that always apply (link-local, cloud metadata, unspecified and multicast addresses); no allowed entry opens them.'),
   "etag": zod.string().optional().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })

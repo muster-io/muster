@@ -91,7 +91,7 @@ func organizationOf(o organization.Organization) gen.Organization {
 		TotpRequired: gen.TotpPolicy(o.TOTPRequired), OidcTokenGraceSeconds: int(o.OIDCTokenGrace / time.Second),
 		Etag: &tag, WorkdayEnd: o.WorkdayEnd, WorkingDays: make([]gen.Weekday, 0, len(o.WorkingDays)),
 		Buttons: gen.OrganizationButtonSet{All: o.Buttons.All}, TeamLabel: o.TeamLabel,
-		NotificationRules: ruleSetOf(o.NotificationRuleViews),
+		NotificationRules: ruleSetOf(o.NotificationRuleViews), ManagedBy: managedByOf(o.ManagedBy),
 	}
 	if !o.Buttons.All {
 		items := buttonItemsOf(o.Buttons.Items)
@@ -155,6 +155,7 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 		},
 		HeartbeatURL:      secretInputOf(b.OutgoingHeartbeat.Url),
 		NotificationRules: ruleSetInputOf(b.NotificationRules),
+		ManagedBy:         managedByIn(b.ManagedBy),
 	}
 	if b.WorkingDays != nil {
 		days := make([]string, len(*b.WorkingDays))
@@ -267,8 +268,7 @@ func (s *Server) UpdateOutboundPolicy(ctx context.Context, req gen.UpdateOutboun
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
 	}
 	p, err := s.organization.UpdateOutboundPolicy(ctx, r.Actor, r.Transport, r.Address, version,
-		organization.OutboundPolicyInput{Mode: organization.OutboundMode(req.Body.Policy), Allowed: req.Body.Allowed,
-			Denied: req.Body.Denied})
+		outboundPolicyInputOf(*req.Body))
 	if err != nil {
 		return nil, err
 	}
@@ -277,12 +277,19 @@ func (s *Server) UpdateOutboundPolicy(ctx context.Context, req gen.UpdateOutboun
 		Headers: gen.UpdateOutboundPolicy200ResponseHeaders{ETag: &tag}}, nil
 }
 
+// outboundPolicyInputOf is an update of the outbound address policy as internal/organization takes it.
+func outboundPolicyInputOf(b gen.OutboundPolicy) organization.OutboundPolicyInput {
+	return organization.OutboundPolicyInput{Mode: organization.OutboundMode(b.Policy), Allowed: b.Allowed,
+		Denied: b.Denied, ManagedBy: managedByIn(b.ManagedBy)}
+}
+
 // outboundPolicyOf is the API form of the outbound address policy.
 func outboundPolicyOf(p organization.OutboundPolicyResource) gen.OutboundPolicy {
 	tag := etag(p.Version)
 	blocked := append([]string{}, p.AlwaysBlocked...)
 	return gen.OutboundPolicy{Policy: gen.OutboundPolicyPolicy(p.Mode), Allowed: append([]string{}, p.Allowed...),
-		Denied: append([]string{}, p.Denied...), AlwaysBlocked: &blocked, Etag: &tag}
+		Denied: append([]string{}, p.Denied...), AlwaysBlocked: &blocked, Etag: &tag,
+		ManagedBy: managedByOf(p.ManagedBy)}
 }
 
 // ListSeverityValues is listSeverityValues: the values of the severity label seen within

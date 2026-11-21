@@ -402,7 +402,8 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	return destinations.Input{Type: kind, Name: m.Name, Mentions: set, MentionEntries: entries, Buttons: destinationButtonsInputOf(m.Buttons),
 		Limiter: destinations.Limiter{Limit: int64(m.Limiter.Limit), PerSeconds: int64(m.Limiter.PerSeconds)},
 		Mattermost: &destinations.MattermostInput{Connection: m.ConnectionId, TeamID: m.TeamId,
-			ChannelID: m.ChannelId}, OwningTeamID: owningTeamOf(m.OwningTeamId)}, nil
+			ChannelID: m.ChannelId}, OwningTeamID: owningTeamOf(m.OwningTeamId),
+		ManagedBy: managedByIn(m.ManagedBy)}, nil
 }
 
 // telegramDestinationInputOf is the Input of a Telegram Destination's body: its Connection and its channel (C-14.FR-2).
@@ -421,7 +422,7 @@ func telegramDestinationInputOf(body gen.DestinationInput) (destinations.Input, 
 		Buttons:      destinationButtonsInputOf(t.Buttons),
 		Limiter:      destinations.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)},
 		Telegram:     &destinations.TelegramInput{Connection: t.ConnectionId, ChannelID: t.ChannelId},
-		OwningTeamID: owningTeamOf(t.OwningTeamId)}, nil
+		OwningTeamID: owningTeamOf(t.OwningTeamId), ManagedBy: managedByIn(t.ManagedBy)}, nil
 }
 
 // bridgeDestinationInputOf is the Input of a Bridge Destination's body: its Connection and its channel id
@@ -441,7 +442,7 @@ func bridgeDestinationInputOf(body gen.DestinationInput) (destinations.Input, er
 		Buttons:      destinationButtonsInputOf(b.Buttons),
 		Limiter:      destinations.Limiter{Limit: int64(b.Limiter.Limit), PerSeconds: int64(b.Limiter.PerSeconds)},
 		Bridge:       &destinations.BridgeInput{Connection: b.ConnectionId, ChannelID: b.ChannelId},
-		OwningTeamID: owningTeamOf(b.OwningTeamId)}, nil
+		OwningTeamID: owningTeamOf(b.OwningTeamId), ManagedBy: managedByIn(b.ManagedBy)}, nil
 }
 
 // slackDestinationInputOf is the Input of a Slack Destination's body: its Connection and its channel id (C-24.FR-3).
@@ -460,7 +461,7 @@ func slackDestinationInputOf(body gen.DestinationInput) (destinations.Input, err
 		Buttons:      destinationButtonsInputOf(sl.Buttons),
 		Limiter:      destinations.Limiter{Limit: int64(sl.Limiter.Limit), PerSeconds: int64(sl.Limiter.PerSeconds)},
 		Slack:        &destinations.SlackInput{Connection: sl.ConnectionId, ChannelID: sl.ChannelId},
-		OwningTeamID: owningTeamOf(sl.OwningTeamId)}, nil
+		OwningTeamID: owningTeamOf(sl.OwningTeamId), ManagedBy: managedByIn(sl.ManagedBy)}, nil
 }
 
 // webhookInputOf is the Input of an outgoing webhook's body: its mode, the request of the events mode, the requests of
@@ -496,7 +497,7 @@ func webhookInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	}
 	return destinations.Input{Type: destinations.TypeWebhook, Name: w.Name, Mentions: set, MentionEntries: entries,
 		Limiter: destinations.Limiter{Limit: int64(w.Limiter.Limit), PerSeconds: int64(w.Limiter.PerSeconds)},
-		Webhook: in, OwningTeamID: owningTeamOf(w.OwningTeamId)}, nil
+		Webhook: in, OwningTeamID: owningTeamOf(w.OwningTeamId), ManagedBy: managedByIn(w.ManagedBy)}, nil
 }
 
 // requestTemplateOf is a request of the template mode as the body gives it.
@@ -723,6 +724,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 	if o := d.OwningTeam; o != nil {
 		owner, ownerID = teamRefOf(o.PublicID, o.Name, o.Slug, o.Deleted, true), owningTeamIDOf(o.PublicID, true)
 	}
+	managedBy := managedByOf(d.ManagedBy)
 	var out gen.Destination
 	switch d.Type {
 	case destinations.TypeMattermost:
@@ -732,7 +734,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			TeamName: nullableString(d.MattermostTeamName), ChannelName: nullableString(d.MattermostChannelName),
 			Mentions: l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
-			OwningTeamId: ownerID})
+			OwningTeamId: ownerID, ManagedBy: managedBy})
 	case destinations.TypeTelegram:
 		err = out.FromTelegramDestination(gen.TelegramDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.TelegramDestinationTypeTelegram, ConnectionId: deref(d.Connection),
@@ -742,21 +744,21 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			DiscussionGroupTitle: nullableString(d.TelegramDiscussionGroupTitle),
 			Mentions:             l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
-			OwningTeamId: ownerID})
+			OwningTeamId: ownerID, ManagedBy: managedBy})
 	case destinations.TypeBridge:
 		err = out.FromBridgeDestination(gen.BridgeDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.BridgeDestinationTypeBridge, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.BridgeChannelID), ChannelName: nullableString(d.BridgeChannelName),
 			Mentions: l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
-			OwningTeamId: ownerID})
+			OwningTeamId: ownerID, ManagedBy: managedBy})
 	case destinations.TypeSlack:
 		err = out.FromSlackDestination(gen.SlackDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.SlackDestinationTypeSlack, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.SlackChannelID), ChannelName: nullableString(d.SlackChannelName),
 			Mentions: l1, MentionEntries: entries, MentionWarnings: warnings, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
-			OwningTeamId: ownerID})
+			OwningTeamId: ownerID, ManagedBy: managedBy})
 	case destinations.TypeWebhook:
 		var w gen.WebhookDestination
 		if w, err = webhookOf(d); err == nil {
@@ -765,7 +767,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			w.Limiter, w.Health, w.Routes = limiter, healthOf(d.Health), routes
 			w.Teams = teamRefs
 			w.TemplateError, w.CreatedAt, w.Etag = templateError, d.CreatedAt, &tag
-			w.OwningTeam, w.OwningTeamId = owner, ownerID
+			w.OwningTeam, w.OwningTeamId, w.ManagedBy = owner, ownerID, managedBy
 			err = out.FromWebhookDestination(w)
 		}
 	default:

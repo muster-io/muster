@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
@@ -132,6 +133,8 @@ type Destination struct {
 	Version       int64
 	// OwningTeam is the Team that owns the Destination (C-25.FR-2), nil when none does.
 	OwningTeam *TeamRef
+	// ManagedBy is the tool that keeps the Destination as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 }
 
 // TeamRef names the Team that owns a Destination: its internal id, public_id, name and slug, and whether it was
@@ -428,7 +431,7 @@ func destinationOf(r dbgen.GetDestinationRow) Destination {
 			PreviousActiveSince: timeOf(r.PreviousSigningSecretSince)},
 		MentionEntries: []mentions.Entry{}, LimiterLimit: r.LimiterLimit, LimiterPerSeconds: r.LimiterPerSeconds,
 		Health:    Health{State: r.Health, Since: timeOf(r.BrokenSince), Reason: textOf(r.BrokenReason)},
-		CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
+		CreatedAt: r.CreatedAt.UTC(), Version: r.Version, ManagedBy: managedby.Of(r.ManagedBy)}
 	if r.TelegramChannelChatID.Valid {
 		id := fmt.Sprint(r.TelegramChannelChatID.Int64)
 		d.TelegramChannelChatID = &id

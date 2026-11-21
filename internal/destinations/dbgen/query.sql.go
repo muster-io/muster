@@ -39,7 +39,7 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
        d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
        t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, d.buttons,
-       o.buttons AS organization_buttons
+       o.buttons AS organization_buttons, d.managed_by
 FROM destinations d
 JOIN organizations o ON o.id = d.org_id
 LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
@@ -96,6 +96,7 @@ type GetDestinationRow struct {
 	OwningTeamDeleted            bool
 	Buttons                      []byte
 	OrganizationButtons          []byte
+	ManagedBy                    pgtype.Text
 }
 
 // GetDestination reads a Destination that is not deleted.
@@ -146,6 +147,7 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 		&i.OwningTeamDeleted,
 		&i.Buttons,
 		&i.OrganizationButtons,
+		&i.ManagedBy,
 	)
 	return i, err
 }
@@ -153,11 +155,12 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 const insertBridgeDestination = `-- name: InsertBridgeDestination :one
 INSERT INTO destinations (
     org_id, public_id, type, name, connection_id, bridge_channel_id, bridge_channel_name, mentions, limiter_limit,
-    limiter_per_seconds, buttons, health, created_at, updated_at
+    limiter_per_seconds, buttons, managed_by, health, created_at, updated_at
 )
 VALUES (
     $1, $2, 'bridge', $3, $4, $5, $6, $7, $8,
-    $9, $10::jsonb, 'healthy', $11::timestamptz, $11::timestamptz
+    $9, $10::jsonb, $11::text, 'healthy', $12::timestamptz,
+    $12::timestamptz
 )
 RETURNING id
 `
@@ -173,6 +176,7 @@ type InsertBridgeDestinationParams struct {
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
+	ManagedBy         pgtype.Text
 	Now               time.Time
 }
 
@@ -190,6 +194,7 @@ func (q *Queries) InsertBridgeDestination(ctx context.Context, arg InsertBridgeD
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -225,12 +230,13 @@ func (q *Queries) InsertDestinationUpdate(ctx context.Context, arg InsertDestina
 const insertMattermostDestination = `-- name: InsertMattermostDestination :one
 INSERT INTO destinations (
     org_id, public_id, type, name, connection_id, mattermost_team_id, mattermost_channel_id, mattermost_team_name,
-    mattermost_channel_name, mentions, limiter_limit, limiter_per_seconds, buttons, health, created_at, updated_at
+    mattermost_channel_name, mentions, limiter_limit, limiter_per_seconds, buttons, managed_by, health, created_at,
+    updated_at
 )
 VALUES (
     $1, $2, 'mattermost', $3, $4, $5, $6, $7, $8,
-    $9, $10, $11, $12::jsonb, 'healthy', $13::timestamptz,
-    $13::timestamptz
+    $9, $10, $11, $12::jsonb, $13::text,
+    'healthy', $14::timestamptz, $14::timestamptz
 )
 RETURNING id
 `
@@ -248,6 +254,7 @@ type InsertMattermostDestinationParams struct {
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
+	ManagedBy         pgtype.Text
 	Now               time.Time
 }
 
@@ -267,6 +274,7 @@ func (q *Queries) InsertMattermostDestination(ctx context.Context, arg InsertMat
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -277,11 +285,12 @@ func (q *Queries) InsertMattermostDestination(ctx context.Context, arg InsertMat
 const insertSlackDestination = `-- name: InsertSlackDestination :one
 INSERT INTO destinations (
     org_id, public_id, type, name, connection_id, slack_channel_id, slack_channel_name, mentions, limiter_limit,
-    limiter_per_seconds, buttons, health, created_at, updated_at
+    limiter_per_seconds, buttons, managed_by, health, created_at, updated_at
 )
 VALUES (
     $1, $2, 'slack', $3, $4, $5, $6, $7, $8,
-    $9, $10::jsonb, 'healthy', $11::timestamptz, $11::timestamptz
+    $9, $10::jsonb, $11::text, 'healthy', $12::timestamptz,
+    $12::timestamptz
 )
 RETURNING id
 `
@@ -297,6 +306,7 @@ type InsertSlackDestinationParams struct {
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
+	ManagedBy         pgtype.Text
 	Now               time.Time
 }
 
@@ -314,6 +324,7 @@ func (q *Queries) InsertSlackDestination(ctx context.Context, arg InsertSlackDes
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -325,12 +336,12 @@ const insertTelegramDestination = `-- name: InsertTelegramDestination :one
 INSERT INTO destinations (
     org_id, public_id, type, name, connection_id, telegram_channel_id, telegram_channel_chat_id,
     telegram_discussion_chat_id, telegram_channel_title, telegram_discussion_group_title, mentions, limiter_limit,
-    limiter_per_seconds, buttons, health, created_at, updated_at
+    limiter_per_seconds, buttons, managed_by, health, created_at, updated_at
 )
 VALUES (
     $1, $2, 'telegram', $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12,
-    $13::jsonb, 'healthy', $14::timestamptz, $14::timestamptz
+    $13::jsonb, $14::text, 'healthy', $15::timestamptz, $15::timestamptz
 )
 RETURNING id
 `
@@ -349,6 +360,7 @@ type InsertTelegramDestinationParams struct {
 	LimiterLimit         int64
 	LimiterPerSeconds    int64
 	Buttons              []byte
+	ManagedBy            pgtype.Text
 	Now                  time.Time
 }
 
@@ -369,6 +381,7 @@ func (q *Queries) InsertTelegramDestination(ctx context.Context, arg InsertTeleg
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -381,15 +394,16 @@ INSERT INTO destinations (
     org_id, public_id, type, name, webhook_mode, webhook_events_config, webhook_template_config, proxy,
     proxy_password_ciphertext,
     proxy_password_key_id, proxy_password_updated_at, signing_secret_ciphertext, signing_secret_key_id,
-    signing_secret_updated_at, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at
+    signing_secret_updated_at, mentions, limiter_limit, limiter_per_seconds, managed_by, health, created_at,
+    updated_at
 )
 VALUES (
     $1, $2, 'webhook', $3, $4, $5::jsonb,
     $6::jsonb, $7,
     $8::bytea, $9::text,
     $10::timestamptz, $11, $12,
-    $13::timestamptz, $14, $15, $16, 'healthy', $13::timestamptz,
-    $13::timestamptz
+    $13::timestamptz, $14, $15, $16, $17::text, 'healthy',
+    $13::timestamptz, $13::timestamptz
 )
 RETURNING id
 `
@@ -411,6 +425,7 @@ type InsertWebhookDestinationParams struct {
 	Mentions                []byte
 	LimiterLimit            int64
 	LimiterPerSeconds       int64
+	ManagedBy               pgtype.Text
 }
 
 // InsertWebhookDestination creates a healthy outgoing webhook Destination with its request, its proxy and the
@@ -433,6 +448,7 @@ func (q *Queries) InsertWebhookDestination(ctx context.Context, arg InsertWebhoo
 		arg.Mentions,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
+		arg.ManagedBy,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -652,7 +668,7 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
        d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
        t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, d.buttons,
-       o.buttons AS organization_buttons
+       o.buttons AS organization_buttons, d.managed_by
 FROM destinations d
 JOIN organizations o ON o.id = d.org_id
 LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
@@ -732,6 +748,7 @@ type ListDestinationsRow struct {
 	OwningTeamDeleted            bool
 	Buttons                      []byte
 	OrganizationButtons          []byte
+	ManagedBy                    pgtype.Text
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -805,6 +822,7 @@ func (q *Queries) ListDestinations(ctx context.Context, arg ListDestinationsPara
 			&i.OwningTeamDeleted,
 			&i.Buttons,
 			&i.OrganizationButtons,
+			&i.ManagedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -1250,8 +1268,8 @@ UPDATE destinations
 SET name = $1, connection_id = $2, bridge_channel_id = $3,
     bridge_channel_name = $4, limiter_limit = $5,
     limiter_per_seconds = $6, buttons = $7::jsonb,
-    updated_at = $8::timestamptz, version = version + 1
-WHERE org_id = $9 AND id = $10 AND type = 'bridge'
+    managed_by = $8::text, updated_at = $9::timestamptz, version = version + 1
+WHERE org_id = $10 AND id = $11 AND type = 'bridge'
 `
 
 type UpdateBridgeDestinationParams struct {
@@ -1262,6 +1280,7 @@ type UpdateBridgeDestinationParams struct {
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
+	ManagedBy         pgtype.Text
 	Now               time.Time
 	OrgID             int64
 	ID                int64
@@ -1278,6 +1297,7 @@ func (q *Queries) UpdateBridgeDestination(ctx context.Context, arg UpdateBridgeD
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
@@ -1290,9 +1310,9 @@ UPDATE destinations
 SET name = $1, connection_id = $2, mattermost_team_id = $3,
     mattermost_channel_id = $4, mattermost_team_name = $5, mattermost_channel_name = $6,
     limiter_limit = $7, limiter_per_seconds = $8,
-    buttons = $9::jsonb,
-    updated_at = $10::timestamptz, version = version + 1
-WHERE org_id = $11 AND id = $12
+    buttons = $9::jsonb, managed_by = $10::text,
+    updated_at = $11::timestamptz, version = version + 1
+WHERE org_id = $12 AND id = $13
 `
 
 type UpdateMattermostDestinationParams struct {
@@ -1305,6 +1325,7 @@ type UpdateMattermostDestinationParams struct {
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
+	ManagedBy         pgtype.Text
 	Now               time.Time
 	OrgID             int64
 	ID                int64
@@ -1323,6 +1344,7 @@ func (q *Queries) UpdateMattermostDestination(ctx context.Context, arg UpdateMat
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
@@ -1335,8 +1357,8 @@ UPDATE destinations
 SET name = $1, connection_id = $2, slack_channel_id = $3,
     slack_channel_name = $4, limiter_limit = $5,
     limiter_per_seconds = $6, buttons = $7::jsonb,
-    updated_at = $8::timestamptz, version = version + 1
-WHERE org_id = $9 AND id = $10 AND type = 'slack'
+    managed_by = $8::text, updated_at = $9::timestamptz, version = version + 1
+WHERE org_id = $10 AND id = $11 AND type = 'slack'
 `
 
 type UpdateSlackDestinationParams struct {
@@ -1347,6 +1369,7 @@ type UpdateSlackDestinationParams struct {
 	LimiterLimit      int64
 	LimiterPerSeconds int64
 	Buttons           []byte
+	ManagedBy         pgtype.Text
 	Now               time.Time
 	OrgID             int64
 	ID                int64
@@ -1363,6 +1386,7 @@ func (q *Queries) UpdateSlackDestination(ctx context.Context, arg UpdateSlackDes
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
@@ -1376,9 +1400,9 @@ SET name = $1, connection_id = $2, telegram_channel_id = $3,
     telegram_channel_chat_id = $4, telegram_discussion_chat_id = $5,
     telegram_channel_title = $6, telegram_discussion_group_title = $7,
     limiter_limit = $8, limiter_per_seconds = $9,
-    buttons = $10::jsonb,
-    updated_at = $11::timestamptz, version = version + 1
-WHERE org_id = $12 AND id = $13 AND type = 'telegram'
+    buttons = $10::jsonb, managed_by = $11::text,
+    updated_at = $12::timestamptz, version = version + 1
+WHERE org_id = $13 AND id = $14 AND type = 'telegram'
 `
 
 type UpdateTelegramDestinationParams struct {
@@ -1392,6 +1416,7 @@ type UpdateTelegramDestinationParams struct {
 	LimiterLimit         int64
 	LimiterPerSeconds    int64
 	Buttons              []byte
+	ManagedBy            pgtype.Text
 	Now                  time.Time
 	OrgID                int64
 	ID                   int64
@@ -1411,6 +1436,7 @@ func (q *Queries) UpdateTelegramDestination(ctx context.Context, arg UpdateTeleg
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Buttons,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
@@ -1429,8 +1455,8 @@ SET name = $1, webhook_mode = $2, webhook_events_config = $3::jsonb,
     proxy_password_updated_at = CASE WHEN $6::boolean THEN $9::timestamptz
                                      ELSE proxy_password_updated_at END,
     limiter_limit = $10, limiter_per_seconds = $11,
-    updated_at = $9::timestamptz, version = version + 1
-WHERE org_id = $12 AND id = $13 AND type = 'webhook'
+    managed_by = $12::text, updated_at = $9::timestamptz, version = version + 1
+WHERE org_id = $13 AND id = $14 AND type = 'webhook'
 `
 
 type UpdateWebhookDestinationParams struct {
@@ -1445,6 +1471,7 @@ type UpdateWebhookDestinationParams struct {
 	Now                     time.Time
 	LimiterLimit            int64
 	LimiterPerSeconds       int64
+	ManagedBy               pgtype.Text
 	OrgID                   int64
 	ID                      int64
 }
@@ -1465,6 +1492,7 @@ func (q *Queries) UpdateWebhookDestination(ctx context.Context, arg UpdateWebhoo
 		arg.Now,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
+		arg.ManagedBy,
 		arg.OrgID,
 		arg.ID,
 	)

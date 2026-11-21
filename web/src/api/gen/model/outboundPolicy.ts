@@ -10,6 +10,13 @@ export interface OutboundPolicy {
   allowed: string[];
   /** Denied networks, host names and domains. A denied entry always wins. */
   denied: string[];
+  /**
+     * The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The policy exists once and reads null until a write sets it; a write that changes only the mark leaves the policy that every replica applies as it is.
+     * @maxLength 32
+     * @nullable
+     * @pattern ^[a-z0-9][a-z0-9._-]{0,31}$
+     */
+  managed_by?: string | null;
   /** Rules that always apply (link-local, cloud metadata, unspecified and multicast addresses); no allowed entry opens them. */
   readonly always_blocked?: readonly string[];
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */

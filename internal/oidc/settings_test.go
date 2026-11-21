@@ -29,6 +29,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
@@ -122,7 +123,8 @@ func (s *memStore) InsertSettings(_ context.Context, a dbgen.InsertSettingsParam
 		GroupMappings: a.GroupMappings, RoleMappings: a.RoleMappings, UnmatchedRole: a.UnmatchedRole,
 		SyncRole: a.SyncRole, SkipTotpWithIdpMfa: a.SkipTotpWithIdpMfa, Proxy: a.Proxy,
 		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
-		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, ClaimsSeen: []byte(`{}`), Version: 1, UpdatedAt: a.UpdatedAt}
+		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, ClaimsSeen: []byte(`{}`), Version: 1, UpdatedAt: a.UpdatedAt,
+		ManagedBy: a.ManagedBy}
 	return 1, nil
 }
 
@@ -150,7 +152,7 @@ func (s *memStore) UpdateSettings(_ context.Context, a dbgen.UpdateSettingsParam
 		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, GroupsClaimMissingSince: missing, GroupsClaimSeenAt: seen,
 		ClaimsSeen: claimsSeen, ClaimsMissing: claimsMissing, ClaimsSupported: supported, Version: a.Version + 1,
-		UpdatedAt: a.UpdatedAt}
+		UpdatedAt: a.UpdatedAt, ManagedBy: a.ManagedBy}
 	return 1, nil
 }
 
@@ -719,6 +721,99 @@ func TestUpdateValidates(t *testing.T) {
 	}
 	if e.store.settings != nil {
 		t.Error("an invalid update was stored")
+	}
+}
+
+// TestManagedBy is C-33.FR-11 on the OIDC settings, which exist once: they read null before the first save and until
+// a write sets the mark; the first save stores it; an update without it keeps it, null clears it, and a value outside
+// the format is refused at /managed_by and writes nothing; the Audit log diff carries each change. A save of the mark
+// alone keeps the client secret and the claims that sign-ins carried, and a demo renamed at start keeps the mark.
+func TestManagedBy(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	if st, err := e.svc.Get(ctx); err != nil || st.ManagedBy != nil {
+		t.Fatalf("before the first save = %v, %v", st.ManagedBy, err)
+	}
+	for _, v := range []string{"Terraform", strings.Repeat("a", 33), ""} {
+		in := e.input()
+		in.ManagedBy = managedby.Set(v)
+		_, err := e.svc.Update(ctx, admin(), nil, in)
+		if fe, ok := errors.AsType[*FieldError](err); !ok || fe.Pointer != "/managed_by" || fe.Code != "invalid_format" ||
+			fe.Detail != managedby.Detail {
+			t.Errorf("%q = %v", v, err)
+		}
+	}
+	if e.store.settings != nil {
+		t.Fatal("a refused mark stored the settings")
+	}
+	in := e.input()
+	in.ManagedBy = managedby.Set("terraform")
+	st, err := e.svc.Update(ctx, admin(), nil, in)
+	if err != nil || st.ManagedBy == nil || *st.ManagedBy != "terraform" || e.store.settings.ManagedBy.String != "terraform" {
+		t.Fatalf("first save with terraform = %v, %v", st.ManagedBy, err)
+	}
+	markOf := func(i int) map[string]any {
+		t.Helper()
+		for _, c := range e.store.audited(ActionSettingsUpdated)[i]["diff"].([]map[string]any) {
+			if c["pointer"] == "/managed_by" {
+				return c
+			}
+		}
+		return nil
+	}
+	if c := markOf(0); c == nil || c["after"] != "terraform" || c["before"] != nil {
+		t.Errorf("the Audit log of the first save: %v", c)
+	}
+	e.store.settings.ClaimsSeen = []byte(`{"groups":{"at":"2026-10-01T00:00:00Z","id_token":true}}`)
+	secret := slices.Clone(e.store.settings.ClientSecretCiphertext)
+
+	keep := e.input()
+	keep.ClientSecret, keep.DisplayName = keyring.Keep, new("Corp SSO")
+	if st, err = e.svc.Update(ctx, admin(), nil, keep); err != nil || st.ManagedBy == nil || *st.ManagedBy != "terraform" {
+		t.Errorf("update without = %v, %v", st.ManagedBy, err)
+	}
+	if c := markOf(1); c != nil {
+		t.Errorf("an update without the mark recorded %v", c)
+	}
+	version := e.store.settings.Version
+	bad := keep
+	bad.ManagedBy = managedby.Set("Terraform")
+	if _, err := e.svc.Update(ctx, admin(), nil, bad); err == nil || e.store.settings.Version != version {
+		t.Errorf("a refused mark on an update = %v, version %d", err, e.store.settings.Version)
+	}
+	only := keep
+	only.ManagedBy = managedby.Set("opentofu")
+	st, err = e.svc.Update(ctx, admin(), nil, only)
+	entries := e.store.audited(ActionSettingsUpdated)
+	if err != nil || st.Version != version+1 || st.ManagedBy == nil || *st.ManagedBy != "opentofu" ||
+		!slices.Equal(e.store.settings.ClientSecretCiphertext, secret) || !slices.Contains(st.ClaimsSeen, "groups") ||
+		len(entries[2]["diff"].([]map[string]any)) != 1 {
+		t.Fatalf("mark only = %+v, %v, diff %v", st, err, entries[2]["diff"])
+	}
+	if c := markOf(2); c == nil || c["before"] != "terraform" || c["after"] != "opentofu" {
+		t.Errorf("the Audit log of the mark alone: %v", c)
+	}
+
+	// A demo renamed at start keeps the mark.
+	e.store.settings.DisplayName = pgtype.Text{String: "Dev IdP", Valid: true}
+	if err := e.svc.EnsureDemo(ctx, Demo{IssuerURL: e.idp.URL(), ClientID: "muster-dev", ClientSecret: "dev-secret",
+		DisplayName: "Example SSO", DisplayNameWas: "Dev IdP", AllowNetwork: "127.0.0.0/8"}); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := e.svc.Get(ctx); err != nil || st.DisplayName != "Example SSO" || st.ManagedBy == nil ||
+		*st.ManagedBy != "opentofu" {
+		t.Errorf("after the demo rename = %s %v, %v", st.DisplayName, st.ManagedBy, err)
+	}
+
+	cleared := keep
+	cleared.DisplayName, cleared.ManagedBy = new("Example SSO"), managedby.Clear
+	if st, err = e.svc.Update(ctx, admin(), nil, cleared); err != nil || st.ManagedBy != nil ||
+		e.store.settings.ManagedBy.Valid {
+		t.Errorf("update with null = %v, %v", st.ManagedBy, err)
+	}
+	last := len(e.store.audited(ActionSettingsUpdated)) - 1
+	if c := markOf(last); c == nil || c["before"] != "opentofu" || c["after"] != nil {
+		t.Errorf("the Audit log of clearing: %v", c)
 	}
 }
 
