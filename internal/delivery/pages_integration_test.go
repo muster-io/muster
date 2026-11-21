@@ -14,8 +14,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/db/dbtest"
+	"github.com/muster-io/muster/internal/delivery"
 	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
+	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/routing"
 )
 
@@ -372,6 +376,114 @@ func TestIntegrationPageReplyLeftOut(t *testing.T) {
 		slices.Sort(reached)
 		if want := []int64{11, 11, 12, 13, 13}; !slices.Equal(reached, want) {
 			t.Errorf("the sent replies mention %v, want %v", reached, want)
+		}
+	})
+}
+
+// TestIntegrationPageReplyLeftOutMentionOnce is C-28.FR-3, C-12.FR-11 and C-11.FR-15 on PostgreSQL for the Team
+// mention or everyone that a Page reply's line left out for length (#690): a reply whose lease went to another replica
+// during its call records nothing, and the replica that sends it again records one mention_not_delivered with the
+// reason message_too_long, naming the Mention and the Page — its step and the name of its chain, which GetPageReply
+// reads from the run — and no entry, event or target; a reply sent already records nothing more; and the event warns
+// on no Destination (ListMentionWarnings).
+func TestIntegrationPageReplyLeftOutMentionOnce(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fire(t, "once", "Once/a")
+		l.round(t, l.a)
+		var group, del, run, page, reply int64
+		if err := l.d.Pool.QueryRow(ctx, `SELECT a.id, x.id FROM alert_groups a JOIN deliveries x
+			ON x.alert_group_id = a.id WHERE a.public_id = $1 AND x.destination_id = $2`, l.group(t, "Once"),
+			l.dests[0]).Scan(&group, &del); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO escalation_runs (org_id, public_id, alert_group_id, chain_name,
+			sources, steps, state, generation, started_at) VALUES ($1, 'ER000000000001', $2, 'Night', '[{"kind":"route"}]',
+			'[]', 'running', 1, $3) RETURNING id`, l.orgID, group, t0).Scan(&run); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO pages (org_id, alert_group_id, escalation_run_id, step_number,
+			kind, everyone, state, created_at) VALUES ($1, $2, $3, 2, 'mention', 'here', 'pending', $4) RETURNING id`,
+			l.orgID, group, run, t0).Scan(&page); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO thread_replies (org_id, delivery_id, alert_group_id,
+			destination_id, event, event_seqs, loudness, mentions, state, next_attempt_at, created_at, page_id,
+			paged_user_ids) VALUES ($1, $2, $3, $4, 'paged', '{1}', 'loud', '{paged}', 'pending', $5, $5, $6, '{}')
+			RETURNING id`, l.orgID, del, group, l.dests[0], l.business.Now(), page).Scan(&reply); err != nil {
+			t.Fatal(err)
+		}
+		here := []mentions.Target{{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneHere}}
+		l.rec.Reset()
+		l.rec.Script(deliverytest.MethodReply,
+			deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, LeftOutMentions: here},
+				Then: func() {
+					// The lease runs out during the call, and the other replica claims the reply.
+					l.exec(t, `UPDATE thread_replies SET lease_owner = 'r2', lease_until = $2 WHERE id = $1`, reply,
+						l.real.Now())
+				}},
+			deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, LeftOutMentions: here}})
+		events := func() []string {
+			t.Helper()
+			rows, err := l.d.Pool.Query(ctx, `SELECT detail::text FROM delivery_events WHERE org_id = $1
+				AND alert_group_id = $2 AND kind = 'mention_not_delivered' ORDER BY id`, l.orgID, group)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var out []string
+			for rows.Next() {
+				var d string
+				if err := rows.Scan(&d); err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, d)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			return out
+		}
+		l.round(t, l.a)
+		if got := events(); len(got) != 0 || l.rec.Count(deliverytest.MethodReply) != 1 {
+			t.Fatalf("recorded without the lease: %v, %d replies", got, l.rec.Count(deliverytest.MethodReply))
+		}
+		l.round(t, l.b)
+		l.round(t, l.a)
+		want := `{"page": {"step": 2, "chain_name": "Night"}, "reason": "message_too_long", ` +
+			`"mention": {"kind": "everyone", "name": "here"}}`
+		if got := events(); len(got) != 1 || got[0] != want || l.rec.Count(deliverytest.MethodReply) != 2 {
+			t.Fatalf("after the reply sent again: %v, %d replies; want %s", got,
+				l.rec.Count(deliverytest.MethodReply), want)
+		}
+		q := deliverydb.New(l.d.Pool)
+		if n, err := q.RecordReplySent(ctx, deliverydb.RecordReplySentParams{OrgID: l.orgID, ID: reply, Owner: "r2",
+			Now: t0}); err != nil || n != 0 {
+			t.Errorf("a reply sent already recorded again: %d, %v", n, err)
+		}
+		warnings, err := destinationsdb.New(l.d.Pool).ListMentionWarnings(ctx, destinationsdb.ListMentionWarningsParams{
+			OrgID: l.orgID, DestinationIds: []int64{l.dests[0]}, Now: l.business.Now()})
+		if err != nil || len(warnings) != 0 {
+			t.Errorf("warnings %+v, %v", warnings, err)
+		}
+		// The Timeline names the Mention and the Page, with no entry or event.
+		tl, err := l.groups.Timeline(ctx, l.group(t, "Once"), groups.TimelineFilter{Kinds: []groups.Kind{
+			groups.KindDelivery}, Ascending: true, Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var named []groups.MentionView
+		for _, e := range tl.Entries {
+			if e.Delivery != nil && e.Delivery.Event == "mention_not_delivered" && e.Delivery.Mention != nil {
+				named = append(named, *e.Delivery.Mention)
+			}
+		}
+		if len(named) != 1 || named[0].Mention == nil || *named[0].Mention != (groups.MentionName{Kind: "everyone",
+			Name: "here"}) || named[0].Page == nil || *named[0].Page != (groups.MentionPage{Step: 2,
+			ChainName: "Night"}) || named[0].User != nil || named[0].Target != nil || named[0].Event != "" ||
+			named[0].Reason != "message_too_long" {
+			t.Errorf("the timeline %+v", named)
 		}
 	})
 }
