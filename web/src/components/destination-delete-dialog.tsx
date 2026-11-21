@@ -21,6 +21,7 @@ import {
 } from "../api/gen/endpoints/destinations/destinations";
 import type { Destination } from "../api/gen/model";
 import { isStale, problemText } from "../lib/api";
+import { ManagedByDeleteLine } from "./managed-by";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -106,6 +107,7 @@ export function DestinationDeleteDialog({
             <DialogDescription data-testid="destination-delete-description">
               {deleteDescription(t, destination)}
             </DialogDescription>
+            <ManagedByDeleteLine tool={destination.managed_by} />
           </DialogHeader>
           {remove.isError && (
             <Alert variant="destructive">

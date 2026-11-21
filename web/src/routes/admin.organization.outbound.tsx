@@ -274,7 +274,11 @@ function OutboundView() {
   const canWrite = useCan("organization:write");
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <PageHeading title={t("organization.nav.outbound")} hint={t("organization.outbound.hint")} />
+      <PageHeading
+        title={t("organization.nav.outbound")}
+        hint={t("organization.outbound.hint")}
+        mark={{ object: "outboundPolicy", tool: query.data?.managed_by }}
+      />
       {query.data === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}

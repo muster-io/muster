@@ -1981,6 +1981,25 @@
     "readOnly": "You can view this Lookup table but not change it.",
     "title": "Lookup tables"
   },
+  "managedBy": {
+    "badge": "Managed by {{tool}}",
+    "deleteLine": "{{tool}} creates it again on its next run.",
+    "objects": {
+      "connection": "connection",
+      "destination": "destination",
+      "escalationChain": "escalation chain",
+      "integration": "integration",
+      "linkRule": "link rule",
+      "lookupTable": "lookup table",
+      "oidcSettings": "OIDC configuration",
+      "organization": "organization",
+      "outboundPolicy": "outbound address policy",
+      "route": "route",
+      "schedule": "schedule",
+      "team": "team"
+    },
+    "warning": "This {{object}} is managed by {{tool}}. Changes you save here are undone by the next run of {{tool}}: change its code instead."
+  },
   "matchers": {
     "add": "Add matcher",
     "applied": "Applied matchers",
