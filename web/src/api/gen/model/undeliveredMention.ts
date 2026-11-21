@@ -5,14 +5,20 @@
 import type { MentionEntryRef } from './mentionEntryRef';
 import type { MentionEvent } from './mentionEvent';
 import type { MentionNotDeliveredReason } from './mentionNotDeliveredReason';
+import type { NamedMention } from './namedMention';
 import type { UserRef } from './userRef';
 
 /**
- * A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not mention as their messenger mentions them (C-28.FR-3).
+ * A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); or a group, a Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11), with `mention` in place of `user`. A Mention of a template's token (`{{ mention "here" }}`, a group's token), which no entry named, has neither `entry` nor `event`.
  */
 export interface UndeliveredMention {
-  user: UserRef;
-  entry: MentionEntryRef;
-  event: MentionEvent;
+  /** The person; absent for a group or everyone, which `mention` names. */
+  user?: UserRef;
+  /** The group or everyone in the chat; absent for a person. */
+  mention?: NamedMention;
+  /** The entry that named the person or the Mention; absent for a template's token. */
+  entry?: MentionEntryRef;
+  /** The Loud event the entry applied to; absent for a template's token. */
+  event?: MentionEvent;
   reason: MentionNotDeliveredReason;
 }

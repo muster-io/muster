@@ -5197,6 +5197,9 @@ func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, se
 	if err != nil {
 		return err
 	}
+	// A Bridge reads its info right after it is saved (#658): to the saved address, through the saved proxy, with the
+	// stored token, as C-13.FR-14 allows. Only that read is forgotten; any other request of the save stays recorded.
+	saved.discard(func(record string) bool { return strings.HasPrefix(record, "GET /v1/info ") })
 	draft := func(addr string, token keyring.SecretInput, p *proxyconf.Input) connections.Draft {
 		setAddress(addr)
 		return connections.Draft{Type: typ, ServerURL: in.ServerURL, BotAPIBaseURL: in.BotAPIBaseURL,
@@ -5275,6 +5278,13 @@ func (s *probeDraftStandIn) taken() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.records)
+}
+
+// discard forgets the requests recorded so far that match.
+func (s *probeDraftStandIn) discard(match func(record string) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = slices.DeleteFunc(s.records, match)
 }
 
 func (s *probeDraftStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
