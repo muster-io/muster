@@ -6,6 +6,7 @@ package gateways
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/netip"
 	"reflect"
@@ -22,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 )
 
@@ -49,8 +51,9 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{t: t, store: newFakeStore(), gw: &fakeGatewaySender{}, clock: clock.NewManual(t0), log: &bytes.Buffer{}}
 	logger := logging.New(e.log, logging.LevelInfo)
-	e.svc = New(Config{OrgID: 1, Store: e.store, Audit: audit.NewWriter(logger, e.clock), Business: e.clock,
-		Log: logger, Gateway: e.gw, Path: deliverytest.Unlimited(1, clock.Clocks{Business: e.clock, Real: clock.Real{}})})
+	e.svc = New(Config{OrgID: 1, Store: e.store, Keys: openKeys(t, 'a'), Audit: audit.NewWriter(logger, e.clock),
+		Business: e.clock,
+		Log:      logger, Gateway: e.gw, Path: deliverytest.Unlimited(1, clock.Clocks{Business: e.clock, Real: clock.Real{}})})
 	return e
 }
 
@@ -137,8 +140,8 @@ func TestCreateSendsCode(t *testing.T) {
 		t.Fatalf("%d codes", len(e.store.codes))
 	}
 	k := e.store.codes[0]
-	if k.sessionID != 7 || bytes.Contains(k.codeHash, []byte(code)) || !bytes.Equal(k.codeHash, codeHash(c.PublicID,
-		code)) || !k.expiresAt.Equal(t0.Add(10*time.Minute)) || !bytes.Equal(k.contactHash, hashText(contact)) {
+	if k.sessionID != 7 || bytes.Contains(k.codeHash, []byte(code)) || !bytes.Equal(k.codeHash, signedCode(t, 'a',
+		c.PublicID, code)) || !k.expiresAt.Equal(t0.Add(10*time.Minute)) || !bytes.Equal(k.contactHash, hashText(contact)) {
 		t.Errorf("code row %+v", k)
 	}
 	if got := e.actions(); len(got) != 1 || got[0] != ActionCreated {
@@ -241,6 +244,148 @@ func TestExpiry(t *testing.T) {
 	}
 	if !strings.Contains(e.log.String(), `"reason":"expired"`) {
 		t.Errorf("log %s", e.log.String())
+	}
+}
+
+// TestCodeSignedWithKeyring: a code is stored as its HMAC with the gateway-contact-code sub-key of the active key,
+// bound to its contact, never as the plain SHA-256 that a reader of the table could reverse over a million values; a
+// Keyring of other master keys cannot check it.
+func TestCodeSignedWithKeyring(t *testing.T) {
+	e := newEnv(t)
+	r := person(1, 7)
+	c := e.create(r, contact)
+	code := e.sentCode()
+	stored := e.store.codes[0].codeHash
+	plain := sha256.Sum256([]byte(c.PublicID + ":" + code))
+	if bytes.Equal(stored, plain[:]) || !bytes.Equal(stored, signedCode(t, 'a', c.PublicID, code)) {
+		t.Errorf("stored %x", stored)
+	}
+	e.svc.cfg.Keys = openKeys(t, 'b')
+	if _, err := e.svc.Confirm(t.Context(), r, c.PublicID, code); left(err) != MaxAttempts-1 {
+		t.Errorf("the right code under other master keys: %v", err)
+	}
+}
+
+// TestCodeAcrossRotation: a code stored under the key A still confirms once B became active with A retired in the
+// Keyring, a wrong one does not, and it still expires after gateway.contact_code; once A left the Keyring the code no
+// longer checks.
+func TestCodeAcrossRotation(t *testing.T) {
+	r := person(1, 7)
+	rotated := func(t *testing.T, after ...byte) (*env, Contact, string) {
+		t.Helper()
+		e := newEnv(t)
+		e.svc.cfg.Keys = openKeys(t, 'a', 'b')
+		c := e.create(r, contact)
+		e.svc.cfg.Keys = openKeys(t, after...)
+		e.clock.Advance(CodeTTL - time.Second)
+		return e, c, e.sentCode()
+	}
+	t.Run("retired", func(t *testing.T) {
+		e, c, code := rotated(t, 'b', 'a')
+		if _, err := e.svc.Confirm(t.Context(), r, c.PublicID, "000000"); left(err) != MaxAttempts-1 {
+			t.Errorf("a wrong code: %v", err)
+		}
+		got, err := e.svc.Confirm(t.Context(), r, c.PublicID, code)
+		if err != nil || !got.Confirmed() {
+			t.Errorf("the right code after the rotation: %+v, %v", got, err)
+		}
+	})
+	t.Run("expired", func(t *testing.T) {
+		e, c, code := rotated(t, 'b', 'a')
+		e.clock.Advance(time.Second)
+		if _, err := e.svc.Confirm(t.Context(), r, c.PublicID, code); left(err) != 0 ||
+			!strings.Contains(e.log.String(), `"reason":"expired"`) {
+			t.Errorf("an expired code: %v", err)
+		}
+	})
+	t.Run("removed", func(t *testing.T) {
+		e, c, code := rotated(t, 'b')
+		if _, err := e.svc.Confirm(t.Context(), r, c.PublicID, code); left(err) != MaxAttempts-1 {
+			t.Errorf("a code whose key left the Keyring: %v", err)
+		}
+	})
+}
+
+// TestLegacyCode: a code stored before codes were signed, as the SHA-256 of "public_id:code", still confirms within its
+// gateway.contact_code and a wrong code does not; a row of 32 other bytes never matches.
+func TestLegacyCode(t *testing.T) {
+	r := person(1, 7)
+	e := newEnv(t)
+	c := e.create(r, contact)
+	code := e.sentCode()
+	e.store.codes[0].codeHash = bytes.Repeat([]byte{7}, sha256.Size)
+	if _, err := e.svc.Confirm(t.Context(), r, c.PublicID, code); left(err) != MaxAttempts-1 {
+		t.Errorf("the right code against other bytes: %v", err)
+	}
+	plain := sha256.Sum256([]byte(c.PublicID + ":" + code))
+	e.store.codes[0].codeHash = plain[:]
+	if _, err := e.svc.Confirm(t.Context(), r, c.PublicID, "000000"); left(err) != MaxAttempts-2 {
+		t.Errorf("a wrong code: %v", err)
+	}
+	if got, err := e.svc.Confirm(t.Context(), r, c.PublicID, code); err != nil || !got.Confirmed() {
+		t.Errorf("a legacy code: %+v, %v", got, err)
+	}
+}
+
+// countingVerify is a Keyring that counts its checks.
+type countingVerify struct {
+	*keyring.Keyring
+	n *int
+}
+
+func (k countingVerify) Verify(p keyring.Purpose, id string, msg, mac []byte) (bool, error) {
+	*k.n++
+	return k.Keyring.Verify(p, id, msg, mac)
+}
+
+// TestCodeChecksEveryKey: a code is checked with every key of the Keyring, also when the active key or the legacy
+// SHA-256 matched first, so that the time a check takes does not tell which one matched.
+func TestCodeChecksEveryKey(t *testing.T) {
+	r := person(1, 7)
+	for _, legacy := range []bool{false, true} {
+		e := newEnv(t)
+		e.svc.cfg.Keys = openKeys(t, 'a', 'b', 'c')
+		c := e.create(r, contact)
+		code := e.sentCode()
+		if legacy {
+			plain := sha256.Sum256([]byte(c.PublicID + ":" + code))
+			e.store.codes[0].codeHash = plain[:]
+		}
+		n := 0
+		e.svc.cfg.Keys = countingVerify{Keyring: openKeys(t, 'a', 'b', 'c'), n: &n}
+		if got, err := e.svc.Confirm(t.Context(), r, c.PublicID, code); err != nil || !got.Confirmed() || n != 3 {
+			t.Errorf("legacy %v: %+v, %v, %d checks", legacy, got, err, n)
+		}
+	}
+}
+
+// failingVerify is a Keyring whose checks fail.
+type failingVerify struct{ *keyring.Keyring }
+
+func (failingVerify) Verify(keyring.Purpose, string, []byte, []byte) (bool, error) {
+	return false, errors.New("verify boom")
+}
+
+// TestCodeKeyFailures: a Keyring without an active key stores no code, and a check that fails fails the confirmation
+// without counting an attempt.
+func TestCodeKeyFailures(t *testing.T) {
+	r := person(1, 7)
+	e := newEnv(t)
+	inactive, err := keyring.New([][]byte{masterKey('a')}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.svc.cfg.Keys = inactive
+	if _, err := e.svc.Create(t.Context(), r, gwID, contact); !errors.Is(err, keyring.ErrNoActiveKey) ||
+		len(e.store.codes) != 0 || len(e.gw.sent) != 0 {
+		t.Errorf("Create without an active key: %v, %d codes", err, len(e.store.codes))
+	}
+	e.svc.cfg.Keys = openKeys(t, 'a')
+	c := e.create(r, contact)
+	e.svc.cfg.Keys = failingVerify{openKeys(t, 'a')}
+	if _, err := e.svc.Confirm(t.Context(), r, c.PublicID, e.sentCode()); err == nil ||
+		!strings.Contains(err.Error(), "verify boom") || e.store.codes[0].attempts != 0 {
+		t.Errorf("Confirm with a failing check: %v, %d attempts", err, e.store.codes[0].attempts)
 	}
 }
 
@@ -446,9 +591,11 @@ func TestContactCap(t *testing.T) {
 	if n := len(e.gw.sent); n != 10 {
 		t.Errorf("%d codes sent", n)
 	}
+	drawn := sha256.Sum256([]byte(g.PublicID + ":012345"))
 	for _, k := range e.store.codes {
 		if k.userID == 5 && (!k.sentAt.Valid || k.voidedAt.Valid || !k.expiresAt.Equal(e.clock.Now().Add(CodeTTL)) ||
-			bytes.Equal(k.codeHash, codeHash(g.PublicID, "012345")) || !bytes.Equal(k.codeHash, random)) {
+			bytes.Equal(k.codeHash, signedCode(t, 'a', g.PublicID, "012345")) || bytes.Equal(k.codeHash, drawn[:]) ||
+			!bytes.Equal(k.codeHash, random)) {
 			t.Errorf("the withheld code does not look sent, or is the code drawn: %+v", k)
 		}
 	}

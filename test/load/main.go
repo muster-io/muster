@@ -9,7 +9,9 @@
 // fails, when fewer Alerts fire or fewer Alert Groups are open than it sent, when the 99th percentile of
 // muster_ingest_request_duration_seconds exceeds 1 s (P-44) or the 95th percentile of muster_delivery_latency_seconds
 // exceeds 5 s (NFR-2); both are read from the histogram buckets on /metrics before and after the run. When nothing
-// listens at the ingestion endpoint it reports that it skipped.
+// listens at the ingestion endpoint it reports that it skipped. With -scenario l2 the storm goes to -teams Teams whose
+// Escalation chains Page their people by Mention and through the Notification gateway of `muster dev`, and the run
+// also reports Pages, calls, statistics and the database's load (l2.go).
 package main
 
 import (
@@ -82,9 +84,12 @@ type options struct {
 	duration, settle          time.Duration
 	groups, alerts            int
 	destination               string
+	scenario                  string
+	teams, teamUsers          int
 	publicURL, ingestURL      string
 	metricsURL, mattermost    string
 	adminEmail, adminPassword string
+	databaseURL               string
 }
 
 func (o options) webhooks() int { return int(math.Round(o.duration.Seconds() * float64(o.rate))) }
@@ -100,6 +105,11 @@ func parse(args []string, stderr io.Writer) (options, int) {
 	flags.StringVar(&o.destination, "destination", destinationMattermost,
 		"`mattermost` delivers to the fake Mattermost server and checks the delivery latency; none creates no Destination")
 	flags.DurationVar(&o.settle, "settle", 5*time.Minute, "how long at most to wait for processing and delivery after sending")
+	flags.StringVar(&o.scenario, "scenario", scenarioL1,
+		"`l1` sends the storm alone; l2 also pages the people of -teams Teams through Escalation chains, Notification "+
+			"rules and the Notification gateway, and reports Pages, calls, statistics and the database's load")
+	flags.IntVar(&o.teams, "teams", 200, "Teams of the l2 scenario, each with its Escalation chain; group g belongs to Team g mod -teams")
+	flags.IntVar(&o.teamUsers, "team-users", 1, "Users of each Team in the l2 scenario, all Paged by its chain")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0
@@ -113,6 +123,14 @@ func parse(args []string, stderr io.Writer) (options, int) {
 	case o.destination != destinationMattermost && o.destination != destinationNone:
 		fmt.Fprintln(stderr, "load test: -destination is mattermost or none")
 		return o, 2
+	case o.scenario != scenarioL1 && o.scenario != scenarioL2:
+		fmt.Fprintln(stderr, "load test: -scenario is l1 or l2")
+		return o, 2
+	case o.scenario == scenarioL2 && (o.teams <= 0 || o.teamUsers <= 0 || o.teamUsers > maxTeamUsers ||
+		o.destination != destinationMattermost):
+		fmt.Fprintf(stderr, "load test: -scenario l2 needs -teams, -team-users from 1 to %d and -destination mattermost\n",
+			maxTeamUsers)
+		return o, 2
 	case o.webhooks() < o.groups || o.webhooks()%o.groups != 0 || o.alerts%o.groups != 0:
 		fmt.Fprintf(stderr, "load test: the %d webhooks of -rate × -duration must be a multiple of -groups (%d), and "+
 			"-alerts (%d) too\n", o.webhooks(), o.groups, o.alerts)
@@ -124,6 +142,7 @@ func parse(args []string, stderr io.Writer) (options, int) {
 	o.mattermost = strings.TrimSuffix(env("MUSTER_LOAD_MATTERMOST_URL", "http://"+devmode.MattermostAddr), "/")
 	o.adminEmail = env("MUSTER_LOAD_ADMIN_EMAIL", devmode.AdminEmail)
 	o.adminPassword = env("MUSTER_LOAD_ADMIN_PASSWORD", devmode.AdminPassword)
+	o.databaseURL = env("MUSTER_DATABASE_URL", devmode.DatabaseURL)
 	return o, -1
 }
 
@@ -151,6 +170,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case skip != "":
 		fmt.Fprintf(stdout, "load test: skipped: ingestion is not available (%s)\n", skip)
 		return 0
+	}
+	if o.scenario == scenarioL2 {
+		return runL2(ctx, o, fake, endpoint, stdout, stderr)
 	}
 	runName := fmt.Sprintf("load-test-%d", time.Now().Unix())
 	s, err := provision(ctx, o, runName)
@@ -231,10 +253,10 @@ var httpClient = &http.Client{
 }
 
 // setup is what provision created: the Integration token, and the public_ids of the Integration, the Route and the
-// Destination, empty with -destination=none.
+// Destination, empty with -destination=none. session is the Admin's web session, which api.rate_limit does not limit.
 type setup struct {
 	api                             *apiclient.ClientWithResponses
-	auth                            apiclient.RequestEditorFn
+	auth, session                   apiclient.RequestEditorFn
 	token                           string
 	integration, route, destination string
 }
@@ -246,25 +268,9 @@ func provision(ctx context.Context, o options, name string) (setup, error) {
 	if err != nil {
 		return setup{}, fmt.Errorf("API client: %w", err)
 	}
-	password := o.adminPassword
-	session, err := c.CreateSessionWithResponse(ctx, apiclient.SessionCreate{Login: o.adminEmail, Password: &password})
-	if err = check("sign in", session, err, session != nil && session.JSON201 != nil); err != nil {
+	withSession, err := signIn(ctx, c, o.adminEmail, o.adminPassword)
+	if err != nil {
 		return setup{}, err
-	}
-	var cookie *http.Cookie
-	for _, ck := range session.HTTPResponse.Cookies() {
-		if ck.Name == sessionCookie {
-			cookie = ck
-		}
-	}
-	if cookie == nil {
-		return setup{}, fmt.Errorf("sign in: the answer sets no %s cookie", sessionCookie)
-	}
-	// The session cookie is Secure, so a cookie jar would not send it over plain HTTP.
-	withSession := func(_ context.Context, req *http.Request) error {
-		req.AddCookie(cookie)
-		req.Header.Set("X-CSRF-Token", session.JSON201.CsrfToken)
-		return nil
 	}
 	me, err := c.GetMeWithResponse(ctx, withSession)
 	if err = check("read the Admin", me, err, me != nil && me.JSON200 != nil); err != nil {
@@ -278,7 +284,7 @@ func provision(ctx context.Context, o options, name string) (setup, error) {
 	if err = check("create the Personal access token", pat, err, pat != nil && pat.JSON201 != nil); err != nil {
 		return setup{}, err
 	}
-	s := setup{api: c, auth: func(_ context.Context, req *http.Request) error {
+	s := setup{api: c, session: withSession, auth: func(_ context.Context, req *http.Request) error {
 		req.Header.Set("Authorization", "Bearer "+pat.JSON201.Value)
 		return nil
 	}}
@@ -310,6 +316,30 @@ func provision(ctx context.Context, o options, name string) (setup, error) {
 		return setup{}, err
 	}
 	return s, nil
+}
+
+// signIn signs in with a password and returns what adds the session to a request: its cookie and its CSRF token.
+func signIn(ctx context.Context, c *apiclient.ClientWithResponses, login, password string) (apiclient.RequestEditorFn,
+	error) {
+	session, err := c.CreateSessionWithResponse(ctx, apiclient.SessionCreate{Login: login, Password: &password})
+	if err = check("sign in", session, err, session != nil && session.JSON201 != nil); err != nil {
+		return nil, err
+	}
+	var cookie *http.Cookie
+	for _, ck := range session.HTTPResponse.Cookies() {
+		if ck.Name == sessionCookie {
+			cookie = ck
+		}
+	}
+	if cookie == nil {
+		return nil, fmt.Errorf("sign in: the answer sets no %s cookie", sessionCookie)
+	}
+	// The session cookie is Secure, so a cookie jar would not send it over plain HTTP.
+	return func(_ context.Context, req *http.Request) error {
+		req.AddCookie(cookie)
+		req.Header.Set("X-CSRF-Token", session.JSON201.CsrfToken)
+		return nil
+	}, nil
 }
 
 // mattermostDestination creates a Connection to the fake Mattermost server and a Destination on its channel, both with
@@ -371,7 +401,8 @@ func fakeRateLimitOff(ctx context.Context, server string) error {
 
 // createRoute creates the Route of the run: the label load_run of the run, the Group key [alertname, cluster], the
 // Destination if there is one, and the first profile's policy with a Storm threshold above the run, which would
-// otherwise hold back the Root messages whose delivery it measures.
+// otherwise hold back the Root messages whose delivery it measures. In the l2 scenario it also delivers to the Teams
+// from the label, so that the Teams' Escalation chains run.
 func (s setup) createRoute(ctx context.Context, o options, name string) (string, error) {
 	profiles, err := s.api.ListRouteProfilesWithResponse(ctx, s.auth)
 	var list struct {
@@ -389,10 +420,14 @@ func (s setup) createRoute(ctx context.Context, o options, name string) (string,
 	if s.destination != "" {
 		destinations = append(destinations, s.destination)
 	}
-	route, err := s.api.CreateRouteWithBodyWithResponse(ctx, "application/json", jsonBody(map[string]any{
+	body := map[string]any{
 		"name": name, "urgent": false, "group_key": []string{"alertname", "cluster"},
 		"matchers":        []map[string]string{{"label": "load_run", "op": "=", "value": name}},
-		"destination_ids": destinations, "policy": policy}), s.auth)
+		"destination_ids": destinations, "policy": policy}
+	if o.scenario == scenarioL2 {
+		body["deliver_to_teams"], body["run_team_chains"] = true, true
+	}
+	route, err := s.api.CreateRouteWithBodyWithResponse(ctx, "application/json", jsonBody(body), s.auth)
 	if err = check("create the Route", route, err, route != nil && route.JSON201 != nil); err != nil {
 		return "", err
 	}
@@ -422,10 +457,13 @@ func check(step string, resp response, err error, ok bool) error {
 
 // plan spreads the run over groups Alertmanager groups of perGroup Alerts, each notified passes times: webhook j
 // notifies group j mod groups, whose Snapshot lists a further share of its Alerts each time and all of them the last
-// time.
+// time. With teams, group g carries the Team label of teams[g mod len(teams)]; began, when set, learns when the first
+// webhook of each group was sent.
 type plan struct {
 	groups, perGroup, passes int
 	run                      string
+	teams                    []string
+	began                    func(group int, at time.Time)
 }
 
 func (p plan) webhooks() int { return p.groups * p.passes }
@@ -437,8 +475,12 @@ func (p plan) next(fake *fakealertmanager.Fake, j int) ([]byte, fakealertmanager
 	reason := "new alerts added"
 	if pass == 0 {
 		reason = "first notification"
+		labels := map[string]string{"alertname": alertname, "cluster": fmt.Sprintf("c%04d", g)}
+		if len(p.teams) > 0 {
+			labels[teamLabel] = p.teams[g%len(p.teams)]
+		}
 		if _, err := fake.PutGroup(name, fakealertmanager.GroupSpec{Receiver: receiverName, Route: "{}",
-			Labels: map[string]string{"alertname": alertname, "cluster": fmt.Sprintf("c%04d", g)}}); err != nil {
+			Labels: labels}); err != nil {
 			return nil, fakealertmanager.Endpoint{}, err
 		}
 	}
@@ -477,6 +519,9 @@ func (p plan) send(ctx context.Context, fake *fakealertmanager.Fake, rate int) (
 		}
 		wg.Go(func() {
 			begin := time.Now()
+			if p.began != nil && j < p.groups {
+				p.began(j, begin)
+			}
 			status, err := fake.Send(ctx, endpoint, body)
 			took := time.Since(begin)
 			mu.Lock()
@@ -695,10 +740,10 @@ func (h histogram) quantile(q float64) float64 {
 	return lower
 }
 
-// verdict prints the figures of the run and PASS or FAIL with the reasons, and returns the exit code.
+// verdict prints the figures of the run and PASS or FAIL with the reasons, failures given first, and returns the exit
+// code.
 func verdict(w io.Writer, o options, report fakealertmanager.LoadReport, st outcome, before, after metrics,
-	destination string) int {
-	var failures []string
+	destination string, failures ...string) int {
 	if report.Accepted != o.webhooks() || report.Rejected > 0 || report.Failed > 0 {
 		failures = append(failures, fmt.Sprintf("%d of %d webhooks accepted", report.Accepted, o.webhooks()))
 	}
