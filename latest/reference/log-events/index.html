@@ -2888,6 +2888,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#account_link_code_withheld" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>account_link_code_withheld</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#account_link_linked" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4631,6 +4642,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#account_link_code_withheld" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>account_link_code_withheld</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#account_link_linked" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -6209,6 +6231,9 @@
 someone must look within the hour, WARN that the line is needed for an investigation, INFO that an investigation
 is impossible without it; <code>MUSTER_LOG_LEVEL</code> sets the lowest level written. The capability is the one that logs
 the event.</p>
+<h3 id="account_link_code_withheld"><code>account_link_code_withheld</code><a class="headerlink" href="#account_link_code_withheld" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>messenger</code>, <code>connection</code>, <code>user</code> · C-18</p>
+<p>A User asked for a link code to a Mattermost, Bridge or Slack account that had received the codes account_link.mattermost_code_requests, account_link.bridge_code_requests or account_link.slack_code_requests allow within the hour across Users, so that nothing was sent and the request was answered as if it had been: messenger is mattermost, bridge or slack, connection the public_id of the Connection, user the public_id of the requesting User. Never carries the account, the handle or the code.</p>
 <h3 id="account_link_linked"><code>account_link_linked</code><a class="headerlink" href="#account_link_linked" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>messenger</code>, <code>connection</code>, <code>user</code>, <code>error</code> · C-18</p>
 <p>A messenger account was linked to a User, through /start with a deep-link token in Telegram, a code from the bot's direct message in Mattermost or Slack, or through a Bridge an account_link event with a token sent to the bot or a code from the bot's direct message, and the account-links hint went to the User: messenger is telegram, mattermost, bridge or slack, connection the public_id of the Connection, user the public_id of the User. error, when present, says why the bot's confirmation or the answer to the account_link event was not sent; the link stays. Never carries the token or the code.</p>
