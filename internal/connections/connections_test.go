@@ -96,6 +96,8 @@ type memStore struct {
 	groupsRead  []dbgen.SetGroupsReadParams
 	lockedTeams [][]int64
 	newTeams    []int64
+	// afterCommit runs once a transaction committed, as another save would right after it.
+	afterCommit func()
 }
 
 // memEvent is an event id of a Bridge Connection.
@@ -163,6 +165,9 @@ func (s *memStore) InTx(_ context.Context, f func(connections.Queries) error) er
 		return err
 	}
 	s.committed++
+	if s.afterCommit != nil {
+		s.afterCommit()
+	}
 	return nil
 }
 

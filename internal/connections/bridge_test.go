@@ -153,16 +153,34 @@ func (e *env) createBridge(t *testing.T, name, base, mode string) connections.Co
 	return c
 }
 
+// createUnread creates the Bridge Connection in while the stand-in b refuses the read of its info after the creation,
+// so that it has none, as one whose bridge was down when it was saved, and forgets that read's request and limiter
+// call.
+func (e *env) createUnread(t *testing.T, b *standIn, in connections.Input) connections.Connection {
+	t.Helper()
+	b.set(func(b *standIn) { b.status = http.StatusServiceUnavailable })
+	c, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BridgeInfo != nil {
+		t.Fatalf("created with info %s", c.BridgeInfo)
+	}
+	b.set(func(b *standIn) { b.requests = nil })
+	e.path.subjects = nil
+	return c
+}
+
 // TestBridgeCreate is C-22.FR-1: a Bridge Connection with its name, base URL without its trailing slash, event
 // delivery mode, token, push secret and limiter; the token and the push secret are encrypted with the fields
 // connections.bot_token and connections.bridge_push_secret as associated data, read only as their status and shown in
 // the Audit log only as secret_changed; the callback address is MUSTER_INGEST_URL/api/v1/callbacks/bridge/<public_id>
-// and the info is null before the first check.
+// and the info is the one read once the creation committed (TestBridgeInfoOnSave).
 func TestBridgeCreate(t *testing.T) {
 	e, b := newBridgeEnv(t)
 	c := e.createBridge(t, "br", b.srv.URL+"/", connections.EventDeliveryPush)
 	if c.Type != connections.TypeBridge || c.BridgeBaseURL != b.srv.URL || c.EventDelivery != "push" ||
-		!c.BotToken.Set || !c.PushSecret.Set || c.BridgeInfo != nil || c.BridgeInfoReadAt != nil ||
+		!c.BotToken.Set || !c.PushSecret.Set || c.BridgeInfo == nil || c.BridgeInfoReadAt == nil ||
 		c.Limiter != (connections.Limiter{Limit: 10, PerSeconds: 1}) || c.ServerURL != "" || c.BotAPIBaseURL != "" ||
 		c.UpdateMode != "" || c.Version != 1 {
 		t.Fatalf("created %+v", c)
@@ -197,7 +215,7 @@ func TestBridgeCreate(t *testing.T) {
 		t.Errorf("audit %s %s", a.Action, a.Diff)
 	}
 	got, err := e.svc.Get(t.Context(), c.PublicID)
-	if err != nil || got.BridgeBaseURL != b.srv.URL || !got.PushSecret.Set || got.BridgeInfo != nil {
+	if err != nil || got.BridgeBaseURL != b.srv.URL || !got.PushSecret.Set || !bytes.Equal(got.BridgeInfo, c.BridgeInfo) {
 		t.Errorf("get = %+v, %v", got, err)
 	}
 	poll := e.createBridge(t, "br-poll", b.srv.URL, connections.EventDeliveryPoll)
@@ -318,6 +336,8 @@ func TestBridgeUpdate(t *testing.T) {
 	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
+	// The bridge refuses the read after the save, which shows that the save forgot the info.
+	b.set(func(b *standIn) { b.status = http.StatusServiceUnavailable })
 	newToken := keep
 	newToken.BridgeBaseURL, newToken.BotToken = b.srv.URL, keyring.Replace(bridgeToken)
 	if err := e.update(t, c.PublicID, newToken); err != nil {
@@ -326,6 +346,7 @@ func TestBridgeUpdate(t *testing.T) {
 	if got, _ := e.svc.Get(ctx, c.PublicID); got.BridgeInfo != nil {
 		t.Errorf("a new token kept the info: %+v", got)
 	}
+	b.set(func(*standIn) {})
 
 	push := keep
 	push.BridgeBaseURL, push.EventDelivery = b.srv.URL, connections.EventDeliveryPush
@@ -387,6 +408,182 @@ func TestBridgeUpdate(t *testing.T) {
 	}
 }
 
+// infoFailedLines are the connections and errors of the log lines bridge_info_read_failed.
+func infoFailedLines(t *testing.T, log string) []string {
+	t.Helper()
+	var out []string
+	for line := range strings.Lines(log) {
+		var l struct {
+			Event      string `json:"event"`
+			Connection string `json:"connection"`
+			Error      string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &l); err == nil && l.Event == "bridge_info_read_failed" {
+			out = append(out, l.Connection+" "+l.Error)
+		}
+	}
+	return out
+}
+
+// TestBridgeInfoOnSave is C-22.FR-2 as revised by #658: a Bridge Connection that is created, or saved with a new base
+// URL or token, has its info read right after the save commits, on the interactive path limited by the Connection,
+// and stored for the version saved, so that it is never unknown for a saved Connection; a save of its name, limiter,
+// proxy or event delivery mode calls nothing and keeps the info; a read that fails or cannot run is logged as
+// bridge_info_read_failed and never fails the save, which then has no info, as before.
+func TestBridgeInfoOnSave(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	infoReads := func() int {
+		n := 0
+		for _, r := range b.seen() {
+			if r.Method == http.MethodGet && r.URL.Path == "/v1/info" &&
+				r.Header.Get("Authorization") == "Bearer "+bridgeToken {
+				n++
+			}
+		}
+		return n
+	}
+	c := e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPoll)
+	if !bytes.Contains(c.BridgeInfo, []byte(`"native_mentions":true`)) || c.BridgeInfoReadAt == nil ||
+		!c.BridgeInfoReadAt.Equal(t0) || c.Version != 1 {
+		t.Fatalf("created without its info: %+v", c)
+	}
+	if got, _ := e.svc.Get(ctx, c.PublicID); !bytes.Equal(got.BridgeInfo, c.BridgeInfo) {
+		t.Errorf("the info read on creation is not stored: %s", got.BridgeInfo)
+	}
+	if n := infoReads(); n != 1 || len(e.store.infos) != 1 || e.store.infos[0].Version != 1 {
+		t.Errorf("%d reads, stored %+v", n, e.store.infos)
+	}
+	if s := e.path.subjects; len(s) != 1 || s[0].Connection == nil || *s[0].Connection != c.ID {
+		t.Errorf("subjects %+v", s)
+	}
+	if lines := infoLines(t, e.log.String()); len(lines) != 1 || lines[0].Connection != c.PublicID {
+		t.Errorf("logged %+v", lines)
+	}
+
+	// Other fields call nothing and keep the info.
+	other := bridgeInput("br-2", b.srv.URL, connections.EventDeliveryPush)
+	other.BotToken = keyring.Keep
+	other.Limiter = connections.Limiter{Limit: 5, PerSeconds: 1}
+	other.Proxy = proxyconf.Input{Enabled: true, Type: new("http"), Address: new("127.0.0.1:3128")}
+	got, err := e.svc.Update(ctx, by, c.PublicID, nil, other)
+	if err != nil || got.Version != 2 || !bytes.Equal(got.BridgeInfo, c.BridgeInfo) || infoReads() != 1 ||
+		len(e.path.subjects) != 1 {
+		t.Fatalf("a save of other fields = %+v, %v; %d reads", got, err, infoReads())
+	}
+	other.Proxy = proxyconf.Input{}
+
+	// A new token: read again for the new version.
+	e.business.Advance(time.Minute)
+	b.set(func(b *standIn) {
+		b.mutate = func(m map[string]any) { m["bridge"].(map[string]any)["version"] = "0.2.0" }
+	})
+	token := other
+	token.BotToken = keyring.Replace(bridgeToken)
+	if got, err = e.svc.Update(ctx, by, c.PublicID, nil, token); err != nil || got.Version != 3 ||
+		!bytes.Contains(got.BridgeInfo, []byte(`"0.2.0"`)) || !got.BridgeInfoReadAt.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("a new token = %+v, %v", got, err)
+	}
+	if n := infoReads(); n != 2 || e.store.infos[len(e.store.infos)-1].Version != 3 {
+		t.Errorf("%d reads, stored %+v", n, e.store.infos)
+	}
+
+	// A new base URL that does not answer: saved, without info, logged.
+	moved := token
+	moved.BridgeBaseURL = "http://127.0.0.1:9"
+	if got, err = e.svc.Update(ctx, by, c.PublicID, nil, moved); err != nil || got.Version != 4 ||
+		got.BridgeInfo != nil || got.BridgeBaseURL != "http://127.0.0.1:9" {
+		t.Fatalf("a new base URL that does not answer = %+v, %v", got, err)
+	}
+	if got, _ := e.svc.Get(ctx, c.PublicID); got.BridgeInfo != nil {
+		t.Errorf("info of an address that does not answer: %s", got.BridgeInfo)
+	}
+	if lines := infoFailedLines(t, e.log.String()); len(lines) != 1 ||
+		!strings.HasPrefix(lines[0], c.PublicID+" connect_failed") {
+		t.Errorf("logged %v", lines)
+	}
+
+	// A bridge that refuses the read at creation: created, without info.
+	b.set(func(b *standIn) { b.status = http.StatusServiceUnavailable })
+	down := e.createBridge(t, "down", b.srv.URL, connections.EventDeliveryPoll)
+	if down.BridgeInfo != nil || down.Version != 1 {
+		t.Errorf("created by a bridge that is down: %+v", down)
+	}
+	lines := infoFailedLines(t, e.log.String())
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], down.PublicID+" ") || strings.Contains(lines[1], bridgeToken) {
+		t.Errorf("logged %v", lines)
+	}
+
+	// No limiter token in time: created, without info.
+	b.set(func(*standIn) {})
+	e.path.limited = true
+	reads := infoReads()
+	limited := e.createBridge(t, "limited", b.srv.URL, connections.EventDeliveryPoll)
+	if limited.BridgeInfo != nil || infoReads() != reads || len(infoFailedLines(t, e.log.String())) != 3 {
+		t.Errorf("created while limited: %+v", limited)
+	}
+	e.path.limited = false
+
+	// A failed store of the info: created, logged.
+	e.store.fail["SetBridgeInfo"] = errors.New("the database is down")
+	stored := e.createBridge(t, "store", b.srv.URL, connections.EventDeliveryPoll)
+	if stored.BridgeInfo != nil || len(infoFailedLines(t, e.log.String())) != 4 {
+		t.Errorf("created with a failed store: %+v", stored)
+	}
+	delete(e.store.fail, "SetBridgeInfo")
+
+	// A Mattermost Connection reads no bridge.
+	reads = infoReads()
+	if _, err := e.svc.Create(ctx, by, input("mm", e.fake.URL())); err != nil || infoReads() != reads {
+		t.Errorf("a Mattermost Connection = %v", err)
+	}
+}
+
+// TestBridgeInfoOnSaveRacedBySave is the guard of the read of info after a save (#658) against a save of the same
+// Connection that commits meanwhile: one that commits before the read makes no request, and one that commits while
+// the bridge is read makes the read store nothing; either way the save returns its own version, without info, never
+// the later save's Connection.
+func TestBridgeInfoOnSaveRacedBySave(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	bump := func(name string) {
+		for _, r := range e.store.rows {
+			if r.row.Name == name {
+				r.row.Version++
+			}
+		}
+	}
+
+	// A save that commits between the creation and the read.
+	e.store.afterCommit = func() {
+		e.store.afterCommit = nil
+		bump("before")
+	}
+	c := e.createBridge(t, "before", b.srv.URL, connections.EventDeliveryPoll)
+	if c.Version != 1 || c.BridgeInfo != nil || len(b.seen()) != 0 || len(e.path.subjects) != 0 ||
+		len(e.store.infos) != 0 {
+		t.Errorf("raced before the read: %+v; %d requests, %d stored", c, len(b.seen()), len(e.store.infos))
+	}
+
+	// A save that commits while the bridge is read.
+	next := e.path.next
+	e.path.next = interactiveFunc(func(ctx context.Context, s delivery.Subject, op delivery.Op) (delivery.Outcome,
+		error) {
+		bump("during")
+		return next.Do(ctx, s, op)
+	})
+	c = e.createBridge(t, "during", b.srv.URL, connections.EventDeliveryPoll)
+	if c.Version != 1 || c.BridgeInfo != nil || len(b.seen()) != 1 {
+		t.Errorf("raced during the read: %+v; %d requests", c, len(b.seen()))
+	}
+	if len(e.store.infos) != 1 || e.store.infos[0].Version != 1 {
+		t.Errorf("stored %+v", e.store.infos)
+	}
+	if got, _ := e.svc.Get(ctx, c.PublicID); got.Version != 2 || got.BridgeInfo != nil {
+		t.Errorf("the later save %+v", got)
+	}
+}
+
 // TestBridgeDelete follows S-039 for a Bridge Connection: it is marked deleted, its token and push secret are wiped,
 // and connection.deleted is recorded.
 func TestBridgeDelete(t *testing.T) {
@@ -434,7 +631,7 @@ func infoLines(t *testing.T, log string) []infoLine {
 func TestBridgeCheck(t *testing.T) {
 	e, b := newBridgeEnv(t)
 	ctx := t.Context()
-	c := e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPush)
+	c := e.createUnread(t, b, bridgeInput("br", b.srv.URL, connections.EventDeliveryPush))
 	hints := len(e.store.hints)
 	res, err := e.svc.Check(ctx, c.PublicID, nil)
 	if err != nil || !res.OK || !res.Bridge || len(res.Steps) != 2 || res.BotName != "" {
@@ -620,8 +817,10 @@ func TestBridgeCheckThroughProxy(t *testing.T) {
 	if err != nil || !res.OK || res.Steps[0].Via != bridge.ViaProxy || res.Steps[1].Via != bridge.ViaProxy {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
+	// The read after the creation and the check.
 	reqs, targets := b.seen(), p.Targets()
-	if len(reqs) != 1 || len(targets) != len(reqs) || "http://"+targets[0] != b.srv.URL {
+	if len(reqs) != 2 || len(targets) != len(reqs) || "http://"+targets[0] != b.srv.URL ||
+		"http://"+targets[1] != b.srv.URL {
 		t.Errorf("%d requests reached the bridge, through the proxy to %v", len(reqs), targets)
 	}
 
@@ -660,7 +859,7 @@ func TestBridgeCheckThroughProxy(t *testing.T) {
 func TestBridgeStoredInfo(t *testing.T) {
 	e, b := newBridgeEnv(t)
 	ctx := t.Context()
-	c := e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPoll)
+	c := e.createUnread(t, b, bridgeInput("br", b.srv.URL, connections.EventDeliveryPoll))
 	conn := bridge.Conn{ID: c.ID, PublicID: c.PublicID, Version: c.Version}
 	if _, ok, err := e.svc.StoredInfo(ctx, conn); ok || err != nil {
 		t.Errorf("before the first check = %v, %v", ok, err)
@@ -713,6 +912,7 @@ func TestBridgeIsNotMattermost(t *testing.T) {
 	e, b := newBridgeEnv(t)
 	ctx := t.Context()
 	c := e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPoll)
+	b.set(func(b *standIn) { b.requests = nil })
 	if _, err := e.svc.Channels(ctx, c.PublicID, "", ""); !errors.Is(err, connections.ErrNotMattermost) {
 		t.Errorf("channels = %v", err)
 	}
@@ -867,8 +1067,10 @@ func TestCheckBridgeChannelThroughProxy(t *testing.T) {
 	if err != nil || !res.Check.OK() {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
+	// The read of info after the creation and the channel check.
 	reqs, targets := f.Requests(), p.Targets()
-	if len(reqs) != 1 || len(targets) != len(reqs) || "http://"+targets[0] != f.URL() {
+	if len(reqs) != 2 || len(targets) != len(reqs) || "http://"+targets[0] != f.URL() ||
+		"http://"+targets[1] != f.URL() {
 		t.Errorf("%d requests reached the bridge, through the proxy to %v", len(reqs), targets)
 	}
 	b.set(func(b *standIn) { b.hijack = true })
@@ -985,6 +1187,7 @@ func TestBridgeInfoForDelivery(t *testing.T) {
 		}
 		return n
 	}
+	f.ResetRequests()
 	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -1382,7 +1585,7 @@ func TestBridgeDevRoute(t *testing.T) {
 }
 
 // TestBridgeRoles is C-30.FR-1, C-30.AC-1 and C-22.FR-3 as revised at the Connections: a Bridge Connection reads the
-// roles of its stored info — messenger before its first check and when the info declares none, gateway alone for a
+// roles of its stored info, read when it is created — messenger when the info declares none, gateway alone for a
 // gateway-only bridge, both for a bridge with both — and only a gateway-only one is GatewayOnly; the role filter lists
 // every Connection of another type and the Bridge Connections with messenger as messengers, and only the Bridge
 // Connections with gateway as gateways.
@@ -1394,8 +1597,12 @@ func TestBridgeRoles(t *testing.T) {
 	old := e.createFakeBridge(t, f, "old", fakebridge.Token, connections.EventDeliveryPoll)
 	gw := e.createFakeBridge(t, f, "gw", fakebridge.GatewayToken, connections.EventDeliveryPoll)
 	both := e.createFakeBridge(t, f, "both", fakebridge.SecondToken, connections.EventDeliveryPoll)
-	if c, _ := e.svc.Get(ctx, gw.PublicID); !slices.Equal(c.BridgeRoles(), []string{bridge.RoleMessenger}) {
-		t.Errorf("before the first check %v", c.BridgeRoles())
+	if c, _ := e.svc.Get(ctx, gw.PublicID); !slices.Equal(c.BridgeRoles(), []string{bridge.RoleGateway}) ||
+		!slices.Equal(gw.BridgeRoles(), []string{bridge.RoleGateway}) {
+		t.Errorf("from the info read on creation %v", c.BridgeRoles())
+	}
+	if c, _ := e.svc.Get(ctx, both.PublicID); !slices.Equal(c.BridgeRoles(), []string{bridge.RoleMessenger}) {
+		t.Errorf("before the bridge declared both %v", c.BridgeRoles())
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, f.URL()+"/_fake/config", strings.NewReader(
 		`{"token":"`+fakebridge.SecondToken+`","roles":["messenger","gateway"]}`))
@@ -1651,6 +1858,8 @@ func TestProbeGateway(t *testing.T) {
 	f := startFakeBridge(t)
 	ctx := t.Context()
 	gw := e.createFakeBridge(t, f, "gw", fakebridge.GatewayToken, connections.EventDeliveryPoll)
+	f.ResetRequests()
+	stored := len(e.store.infos)
 	if out := e.svc.ProbeGateway(ctx, gw.ID); out.Kind != delivery.OutcomeOK {
 		t.Fatalf("the probe %+v", out)
 	}
@@ -1658,7 +1867,7 @@ func TestProbeGateway(t *testing.T) {
 		t.Errorf("requests %+v", reqs)
 	}
 	if got, _ := e.svc.Get(ctx, gw.PublicID); !slices.Equal(got.BridgeRoles(), []string{bridge.RoleGateway}) ||
-		len(e.store.infos) != 1 {
+		len(e.store.infos) != stored+1 {
 		t.Errorf("the info was not stored: %+v", got)
 	}
 	if out := e.svc.ProbeGateway(ctx, gw.ID); out.Kind != delivery.OutcomeOK || len(f.Requests()) != 2 {
