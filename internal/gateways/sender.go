@@ -61,10 +61,12 @@ import (
 // before its attempt; the calls one claim takes; the margin after the time a limiter token is due; the longest and
 // the shortest wait between rounds; and the first wait after a failed round.
 //
-// SenderConcurrency is the sender's own: the calls a round attempts at once. Each attempt holds at most one connection
-// of the main pool at a time — its preparation's transaction, then its record's, none while the gateway answers —, so
-// the sender holds at most this many besides its claim. Processing keeps to half of a pool of max(10, CPUs)
-// (db.MinPoolConns), and delivery, ingestion and the API share the rest with the sender.
+// SenderConcurrency is the sender's own: the calls a round attempts at once. Four keep the default limiter of a
+// gateway's Connection (connection.bridge.limiter, 10 calls a second) busy while the gateway answers each call within
+// 400 ms, where one call at a time would make one call per answer. Each attempt holds at most one connection of the
+// main pool at a time — its preparation's transaction, then its record's, none while the gateway answers —, so the
+// sender holds at most four besides its claim. Processing keeps to half of a pool of max(10, CPUs) (db.MinPoolConns),
+// and delivery, ingestion and the API share the rest with the sender.
 const (
 	SenderLease          = delivery.Lease
 	SenderBatch          = delivery.Batch
