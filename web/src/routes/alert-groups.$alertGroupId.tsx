@@ -61,7 +61,7 @@ function AlertGroupView({ alertGroupId }: { alertGroupId: string }) {
           {group.allowed_commands.includes("add_note") && <NoteBox alertGroupId={group.id} />}
         </div>
         <div className="flex min-w-0 flex-col gap-6">
-          <AlertGroupDeliveries alertGroupId={group.id} />
+          {!group.details_removed && <AlertGroupDeliveries alertGroupId={group.id} />}
           <AlertGroupLabels group={group} />
           <RelatedAlertGroups alertGroupId={group.id} />
         </div>

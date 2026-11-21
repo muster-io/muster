@@ -471,8 +471,8 @@ var ReminderSkipped = newEvent("reminder_skipped", LevelInfo, "C-17",
 // AlertGroupsPurged is logged when the Alert Group retention of the Leader deleted details or summary rows.
 var AlertGroupsPurged = newEvent("alert_groups_purged", LevelInfo, "C-09",
 	"The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended "+
-		"retention.alert_details ago and the steps of the runs of the Escalation chains of Alert Groups resolved "+
-		"then (details, the rows deleted) and the summary rows of Alert Groups resolved "+
+		"retention.alert_details ago, and the steps of the runs of the Escalation chains and the deliveries of "+
+		"Alert Groups resolved then (details, the rows deleted) and the summary rows of Alert Groups resolved "+
 		"retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).",
 	"details", "summaries")
 

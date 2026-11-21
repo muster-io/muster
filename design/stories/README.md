@@ -12,9 +12,10 @@ the review checks the code against.
 
 Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24` and the [core of
 L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`, with the statistics by people and by Team that L2 adds to
-`C-09`. Every functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of a capability is covered
-by its stories; the [coverage table](coverage.md) shows which story covers which ID. Terms follow
-[`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices are in the [ADRs](../adr/README.md).
+`C-09`, and the capabilities of L2 specified after its core, from `C-33`. Every functional requirement (`C-NN.FR-n`)
+and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the [coverage table](coverage.md)
+shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices
+are in the [ADRs](../adr/README.md).
 
 Contents: [1. File format](#1-file-format) · [2. Repository layout](#2-repository-layout) ·
 [3. Sizing and slicing](#3-sizing-and-slicing) · [4. Shared contracts](#4-shared-contracts) ·
@@ -55,7 +56,7 @@ issue: null
 | `capability` | The capability `C-NN` the story belongs to. |
 | `kind` | `be` (backend: Go, SQL, OpenAPI), `fe` (the web UI), `infra` (build, CI, release, deployment) or `docs` (the documentation site). A spike — a check on the test environment that a later story relies on — is `docs` with `operator_attention: true`: the maintainer runs it, it records the verified facts in `design/facts.md` and corrects the contracts that relied on them, and its title starts with "Spike:". |
 | `layer` | `L1` or `L2`: the layer of the PRD the story implements. |
-| `repository` | Optional, after `layer`: the GitHub repository, `OWNER/NAME`, of a story whose pull request goes to another repository than this one — the bridge libraries of ADR-0017. Its `files_touched` are paths in that repository, its `verify` runs that repository's Makefile, and its pull request there says `Part of muster-io/muster#<issue>`: a pull request in another repository does not close an issue here, so the issue is closed by hand once that pull request merges. The contract and the issue stay in this repository. Without the key the story is for this repository. |
+| `repository` | Optional, after `layer`: the GitHub repository, `OWNER/NAME`, of a story whose pull request goes to another repository than this one — the bridge libraries of ADR-0017 and the Terraform provider of C-33. Its `files_touched` are paths in that repository, its `verify` runs that repository's Makefile, and its pull request there says `Part of muster-io/muster#<issue>`: a pull request in another repository does not close an issue here, so the issue is closed by hand once that pull request merges. The contract and the issue stay in this repository. Without the key the story is for this repository. |
 | `depends_on` | Stories that must be merged first. The graph is acyclic. A dependency usually has a smaller ID; a part split off later takes the next free ID (section 6) but keeps its place in the phase order, so stories with smaller IDs may depend on it — S-061, split from S-039, comes before S-040. The story map lists stories in an order that respects every dependency. A frontend story depends on the backend story of its capability. |
 | `covers` | The FR and AC IDs the story covers, fully or in part; the body's coverage table says which. Required by the [L1 conventions](../prd/L1.md#2-conventions) and those of [L2](../prd/L2.md#2-conventions). |
 | `files_touched` | Every hand-written file the story creates or changes, tests included. Generated files are never listed ([section 2](#2-repository-layout)). A path ending in `/**` stands for a directory of small fixtures and counts as one entry. |
@@ -105,7 +106,9 @@ and ADR-0009 (the SPA in `web/`); the foundation stories create it.
 The bridge libraries for Go and Python and the example bridge are not in this repository: they live in
 `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python`, MIT without a CLA (ADR-0017), and the stories that
 build them name their repository in `repository` (S-083, S-084, S-085) and describe its layout in their contracts;
-the generated files there — each library's models and lock file — are never listed either.
+the generated files there — each library's models and lock file — are never listed either. Nor is the Terraform
+provider, which lives in `muster-io/terraform-provider-muster` under MIT without a CLA (ADR-0001, C-33); its stories
+(S-182 to S-188) name that repository, and its generated client, its `docs/` and its lock file are never listed.
 
 **Generated files are never listed** and are checked in: `internal/*/dbgen/` (sqlc), `internal/api/gen/` (the
 oapi-codegen strict server), `internal/bridge/gen/` (the models of the Bridge protocol, from S-073), `pkg/apiclient/`
@@ -249,7 +252,8 @@ stays ticked while its statement is unchanged. Edit the files, not the issues.
 
 ## 8. Story map
 
-All of L1 and the core of L2, in phase order. Contracts were written in batches, and every story of the map now has its
+All of L1, the core of L2 and the capabilities of L2 specified after it, in phase order. Contracts were written in
+batches, and every story of the map now has its
 contract file; a later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` frontend, `infra` build and
 deployment, `docs` documentation. A story for another repository names it after its title.
 
@@ -273,6 +277,8 @@ deployment, `docs` documentation. A story for another repository names it after 
 | L2 Paging | C-30 – C-32, the chains' part of C-27.FR-8 | S-145 – S-161, S-167 – S-169, S-172, S-173, S-177, S-178 | 24 |
 | L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
 | **L2 core** | 8 | | **68** |
+| L2 Terraform provider | C-33 | S-179 – S-189 | 11 |
+| **L2** | 9 | | **79** |
 
 ### Foundation
 
@@ -706,6 +712,37 @@ share one layer and milestone (`scripts/stories-sync`), as S-117 covers C-03.FR-
 only the Teams of Alert Groups and the filter by Team, S-118 for the API and S-120 for the list's filter on the page, so
 a lead runs them beside the remaining chains of the stages above. S-174's migration takes the next free number when it
 starts, as section 4 says for a story merged out of the map's order.
+
+### L2 Terraform provider
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-179](S-179-the-specification-under-mit-and-managed-by-on-routing-teams-and-chains.md) | C-33 | The API specification under MIT, and the managed_by mark on Integrations, Routes, Teams, Schedules, Escalation chains, Lookup tables and Link rules (BE) | be | — |
+| [S-180](S-180-managed-by-on-connections-destinations-and-the-settings-objects.md) | C-33 | The managed_by mark on Connections, Destinations, the Organization's settings, the Outbound address policy and the OIDC settings (BE) | be | S-179 |
+| [S-181](S-181-the-managed-by-mark-and-the-edit-warnings-on-the-configuration-pages.md) | C-33 | The "Managed by" mark and the warnings before a change on every configuration page (FE) | fe | S-180, S-158 |
+| [S-182](S-182-terraform-provider-skeleton-client-configuration-ci-and-release-pipeline.md) | C-33 | The Terraform provider's repository, its generated client, the provider configuration with the version check, CI with acceptance tests against muster dev, and the release pipeline — in `muster-io/terraform-provider-muster` | infra | S-181 |
+| [S-183](S-183-terraform-provider-organization-outbound-policy-and-oidc-settings.md) | C-33 | The Terraform resources of the objects that exist once: the Organization's settings with the default Notification rules, the Outbound address policy and the OIDC settings with the Role mapping (BE) — in `muster-io/terraform-provider-muster` | be | S-182 |
+| [S-184](S-184-terraform-provider-integrations-integration-tokens-and-connections.md) | C-33 | The Terraform resources of Integrations, Integration tokens and the Connections of each type, and the data source muster_connection (BE) — in `muster-io/terraform-provider-muster` | be | S-182 |
+| [S-185](S-185-terraform-provider-destinations-lookup-tables-and-link-rules.md) | C-33 | The Terraform resources of the Destinations of each type with the Secrets of outgoing webhooks, Lookup tables and Link rules (BE) — in `muster-io/terraform-provider-muster` | be | S-184 |
+| [S-186](S-186-terraform-provider-teams-members-team-destinations-schedules-and-the-user-and-team-data-sources.md) | C-33 | The Terraform resources of Teams, Team members, a Team's Destinations and Schedules with their Rotation layers, and the data sources muster_user and muster_team (BE) — in `muster-io/terraform-provider-muster` | be | S-185 |
+| [S-187](S-187-terraform-provider-escalation-chains-routes-the-default-route-and-the-route-order.md) | C-33 | The Terraform resources of Escalation chains, a Team's chains, Routes, the Default route and the Route order, with a complete example (BE) — in `muster-io/terraform-provider-muster` | be | S-183, S-186 |
+| [S-188](S-188-terraform-provider-guides-signing-key-and-publication-in-both-registries.md) | C-33 | The Terraform provider's guides, its signing key, and its first release in the Terraform Registry and the OpenTofu Registry — in `muster-io/terraform-provider-muster` | infra | S-187 |
+| [S-189](S-189-documentation-configuration-as-code-with-the-terraform-provider.md) | C-33 | Documentation: configuration as code with the Terraform provider, and the link from the "Managed by" mark | docs | S-181, S-188 |
+
+S-179 to S-189 were written when the maintainer settled the Terraform provider (journal D492, D506, D757), the first
+item of [L2 §1.5](../prd/L2.md#15-specified-later-in-l2) to be specified. Three are Muster's: the specification under
+MIT and the mark `managed_by` on the configuration objects, split into S-179 and S-180 at the boundary between two
+groups of domains because together they touched about 45 files, and the mark with its warnings on the pages, S-181,
+which follows S-158 because it changes the Escalation chain page that S-158 rebuilds. S-179 adds the one migration for
+all twelve tables, 0055. The three ship in 0.2.0, as the maintainer decided, which makes 0.2.0 the provider's minimum
+version. S-182 to S-188 are worked in `muster-io/terraform-provider-muster` and start after the
+tag of 0.2.0, which `depends_on` cannot name: S-182 builds the repository, the client, the provider's configuration,
+CI with the acceptance tests against `muster dev` from Muster's image, and the release pipeline; S-183 to S-187 add the
+resources by group, in the order in which they reference each other — the objects that exist once beside the rest,
+then Integrations and Connections, Destinations, Teams and Schedules, and last Escalation chains and Routes with the
+complete example; S-188 writes the guides and publishes the first release in both Registries, with the maintainer's
+signing key and accounts. S-189, Muster's page on configuration as code, follows the release so that its links to the
+Registries resolve.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
