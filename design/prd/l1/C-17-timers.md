@@ -32,12 +32,17 @@ FR-11.
   _Revised for L2 (2026-10-26):_ where Escalation chains run on an Alert Group, the first chain that starts stops its
   ack timeout, and when the Alert Group becomes firing again the ack timeout starts over only if none of its chains
   starts (C-32.FR-6); the chains share the points above (C-32.FR-5).
+  _Revised for L2 (2026-11-21):_ new Alerts that remove the acknowledgement, where the Route lets them, and a Detach
+  that leaves the Alert Group firing are points of starting over too; an attached Alert Group has no ack timeout of its
+  own (C-36.FR-7, C-37.FR-4, C-37.FR-8).
 - **C-17.FR-2** Notices come at doubling intervals from the Route's first interval F (`route.ack_timeout`) — F, 2F and
   4F, that is F, 3F and 7F after the start — and there are at most three. They are Loud Thread replies whose text is the
   Route's ack timeout template (C-12); Mentions follow each Destination's setting. The ack timeout can be turned off per
   Route; it is a Route policy field added here, with the profile values of defaults.md.
   _Revised for L2 (2026-10-26):_ the Mentions are those of each Destination's Mention entries for `ack_timeout`
   (C-28.FR-1).
+  _Revised for L2 (2026-11-21):_ the notices are Loud only where the Route lists `ack_timeout` among its Loud events,
+  and Quiet without Mentions elsewhere (C-36.FR-2).
 - **C-17.FR-3** After the last notice the Alert Group is Unclaimed: the Root message and the UI show "Nobody has taken
   this", and the Alert Group list gains an Unclaimed filter, column and badge. Unclaimed ends when the Alert Group stops
   being firing — it is acknowledged, snoozed, or resolved by a person or by the system — and the status change that ends
@@ -84,6 +89,9 @@ FR-11.
 
   _Revised for L2 (2026-10-26):_ `unclaimed` is also recorded when the last Escalation chain of an Alert Group runs out
   (C-32.FR-7).
+  _Revised for L2 (2026-11-21):_ `ack_timeout`, and `notices_missed` standing for ack timeout notices, are Loud only
+  where the Route lists `ack_timeout`; `reminder`, `auto_unacknowledged` and `notices_missed` standing for Reminders
+  stay Loud on every Route (C-36.FR-2).
 
 ## UI
 
