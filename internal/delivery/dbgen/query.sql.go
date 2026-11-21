@@ -4241,7 +4241,7 @@ func (q *Queries) LockRerenderGroup(ctx context.Context, arg LockRerenderGroupPa
 
 const lockStorm = `-- name: LockStorm :one
 SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
-       r.name AS route_name, r.language AS route_language, r.storm_threshold
+       r.storm_threshold
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = $1 AND s.id = $2 AND s.ended_at IS NULL
@@ -4261,12 +4261,13 @@ type LockStormRow struct {
 	AlertGroupCount int64
 	UrgentCount     int64
 	RoutePublicID   string
-	RouteName       string
-	RouteLanguage   string
 	StormThreshold  int64
 }
 
-// LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.
+// LockStorm reads, and locks, a Storm that has not ended, with the public_id and Storm threshold of its Route. The
+// Route's row is not locked, so a lock that waited for a save of the Route still reads the Route as it was before: the
+// end of the Storm reads the name and the language the summaries show again, in a statement of its own
+// (GetRouteDelivery).
 func (q *Queries) LockStorm(ctx context.Context, arg LockStormParams) (LockStormRow, error) {
 	row := q.db.QueryRow(ctx, lockStorm, arg.OrgID, arg.ID)
 	var i LockStormRow
@@ -4278,8 +4279,6 @@ func (q *Queries) LockStorm(ctx context.Context, arg LockStormParams) (LockStorm
 		&i.AlertGroupCount,
 		&i.UrgentCount,
 		&i.RoutePublicID,
-		&i.RouteName,
-		&i.RouteLanguage,
 		&i.StormThreshold,
 	)
 	return i, err
