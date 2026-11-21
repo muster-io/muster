@@ -68,9 +68,9 @@ container close to it: that is the page cache of the database files, which the k
 For a larger installation, edit the `postgres` service in `docker-compose.yml`: raise `mem_limit` and the settings
 under `command` together, so that the settings still fit inside the limit. Count `shared_buffers` and about 20 MB more
 of shared memory, about 16 MB for each of the `max_connections`, about 35 MB for each of the three autovacuum workers,
-and about 35 MB for the rest.
-One replica of Muster opens up to `max(10, CPUs)` connections and about three more, so raise `max_connections` on a
-machine with more than 27 CPUs. Run `docker compose up -d --wait` to restart PostgreSQL with the new values.
+and about 35 MB for the rest. One replica of Muster opens up to `max(10, CPUs)` connections and about three more, so
+raise `max_connections` on a machine with more than 27 CPUs. Run `docker compose up -d --wait` to restart PostgreSQL
+with the new values.
 
 ## CloudNativePG
 

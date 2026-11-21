@@ -107,8 +107,8 @@ issue: 3
   `shared_buffers=96MB`, `work_mem=2MB`, `maintenance_work_mem=32MB`, `max_connections=30` — sized for evaluation and
   small installations and checked with 100,000 Alert Groups (the starting values, `160m` with `shared_buffers=32MB`,
   lost PostgreSQL processes to the OOM killer at 50,000); the nightly load test reports the footprint of NFR-3 with
-  them (P-43) and fails when the kernel kills a PostgreSQL process. `.env.example` holds the master key placeholder that S-007 refuses
-  and the bootstrap Admin; `make compose-check` runs `docker compose config`.
+  them (P-43) and fails when the kernel kills a PostgreSQL process. `.env.example` holds the master key placeholder
+  that S-007 refuses and the bootstrap Admin; `make compose-check` runs `docker compose config`.
 - **Trivy** (C-01.FR-11): CI builds the image with goreleaser's snapshot mode and scans it; high and critical
   vulnerabilities with a fix fail the job.
 
