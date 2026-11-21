@@ -4386,7 +4386,7 @@ over one store, run each bot in one process only.</p>
 <p>The library's repository has a complete bridge in one file, <code>examples/minimal</code>: its messenger lives in memory and
 writes every message the bot posts to the log. From a clone of the repository, with Go 1.26 or newer, run it with a
 token, the one a Bridge Connection in Muster would hold:</p>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>--branch<span class="w"> </span>v0.1.0<span class="w"> </span>https://github.com/muster-io/muster-bridge-go<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster-bridge-go
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>--branch<span class="w"> </span>v0.1.2<span class="w"> </span>https://github.com/muster-io/muster-bridge-go<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster-bridge-go
 <span class="nb">printf</span><span class="w"> </span>example-token<span class="w"> </span>&gt;<span class="w"> </span>/tmp/bt
 go<span class="w"> </span>run<span class="w"> </span>./examples/minimal<span class="w"> </span>-token-file<span class="w"> </span>/tmp/bt
 </code></pre></div>
@@ -4639,7 +4639,7 @@ processes over one store, run each bot in one process only.</p>
 <p>The library's repository has a complete bridge in one file, <code>examples/memory_bridge.py</code>: its messenger lives in memory
 and writes every message the bot posts to the log. With the library installed as above, clone the repository, install
 uvicorn beside the library and run the example with a token, the one a Bridge Connection in Muster would hold:</p>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>--branch<span class="w"> </span>v0.1.0<span class="w"> </span>https://github.com/muster-io/muster-bridge-python<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster-bridge-python
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>--branch<span class="w"> </span>v0.1.2<span class="w"> </span>https://github.com/muster-io/muster-bridge-python<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster-bridge-python
 pip<span class="w"> </span>install<span class="w"> </span>uvicorn
 <span class="nb">printf</span><span class="w"> </span>example-token<span class="w"> </span>&gt;<span class="w"> </span>/tmp/bt
 python<span class="w"> </span>examples/memory_bridge.py<span class="w"> </span>--token-file<span class="w"> </span>/tmp/bt
@@ -4658,7 +4658,7 @@ found by login. It offers every feature of the protocol, one by one switchable, 
 to try Muster without a real messenger, and as a reference for your own bridge.</p>
 <p>Its image is <code>ghcr.io/muster-io/muster-example-bridge</code>, tagged <code>vX.Y.Z</code> with each release of the Go library; <code>edge</code>
 follows the <code>master</code> branch of the library's repository.</p>
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">8095</span>:8095<span class="w"> </span>-e<span class="w"> </span><span class="nv">BRIDGE_TOKEN</span><span class="o">=</span>example-token<span class="w"> </span>ghcr.io/muster-io/muster-example-bridge:v0.1.0
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">8095</span>:8095<span class="w"> </span>-e<span class="w"> </span><span class="nv">BRIDGE_TOKEN</span><span class="o">=</span>example-token<span class="w"> </span>ghcr.io/muster-io/muster-example-bridge:v0.1.2
 </code></pre></div>
 <p>The page is then at <code>http://127.0.0.1:8095/</code>, and the protocol under <code>/v1/</code> on the same port. <code>BRIDGE_FEATURES</code> limits
 the features the example offers, comma-separated: with <code>BRIDGE_FEATURES=thread_messages</code>, for one, it shows no buttons,
@@ -4698,7 +4698,7 @@ name and nothing on the host's loopback is involved.</p>
 cat<span class="w"> </span>&gt;compose.override.yaml<span class="w"> </span><span class="s">&lt;&lt;'EOF'</span>
 <span class="s">services:</span>
 <span class="s">  example-bridge:</span>
-<span class="s">    image: ghcr.io/muster-io/muster-example-bridge:v0.1.0</span>
+<span class="s">    image: ghcr.io/muster-io/muster-example-bridge:v0.1.2</span>
 <span class="s">    environment:</span>
 <span class="s">      BRIDGE_TOKEN: ${EXAMPLE_BRIDGE_TOKEN}</span>
 <span class="s">    ports:</span>
@@ -5894,9 +5894,9 @@ same kind of service as a messenger bridge, with the same token, the same <code>
 the calls to your provider and the callback of your provider that says the person pressed.</p>
 <div class="admonition note">
 <p class="admonition-title">Library versions</p>
-<p>The gateway role is in the <code>master</code> branch of both libraries, after <code>0.1.1</code>. Until their next release carries it,
-take it from there: <code>go get github.com/muster-io/muster-bridge-go@master</code>, or install <code>muster-bridge</code> from the
-repository of <code>muster-bridge-python</code>.</p>
+<p>The gateway role is in the libraries from <code>0.1.2</code>: use <code>go get github.com/muster-io/muster-bridge-go@v0.1.2</code>, or
+<code>pip install 'muster-bridge&gt;=0.1.2'</code>. <code>0.1.1</code> and earlier have no gateway
+role.</p>
 </div>
 <h3 id="the-role-in-info">The role in <code>info</code><a class="headerlink" href="#the-role-in-info" title="Permanent link">&para;</a></h3>
 <p>A bridge declares its role in <code>info</code>, with <code>roles</code>. A bridge without <code>roles</code> is a messenger. A gateway that is not also a

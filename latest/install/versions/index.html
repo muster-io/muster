@@ -3287,7 +3287,7 @@ channel. CI runs against a fake. See <a href="../../messengers/slack/">Slack</a>
 <p>Muster's versions are <code>0.N.x</code>, and 1.0 is a long way off.</p>
 <ul>
 <li><strong><code>0.N</code> is layer N of the <a href="https://github.com/muster-io/muster#roadmap">roadmap</a>.</strong> L1, Alert Groups in messengers,
-  is released as <code>0.1.x</code>; L2 will be <code>0.2.x</code>, L3 <code>0.3.x</code>, and so on. Layer N+1 starts with the release <code>0.(N+1).0</code>,
+  is <code>0.1.x</code>; L2, on-call, is <code>0.2.x</code>; L3 will be <code>0.3.x</code>, and so on. Layer N+1 starts with the release <code>0.(N+1).0</code>,
   which the maintainers set with release-please's <code>release-as</code>.</li>
 <li><strong><code>0.N.x</code> releases bring fixes and small changes</strong>, and nothing that breaks an installation: settings, the API under
   <code>/api/v1</code> and the database keep working without a change on your side.</li>
@@ -3298,7 +3298,7 @@ channel. CI runs against a fake. See <a href="../../messengers/slack/">Slack</a>
 <dl>
 <dt>0.2.0</dt>
 <dd>
-<p>The urgent mark of a Route (<code>route.urgent</code>) and the Organization's "critical is Urgent"
+<p>The <code>route.urgent</code> setting of a Route and the Organization's "critical is Urgent"
 (<code>organization.critical_is_urgent</code>) no longer act: an Alert Group is Urgent exactly when its Severity level is
 critical, and a Route raises the level of its Alert Groups with its
 <a href="../../concepts/routes-and-group-keys/#minimum-severity">Minimum severity</a>.</p>
@@ -3310,6 +3310,11 @@ critical, and a Route raises the level of its Alert Groups with its
 <li>Migration 0021 computes the Severity level and the urgency of the open Alert Groups and of their deliveries once,
   by the new rule: without lifecycle events or Mentions, without ending a Snooze or an acknowledgement, and without
   publishing anywhere new.</li>
+<li>Urgency is read from the Severity level of every Alert Group, resolved ones included, while migration 0021
+  computes the level only of the open ones. A resolved Alert Group whose Route was marked urgent now reads
+  <code>urgent: false</code> unless its level is critical, and a resolved critical one of an Organization that had turned
+  "critical is Urgent" off now reads <code>urgent: true</code>, so the <code>urgent</code> filter and the statistics over a period before
+  the upgrade give other results than on 0.1.</li>
 <li><code>urgent</code> in the input of a Route and <code>critical_is_urgent</code> in the input of the Organization are optional. A Route
   request with <code>urgent: true</code> and no <code>minimum_severity</code>, as a 0.1 client sends it, sets the Minimum severity
   critical; <code>urgent: false</code>, <code>urgent</code> beside <code>minimum_severity</code>, and <code>critical_is_urgent</code> change nothing. Reads keep
@@ -3419,9 +3424,8 @@ critical, and a Route raises the level of its Alert Groups with its
   from another Mattermost server) is published again once, Quietly, as a deleted Root message is, and a Mention
   in its footer may notify; a message the new Connection may not edit (a 403, as from another Connection of the same
   Mattermost server) makes the Destination Broken. A repair of a Root message that a send after a move may have
-  shown wrong stores a repair hash in <code>deliveries.desired_hash</code>; a replica without 0041, during a rolling update
-  or after a downgrade, takes it as a changed Desired state and edits each such Root message once more, Quietly,
-  with no visible change.</li>
+  shown wrong stores a repair hash in <code>deliveries.desired_hash</code>; a replica without 0041, during a rolling update,
+  takes it as a changed Desired state and edits each such Root message once more, Quietly, with no visible change.</li>
 <li>Migration 0042 adds the <a href="../../concepts/teams/#team-mentions">Team mentions</a>, none after the upgrade, and what the
   check of a Connection finds of its groups: whether a Slack bot token has <code>usergroups:read</code> and whether a
   Mattermost bot may read the groups, unknown until the Connection's next check. It is expand only: a 0.1 replica,
@@ -3461,7 +3465,7 @@ critical, and a Route raises the level of its Alert Groups with its
   Routes and Teams name, none after the upgrade, and the Permissions <code>escalation-chains:read</code>, which every Role
   gets, and <code>escalation-chains:write</code>, which Admins get. Roles get them at once; a Personal access token keeps the
   Permissions it was issued with, so issue a new one to reach the Escalation chains. It is expand only: a replica
-  without it reads and writes none of them, and no chain runs on 0.2.0 before a later version.</li>
+  without it reads and writes none of them.</li>
 <li>Migration 0047 adds the runs of the Escalation chains on Alert Groups, the steps they made and skipped, and the
   timers of their steps, which name the run rather than the Alert Group, none after the upgrade: chains start at
   the next point that starts them, such as a first Publication or an Unacknowledge, never on the upgrade. It is
@@ -3491,6 +3495,40 @@ critical, and a Route raises the level of its Alert Groups with its
   no Assignee and never clears them when it acknowledges, snoozes or resolves an Alert Group — the reads show only
   the Assignees of firing Alert Groups, so such rows never show — and its Pages and rule runs carry no run step, so
   a reach by them only adds to a chain without Assignees; let the rollout finish before relying on Assignees.</li>
+<li>Migration 0051 adds the Pages through <a href="../../messengers/notification-gateways/">Notification gateways</a>: the Page,
+  the run of the chain and the rule run that queued each Alert Group of a call, and the gateway and the call of a
+  Page of the kind call, none after the upgrade. It is expand only: a 0.1 replica, or one of a development image
+  without it, writes none of the new columns, so the calls it queues have no stop check of a chain or a rule, and a
+  call it sends ends without settling its Pages, which stay pending and make no Assignee. Its delivery worker also
+  settles the Pages of the calls of a 0.2.0 replica as Pages by Mention within a round: it ends them
+  <code>not_delivered</code>, records a wrong <code>page_not_delivered</code>, and an accepted call then makes no Assignee. Do not rely on
+  Pages through gateways until every replica runs 0.2.0.</li>
+<li>Migrations 0052 to 0055 add one index each, on <code>thread_replies</code> (the Page replies still to be sent),
+  <code>alert_groups</code> (the open Alert Groups and those in their Grace period) and twice on <code>deliveries</code> (the pending
+  deliveries of Alert Groups, and those no worker has to send, by their last change), which the delivery worker, the
+  walks of a change of configuration and the retention of deliveries read. They are expand only and a replica
+  without them works as before, only slower on a large database. Each builds its index inside a transaction, so
+  while it builds, writes to that table wait: ingestion and Alert Group changes for <code>alert_groups</code> and <code>deliveries</code>,
+  Thread replies for <code>thread_replies</code>. Each runs under a <code>lock_timeout</code> of 5 seconds and a <code>statement_timeout</code> of
+  5 minutes.</li>
+</ul>
+<p><strong>Breaking changes in 0.2.0.</strong> Four changes can break an installation or a client that worked on 0.1; check them
+before you upgrade:</p>
+<ul>
+<li><strong>The Route profile id <code>on_call</code> is now <code>paging</code>.</strong> A client that types the enum of <code>listRouteProfiles</code> or looks
+  up <code>on_call</code> must use <code>paging</code>. Nothing stored changes. See "The Route profile On-call is now Paging" below.</li>
+<li><strong>A Helm <code>image.repository</code> without a registry host is prefixed with <code>ghcr.io</code>.</strong> A path such as <code>myorg/muster</code>
+  that you pulled from Docker Hub now points at <code>ghcr.io/myorg/muster</code>: set <code>image.registry: docker.io</code> or write
+  the full path; a local image for kind or minikube needs <code>image.registry: ""</code>. See "Helm chart" below.</li>
+<li><strong>A Role mapping entry that ends in <code>/*</code> is a subtree.</strong> <code>platform/*</code> matched only that exact group name on 0.1;
+  it now matches <code>platform</code> and every group below it, so it can give a Role to people it did not before. Review
+  each entry that ends in <code>/*</code> before the upgrade. An entry with <code>*</code> anywhere else is refused with <code>422</code> when you
+  save the OIDC settings. See "Role mapping entries with <code>*</code>" below.</li>
+<li><strong>Marking a Route urgent and "critical is Urgent" stop acting.</strong> An Alert Group is Urgent exactly when its
+  Severity level is critical, and a Route raises the level with its Minimum severity. Routes marked urgent got the
+  Minimum severity critical; an Organization that had turned "critical is Urgent" off now has Urgent critical Alert
+  Groups, and no setting keeps the old behaviour. Check the Minimum severity of your Routes after the upgrade. A
+  client that sends <code>urgent</code> or <code>critical_is_urgent</code> keeps working, as the notes above describe.</li>
 </ul>
 <p><strong>Slack apps get an optional scope.</strong> Team mentions in Slack need the bot scope <code>usergroups:read</code>, which the
 <a href="../../messengers/slack/#create-the-app-from-a-manifest">manifest</a> now has. A Slack app installed before 0.2.0 keeps
@@ -3521,6 +3559,10 @@ now counts as a path under <code>image.registry</code>.</p>
   GitHub, set <code>image.repository</code> to the full <code>ghcr.io/muster-io/muster</code>, which ignores both registry values.</li>
 <li><code>httpRoute.app.annotations</code> and <code>httpRoute.ingest.annotations</code> set the annotations of one HTTPRoute, over the
   shared <code>httpRoute.annotations</code>, as the Ingress ones do.</li>
+<li>Three alert rules are new and on by default, so an installation that renders the rules gets them on upgrade:
+  <code>MusterIngestSnapshotFailed</code> (<code>alerting.rules.MusterIngestSnapshotFailed.enabled</code>), <code>MusterScheduleGap</code>
+  (<code>alerting.rules.MusterScheduleGap.enabled</code>) and <code>MusterNotificationGatewayBroken</code>
+  (<code>alerting.rules.MusterNotificationGatewayBroken.enabled</code>). Set the key to <code>false</code> to leave one out.</li>
 </ul>
 <p><strong>The Route profile On-call is now Paging.</strong> <code>route-profiles</code> (<code>listRouteProfiles</code>) returns the id <code>paging</code>, named
 Paging, instead of <code>on_call</code>, which breaks clients that type the enum of the profile ids or look up <code>on_call</code>;
@@ -3528,11 +3570,14 @@ during a rolling update a 0.1 replica still answers <code>on_call</code>, and a 
 Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only
 fill in a new Route and are not stored, so nothing stored changes.</p>
 <p><strong>Rolling upgrade from 0.1.</strong> Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
-replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
-level on the Alert Groups it changes, with <code>urgent</code> true, since 0.2.0 writes <code>routes.urgent</code>. Until a later change
-of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
+replicas still run until the rollout ends. A 0.1 replica keeps running on the new schema, but one that starts or
+restarts after the first 0.2.0 replica has migrated (after a crash or an OOM kill, on a node drain, a scale-up or
+<code>docker compose restart</code>) exits with <code>schema_too_new</code> and does not come back, so the capacity drops to the 0.2.0
+replicas: finish the rollout promptly. A 0.1 replica ignores the Minimum severity: it stores a lower Severity level
+on the Alert Groups it changes, with <code>urgent</code> true, since 0.2.0 writes <code>routes.urgent</code>. Until a later change of
+their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
 Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
-Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
+Urgent" until every replica runs 0.2.0: a 0.1 replica writes <code>routes.urgent</code> and the switch, which 0.2.0 reads
 differently. A 0.1 replica also does not know the end of the working day: its <code>updateOrganization</code> that sets the
 start of the working day at or after the end fails the CHECK of migration 0022 with <code>500</code> until the rollout ends;
 save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
@@ -4002,6 +4047,34 @@ leaves nothing of it, but the schema recorded as dirty at version 42. To recover
 Muster, run <code>UPDATE schema_migrations SET version = 41, dirty = false;</code> and start the 0.2.0 replica again, or run
 <code>muster migrate</code>. Going back below 0042 loses every Team mention and what the checks found of the groups; once 0042
 is back, each Connection's next check finds the groups again, and the Team mentions are entered again.</p>
+<p>Migration 0043 adds the Mention entries, the Alert Groups each Storm counts and the new Mention of the delivery
+events in three transactions: the first creates the tables, fills the entries from the Mention settings and adds
+the new CHECK of <code>delivery_events</code>, <code>NOT VALID</code>; the second validates it; the third drops the CHECK it replaces. A
+failure leaves the schema recorded as dirty at version 43. To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">tables</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'mention_entries'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 42, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, finish the second and the third transactions and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">delivery_events</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">delivery_events_mentions_v2_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">delivery_events</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">delivery_events_mentions_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
+<p>Going back below 0043 drops every Mention entry and the Alert Groups the Storms count, and turns the Mention
+<code>storm_started</code> of the delivery events back into <code>new_alert_group</code>; the Mention settings are read again as the
+column <code>destinations.mentions</code> kept them, so a change of the Mention entries made on 0.2.0 is lost.</p>
 <p>Migration 0044 adds the two columns of what a Telegram Destination's check saw of its discussion group in one
 transaction: a failure leaves nothing of it, but the schema recorded as dirty at version 44. To recover, with the
 same database role as Muster, run <code>UPDATE schema_migrations SET version = 43, dirty = false;</code> and start the 0.2.0
@@ -4188,8 +4261,101 @@ refuses to start with <code>schema_dirty</code>. To recover, with the same datab
 <p>Going back below 0049 deletes the timers of rule runs and the Thread replies of Pages, and loses every Page with the
 people it named and every run of a Notification rule; the Timeline keeps its <code>paged</code> and <code>page_not_delivered</code>
 entries without the Team mention or token and the importance of a Page.</p>
-<p>Going back below 0050 loses the Assignees and the run steps of the Pages and the runs of Notification rules; the
-Timeline keeps its <code>assignees_changed</code> entries without the Assignees after each change.</p>
+<p>Migration 0050 adds the Assignees in one transaction: a failure leaves nothing of it, but the schema recorded as
+dirty at version 50, as the lock timeout or a deadlock with the running replicas, which write the Alert Groups and
+the Timeline it locks, may cause. To recover, with the same database role as Muster, run
+<code>UPDATE schema_migrations SET version = 49, dirty = false;</code> and start the 0.2.0 replica again, or run
+<code>muster migrate</code>. Going back below 0050 loses the Assignees and the run steps of the Pages and the runs of
+Notification rules; the Timeline keeps its <code>assignees_changed</code> entries without the Assignees after each change.</p>
+<p>Migration 0051 adds the Pages through Notification gateways in three transactions: the first adds the columns, their
+foreign keys and CHECKs and the new CHECKs of the reasons, <code>NOT VALID</code>, and the indexes of the new columns; the
+second validates them; the third drops the CHECKs of the reasons they replace. Each gives up after 5 seconds of
+waiting for a lock (<code>lock_timeout</code>), such as that of the Connections, which every replica writes, and PostgreSQL
+may end the first on a deadlock with replicas of a development image, which change the Pages and the calls it
+alters; run the upgrade at a quiet time. Any such failure leaves the schema recorded as dirty at version 51, and
+the 0.2.0 replica refuses to start with <code>schema_dirty</code>. To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">columns</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'pages'</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">column_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'gateway_connection_id'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 50, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, finish the second and the third transactions and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">gateway_call_items</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">gateway_call_items_escalation_run_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">gateway_call_items</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">gateway_call_items_notification_rule_run_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">gateway_call_items</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">gateway_call_items_page_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">pages</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">pages_gateway_connection_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">pages</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">pages_gateway_call_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">pages</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">pages_gateway_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">pages</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">pages_reason_v2_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">page_users</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">page_users_reason_v2_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">pages</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">pages_reason_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">page_users</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">page_users_reason_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
+<p>Going back below 0051 deletes the Pages of calls and loses what ties each Alert Group of a call to its Page, run
+and rule run; the calls that are still to be made go on without stop checks of their chains and rules, and the
+Timeline keeps its <code>paged</code> and <code>page_not_delivered</code> entries.</p>
+<p>Migrations 0052 to 0055 each build one index in a single transaction, with <code>CREATE INDEX</code> and not
+<code>CREATE INDEX CONCURRENTLY</code>, on <code>thread_replies</code>, <code>alert_groups</code> and, twice, <code>deliveries</code>. Like the indexes of
+migration 0040, they block the writes to the table while they build, so on a large <code>alert_groups</code> or <code>deliveries</code>
+table ingestion and the changes of Alert Groups wait. Each runs under a <code>statement_timeout</code> of 5 minutes and gives
+up after 5 seconds of waiting for a lock. A failure, a timeout of the build included, leaves nothing of the index
+but the schema recorded as dirty at the version of the migration, 52, 53, 54 or 55, and the 0.2.0 replica refuses
+to start with <code>schema_dirty</code>. To recover, with the same database role as Muster, either
+run the upgrade again at a quiet time or build the index yourself without blocking writes and mark the migration
+applied:</p>
+<ol>
+<li>
+<p>To run it again, clear the failed attempt, with <code>N</code> the version the schema is recorded dirty at, 52 to 55, and
+   start the 0.2.0 replica again, or run <code>muster migrate</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">N</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>To build the index yourself, run the statement of the failed migration outside a transaction (the <code>psql</code>
+   default), and then set the version to the migration's own:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">-- 0052</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">CONCURRENTLY</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">thread_replies_page_pending_idx</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">thread_replies</span><span class="w"> </span><span class="p">(</span><span class="n">org_id</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="p">)</span>
+<span class="w">    </span><span class="k">WHERE</span><span class="w"> </span><span class="n">page_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">state</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="s1">'collecting'</span><span class="p">,</span><span class="w"> </span><span class="s1">'pending'</span><span class="p">);</span>
+<span class="c1">-- 0053</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">CONCURRENTLY</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">alert_groups_evaluated_idx</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">alert_groups</span><span class="w"> </span><span class="p">(</span><span class="n">org_id</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="p">)</span>
+<span class="w">    </span><span class="k">WHERE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">&lt;&gt;</span><span class="w"> </span><span class="s1">'resolved'</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="n">grace_deadline</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">;</span>
+<span class="c1">-- 0054</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">CONCURRENTLY</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">deliveries_alert_group_pending_idx</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">deliveries</span>
+<span class="w">    </span><span class="p">(</span><span class="n">org_id</span><span class="p">,</span><span class="w"> </span><span class="n">alert_group_id</span><span class="p">)</span>
+<span class="w">    </span><span class="k">WHERE</span><span class="w"> </span><span class="k">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'pending'</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">alert_group_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">;</span>
+<span class="c1">-- 0055</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">CONCURRENTLY</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">deliveries_retention_idx</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">deliveries</span><span class="w"> </span><span class="p">(</span><span class="n">org_id</span><span class="p">,</span><span class="w"> </span><span class="n">updated_at</span><span class="p">)</span>
+<span class="w">    </span><span class="k">WHERE</span><span class="w"> </span><span class="k">state</span><span class="w"> </span><span class="o">&lt;&gt;</span><span class="w"> </span><span class="s1">'pending'</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">alert_group_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">;</span>
+<span class="c1">-- then, with N the version of the migration whose index you built</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+</ol>
+<p>A failed <code>CONCURRENTLY</code> build leaves an invalid index of that name: drop it with <code>DROP INDEX</code> before building
+   again. Migrations run in order, so only the one the schema is recorded dirty at has failed; build its index
+   alone, set the version, and the 0.2.0 replica applies the later ones as it starts.</p>
+<p>Going back below 0052, 0053, 0054 or 0055 drops its index and loses nothing else; the queries it served read more
+rows until it is back.</p>
+<p><strong>Going back to 0.1.</strong> Nothing runs down migrations in an installation: <code>muster migrate</code> takes no arguments, and the
+"Going back below 00NN" sentences above describe what the down migrations drop, which only Muster's tests run;
+they are not a supported way back. A 0.1.x binary on the 0.2.0 schema stops at start with the log event
+<a href="../../reference/log-events/#schema_too_new"><code>schema_too_new</code></a>, naming the schema version of 0.2.0 and the one it
+knows ("database schema version N is newer than this binary knows (20)" on 0.1.4), and its <code>muster migrate</code> exits
+with 1. Going back to 0.1 means restoring the database backup taken before the upgrade
+together with the master keys of that time, and running 0.1 on it, as <a href="../../operations/upgrades/">Upgrades</a>
+describes; everything written since the upgrade is lost.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
