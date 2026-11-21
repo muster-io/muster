@@ -5,7 +5,7 @@ capability: C-33
 kind: infra
 layer: L2
 repository: muster-io/terraform-provider-muster
-depends_on: [S-180]
+depends_on: [S-181]
 covers: [C-33.FR-1, C-33.FR-2, C-33.FR-3, C-33.FR-4, C-33.FR-8, C-33.FR-17, C-33.FR-18, C-33.FR-19, C-33.FR-20, C-33.AC-1, C-33.AC-15]
 files_touched:
   - README.md
@@ -100,7 +100,7 @@ issue: null
   `main.go` serves `providerserver.NewProtocol6` with the address `registry.terraform.io/muster-io/muster` and a
   `-debug` flag.
 - **Specification and client** (`api/openapi.yaml`, `api/MUSTER_VERSION`, `api/codegen.yaml`): `MUSTER_VERSION`
-  holds one version, `0.2.0` or the first `0.2.x` that carries `managed_by` (C-33.FR-4); `make spec-check` downloads
+  holds one version, `0.2.0` at first (C-33.FR-4); `make spec-check` downloads
   `https://raw.githubusercontent.com/muster-io/muster/v<version>/api/openapi.yaml` (`MUSTER_SPEC_URL` overrides it)
   and compares it byte for byte; `make spec-sync VERSION=x.y.z` replaces the copy and the version and runs
   `make generate`. oapi-codegen writes the types and the client into `internal/client/gen/` (generated, never listed).
@@ -110,8 +110,8 @@ issue: null
   `application/problem+json` with `code`, `title`, `detail` and `errors`. The token is never logged; `TF_LOG` shows
   requests with `Authorization` as `[redacted]`.
 - **Provider** (`provider.go`, `version.go`): the attributes `endpoint` (URL) and `token` (sensitive); `Configure`
-  calls `getSystemStatus` and compares its `version` as semver with the minimum, a constant in `version.go`: `0.2.0`,
-  or the first `0.2.x` that carries `managed_by` if S-179 and S-180 missed that tag. Errors and the warning are those
+  calls `getSystemStatus` and compares its `version` as semver with the minimum, the constant `0.2.0` in
+  `version.go`, the release that carries `managed_by`. Errors and the warning are those
   of the acceptance statements; the messages name the variable or the attribute that was used.
 - **Resource machinery** (`resourcekit.go`), used by every resource of S-183 to S-187:
   - `etag`, a computed attribute of every resource that stores the object's ETag from each read and write; updates and
@@ -121,7 +121,8 @@ issue: null
     Route order) held by the provider process from the fresh read to the write; the fresh read; the comparison of the
     part the resource manages with its prior state, which ends in the `412` error above when they differ; and the
     write with the ETag of that read.
-  - `managed_by` `terraform` set on every create and update body.
+  - `managed_by` `terraform` set on every create and update body, under OpenTofu too; the value is not configurable
+    (C-33.FR-13).
   - Import by `public_id` with `ImportStatePassthroughID`, and the parsing of composite ids `<a>/<b>`.
   - A `404` on a read removes the resource from the state.
   - Problems → diagnostics: a `422` error pointer `/a/0/b` → the attribute path `a[0].b` where the resource maps
@@ -212,9 +213,9 @@ None.
 ## Notes
 
 - Suggested commit: `feat: add the provider skeleton with its client, configuration and release pipeline`.
-- Starts after Muster's tag `v0.2.0` (journal D757), with S-179 and S-180 merged: `depends_on` names S-180, and the
-  tag is the maintainer's to announce. If S-179 or S-180 merged after that tag, `api/MUSTER_VERSION` and the minimum
-  are the first `0.2.x` that carries both.
+- Starts after Muster's tag `v0.2.0` (journal D757), which carries S-179 to S-181: `depends_on` names S-181, the last
+  of them, since it cannot name a tag, and the tag is the maintainer's to announce. `api/MUSTER_VERSION` starts at
+  `0.2.0`.
 - **Maintainer** (operator attention): install on this repository the GitHub App that release-please uses in Muster's
   repository and give it the variable `RELEASE_PLEASE_APP_CLIENT_ID` and the secret `RELEASE_PLEASE_APP_PRIVATE_KEY`;
   enable Renovate; after the first push, require the checks `ci` and `acceptance` on `master`; turn on private

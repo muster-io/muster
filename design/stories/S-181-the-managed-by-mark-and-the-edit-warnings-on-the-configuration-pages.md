@@ -112,6 +112,7 @@ None.
 
 - Suggested commit: `feat(web): show which tool manages a configuration object and warn before changes`.
 - S-158 rebuilds the Escalation chain page; this story follows it so as not to conflict with it.
+- Ships in 0.2.0 with S-179 and S-180, as the maintainer decided; the provider (S-182) starts after that tag.
 - The warning never asks to confirm a save: the maintainer decided that the mark warns and never blocks (journal D757).
 
 ## Coverage

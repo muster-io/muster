@@ -61,7 +61,8 @@ issue: null
 **OUT**
 
 - The guides and the publication (S-188); the page on Muster's documentation site (S-189).
-- Moving open Alert Groups before a Route is destroyed (`moveOpenAlertGroups`): an operation (Open questions).
+- Moving open Alert Groups before a Route is destroyed (`moveOpenAlertGroups`): an operation; the destroy reports
+  Muster's `409`, as the maintainer decided (C-33.FR-17).
 
 ## Contracts
 
@@ -126,9 +127,8 @@ the Default route — warn on destroy. The pull request carries this output, `Te
 
 ## Open questions
 
-- Should destroying a `muster_route` move its open Alert Groups first, for example to the Default route? The API
-  refuses the delete while they remain (C-08), and moving them is a decision about Alert Groups. Recommendation: no —
-  report the refusal, and document `moveOpenAlertGroups` in the Route's documentation.
+None. Destroying a `muster_route` never moves its open Alert Groups: it reports Muster's `409`
+`route-has-open-alert-groups`, as the maintainer decided, and the Route's documentation names `moveOpenAlertGroups`.
 
 ## Notes
 

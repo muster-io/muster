@@ -720,7 +720,7 @@ starts, as section 4 says for a story merged out of the map's order.
 | [S-179](S-179-the-specification-under-mit-and-managed-by-on-routing-teams-and-chains.md) | C-33 | The API specification under MIT, and the managed_by mark on Integrations, Routes, Teams, Schedules, Escalation chains, Lookup tables and Link rules (BE) | be | — |
 | [S-180](S-180-managed-by-on-connections-destinations-and-the-settings-objects.md) | C-33 | The managed_by mark on Connections, Destinations, the Organization's settings, the Outbound address policy and the OIDC settings (BE) | be | S-179 |
 | [S-181](S-181-the-managed-by-mark-and-the-edit-warnings-on-the-configuration-pages.md) | C-33 | The "Managed by" mark and the warnings before a change on every configuration page (FE) | fe | S-180, S-158 |
-| [S-182](S-182-terraform-provider-skeleton-client-configuration-ci-and-release-pipeline.md) | C-33 | The Terraform provider's repository, its generated client, the provider configuration with the version check, CI with acceptance tests against muster dev, and the release pipeline — in `muster-io/terraform-provider-muster` | infra | S-180 |
+| [S-182](S-182-terraform-provider-skeleton-client-configuration-ci-and-release-pipeline.md) | C-33 | The Terraform provider's repository, its generated client, the provider configuration with the version check, CI with acceptance tests against muster dev, and the release pipeline — in `muster-io/terraform-provider-muster` | infra | S-181 |
 | [S-183](S-183-terraform-provider-organization-outbound-policy-and-oidc-settings.md) | C-33 | The Terraform resources of the objects that exist once: the Organization's settings with the default Notification rules, the Outbound address policy and the OIDC settings with the Role mapping (BE) — in `muster-io/terraform-provider-muster` | be | S-182 |
 | [S-184](S-184-terraform-provider-integrations-integration-tokens-and-connections.md) | C-33 | The Terraform resources of Integrations, Integration tokens and the Connections of each type, and the data source muster_connection (BE) — in `muster-io/terraform-provider-muster` | be | S-182 |
 | [S-185](S-185-terraform-provider-destinations-lookup-tables-and-link-rules.md) | C-33 | The Terraform resources of the Destinations of each type with the Secrets of outgoing webhooks, Lookup tables and Link rules (BE) — in `muster-io/terraform-provider-muster` | be | S-184 |
@@ -734,8 +734,8 @@ item of [L2 §1.5](../prd/L2.md#15-specified-later-in-l2) to be specified. Three
 MIT and the mark `managed_by` on the configuration objects, split into S-179 and S-180 at the boundary between two
 groups of domains because together they touched about 45 files, and the mark with its warnings on the pages, S-181,
 which follows S-158 because it changes the Escalation chain page that S-158 rebuilds. S-179 adds the one migration for
-all twelve tables. Merged before the tag of 0.2.0, they make 0.2.0 the provider's minimum version; merged after it, the
-first `0.2.x` that carries them. S-182 to S-188 are worked in `muster-io/terraform-provider-muster` and start after the
+all twelve tables, 0055. The three ship in 0.2.0, as the maintainer decided, which makes 0.2.0 the provider's minimum
+version. S-182 to S-188 are worked in `muster-io/terraform-provider-muster` and start after the
 tag of 0.2.0, which `depends_on` cannot name: S-182 builds the repository, the client, the provider's configuration,
 CI with the acceptance tests against `muster dev` from Muster's image, and the release pipeline; S-183 to S-187 add the
 resources by group, in the order in which they reference each other — the objects that exist once beside the rest,

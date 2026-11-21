@@ -1197,7 +1197,7 @@ S-182, S-183, S-184, S-185, S-186, S-187, S-188, S-189. S-182 to S-188 are worke
 | C-33.FR-1 | S-182 | complete |  |
 | C-33.FR-2 | S-179 (part), S-182 (part) | complete | the licence in Muster (S-179); the copy, its check and the client (S-182) |
 | C-33.FR-3 | S-182 | complete |  |
-| C-33.FR-4 | S-182 | complete | 0.2.0 when S-179 and S-180 merge before its tag |
+| C-33.FR-4 | S-182 | complete | 0.2.0, which carries S-179 and S-180 |
 | C-33.FR-5 | S-183 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete | by group of resources |
 | C-33.FR-6 | S-184 (part), S-186 (part) | complete | `muster_connection` (S-184); `muster_user`, `muster_team` (S-186) |
 | C-33.FR-7 | S-183 (part), S-184 (part), S-185 (part), S-186 (part), S-187 (part) | complete |  |

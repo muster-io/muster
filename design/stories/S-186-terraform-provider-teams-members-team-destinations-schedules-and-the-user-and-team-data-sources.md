@@ -156,7 +156,8 @@ None.
 
 - Suggested commit: `feat: manage teams, team members, team destinations and schedules`.
 - A Team's Destinations are a resource of their own because a Destination owned by the Team and the Team's list of it
-  would otherwise reference each other (C-33.FR-16); the same holds for its Escalation chains in S-187.
+  would otherwise reference each other (C-33.FR-16); the same holds for its Escalation chains in S-187. The maintainer
+  chose these separate resources over leaving `owning_team_id` out of the provider.
 - Membership is never authoritative (journal D757): the identity provider and people added by hand in the web UI stay
   as they are.
 
