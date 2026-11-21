@@ -4,14 +4,14 @@
 - Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34 and the later ones of the 0.2.x patch releases among them). A
+[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34, C-36, C-37 and the later ones of the 0.2.x patch releases among them). A
 capability is done when its stories together cover every ID
 of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID
 fully or in part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
-  Every ID of L1, of the core of L2, of C-33 and of C-34 is complete. The sections of L2 follow the non-functional requirements
+  Every ID of L1, of the core of L2, of C-33, of C-34, of C-36 and of C-37 is complete. The sections of L2 follow the non-functional requirements
   of L1, and the requirements of L1 that L2 revises have a section of their own at the end.
   [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 has a
   row here.
@@ -22,7 +22,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) ·
 [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) ·
 [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) ·
-[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [L1
+[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [C-36](#c-36) · [C-37](#c-37) · [L1
 requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
@@ -63,6 +63,8 @@ requirements revised for L2](#l1-requirements-revised-for-l2)
 | C-32 Escalation chains and Assignees | L2 Paging | 38 | S-148, S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-161 | yes | 38 of 38 |
 | C-33 Terraform provider | L2 Terraform provider | 37 | S-179, S-180, S-181, S-182, S-183, S-184, S-185, S-186, S-187, S-188, S-189 | yes | 37 of 37 |
 | C-34 Maintenance windows | L2 0.2.x | 41 | S-190, S-191, S-192, S-193, S-194, S-195, S-196 | yes | 41 of 41 |
+| C-36 Loud and Quiet settings of a Route | L2 0.2.x | 21 | S-197, S-198, S-199, S-200, S-201 | yes | 21 of 21 |
+| C-37 Attach and Detach | L2 0.2.x | 29 | S-202, S-203, S-204, S-205, S-206, S-207, S-208 | yes | 29 of 29 |
 
 ## C-01
 
@@ -991,7 +993,7 @@ S-162, S-112, S-121, S-170, S-122, S-119, S-123, S-124, S-140, S-169
 | C-26.FR-2 | S-121 (part), S-123 (part), S-169 (part) | complete | "Run the Teams' Escalation chains" acts on chains with C-32.FR-4 (S-169) |
 | C-26.FR-3 | S-121 | complete |  |
 | C-26.FR-4 | S-121 | complete |  |
-| C-26.FR-5 | S-121 (part), S-123 (part), S-140 (part), S-192 (part) | complete | the Mentions of the Destination's entries for `new_alert_group` (S-140); `destination_joined` waits for the end of a Maintenance window (S-192) |
+| C-26.FR-5 | S-121 (part), S-123 (part), S-140 (part), S-192 (part), S-198 (part), S-203 (part) | complete | the Mentions of the Destination's entries for `new_alert_group` (S-140); `destination_joined` waits for the end of a Maintenance window (S-192); it is Quiet where the Route does not list `new_alert_group` (S-198) and while the Alert Group is attached (S-203) |
 | C-26.FR-6 | S-170 | complete |  |
 | C-26.FR-7 | S-121 (part), S-119 (part) | complete |  |
 | C-26.FR-8 | S-111 (part), S-112 (part) | complete |  |
@@ -1054,7 +1056,7 @@ L2 On call (Mentions) · stories: S-113, S-114, S-138, S-139, S-140, S-171, S-16
 | C-28.FR-1 | S-140 (part), S-143 (part) | complete |  |
 | C-28.FR-2 | S-138 (part), S-139 (part), S-140 (part), S-171 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; what each Connection can mention S-139; the validation S-140; writing groups in Slack, and groups and everyone in bridges, S-171; the bridge libraries S-141, S-142 |
 | C-28.FR-3 | S-140 (part), S-165 (part), S-143 (part) | complete |  |
-| C-28.FR-4 | S-140 | complete |  |
+| C-28.FR-4 | S-140, S-198 (part) | complete | an entry for a Loud event that the Route makes Quiet mentions nobody there (S-198) |
 | C-28.FR-5 | S-140 | complete |  |
 | C-28.FR-6 | S-140 | complete |  |
 | C-28.FR-7 | S-140 | complete |  |
@@ -1108,7 +1110,7 @@ S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158
 | C-30.FR-3 | S-167 (part), S-150 (part) | complete | P-86 stays provisional until the test environment confirms it |
 | C-30.FR-4 | S-148 (part), S-157 (part) | complete | the queue (S-148); the calls of steps and rules (S-157); P-87 stays provisional until the test environment confirms it |
 | C-30.FR-5 | S-145 (part), S-148 (part) | complete |  |
-| C-30.FR-6 | S-173 | complete |  |
+| C-30.FR-6 | S-173, S-203 (part) | complete | an acknowledgement for an attached Alert Group is answered as one for an Alert Group someone owns (S-203) |
 | C-30.FR-7 | S-148 (part), S-157 (part) | complete |  |
 | C-30.FR-8 | S-149 (part), S-150 (part) | complete | P-88, for the chart rules of C-27 and C-30, decided |
 | C-30.FR-9 | S-167 (part), S-150 (part), S-153 (part), S-154 (part), S-157 (part), S-158 (part) | complete | the profile (S-150), the rules (S-153), the steps (S-154, S-157) and the chain form (S-158) |
@@ -1152,7 +1154,7 @@ S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-1
 | C-32.FR-2 | S-154 (part), S-158 (part) | complete |  |
 | C-32.FR-3 | S-154 (part), S-169 (part), S-155 (part), S-156 (part), S-157 (part), S-158 (part) | complete |  |
 | C-32.FR-4 | S-169 | complete | P-70 confirmed with S-169 |
-| C-32.FR-5 | S-169, S-193 (part) | complete | the rows of a Maintenance window: becoming kept back stops the chains, the end starts them over (S-193); new Alerts that remove an acknowledgement are specified later in L2 |
+| C-32.FR-5 | S-169, S-193 (part), S-199 (part), S-204 (part) | complete | the rows of a Maintenance window: becoming kept back stops the chains, the end starts them over (S-193); new Alerts that remove an acknowledgement start them over, where the Route says so (S-199); an Attach stops them and a Detach of a firing Alert Group starts them over (S-204) |
 | C-32.FR-6 | S-169 | complete |  |
 | C-32.FR-7 | S-169 | complete |  |
 | C-32.FR-8 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram, Bridges and outgoing webhooks (S-177) |
@@ -1282,6 +1284,72 @@ S-195, S-196. They start after the tag of 0.2.0 and ship in a 0.2.x patch releas
 | C-34.AC-17 | S-191 (part), S-192 (part) | complete | `muster_maintenance_kept_back_total` (S-191); `muster_maintenance_released_total` (S-192); the log events (S-190, S-191) |
 | C-34.AC-18 | S-191 | complete |  |
 
+## C-36
+
+[Loud and Quiet settings of a Route](../prd/l2/C-36-route-loud-and-quiet-settings.md) · L2 0.2.x · stories: S-197, S-198,
+S-199, S-200, S-201. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-36.FR-1 | S-197 (part), S-198 (part) | complete | the fields, the API and the Audit log (S-197); that edits apply at once to the events recorded after them (S-198) |
+| C-36.FR-2 | S-198 (part), S-199 (part) | complete | every row of the table (S-198); the row `alerts_added` (removes) (S-199) |
+| C-36.FR-3 | S-198 | complete |  |
+| C-36.FR-4 | S-198 | complete |  |
+| C-36.FR-5 | S-198 | complete |  |
+| C-36.FR-6 | S-199 | complete |  |
+| C-36.FR-7 | S-199 | complete |  |
+| C-36.FR-8 | S-197 | complete |  |
+| C-36.FR-9 | S-197 (part), S-200 (part) | complete | the stored value (S-197); the unavailable box that ticks when the ack timeout is turned on (S-200) |
+| C-36.FR-10 | S-197 (part), S-201 (part) | complete | the migration and the optional input (S-197); the upgrade note that suggests unticking events (S-201) |
+| C-36.FR-11 | S-200 (part), S-201 (part) | complete | the form's link (S-200); the page (S-201) |
+| C-36.AC-1 | S-197 (part), S-200 (part) | complete | the profiles and the stored Route (S-197); the form filled from the profile (S-200) |
+| C-36.AC-2 | S-198 | complete |  |
+| C-36.AC-3 | S-198 (part), S-199 (part) | complete | the rows of the table (S-198); the removal row (S-199) |
+| C-36.AC-4 | S-198 | complete |  |
+| C-36.AC-5 | S-199 | complete |  |
+| C-36.AC-6 | S-199 | complete |  |
+| C-36.AC-7 | S-199 | complete |  |
+| C-36.AC-8 | S-197 | complete |  |
+| C-36.AC-9 | S-198 | complete |  |
+| C-36.AC-10 | S-200 | complete |  |
+
+## C-37
+
+[Attach and Detach](../prd/l2/C-37-attach-and-detach.md) · L2 0.2.x · stories: S-202, S-203, S-204, S-205, S-206, S-207,
+S-208. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-37.FR-1 | S-202 (part), S-205 (part), S-207 (part) | complete | the Commands, Permission and metric (S-202); no button or Text command in messengers (S-205); the UI (S-207); the MCP server is not built yet |
+| C-37.FR-2 | S-202 | complete |  |
+| C-37.FR-3 | S-202 (part), S-203 (part) | complete | the pair of Attach and Detach (S-202); a main Alert Group with its attached ones (S-203) |
+| C-37.FR-4 | S-202 (part), S-204 (part) | complete | the status taken, Assignees and Unclaimed (S-202); chains, ack timeout, Reminders and the end of a Snooze (S-204) |
+| C-37.FR-5 | S-203 (part), S-204 (part) | complete | following (S-203); starting no chain or timer of its own (S-204) |
+| C-37.FR-6 | S-203 | complete |  |
+| C-37.FR-7 | S-203 (part), S-205 (part) | complete | the status, the loudness and the main Alert Group's independence (S-203); the messengers (S-205) |
+| C-37.FR-8 | S-202 (part), S-204 (part) | complete | what Detach keeps (S-202); chains, ack timeout and Reminders starting over (S-204) |
+| C-37.FR-9 | S-203 (part), S-206 (part) | complete | the Commands from any Transport (S-203); the bulk item (S-206) |
+| C-37.FR-10 | S-205 | complete |  |
+| C-37.FR-11 | S-205 | complete |  |
+| C-37.FR-12 | S-206 (part), S-207 (part) | complete | the API for the page's section and Alerts (S-206); the dialog, notice and section (S-207) |
+| C-37.FR-13 | S-206 (part), S-207 (part) | complete | the filter, the count and the bulk Attach in the API (S-206); the mark, the filter control and the bar (S-207) |
+| C-37.FR-14 | S-206 (part), S-207 (part) | complete | the statistics (S-206); "Resolved with #{M}" on the page (S-207) |
+| C-37.FR-15 | S-202 (part), S-203 (part), S-205 (part), S-206 (part) | complete | the rows and the Commands' entries (S-202), following and the system endings (S-203), the messenger column (S-205), webhook events (S-206) |
+| C-37.FR-16 | S-202 | complete |  |
+| C-37.FR-17 | S-208 | complete |  |
+| C-37.AC-1 | S-202 (part), S-205 (part) | complete | the Timeline, Audit log and API (S-202); the Root message and Thread reply (S-205) |
+| C-37.AC-2 | S-204 | complete |  |
+| C-37.AC-3 | S-203 | complete |  |
+| C-37.AC-4 | S-202 (part), S-203 (part), S-206 (part) | complete | the refusals of FR-2 and `403` (S-202); `alert_group_attached` (S-203); the bulk Acknowledge (S-206) |
+| C-37.AC-5 | S-203 (part), S-204 (part), S-205 (part) | complete | the statuses and entries (S-203); the chain at step 1 (S-204); "Resolved with #1287" (S-205) |
+| C-37.AC-6 | S-202 (part), S-204 (part), S-205 (part) | complete | the Alert Group kept (S-202); the first Reminder 4 hours later (S-204); the Root message edited back (S-205) |
+| C-37.AC-7 | S-203 (part), S-205 (part) | complete | the entries and the status (S-203); the line in a new Destination (S-205) |
+| C-37.AC-8 | S-205 | complete |  |
+| C-37.AC-9 | S-206 | complete |  |
+| C-37.AC-10 | S-206 | complete |  |
+| C-37.AC-11 | S-202 (part), S-206 (part) | complete | the limit (S-202); the bulk Attach (S-206) |
+| C-37.AC-12 | S-207 | complete |  |
+
 ## L1 requirements revised for L2
 
 The requirements of L1 that [L2 §6](../prd/L2.md#6-revisions-to-l1) revises, and those it adds to L1 files, with the
@@ -1300,19 +1368,21 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-03.FR-30 | S-117 | complete |  |
 | C-06.FR-19 | S-118 (part), S-120 (part) | complete |  |
 | C-08 scenario 2 | S-111, S-112 | complete | the Minimum severity instead of the urgent mark |
-| C-08.FR-1 | S-111 (part), S-115 (part), S-121 (part), S-123 (part), S-125 (part), S-154 (part), S-158 (part) | complete | the Escalation chains of a Route (S-154) and on its form (S-158) |
+| C-08.FR-1 | S-111 (part), S-115 (part), S-121 (part), S-123 (part), S-125 (part), S-154 (part), S-158 (part), S-197 (part), S-200 (part) | complete | the Escalation chains of a Route (S-154) and on its form (S-158); the Loud and Quiet settings (S-197) and their section of the form (S-200) |
 | C-08.FR-6 | S-111 | complete |  |
-| C-08.FR-7 | S-162 | complete |  |
-| C-08 UI | S-112, S-119, S-123, S-129, S-158 | complete | the Escalation chains on the Route form (S-158) |
+| C-08.FR-7 | S-162, S-197 (part), S-200 (part) | complete | the profiles' Loud events and removal of an acknowledgement (S-197) pre-fill the section of the form (S-200) |
+| C-08 UI | S-112, S-119, S-123, S-129, S-158, S-200 | complete | the Escalation chains on the Route form (S-158); the section "Loud and Quiet" (S-200) |
 | C-08.AC-11 | S-162 | complete |  |
-| C-09.FR-1 | S-111 (part), S-118 (part), S-169 (part), S-168 (part) | complete | the running chains (S-169) and the Assignees (S-168) |
-| C-09.FR-9 | S-111 (part), S-169 | complete | chains that start over on a rise to critical (S-169) |
+| C-09.FR-1 | S-111 (part), S-118 (part), S-169 (part), S-168 (part), S-202 (part), S-203 (part) | complete | the running chains (S-169) and the Assignees (S-168); the attached state (S-202) and following (S-203) |
+| C-09.FR-4 | S-198 (part), S-199 (part), S-203 (part) | complete | added for L2: the Reopen into firing as a Loud event of the Route (S-198); a Reopen into acknowledged keeps its Owner and its Alerts remove nothing (S-199); a Reopen never attaches again (S-203) |
+| C-09.FR-6 | S-198 (part), S-199 (part), S-203 (part) | complete | added for L2: new Alerts as a Loud event of the Route (S-198); the removal of an acknowledgement, never in a snoozed Alert Group (S-199); new Alerts in an attached Alert Group change no status (S-203) |
+| C-09.FR-9 | S-111 (part), S-169, S-198 (part), S-199 (part), S-203 (part) | complete | chains that start over on a rise to critical (S-169); `rise_to_urgent` as a Loud event (S-198) and the order against new Alerts (S-199); a rise changes no status of an attached Alert Group (S-203) |
 | C-09.FR-11 | S-118 (part), S-120 (part), S-123 (part), S-159 | complete | the Assignees and running chains on the page (S-159) |
-| C-09.FR-13 | S-118 (part), S-120 (part), S-168 (part), S-159 | complete | the Assignee filter: the API (S-168) and the list (S-159) |
-| C-09.FR-14 | S-120 (part), S-123 (part), S-159 | complete | the Teams in the header (S-120), the entries of each Destination (S-123), the running chains, Assignees and escalation entries (S-159) |
-| C-09.FR-15 | S-174 (part), S-175 (part) | complete | By Team and the filters of every view: the API (S-174) and the page (S-175) |
+| C-09.FR-13 | S-118 (part), S-120 (part), S-168 (part), S-159, S-206 (part), S-207 (part) | complete | the Assignee filter: the API (S-168) and the list (S-159); the filter Attached, the count and the mark: the API (S-206) and the list (S-207) |
+| C-09.FR-14 | S-120 (part), S-123 (part), S-159, S-205 (part), S-206 (part), S-207 (part) | complete | the Teams in the header (S-120), the entries of each Destination (S-123), the running chains, Assignees and escalation entries (S-159); the notice, the section of attached Alert Groups and their Alerts on the page (S-206 for the API, S-207) and the Root message's line (S-205) |
+| C-09.FR-15 | S-174 (part), S-175 (part), S-206 | complete | By Team and the filters of every view: the API (S-174) and the page (S-175); an Alert Group resolved with its main one is left out (S-206) |
 | C-09.FR-16 | S-169 (part) | complete | the steps of the runs of Escalation chains are details, kept for `retention.alert_details`, pruned with them and hidden from "How it went" once removed (S-169) |
-| C-09.FR-22 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-168 (part), S-156 (part) | complete | the events of C-25 and C-26 (S-118, S-121) and of C-30 and C-32 (S-148, S-169, S-155, S-168, S-156) |
+| C-09.FR-22 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-168 (part), S-156 (part), S-198 (part), S-199 (part), S-202 (part), S-203 (part), S-205 (part) | complete | the events of C-25 and C-26 (S-118, S-121) and of C-30 and C-32 (S-148, S-169, S-155, S-168, S-156); the loudness a Route's Loud events give the rows (S-198) and the row `alerts_added` (removes) (S-199); the five events of Attach and Detach (S-202, S-203) and their messenger column (S-205) |
 | C-09.FR-27 | S-174 | complete | added for L2: who made the first acknowledgement, with the backfill from the Timeline |
 | C-09.FR-28 | S-174 (part), S-175 (part) | complete | added for L2: By people in the API (S-174) and on the page (S-175) |
 | C-09.FR-29 | S-174 (part), S-175 (part) | complete | added for L2: By Team in the API (S-174), the view and its link to By people (S-175) |
@@ -1328,8 +1398,11 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-09.AC-31 | S-174 (part), S-175 (part) | complete | added for L2 |
 | C-09.AC-32 | S-174 (part), S-175 (part) | complete | added for L2 |
 | C-09.AC-33 | S-174 (part), S-175 (part) | complete | added for L2 |
-| C-10.FR-1 | S-173 (part), S-169 (part), S-168 (part) | complete | an Acknowledge through a gateway only while nobody owns the Alert Group (S-173); chains stop (S-169); Assignees clear (S-168) |
+| C-10.FR-1 | S-173 (part), S-169 (part), S-168 (part), S-202 (part), S-203 (part) | complete | an Acknowledge through a gateway only while nobody owns the Alert Group (S-173); chains stop (S-169); Assignees clear (S-168); the Commands Attach and Detach (S-202) and the refusal of the others on an attached Alert Group (S-203) |
+| C-10.FR-2 | S-202 | complete | `alert-groups:attach` for Admins and Responders, a Service account included |
 | C-10.FR-3 | S-173 | complete | the Transport `gateway` |
+| C-10.FR-14 | S-206 | complete | the bulk Attach, and the bulk refusal of an attached Alert Group |
+| C-10.FR-16 | S-202 | complete | `attach` and `detach` in `allowed_commands` |
 | C-10.AC-23 | S-162 (part), S-113 (part) | complete |  |
 | C-11.FR-2 | S-148 (part), S-155 (part) | complete | calls have a sender of their own (S-148); Pages are Thread replies of delivery (S-155) |
 | C-11.FR-3 | S-111 | complete |  |
@@ -1348,13 +1421,13 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-13.FR-8 | S-140 | complete | Mattermost groups for group entries and Team mentions |
 | C-13.FR-9 | S-114 (part), S-143 (part) | complete | the button set (S-114) and the Mention entries (S-143); the Route and Team forms with Severity conditions are S-123's, under C-26.FR-1 |
 | C-14.FR-16 | S-125 | complete |  |
-| C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-177 (part), S-168 (part), S-156 (part) | complete | the L2 events in events mode (S-118, S-121, S-148, S-169, S-155), the people of `paged` (S-177), the `webhook_events` CHECK extended by S-118, S-121 and S-148; the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156) |
+| C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-177 (part), S-168 (part), S-156 (part), S-198 (part), S-206 (part) | complete | the L2 events in events mode (S-118, S-121, S-148, S-169, S-155), the people of `paged` (S-177), the `webhook_events` CHECK extended by S-118, S-121 and S-148; the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156); `notify` from the loudness a Route gives the event (S-198); the five events of Attach and Detach and `attached_to` in `alert_group` (S-206) |
 | C-15.FR-11 | S-140 (part), S-177 | complete | Teams and the On-call as targets (S-140); the people that `paged` names (S-177) |
 | C-16.FR-4 | S-113 (part), S-125 (part) | complete |  |
-| C-17.FR-1 | S-169 | complete | the first chain stops the ack timeout |
-| C-17.FR-2 | S-140 | complete | the Mentions of the entries for `ack_timeout` |
+| C-17.FR-1 | S-169, S-199 (part), S-204 (part) | complete | the first chain stops the ack timeout (S-169); the ack timeout and chains start over when new Alerts remove an acknowledgement (S-199); they stop on Attach and start over on Detach (S-204) |
+| C-17.FR-2 | S-140, S-198 (part) | complete | the Mentions of the entries for `ack_timeout` (S-140); the notice Quiet where the Route does not list `ack_timeout` (S-198) |
 | C-17.FR-3 | S-169 | complete | Unclaimed once every chain ran out |
-| C-17.FR-11 | S-169 | complete | `unclaimed` when the last chain runs out |
+| C-17.FR-11 | S-169, S-198 (part) | complete | `unclaimed` when the last chain runs out (S-169); `ack_timeout` and `notices_missed` take the loudness of the Route's Loud events (S-198) |
 | C-18.FR-4 | S-155 (part), S-177 (part) | complete | a Page by Mention reaches a person only through an Account link: in Mattermost and Slack (S-155), in Telegram and through Bridges (S-177) |
 | C-18.FR-6 | S-167 (part), S-150 (part) | complete | gateway contacts set only by their person, seen and removed by Admins (S-167, S-150) |
 | C-18.FR-10 | S-145 | complete | gateway-only Connections not offered to link an account through |
@@ -1371,3 +1444,5 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-24.FR-2 | S-139 | complete | the step `scopes` reports it and the Connection keeps it |
 | C-24.FR-4 | S-125 | complete |  |
 | C-24.FR-6 | S-171 | complete | `<!subteam^ID>`; no `<!everyone>` (F-127) |
+| reference.md Loud and Quiet | S-198, S-199, S-203 (part), S-205 (part) | complete | the Loud events of a Route and the rows that stay Loud (S-198), the removal of an acknowledgement (S-199), every event of an attached Alert Group Quiet (S-203, S-205) |
+| reference.md Buttons and links by status | S-205 | complete | an attached Root message has none |

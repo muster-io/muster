@@ -13,7 +13,7 @@ the review checks the code against.
 Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24` and the [core of
 L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`, with the statistics by people and by Team that L2 adds to
 `C-09`, and the capabilities of L2 specified after its core, from `C-33`, among them those of the 0.2.x patch
-releases, from `C-34`. Every functional requirement (`C-NN.FR-n`)
+releases: `C-34`, `C-36` and `C-37`. Every functional requirement (`C-NN.FR-n`)
 and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the [coverage table](coverage.md)
 shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices
 are in the [ADRs](../adr/README.md).
@@ -143,7 +143,7 @@ under `docs/assets/screenshots/` — are generated and checked in too, and never
   C-28 and C-29), "L2 On call" (C-27, Team mentions and the Mention entries) and "L2 Paging" (C-30 – C-32); beside
   them, "L2 Statistics" (S-174 to S-176, for C-09) needs only the Teams of Alert Groups and runs in parallel. The
   capabilities specified after the core follow, the Terraform provider and then those of "L2 0.2.x", which start after
-  the tag of 0.2.0 and ship in its patch releases (C-34 from S-190). The
+  the tag of 0.2.0 and ship in its patch releases (C-34 from S-190, C-36 from S-197, C-37 from S-202). The
   architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
@@ -281,8 +281,8 @@ deployment, `docs` documentation. A story for another repository names it after 
 | L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
 | **L2 core** | 8 | | **68** |
 | L2 Terraform provider | C-33 | S-179 – S-189 | 11 |
-| L2 0.2.x | C-34 | S-190 – S-196 | 7 |
-| **L2** | 10 | | **86** |
+| L2 0.2.x | C-34, C-36, C-37 | S-190 – S-208 | 19 |
+| **L2** | 12 | | **98** |
 
 ### Foundation
 
@@ -759,6 +759,18 @@ Registries resolve.
 | [S-194](S-194-the-maintenance-windows-sections-of-the-integration-route-and-team-pages-and-the-list-of-windows-fe.md) | C-34 | The Maintenance windows sections of the Integration, Route and Team pages, and the list of windows (FE) | fe | S-190, S-191, S-123, S-120, S-158 |
 | [S-195](S-195-the-kept-back-banner-badge-and-filter-on-the-alert-group-page-and-list-and-the-marks-in-the-timeline-fe.md) | C-34 | The "Kept back" banner, badge and filter on the Alert Group page and list, and the marks in the Timeline and delivery states (FE) | fe | S-194, S-192, S-159 |
 | [S-196](S-196-documentation-maintenance-windows.md) | C-34 | Documentation: Maintenance windows | docs | S-193, S-194, S-195 |
+| [S-197](S-197-the-loud-and-quiet-settings-of-a-route-with-their-profiles-migration-and-api-be.md) | C-36 | The Loud and Quiet settings of a Route with their profiles, migration and API (BE) | be | S-162, S-140, S-154 |
+| [S-198](S-198-the-loudness-of-the-rows-that-a-routes-loud-events-govern-be.md) | C-36 | The loudness of the rows that a Route's Loud events govern (BE) | be | S-197, S-140, S-121, S-169, S-155, S-044 |
+| [S-199](S-199-new-alerts-remove-the-acknowledgement-and-start-chains-and-the-ack-timeout-over-be.md) | C-36 | New Alerts remove the acknowledgement, and start Escalation chains and the ack timeout over (BE) | be | S-198, S-169, S-155, S-173, S-174 |
+| [S-200](S-200-the-loud-and-quiet-section-of-the-route-form-fe.md) | C-36 | The "Loud and Quiet" section of the Route form (FE) | fe | S-197, S-198, S-199, S-112, S-123, S-158 |
+| [S-201](S-201-documentation-loud-and-quiet-per-route-and-new-alerts-that-remove-the-acknowledgement.md) | C-36 | Documentation: Loud and Quiet per Route, and new Alerts that remove the acknowledgement | docs | S-198, S-199, S-200 |
+| [S-202](S-202-attach-and-detach-commands-with-their-permission-refusals-limit-state-and-audit-log-be.md) | C-37 | The Commands Attach and Detach with their Permission, refusals, limit, state and Audit log (BE) | be | S-198, S-169, S-168, S-174, S-173, S-197 |
+| [S-203](S-203-attached-alert-groups-follow-their-main-alert-group-and-the-attachment-ends-on-a-resolve-be.md) | C-37 | Attached Alert Groups follow their main Alert Group, and the attachment ends on a resolve (BE) | be | S-202, S-199, S-173, S-169, S-063 |
+| [S-204](S-204-chains-notification-rules-calls-the-ack-timeout-and-reminders-stop-on-attach-and-start-over-on-detach-be.md) | C-37 | Escalation chains, Notification rules, calls, the ack timeout and Reminders stop on Attach and start over on Detach (BE) | be | S-203, S-169, S-155, S-157, S-168 |
+| [S-205](S-205-the-line-of-an-attached-alert-group-and-of-its-main-alert-group-in-every-messenger-and-bridge-be.md) | C-37 | The line of an attached Alert Group and of its main Alert Group in every messenger and bridge, with the Thread replies and the answers to presses (BE) | be | S-203, S-126, S-168, S-113, S-081, S-075, S-100, S-067 |
+| [S-206](S-206-the-attached-filter-bulk-attach-the-alerts-of-attached-alert-groups-statistics-and-webhook-events-be.md) | C-37 | The attached filter and counts of the Alert Group list, bulk Attach, the Alerts of attached Alert Groups, statistics and webhook events (BE) | be | S-203, S-174, S-168, S-044 |
+| [S-207](S-207-the-attach-dialog-the-notice-and-section-on-the-alert-group-page-and-the-mark-filter-and-bulk-attach-of-the-list-fe.md) | C-37 | The Attach dialog, the notice and the section on the Alert Group page, and the mark, filter and bulk Attach of the list (FE) | fe | S-202, S-203, S-204, S-206, S-159, S-158 |
+| [S-208](S-208-documentation-attach-and-detach.md) | C-37 | Documentation: Attach and Detach | docs | S-204, S-205, S-206, S-207, S-201 |
 
 S-190 to S-196 specify C-34, the first capability of the 0.2.x patch releases (L2 §1.5). The behaviour is cut at the
 contract boundaries of a window's life. S-190 is the object — the table, the Permissions, the limits, the API, the Audit
@@ -772,7 +784,27 @@ sections of the Integration, Route and Team pages and the list, S-195 the Alert 
 follows S-192 for the delivery state. S-196 documents the capability and adds the documentation links of the web UI, so
 that `docslinkcheck` finds its page. Implementation of all seven starts after the tag of 0.2.0, and their migrations —
 one in each of S-190 to S-192 — take the numbers the orchestrator assigns at dispatch, with each replaced CHECK
-re-versioned in the order the stories merge. The stories of the later capabilities of 0.2.x add their sections here.
+re-versioned in the order the stories merge.
+
+S-197 to S-201 specify C-36 and S-202 to S-208 specify C-37, the next two capabilities of the 0.2.x patch releases.
+C-36 is cut where the behaviour changes its meaning. S-197 is the setting — two columns with the migration that gives
+every existing Route the loudness of L1, the profiles and the Route API. S-198 reads it: which of the rows of the
+lifecycle event tables a Route's Loud events govern, decided when an entry is recorded and read by delivery, Storms and
+events-mode webhooks from the entry; S-199 adds the removal of an acknowledgement by new Alerts with the starting over of
+chains and the ack timeout, which needs S-198's list of the rows about the Owner. S-200 is the section of the Route form
+and S-201 the page on Loud and Quiet, which follows the form so that its screenshot shows the finished section. C-37 is
+cut at the lives of an attachment. S-202 is the state with its Commands, Permission, ordered refusals, limit and Audit
+log, and S-203 the following of the main Alert Group, the end of an attachment on a resolve, the Quiet rule and the
+refusal of other Commands on an attached Alert Group, which builds on S-199 for the removal that it follows. S-204 takes
+the chains, Notification rules, calls and timers that stop on Attach and start over on Detach, S-205 the line, the Thread
+replies, the bridges' `layout` and the answers to presses in every messenger, and S-206 the list filter, the bulk Attach,
+the Alerts of attached Alert Groups, the statistics and the webhook events. S-207 is the frontend after the backend it
+shows and S-208 the documentation, with the documentation links of the dialog and the notice, so that `docslinkcheck`
+finds the page. C-37 depends on C-36 through S-198 and S-199. Implementation of all twelve starts after the tag of
+0.2.0. Migrations are two: S-197's, with no CHECK to re-version, and S-202's, which replaces the event CHECKs of
+`timeline_entries`, `webhook_events` and `thread_replies` as C-34's do; their numbers are assigned by the orchestrator at
+dispatch, with each replaced CHECK re-versioned in the order the stories merge. The stories of the later capabilities of
+0.2.x add their sections here.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
