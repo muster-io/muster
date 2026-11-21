@@ -140,6 +140,7 @@ export const ListEscalationChainsResponse = zod.object({
 }),zod.null()]).describe('With `everyone_unsupported`, the Destination that cannot mention; with `destination_deleted`, the deleted Destination; null with the other kinds.'),
   "reason": zod.union([zod.enum(['telegram_no_groups', 'usergroups_read_missing', 'bridge_no_group_mentions', 'bridge_not_declared', 'messenger_has_no_token']).describe('Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.'),zod.null()]).describe('With `everyone_unsupported`, why the Connection cannot mention; null otherwise.')
 })).describe('What the chain cannot do — `pages_nobody` first — then what its steps cannot do, by step.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the chain as code, such as `terraform`, or null when none does (C-33.FR-11); see `EscalationChainInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })),
@@ -162,6 +163,10 @@ export const createEscalationChainBodyStepsItemUserIdsMax = 50;
 export const createEscalationChainBodyStepsItemTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createEscalationChainBodyStepsItemGatewayIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createEscalationChainBodyStepsItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const createEscalationChainBodyManagedByMax = 32;
+
+
+export const createEscalationChainBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const CreateEscalationChainBody = zod.object({
@@ -183,7 +188,8 @@ export const CreateEscalationChainBody = zod.object({
   "repeat_times": zod.int().optional().describe('With `repeat`, how many times it goes back, from 1 to 10 (`escalation.limits`).'),
   "working_hours_only": zod.boolean().optional().describe('With the steps that Page or send; omitted, false. True makes the step only in the Working hours of the chain\'s owning Team, else the Organization\'s (C-25.FR-9).'),
   "severity_condition": zod.enum(['any', 'critical', 'below_critical']).optional().describe('With the steps that Page or send; omitted, `any`.')
-}).describe('An Escalation step with the fields of its kind only; a field another kind takes is refused with `422` `unsupported` at it, and a missing one with `required`. `page_on_call` takes `schedule_id`, a Schedule of any Team, and `importance`; `page_people` takes `user_ids` and `importance`; `page_team` takes `team_id` — the chain\'s owning Team when omitted, and required when the chain has none — or `everyone`; `call` takes `call_target` with `schedule_id` (`on_call`) or `user_ids` (`people`), and `gateway_id`; `wait` takes `wait_seconds`; `webhook` takes `destination_id`; `repeat` takes `repeat_from` and `repeat_times`. The steps that Page or send — every kind but `wait` and `repeat` — also take `working_hours_only` and `severity_condition`. An id that names nothing is refused with `422` `unknown_id` at it.')).describe('The steps in their order, at most 20 (`escalation.limits`, else `422` `out_of_range` at `/steps`), replaced as a whole.')
+}).describe('An Escalation step with the fields of its kind only; a field another kind takes is refused with `422` `unsupported` at it, and a missing one with `required`. `page_on_call` takes `schedule_id`, a Schedule of any Team, and `importance`; `page_people` takes `user_ids` and `importance`; `page_team` takes `team_id` — the chain\'s owning Team when omitted, and required when the chain has none — or `everyone`; `call` takes `call_target` with `schedule_id` (`on_call`) or `user_ids` (`people`), and `gateway_id`; `wait` takes `wait_seconds`; `webhook` takes `destination_id`; `repeat` takes `repeat_from` and `repeat_times`. The steps that Page or send — every kind but `wait` and `repeat` — also take `working_hours_only` and `severity_condition`. An id that names nothing is refused with `422` `unknown_id` at it.')).describe('The steps in their order, at most 20 (`escalation.limits`, else `422` `out_of_range` at `/steps`), replaced as a whole.'),
+  "managed_by": zod.string().max(createEscalationChainBodyManagedByMax).regex(createEscalationChainBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 })
 
 export const createEscalationChainResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -304,6 +310,7 @@ export const CreateEscalationChainResponse = zod.object({
 }),zod.null()]).describe('With `everyone_unsupported`, the Destination that cannot mention; with `destination_deleted`, the deleted Destination; null with the other kinds.'),
   "reason": zod.union([zod.enum(['telegram_no_groups', 'usergroups_read_missing', 'bridge_no_group_mentions', 'bridge_not_declared', 'messenger_has_no_token']).describe('Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.'),zod.null()]).describe('With `everyone_unsupported`, why the Connection cannot mention; null otherwise.')
 })).describe('What the chain cannot do — `pages_nobody` first — then what its steps cannot do, by step.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the chain as code, such as `terraform`, or null when none does (C-33.FR-11); see `EscalationChainInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })
@@ -436,6 +443,7 @@ export const GetEscalationChainResponse = zod.object({
 }),zod.null()]).describe('With `everyone_unsupported`, the Destination that cannot mention; with `destination_deleted`, the deleted Destination; null with the other kinds.'),
   "reason": zod.union([zod.enum(['telegram_no_groups', 'usergroups_read_missing', 'bridge_no_group_mentions', 'bridge_not_declared', 'messenger_has_no_token']).describe('Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.'),zod.null()]).describe('With `everyone_unsupported`, why the Connection cannot mention; null otherwise.')
 })).describe('What the chain cannot do — `pages_nobody` first — then what its steps cannot do, by step.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the chain as code, such as `terraform`, or null when none does (C-33.FR-11); see `EscalationChainInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })
@@ -467,6 +475,10 @@ export const updateEscalationChainBodyStepsItemUserIdsMax = 50;
 export const updateEscalationChainBodyStepsItemTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateEscalationChainBodyStepsItemGatewayIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateEscalationChainBodyStepsItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const updateEscalationChainBodyManagedByMax = 32;
+
+
+export const updateEscalationChainBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateEscalationChainBody = zod.object({
@@ -488,7 +500,8 @@ export const UpdateEscalationChainBody = zod.object({
   "repeat_times": zod.int().optional().describe('With `repeat`, how many times it goes back, from 1 to 10 (`escalation.limits`).'),
   "working_hours_only": zod.boolean().optional().describe('With the steps that Page or send; omitted, false. True makes the step only in the Working hours of the chain\'s owning Team, else the Organization\'s (C-25.FR-9).'),
   "severity_condition": zod.enum(['any', 'critical', 'below_critical']).optional().describe('With the steps that Page or send; omitted, `any`.')
-}).describe('An Escalation step with the fields of its kind only; a field another kind takes is refused with `422` `unsupported` at it, and a missing one with `required`. `page_on_call` takes `schedule_id`, a Schedule of any Team, and `importance`; `page_people` takes `user_ids` and `importance`; `page_team` takes `team_id` — the chain\'s owning Team when omitted, and required when the chain has none — or `everyone`; `call` takes `call_target` with `schedule_id` (`on_call`) or `user_ids` (`people`), and `gateway_id`; `wait` takes `wait_seconds`; `webhook` takes `destination_id`; `repeat` takes `repeat_from` and `repeat_times`. The steps that Page or send — every kind but `wait` and `repeat` — also take `working_hours_only` and `severity_condition`. An id that names nothing is refused with `422` `unknown_id` at it.')).describe('The steps in their order, at most 20 (`escalation.limits`, else `422` `out_of_range` at `/steps`), replaced as a whole.')
+}).describe('An Escalation step with the fields of its kind only; a field another kind takes is refused with `422` `unsupported` at it, and a missing one with `required`. `page_on_call` takes `schedule_id`, a Schedule of any Team, and `importance`; `page_people` takes `user_ids` and `importance`; `page_team` takes `team_id` — the chain\'s owning Team when omitted, and required when the chain has none — or `everyone`; `call` takes `call_target` with `schedule_id` (`on_call`) or `user_ids` (`people`), and `gateway_id`; `wait` takes `wait_seconds`; `webhook` takes `destination_id`; `repeat` takes `repeat_from` and `repeat_times`. The steps that Page or send — every kind but `wait` and `repeat` — also take `working_hours_only` and `severity_condition`. An id that names nothing is refused with `422` `unknown_id` at it.')).describe('The steps in their order, at most 20 (`escalation.limits`, else `422` `out_of_range` at `/steps`), replaced as a whole.'),
+  "managed_by": zod.string().max(updateEscalationChainBodyManagedByMax).regex(updateEscalationChainBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 })
 
 export const updateEscalationChainResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -609,6 +622,7 @@ export const UpdateEscalationChainResponse = zod.object({
 }),zod.null()]).describe('With `everyone_unsupported`, the Destination that cannot mention; with `destination_deleted`, the deleted Destination; null with the other kinds.'),
   "reason": zod.union([zod.enum(['telegram_no_groups', 'usergroups_read_missing', 'bridge_no_group_mentions', 'bridge_not_declared', 'messenger_has_no_token']).describe('Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.'),zod.null()]).describe('With `everyone_unsupported`, why the Connection cannot mention; null otherwise.')
 })).describe('What the chain cannot do — `pages_nobody` first — then what its steps cannot do, by step.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the chain as code, such as `terraform`, or null when none does (C-33.FR-11); see `EscalationChainInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })

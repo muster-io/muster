@@ -26,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/routing/dbgen"
 	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
@@ -279,7 +280,7 @@ func (s *fakeStore) InsertRoute(_ context.Context, arg dbgen.InsertRouteParams) 
 		RemindersEnabled: arg.RemindersEnabled, RemindersFirstIntervalSeconds: arg.RemindersFirstIntervalSeconds,
 		RemindersCapSeconds: arg.RemindersCapSeconds, AutoUnacknowledge: arg.AutoUnacknowledge, CreatedAt: arg.Now,
 		Version: 1, MessageLabels: arg.MessageLabels, DeliverToTeams: arg.DeliverToTeams,
-		RunTeamChains: arg.RunTeamChains,
+		RunTeamChains: arg.RunTeamChains, ManagedBy: arg.ManagedBy,
 	}})
 	s.own(&s.rows[len(s.rows)-1].ListRoutesRow, arg.OwningTeamID)
 	return s.nextID, nil
@@ -361,6 +362,7 @@ func (s *fakeStore) UpdateRoute(_ context.Context, arg dbgen.UpdateRouteParams) 
 				arg.RemindersCapSeconds
 			r.AutoUnacknowledge, r.MessageLabels = arg.AutoUnacknowledge, arg.MessageLabels
 			r.DeliverToTeams, r.RunTeamChains = arg.DeliverToTeams, arg.RunTeamChains
+			r.ManagedBy = arg.ManagedBy
 			s.own(&r.ListRoutesRow, arg.OwningTeamID)
 			r.Version++
 		}
@@ -694,7 +696,8 @@ func getRowOf(r dbgen.ListRoutesRow, place int64) dbgen.GetRouteRow {
 		StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount, OwningTeamID: r.OwningTeamID,
 		OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName, OwningTeamSlug: r.OwningTeamSlug,
 		OwningTeamDeleted: r.OwningTeamDeleted, MessageLabels: r.MessageLabels, SeverityLabel: r.SeverityLabel,
-		TeamLabel: r.TeamLabel, DeliverToTeams: r.DeliverToTeams, RunTeamChains: r.RunTeamChains}
+		TeamLabel: r.TeamLabel, DeliverToTeams: r.DeliverToTeams, RunTeamChains: r.RunTeamChains,
+		ManagedBy: r.ManagedBy}
 }
 
 func newService(t *testing.T) (*Service, *fakeStore, *clock.Manual) {
@@ -1243,6 +1246,73 @@ func TestDelete(t *testing.T) {
 	}
 	if _, err := svc.Create(t.Context(), by, input("a")); err != nil {
 		t.Errorf("the name of a deleted route = %v", err)
+	}
+}
+
+// TestManagedBy is C-33.FR-11: a Route created with a mark reads it back and one without reads none, an update that
+// leaves it out keeps it and null clears it, a value outside the format is refused at /managed_by with nothing
+// changed, the Default route takes it like any Route, each change is in the Audit log diff, and a marked Route is
+// reordered as any other.
+func TestManagedBy(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	in := input("tf")
+	in.ManagedBy = managedby.Set("terraform")
+	marked, err := svc.Create(ctx, by, in)
+	if err != nil || marked.ManagedBy == nil || *marked.ManagedBy != "terraform" {
+		t.Fatalf("create marked = %v, %v", marked.ManagedBy, err)
+	}
+	if d := string(store.audit[len(store.audit)-1].Diff); !strings.Contains(d, `{"pointer":"/managed_by","after":"terraform"}`) {
+		t.Errorf("creation diff %s", d)
+	}
+	plain, err := svc.Create(ctx, by, input("plain"))
+	if err != nil || plain.ManagedBy != nil {
+		t.Errorf("create without = %v, %v", plain.ManagedBy, err)
+	}
+	kept, err := svc.Update(ctx, by, marked.PublicID, nil, input("tf-2"))
+	if err != nil || kept.ManagedBy == nil || *kept.ManagedBy != "terraform" {
+		t.Errorf("update without = %v, %v", kept.ManagedBy, err)
+	}
+	bad := input("tf-3")
+	bad.ManagedBy = managedby.Set("Terraform")
+	if f := fieldError(t, func() error { _, err := svc.Update(ctx, by, marked.PublicID, nil, bad); return err }()); f.Pointer !=
+		"/managed_by" || f.Code != CodeInvalidFormat {
+		t.Errorf("Terraform = %+v", f)
+	}
+	if got, _ := svc.Get(ctx, marked.PublicID); got.Name != "tf-2" || got.Version != kept.Version {
+		t.Errorf("a refused update changed the Route: %+v", got)
+	}
+	null := input("tf-2")
+	null.ManagedBy = managedby.Clear
+	store.open[marked.ID] = 2
+	cleared, err := svc.Update(ctx, by, marked.PublicID, nil, null)
+	if err != nil || cleared.ManagedBy != nil || cleared.Version != kept.Version+1 {
+		t.Errorf("update with null = %v, %v", cleared.ManagedBy, err)
+	}
+	if len(store.updates) != 0 || len(store.notified) != 0 {
+		t.Errorf("a change of the mark alone asked the open Alert Groups for %+v, %v", store.updates, store.notified)
+	}
+	if d := string(store.audit[len(store.audit)-1].Diff); d != `[{"pointer":"/managed_by","before":"terraform"}]` {
+		t.Errorf("clearing diff %s", d)
+	}
+	list, _ := svc.List(ctx)
+	def := list.Routes[len(list.Routes)-1]
+	defIn := input(def.Name)
+	defIn.Matchers, defIn.ManagedBy = nil, managedby.Set("terraform")
+	if got, err := svc.Update(ctx, by, def.PublicID, nil, defIn); err != nil || got.ManagedBy == nil ||
+		*got.ManagedBy != "terraform" || !got.IsDefault {
+		t.Errorf("default route = %+v, %v", got.ManagedBy, err)
+	}
+	again := input("tf-2")
+	again.ManagedBy = managedby.Set("terraform")
+	if _, err := svc.Update(ctx, by, marked.PublicID, nil, again); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = svc.List(ctx)
+	got, err := svc.Reorder(ctx, by, ptr(list.Version), []string{plain.PublicID, marked.PublicID})
+	if err != nil || names(got) != "plain,tf-2,Default" || got.Routes[1].ManagedBy == nil ||
+		got.Routes[2].ManagedBy == nil {
+		t.Errorf("reorder a marked Route = %s, %v", names(got), err)
 	}
 }
 

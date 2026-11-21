@@ -2045,6 +2045,44 @@ func (q *Queries) StartCall(ctx context.Context, arg StartCallParams) (int64, er
 	return result.RowsAffected(), nil
 }
 
+const unstartCall = `-- name: UnstartCall :execrows
+UPDATE gateway_calls g
+SET state = 'waiting', contact_id = NULL, language = NULL, text = NULL, action_data = NULL, button_key_id = NULL,
+    first_attempt_at = NULL, next_attempt_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL
+WHERE g.org_id = $2 AND g.id = $3 AND g.state = 'sending' AND g.attempts = 0 AND g.first_failed_at IS NULL
+  AND g.lease_owner = $4::text
+  AND NOT EXISTS (SELECT 1
+                  FROM gateway_calls w
+                  WHERE w.org_id = $2 AND w.connection_id = g.connection_id AND w.user_id = g.user_id
+                    AND w.state = 'waiting')
+`
+
+type UnstartCallParams struct {
+	At    time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// UnstartCall undoes the start of a call that its round stopped before it was made (sender.go, gate): it waits again,
+// due at @at, without its contact, language, text, action data and the id of their key, and frees its lease, so that
+// the Pages that come due join it and its Alert Groups are read again right before its first attempt, as when its
+// preparation had found no limiter token. Only a call this replica holds the lease of, started and never attempted,
+// and only while no call waits behind it: the caller holds the person's lock, and a Page that came due since the start
+// queued a call that waits behind it; the call then stays started (no row).
+func (q *Queries) UnstartCall(ctx context.Context, arg UnstartCallParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unstartCall,
+		arg.At,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateGatewayBrokenReason = `-- name: UpdateGatewayBrokenReason :execrows
 UPDATE connections
 SET gateway_broken_reason = $1::text

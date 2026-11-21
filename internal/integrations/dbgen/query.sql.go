@@ -206,7 +206,7 @@ func (q *Queries) FindIntegrationByName(ctx context.Context, arg FindIntegration
 const getIntegration = `-- name: GetIntegration :one
 SELECT i.id, i.public_id, i.name, i.description, i.builtin, i.connection_mode, i.static_labels,
        i.duplicate_window_seconds, i.heartbeat_enabled, i.heartbeat_timeout_seconds, i.heartbeat_state,
-       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version
+       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version, i.managed_by
 FROM integrations i
 WHERE i.org_id = $1 AND i.public_id = $2 AND i.deleted_at IS NULL
 `
@@ -233,6 +233,7 @@ type GetIntegrationRow struct {
 	SnapshotCount           int64
 	CreatedAt               time.Time
 	Version                 int64
+	ManagedBy               pgtype.Text
 }
 
 // GetIntegration reads an Integration that is not deleted.
@@ -256,6 +257,7 @@ func (q *Queries) GetIntegration(ctx context.Context, arg GetIntegrationParams) 
 		&i.SnapshotCount,
 		&i.CreatedAt,
 		&i.Version,
+		&i.ManagedBy,
 	)
 	return i, err
 }
@@ -263,13 +265,13 @@ func (q *Queries) GetIntegration(ctx context.Context, arg GetIntegrationParams) 
 const insertIntegration = `-- name: InsertIntegration :one
 INSERT INTO integrations (
     org_id, public_id, name, description, connection_mode, static_labels, duplicate_window_seconds,
-    heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at, updated_at
+    heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, managed_by, created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8::boolean, $9,
-    CASE WHEN $8::boolean THEN 'waiting' ELSE 'not_configured' END, $10::timestamptz,
-    $10::timestamptz
+    CASE WHEN $8::boolean THEN 'waiting' ELSE 'not_configured' END, $10::text,
+    $11::timestamptz, $11::timestamptz
 )
 RETURNING id
 `
@@ -284,6 +286,7 @@ type InsertIntegrationParams struct {
 	DuplicateWindowSeconds  int64
 	HeartbeatEnabled        bool
 	HeartbeatTimeoutSeconds int64
+	ManagedBy               pgtype.Text
 	Now                     time.Time
 }
 
@@ -299,6 +302,7 @@ func (q *Queries) InsertIntegration(ctx context.Context, arg InsertIntegrationPa
 		arg.DuplicateWindowSeconds,
 		arg.HeartbeatEnabled,
 		arg.HeartbeatTimeoutSeconds,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -518,7 +522,7 @@ const listIntegrations = `-- name: ListIntegrations :many
 
 SELECT i.id, i.public_id, i.name, i.description, i.builtin, i.connection_mode, i.static_labels,
        i.duplicate_window_seconds, i.heartbeat_enabled, i.heartbeat_timeout_seconds, i.heartbeat_state,
-       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version
+       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version, i.managed_by
 FROM integrations i
 WHERE i.org_id = $1 AND i.deleted_at IS NULL
   AND ($2::bigint IS NULL OR i.id > $2::bigint)
@@ -549,6 +553,7 @@ type ListIntegrationsRow struct {
 	SnapshotCount           int64
 	CreatedAt               time.Time
 	Version                 int64
+	ManagedBy               pgtype.Text
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -581,6 +586,7 @@ func (q *Queries) ListIntegrations(ctx context.Context, arg ListIntegrationsPara
 			&i.SnapshotCount,
 			&i.CreatedAt,
 			&i.Version,
+			&i.ManagedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -730,8 +736,8 @@ SET name = $1, description = $2, static_labels = $3,
                            WHEN heartbeat_state = 'not_configured' THEN 'waiting'
                            ELSE heartbeat_state END,
     heartbeat_lost_since = CASE WHEN $5::boolean THEN heartbeat_lost_since END,
-    updated_at = $7::timestamptz, version = version + 1
-WHERE org_id = $8 AND id = $9
+    managed_by = $7::text, updated_at = $8::timestamptz, version = version + 1
+WHERE org_id = $9 AND id = $10
 `
 
 type UpdateIntegrationParams struct {
@@ -741,6 +747,7 @@ type UpdateIntegrationParams struct {
 	DuplicateWindowSeconds  int64
 	HeartbeatEnabled        bool
 	HeartbeatTimeoutSeconds int64
+	ManagedBy               pgtype.Text
 	Now                     time.Time
 	OrgID                   int64
 	ID                      int64
@@ -757,6 +764,7 @@ func (q *Queries) UpdateIntegration(ctx context.Context, arg UpdateIntegrationPa
 		arg.DuplicateWindowSeconds,
 		arg.HeartbeatEnabled,
 		arg.HeartbeatTimeoutSeconds,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

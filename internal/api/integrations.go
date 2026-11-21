@@ -352,7 +352,7 @@ func integrationAlertOf(a ingest.ViewAlert) gen.IntegrationAlert {
 func integrationInputOf(in gen.IntegrationInput) integrations.Input {
 	out := integrations.Input{Name: in.Name, Description: in.Description, ConnectionMode: string(in.ConnectionMode),
 		StaticLabels: in.StaticLabels, DuplicateWindowSeconds: int64(in.DuplicateWindowSeconds),
-		Heartbeat: integrations.HeartbeatInput{Enabled: in.Heartbeat.Enabled}}
+		Heartbeat: integrations.HeartbeatInput{Enabled: in.Heartbeat.Enabled}, ManagedBy: managedByIn(in.ManagedBy)}
 	if in.Heartbeat.TimeoutSeconds != nil {
 		t := int64(*in.Heartbeat.TimeoutSeconds)
 		out.Heartbeat.TimeoutSeconds = &t
@@ -387,7 +387,7 @@ func (s *Server) integrationOf(in integrations.Integration, openAlertGroups int6
 			LastSignalAt: nullableTime(in.Heartbeat.LastSignalAt), LostSince: nullableTime(in.Heartbeat.LostSince)},
 		LastSnapshotAt: nullableTime(in.LastSnapshotAt), SnapshotCount: int(in.SnapshotCount),
 		Warnings: make([]gen.IntegrationWarning, 0, len(in.Warnings)), OpenAlertGroupCount: int(openAlertGroups),
-		CreatedAt: in.CreatedAt.UTC(), Etag: &tag,
+		CreatedAt: in.CreatedAt.UTC(), Etag: &tag, ManagedBy: managedByOf(in.ManagedBy),
 	}
 	for _, w := range in.Warnings {
 		item := gen.IntegrationWarning{Kind: gen.IntegrationWarningKind(w.Kind)}
