@@ -63,7 +63,7 @@ acceptance:
   - "[C-18.AC-1, C-18.FR-2] The second `/start` with the same token links nothing, gets the reply \"This link is invalid or expired. Start again from your Muster profile.\" and is recorded as `account_link.link_rejected` with the reason `token_used`; an unknown token, an expired one and a token of another Connection are rejected the same way, with the same reply."
   - "[C-18.FR-3, C-18.FR-11] `startMattermostLink` with `@bob` finds the user through the API and the bot sends him a direct message with an 8-character code and \"You requested a link to Muster. Do not share this code.\"; `confirmMattermostLink` with the code links the account and the bot confirms \"Linked to Muster user {name}\"; both bot messages go through the interactive path."
   - "[C-18.AC-2] After five wrong codes the sixth attempt is refused even with the correct code, and the request is void; each wrong code is recorded as `account_link.link_rejected` with the reason `wrong_code`."
-  - "[C-18.FR-3] Code requests are limited by `account_link.mattermost_code_requests`: the sixth request of one User and the fourth for one target account within an hour answer `429` with `Retry-After`."
+  - "[C-18.FR-3] Code requests are limited by `account_link.mattermost_code_requests`: the sixth request of one User and the fourth of one User for one target account within an hour answer `429` with `Retry-After`; beyond 10 codes within an hour for one target account across Users, a request is answered as if its code were sent, and nothing is sent."
   - "[C-18.FR-4, C-18.FR-5] A new link of the same User in the same identity space replaces the previous one; linking an account linked to another User is refused — `409` `account_linked_elsewhere` in the API, \"This account is linked to another user. Its owner or an admin can unlink it.\" from the Telegram bot — and recorded as `link_rejected` with the reason `conflict`."
   - "[C-18.FR-10] `listLinkableConnections` returns every Connection that is not deleted with only `id`, `name` and `messenger`, needs no Permission, and gives a Service account token `403` `service_account_not_allowed`."
   - "[C-18.FR-6, C-18.FR-10, C-18.AC-4, C-03.AC-14] Users list their links with the messenger, Connection, username and last use and unlink them from the web session; with any API token, an Admin's included, starting, confirming and removing one's own link answer `403` `session_required`; Admins list and delete a User's links with `users:read` and `users:write`, and `POST /users/{id}/account-links` answers `405` `method-not-allowed` with `Allow: GET`."
@@ -157,8 +157,11 @@ issue: 51
 - **Mattermost** (C-18.FR-3; `accountlinks/mattermost.go`, `mattermost/client.go`):
   - `startMattermostLink {connection_id, username}`: a leading `@` is dropped. The limits of
     `account_link.mattermost_code_requests` are counted over `account_link_requests` of the last hour — per requesting
-    User, and per Connection and target account — and refused with `429` `rate-limited` and `Retry-After` until the
-    oldest counted request is an hour old. Both are counted in the transaction that stores the request, under the lock
+    User, and per requesting User, Connection and target account — and refused with `429` `rate-limited` and
+    `Retry-After` until the User's oldest counted request is an hour old; a request beyond the codes the target account
+    receives across Users is not refused, which would tell of other Users' requests, but answered as if its code were
+    sent: a request no code confirms is stored, voiding the User's earlier ones, nothing is sent, and
+    `account_link_code_withheld` is logged. All are counted in the transaction that stores the request, under the lock
     of the User's row and a transaction advisory lock of the target account (`db.AccountLinkCodeTargetLockClass`,
     `0x6d75_0005`), so that concurrent requests cannot pass them; the User's count is also checked before the lookup,
     which spends no messenger call on a refused request. Through the interactive path: `GET /api/v4/users/username/{username}` (`404`
@@ -284,7 +287,7 @@ CONF $(jq -r .request_id <<<"$S") $CODE | jq -c '{messenger, external_id, userna
 curl -s $FMM/dms | jq -r '.[-1].message' | grep -c '^Linked to Muster user'               # 1
 curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="interactive",outcome="ok"}' | awk -v i=$I0 '{print ($2 - i) >= 7}'   # 1
 
-# C-18.FR-5: an account linked to another User; C-18.FR-3: the limit per target account
+# C-18.FR-5: an account linked to another User; C-18.FR-3: the limit per requesting User and target account
 curl -s "${HA[@]}" $API/me/account-links/mattermost -d "{\"connection_id\":\"$C\",\"username\":\"bob\"}" | jq -r .code   # account_linked_elsewhere
 REJ                                                         # {"reason":"conflict","messenger":"mattermost","external_id":"u-bob"}
 for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} ' "${HD[@]}" $API/me/account-links/mattermost -d "{\"connection_id\":\"$C\",\"username\":\"dana\"}"; done

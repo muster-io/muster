@@ -7014,7 +7014,10 @@ paths:
       - Account links
       summary: Start linking a Mattermost account
       description: 'The Connection''s bot sends a direct message with a code to the `@username`. Code requests are limited
-        per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`). Refused with `409` if the account is already
+        per requesting User and per requesting User and target account (`429` `link_code_requests_exceeded` with
+        `Retry-After`, `account_link.mattermost_code_requests`). Beyond the codes one account receives within an hour
+        across Users, a request is answered as if its code were sent, but nothing is sent and no code confirms it, so
+        that the answer never tells of other Users'' requests. Refused with `409` if the account is already
         linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on
         the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503`
         with `Retry-After`. No operation starts a link for another User, whatever the caller''s Role.
@@ -7151,8 +7154,10 @@ paths:
       description: 'Where the Bridge Connection''s `info` declares `direct_messages` with `bot_can_start` and a
         `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind
         `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are
-        limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`,
-        `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409`
+        limited per requesting User and per requesting User and target account (`429` `link_code_requests_exceeded`
+        with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts.
+        Beyond the codes one account receives within an hour across Users, a request is answered as if its code were
+        sent, but nothing is sent and no code confirms it. Refused with `409`
         `code_not_offered` when the Connection''s `info`, read again first when Muster''s copy is older than
         `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the
         account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the
@@ -7249,8 +7254,10 @@ paths:
         `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot
         are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to
         the account''s user id — with "You requested a link to Muster. Do not share this code.". Code requests are
-        limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`,
-        `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409`
+        limited per requesting User and per requesting User and target account (`429` `link_code_requests_exceeded`
+        with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts.
+        Beyond the codes one account receives within an hour across Users, a request is answered as if its code were
+        sent, but nothing is sent and no code confirms it. Refused with `409`
         `account_linked_elsewhere` when the account is linked to another User, with `409` `messages_tab_disabled` when
         Slack refuses the direct message because the Messages tab of the Slack app is off, and with `409` without a
         code when Slack refuses a call otherwise. Runs on the interactive path: when no limiter token is free within
@@ -10358,8 +10365,8 @@ components:
         in: code
         codes:
         - code: link_code_requests_exceeded
-          description: Too many Mattermost, Bridge or Slack link codes were requested within an hour, by the User or for
-            the target account (`account_link.mattermost_code_requests`, `startMattermostLink`;
+          description: Too many Mattermost, Bridge or Slack link codes were requested within an hour, by the User or by
+            the User for the target account (`account_link.mattermost_code_requests`, `startMattermostLink`;
             `account_link.bridge_code_requests`, `startBridgeCodeLink`; `account_link.slack_code_requests`,
             `startSlackLink`); `retry_after_seconds` says when the next one is allowed.
         - code: contact_code_requests_exceeded
