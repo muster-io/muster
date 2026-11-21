@@ -56,13 +56,19 @@ func (e *contactsEnv) answerTo(id string) string {
 	return e.answersTo(id)[0]
 }
 
-// sentCall queues a call of the demo gateway to the User user about groups and waits until the gateway got it.
+// sentCall queues a call of the demo gateway to the User user about groups and waits until the gateway got it and
+// Muster recorded it accepted as that notification, which an acknowledgement is bound to.
 func (e *contactsEnv) sentCall(r *Replica, user string, groups ...string) fakebridge.Notification {
 	e.t.Helper()
 	before := len(e.calls())
 	e.queueCall(r, user, groups...)
 	eventually(e.t, "the call to "+user, func() bool { return len(e.calls()) > before })
-	return e.calls()[len(e.calls())-1]
+	n := e.calls()[len(e.calls())-1]
+	eventually(e.t, "the accepted call to "+user, func() bool {
+		return e.h.count(e.t, `SELECT count(*) FROM gateway_calls WHERE state = 'accepted' AND notification_id = '`+
+			n.ID+`'`) == 1
+	})
+	return n
 }
 
 // logged are the lines of event on every replica whose fields include want.
@@ -269,5 +275,29 @@ func TestGatewayAcknowledge(t *testing.T) {
 	}
 	if done != 3 || refused != 3 {
 		t.Errorf("muster_commands_total{transport=\"gateway\"}: done %g, refused %g", done, refused)
+	}
+
+	// The data of a call acts only for the notification the gateway accepted it as, and only for two hours after.
+	g8 := group(8)
+	advance(t, r, 61)
+	eighth := e.sentCall(r, petr.id, g8)
+	if got := e.answerTo(e.acknowledge(veras.ID, `"data":"`+eighth.Action.Data+`"`)); got !=
+		"This call could not be verified; nothing was changed" {
+		t.Errorf("the answer to another notification %q", got)
+	}
+	if n := e.logged("gateway_acknowledge_refused", map[string]string{"connection": e.gw,
+		"reason": "notification_mismatch"}); n != 1 {
+		t.Errorf("%d refusals of another notification logged", n)
+	}
+	advance(t, r, 2*60*60+60)
+	if got := e.answerTo(e.acknowledge(eighth.ID, "")); got != "This call has expired; nothing was changed" {
+		t.Errorf("the answer to a stale call %q", got)
+	}
+	if n := e.logged("gateway_acknowledge_refused", map[string]string{"connection": e.gw,
+		"reason": "stale_call"}); n != 1 {
+		t.Errorf("%d refusals of a stale call logged", n)
+	}
+	if o, _ := e.alertGroup(g8)["owner"].(map[string]any); o != nil {
+		t.Errorf("g8 owned by %v", o)
 	}
 }

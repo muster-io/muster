@@ -119,7 +119,8 @@ issue: 462
 - **Metrics** (`internal/metrics/catalogue.go`): `gateway` among the `transport` values of `muster_commands_total`;
   reference.md adds it to the row of that metric and drops the sentence about it under "Metrics added in L2".
 - **Log events** (`internal/logging/events.go`): `gateway_acknowledge_refused` (info; the call, the Connection, the
-  reason: `not_verified`, `expired`, `unknown_call`, `disabled` or `deleted`), C-30.
+  reason: `not_verified`, `expired`, `unknown_call`, `not_accepted`, `notification_mismatch`, `stale_call`, `disabled`
+  or `deleted`), C-30.
 - **Keyring** (`internal/keyring/query.sql`, `status.go`): `CountOpenButtonKeys` counts, with the Root messages, the
   calls whose action data a key signed, through a gateway and to a person not deleted — waiting or being sent, or
   accepted or Not delivered after an attempt, ended within twice `bridge.event_max_age` of the business time
