@@ -45,6 +45,9 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   clear its Assignees (C-32.FR-5, C-32.FR-12). An Acknowledge reported by a Notification gateway, with the Transport
   `gateway`, applies only while nobody owns the Alert Group: firing or snoozed → acknowledged; acknowledged → unchanged,
   and the person is told who has it; it never makes a Takeover (C-30.FR-6).
+  _Revised for L2 (2026-11-21):_ the Commands Attach and Detach join them (C-37.FR-1, C-37.FR-2); every change of a
+  main Alert Group's status is applied to the Alert Groups attached to it (C-37.FR-5), and the Commands of this table
+  on an attached Alert Group, except Add Note, are refused (C-37.FR-9).
 
 - **C-10.FR-2** Refusals carry a stable code and a message: "already resolved" (Acknowledge, Resolve, Snooze on
   resolved); "not acknowledged"; "not snoozed"; "not resolved", "resolved automatically — it reopens by itself when an
@@ -52,6 +55,8 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   already resolved" (Unresolve, checked in this order); "a Service account cannot be an Owner" (Acknowledge and "Still
   on it" from a Service account); "not permitted". The API returns them as `Problem` documents with `409` for
   preconditions and `403` for permissions.
+  _Revised for L2 (2026-11-21):_ an attached Alert Group refuses them with `alert_group_attached`, and Attach and Detach
+  add their own codes (C-37.FR-2, C-37.FR-9).
 - **C-10.FR-3** Every command passes through one dispatcher: permission → precondition → transition → Audit log →
   Timeline → re-render. The Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`) is recorded;
   transitions Muster starts itself use the Transport `system` and appear in the Timeline only (ADR-0016).
@@ -89,6 +94,8 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   refusal of one never stops the others. A bulk Acknowledge skips every Alert Group that another user owns, with the
   outcome "skipped: owned by {Owner}", so it never makes a Takeover; a Takeover is made one Alert Group at a time. An
   id that names no Alert Group the caller can see gets the outcome "failed: not found".
+  _Revised for L2 (2026-11-21):_ Attach to one main Alert Group is a bulk command too, and an attached Alert Group gets
+  the outcome `alert_group_attached` in the others (C-37.FR-9, C-37.FR-13).
 - **C-10.FR-15** Commands add these rows to the lifecycle event table of C-09.FR-22, with the same columns and meaning.
   Acknowledge by the current Owner changes nothing and records no event; Resolve with a Note records `resolved` and then
   `note_added`.
@@ -108,6 +115,8 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   allows for the caller's Permissions and identity — the commands of FR-1 plus `still_on_it` (the caller is the Owner
   and a Reminder is waiting, C-17.FR-10) and `add_note` (the caller may add Notes). A Service account is never offered
   Acknowledge or "Still on it".
+  _Revised for L2 (2026-11-21):_ `attach` and `detach` join them where allowed; an attached Alert Group offers only
+  `detach` and `add_note` (C-37.FR-1, C-37.FR-9).
 - **C-10.FR-17** Snooze presets. Besides a duration, a time or no end, a Snooze can end at one of two Snooze presets,
   whose end Muster computes when the Command runs, on the business clock, from the start of the working day
   (`organization.workday_start`) and the first day of the week (`organization.week_start`):
