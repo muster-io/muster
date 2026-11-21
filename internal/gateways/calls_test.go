@@ -500,6 +500,28 @@ func (f *fakeCalls) RescheduleCall(_ context.Context, a dbgen.RescheduleCallPara
 	return 1, nil
 }
 
+func (f *fakeCalls) UnstartCall(_ context.Context, a dbgen.UnstartCallParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.err("UnstartCall"); err != nil {
+		return 0, err
+	}
+	c := f.call(a.ID)
+	if c == nil || c.state != CallSending || c.attempts != 0 || c.firstFailed.Valid || c.owner != a.Owner {
+		return 0, nil
+	}
+	for _, w := range f.calls {
+		if w.conn == c.conn && w.user == c.user && w.state == CallWaiting {
+			return 0, nil
+		}
+	}
+	c.state, c.contactID, c.language, c.text = CallWaiting, pgtype.Int8{}, pgtype.Text{}, pgtype.Text{}
+	c.actionData, c.buttonKeyID, c.firstAttempt = pgtype.Text{}, pgtype.Text{}, pgtype.Timestamptz{}
+	c.nextAttempt = pgtype.Timestamptz{Time: a.At, Valid: true}
+	f.release(c)
+	return 1, nil
+}
+
 func (f *fakeCalls) RecordCallRetry(_ context.Context, a dbgen.RecordCallRetryParams) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -41,7 +41,7 @@ import (
 // Only calls set the state: deliveries to the Destinations of the same bridge never do, and the state never touches
 // them. The calls that one sender attempts at once make their gateway Broken as the calls of several replicas do, each
 // in a transaction of its own under the lock below; the sender learns whether the gateway is Broken once that
-// committed, so that no other call of its round goes through it (sender.go). The Leader exports
+// committed, so that no call of its round goes through the gateway after that was recorded (sender.go, gate). The Leader exports
 // muster_notification_gateway_broken (Export) and reconciles the state (Reconcile) in its task delivery_queue.
 //
 // Lock order. Every transaction of the Broken state — a Break, an end by a probe or a check, the record of a failed

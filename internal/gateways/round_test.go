@@ -11,7 +11,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
@@ -19,12 +22,11 @@ import (
 )
 
 // roundGateway is the Notification gateway of the tests of rounds: it answers each contact as answer says, ok when it
-// is nil, runs during while a call is made, and keeps the contacts called and the most calls made at once.
+// is nil, runs during while a call is made, and keeps the contacts called and the calls made at the moment.
 type roundGateway struct {
 	mu       sync.Mutex
 	sent     []string
 	inFlight int
-	most     int
 	answer   func(contact string) delivery.Outcome
 	during   func(contact string)
 }
@@ -33,7 +35,6 @@ func (g *roundGateway) Notify(_ context.Context, _ delivery.Call, n delivery.Not
 	g.mu.Lock()
 	g.sent = append(g.sent, n.Contact)
 	g.inFlight++
-	g.most = max(g.most, g.inFlight)
 	g.mu.Unlock()
 	if g.during != nil {
 		g.during(n.Contact)
@@ -103,6 +104,13 @@ func (b *bucket) HoldConnection(_ context.Context, _ DBTX, _, connection int64, 
 	return nil
 }
 
+// asks is how many tokens were asked for.
+func (b *bucket) asks() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.n
+}
+
 // person adds the User id, in English, with a confirmed contact at the gateway 10.
 func (e *senderEnv) person(id int64) {
 	e.f.mu.Lock()
@@ -122,42 +130,58 @@ func (e *senderEnv) callOf(i int) fakeCall {
 	return e.f.calls[i]
 }
 
-// TestSenderRoundConcurrency: a round attempts its due calls Concurrency at once, never more, each holding its slot
-// until its outcome is recorded, and returns once every attempt ended.
+// unstarted reports whether c waits for its first attempt as before its preparation: no start, no lease, no attempt.
+func unstarted(c fakeCall) bool {
+	return c.state == CallWaiting && !c.firstAttempt.Valid && !c.text.Valid && !c.language.Valid &&
+		!c.contactID.Valid && !c.actionData.Valid && !c.buttonKeyID.Valid && c.owner == "" && c.attempts == 0 &&
+		!c.firstFailed.Valid && !c.errorClass.Valid
+}
+
+// TestSenderRoundConcurrency: a round attempts its due calls Concurrency at once, never more: while Concurrency calls
+// are being made, the round prepares no other — it takes no token — until one of them ended; it returns once every
+// attempt ended. In a synctest bubble, Wait shows the moment every goroutine waits: the calls made for their release,
+// the round for a free slot.
 func TestSenderRoundConcurrency(t *testing.T) {
-	e := newSender(t)
-	e.s.Concurrency = 3
-	gw := &roundGateway{}
-	e.s.Gateway = gw
-	for id := int64(4); id <= 9; id++ {
-		e.person(id)
-		e.page(t, id, 10, 1)
-	}
-	e.page(t, 1, 10, 1)
-	e.page(t, 2, 10, 2)
-	full := make(chan struct{})
-	var once sync.Once
-	gw.during = func(string) {
-		gw.mu.Lock()
-		n := gw.inFlight
-		gw.mu.Unlock()
-		if n == 3 {
-			once.Do(func() { close(full) })
+	synctest.Test(t, func(t *testing.T) {
+		const calls, concurrency = 8, 3
+		e := newSender(t)
+		e.s.Concurrency = concurrency
+		gw := &roundGateway{}
+		lim := newBucket(calls)
+		e.s.Gateway, e.s.Limiter = gw, lim
+		for id := int64(4); id <= 9; id++ {
+			e.person(id)
+			e.page(t, id, 10, 1)
 		}
-		select {
-		case <-full:
-		case <-time.After(10 * time.Second): // a guard against a sender that never makes three calls at once
+		e.page(t, 1, 10, 1)
+		e.page(t, 2, 10, 2)
+		release := make(chan struct{})
+		gw.during = func(string) { <-release }
+		done := make(chan error)
+		go func() {
+			_, err := e.s.Round(t.Context())
+			done <- err
+		}()
+		for released := range calls {
+			synctest.Wait()
+			gw.mu.Lock()
+			inFlight := gw.inFlight
+			gw.mu.Unlock()
+			if want := min(concurrency, calls-released); inFlight != want || lim.asks() != released+want {
+				t.Errorf("%d calls ended: %d made at once and %d prepared, want %d and %d", released, inFlight,
+					lim.asks(), want, released+want)
+			}
+			release <- struct{}{}
 		}
-	}
-	e.round(t)
-	if gw.most != 3 || len(gw.called()) != 8 {
-		t.Fatalf("%d calls, at most %d at once", len(gw.called()), gw.most)
-	}
-	for i := range 8 {
-		if c := e.callOf(i); c.state != CallAccepted || c.attempts != 1 || c.owner != "" {
-			t.Errorf("the call %d %+v", i, c)
+		if err := <-done; err != nil {
+			t.Fatal(err)
 		}
-	}
+		for i := range calls {
+			if c := e.callOf(i); c.state != CallAccepted || c.attempts != 1 || c.owner != "" {
+				t.Errorf("the call %d %+v", i, c)
+			}
+		}
+	})
 }
 
 // TestSenderRoundTokenOrder is C-30.FR-4 with calls attempted at once: the preparations take the tokens of the
@@ -227,22 +251,30 @@ func gatedRound(t *testing.T, e *senderEnv, lim *bucket, wait func()) *roundGate
 	return gw
 }
 
-// TestSenderRoundRetryAfter is a RetryAfter among calls attempted at once: once the gateway asked one call to wait,
-// no other call of the round goes through it. The call prepared before the answer was recorded is not made and waits
-// for the end of the hold plus the token margin, as it would have waited for a token, with no attempt and no budget
-// started; the call prepared after it gets no token; the call through another gateway goes.
+// answerA makes the gateway answer the first call to A of gatedRound with out, and every other call ok.
+func answerA(out delivery.Outcome) func(string) delivery.Outcome {
+	var answered atomic.Bool
+	return func(c string) delivery.Outcome {
+		if c == "+10000000001" && answered.CompareAndSwap(false, true) {
+			return out
+		}
+		return delivery.Outcome{Kind: delivery.OutcomeOK}
+	}
+}
+
+// TestSenderRoundRetryAfter is a RetryAfter among calls attempted at once: once the round recorded that the gateway
+// asked one call to wait, no call of the round prepared before goes through it. The call that its preparation started
+// before the answer was recorded is not made and waits again, unstarted, until the end of the hold plus the token
+// margin, as it would have waited for a token; the call prepared after it gets no token; the call through another
+// gateway goes.
 func TestSenderRoundRetryAfter(t *testing.T) {
 	e := newSender(t)
 	lim := newBucket(10)
 	held := make(chan struct{})
 	lim.held = func() { close(held) }
 	gw := gatedRound(t, e, lim, func() { <-held })
-	gw.answer = func(contact string) delivery.Outcome {
-		if contact == "+10000000001" {
-			return delivery.Outcome{Kind: delivery.OutcomeRetryAfter, RetryAfter: 30 * time.Second}
-		}
-		return delivery.Outcome{Kind: delivery.OutcomeOK}
-	}
+	gw.answer = answerA(delivery.Outcome{Kind: delivery.OutcomeRetryAfter,
+		RetryAfter: 30 * time.Second})
 	e.round(t)
 	until := c0.Add(3*time.Second + 30*time.Second)
 	if got := gw.called(); !slices.Equal(got, []string{"+10000000001", "+10000000003"}) {
@@ -252,33 +284,68 @@ func TestSenderRoundRetryAfter(t *testing.T) {
 		!a.nextAttempt.Time.Equal(until.Add(SenderTokenMargin)) || lim.holds[10] != until {
 		t.Errorf("the call asked to wait %+v, holds %v", a, lim.holds)
 	}
-	if b := e.callOf(1); b.state != CallSending || b.attempts != 0 || b.errorClass.Valid || b.firstFailed.Valid ||
-		b.owner != "" || !b.nextAttempt.Time.Equal(until.Add(SenderTokenMargin)) {
+	if b := e.callOf(1); !unstarted(b) || !b.nextAttempt.Time.Equal(until.Add(SenderTokenMargin)) {
 		t.Errorf("the call prepared before the answer %+v", b)
 	}
 	if c := e.callOf(2); c.state != CallAccepted {
 		t.Errorf("the call through another gateway %+v", c)
 	}
-	if d := e.callOf(3); d.state != CallWaiting || d.attempts != 0 || !d.nextAttempt.Time.Equal(until.Add(SenderTokenMargin)) {
+	if d := e.callOf(3); !unstarted(d) || !d.nextAttempt.Time.Equal(until.Add(SenderTokenMargin)) {
 		t.Errorf("the call prepared after the answer %+v", d)
 	}
 }
 
-// TestSenderRoundBroken is a Fatal answer among calls attempted at once: once one call made the gateway Broken, no
-// other call of the round goes through it. The call prepared before the Broken state was recorded ends Not delivered
-// with gateway_broken, unsent, as does the call prepared after it; the call through another gateway goes.
+// TestSenderRoundHeldCall is C-30.FR-4 for a call stopped at the gate by a hold: as it waits unstarted, a Page that
+// comes due during the hold joins it, rather than waiting behind it for gateway.combine_window; an Alert Group of it
+// that stops during the hold is dropped right before its first attempt; and its first attempt, which its Pages are
+// settled with, is the one made after the hold.
+func TestSenderRoundHeldCall(t *testing.T) {
+	e := newSender(t)
+	lim := newBucket(10)
+	held := make(chan struct{})
+	lim.held = func() { close(held) }
+	gw := gatedRound(t, e, lim, func() { <-held })
+	gw.answer = answerA(delivery.Outcome{Kind: delivery.OutcomeRetryAfter,
+		RetryAfter: 30 * time.Second})
+	e.round(t)
+	lim.held = nil
+	e.f.group(5, "Disk5", "warning")
+	e.page(t, 2, 10, 5)
+	e.f.setStatus(1, "acknowledged")
+	if b := e.callOf(1); len(e.f.calls) != 4 || !unstarted(b) || !slices.Equal(e.f.itemsOf(b.id),
+		[]string{"+Disk1", "+Disk5"}) {
+		t.Fatalf("the Page during the hold: %d calls, %+v about %v", len(e.f.calls), b, e.f.itemsOf(b.id))
+	}
+	e.advance(30*time.Second + SenderTokenMargin)
+	first := e.business.Now()
+	e.round(t)
+	b := e.callOf(1)
+	if b.state != CallAccepted || !slices.Equal(e.f.itemsOf(b.id), []string{"+Disk5", "-Disk1"}) {
+		t.Fatalf("the call after the hold %+v about %v", b, e.f.itemsOf(b.id))
+	}
+	i := slices.IndexFunc(e.pages.outcomes, func(o groups.CallOutcome) bool { return o.Call == b.id })
+	if i < 0 || !e.pages.outcomes[i].FirstAttempt.Equal(first) || !slices.Equal(e.pages.outcomes[i].Groups,
+		[]int64{5}) {
+		t.Errorf("settled %+v", e.pages.outcomes)
+	}
+	if got := gw.called(); len(got) != 5 || !slices.Contains(got, "+10000000002") {
+		t.Errorf("called %v", got)
+	}
+}
+
+// TestSenderRoundBroken is a Fatal answer among calls attempted at once: once the round recorded that one call made the
+// gateway Broken, no call of the round prepared before goes through it. The call that its preparation started before
+// is not made and waits again, unstarted, due at once, and the sender is woken: its next preparation reads the Broken
+// state and ends it Not delivered with gateway_broken, unsent, as it ends the call prepared after the Break; the call
+// through another gateway goes.
 func TestSenderRoundBroken(t *testing.T) {
 	e := newBrokenSender(t)
 	settling := make(chan struct{})
 	var once sync.Once
 	e.pages.hook = func() { once.Do(func() { close(settling) }) }
 	gw := gatedRound(t, e.senderEnv, newBucket(10), func() { <-settling })
-	gw.answer = func(contact string) delivery.Outcome {
-		if contact == "+10000000001" {
-			return delivery.Outcome{Kind: delivery.OutcomeFatal, Status: 401, Error: "401 Unauthorized"}
-		}
-		return delivery.Outcome{Kind: delivery.OutcomeOK}
-	}
+	gw.answer = answerA(delivery.Outcome{Kind: delivery.OutcomeFatal, Status: 401,
+		Error: "401 Unauthorized"})
 	e.round(t)
 	if got := gw.called(); !slices.Equal(got, []string{"+10000000001", "+10000000003"}) {
 		t.Fatalf("called %v", got)
@@ -286,6 +353,10 @@ func TestSenderRoundBroken(t *testing.T) {
 	if e.b.state(10) == nil {
 		t.Fatal("the gateway is not Broken")
 	}
+	if b := e.callOf(1); !unstarted(b) || !b.nextAttempt.Time.Equal(c0.Add(3*time.Second)) || len(e.s.wake) != 1 {
+		t.Fatalf("the call prepared before the Break %+v, woken %d", b, len(e.s.wake))
+	}
+	e.round(t)
 	want := []struct {
 		state, reason string
 		attempts      int64
@@ -296,91 +367,127 @@ func TestSenderRoundBroken(t *testing.T) {
 			t.Errorf("the call %d %+v, want %+v", i, c, w)
 		}
 	}
+	if got := gw.called(); len(got) != 2 {
+		t.Errorf("called %v", got)
+	}
 }
 
-// TestSenderRoundReclaimed is NFR-4 within one replica: a call whose lease ran out during a slow call, claimed again
-// by the same round, is left to the attempt that runs, which records its outcome under the renewed lease; the gateway
-// is called once. One call at a time is claimed: the critical call A, then B, whose lease from a claim made before
-// A's ran out has run out too by its preparation, then A again, then B again, which goes.
-func TestSenderRoundReclaimed(t *testing.T) {
+// TestSenderRoundRetried: a call being retried that the gate stops keeps what its first attempt fixed — after a hold
+// it waits until the hold ends plus the token margin, still started, with no attempt counted; after a Broken state it
+// ends Not delivered with gateway_broken, unsent.
+func TestSenderRoundRetried(t *testing.T) {
+	retried := func(e *senderEnv) {
+		e.f.mu.Lock()
+		defer e.f.mu.Unlock()
+		b := &e.f.calls[1]
+		b.state, b.attempts = CallSending, 1
+		b.firstAttempt = pgtype.Timestamptz{Time: c0, Valid: true}
+		b.language = pgtype.Text{String: "en", Valid: true}
+		b.text = pgtype.Text{String: "the text", Valid: true}
+		b.contactID = pgtype.Int8{Int64: 502, Valid: true}
+	}
 	e := newSender(t)
-	e.s.Concurrency, e.s.Batch = 2, 1
-	gw := &roundGateway{}
-	e.s.Gateway = gw
-	e.page(t, 1, 10, 4)
-	e.page(t, 2, 10, 1)
-	inCall, release := make(chan struct{}), make(chan struct{})
-	gw.during = func(contact string) {
-		if contact == "+10000000001" {
-			close(inCall)
-			<-release
-		}
-	}
-	claims := 0
-	e.f.claiming = func() {
-		claims++
-		switch claims {
-		case 2:
-			// A is being called; its lease runs out after this claim, which read the real clock before.
-			<-inCall
-			e.real.Advance(SenderLease)
-		case 4:
-			close(release)
-		}
-	}
+	lim := newBucket(10)
+	held := make(chan struct{})
+	lim.held = func() { close(held) }
+	gw := gatedRound(t, e, lim, func() { <-held })
+	gw.answer = answerA(delivery.Outcome{Kind: delivery.OutcomeRetryAfter, RetryAfter: 30 * time.Second})
+	retried(e)
 	e.round(t)
-	if got := gw.called(); !slices.Equal(got, []string{"+10000000001", "+10000000002"}) || claims != 5 {
-		t.Fatalf("called %v, %d claims", got, claims)
+	until := c0.Add(3*time.Second + 30*time.Second)
+	if b := e.callOf(1); b.state != CallSending || b.attempts != 1 || b.text.String != "the text" || b.owner != "" ||
+		!b.nextAttempt.Time.Equal(until.Add(SenderTokenMargin)) || slices.Contains(gw.called(), "+10000000002") {
+		t.Errorf("the call being retried after a hold %+v", b)
 	}
-	if a, b := e.callOf(0), e.callOf(1); a.state != CallAccepted || a.attempts != 1 || b.state != CallAccepted {
-		t.Errorf("the calls %+v %+v", a, b)
+
+	be := newBrokenSender(t)
+	settling := make(chan struct{})
+	var once sync.Once
+	be.pages.hook = func() { once.Do(func() { close(settling) }) }
+	gw = gatedRound(t, be.senderEnv, newBucket(10), func() { <-settling })
+	gw.answer = answerA(delivery.Outcome{Kind: delivery.OutcomeFatal, Status: 401})
+	retried(be.senderEnv)
+	be.round(t)
+	if b := be.callOf(1); b.state != CallNotDelivered || b.reason.String != groups.PageGatewayBroken ||
+		b.attempts != 1 || slices.Contains(gw.called(), "+10000000002") {
+		t.Errorf("the call being retried after a Break %+v", b)
+	}
+}
+
+// TestSenderUnstart: the undo of a start keeps the start when a Page queued a call behind the started call meanwhile —
+// the call then waits until the given time, as one whose first attempt was asked to wait — and changes nothing once
+// the lease went to another replica; a failing query fails it.
+func TestSenderUnstart(t *testing.T) {
+	e := newSender(t)
+	e.page(t, 1, 10, 1)
+	rows, err := e.f.ClaimDueCalls(t.Context(), claimParams(e.s))
+	if err != nil || len(rows) != 1 {
+		t.Fatal(rows, err)
+	}
+	c, err := e.s.prepare(t.Context(), rows[0])
+	if err != nil || c == nil {
+		t.Fatal(c, err)
+	}
+	e.page(t, 1, 10, 2)
+	at := c0.Add(time.Minute)
+	if err := e.s.unstart(t.Context(), c, at); err != nil {
+		t.Fatal(err)
+	}
+	if started, behind := e.callOf(0), e.callOf(1); started.state != CallSending || !started.firstAttempt.Valid ||
+		!started.nextAttempt.Time.Equal(at) || started.owner != "" || behind.state != CallWaiting ||
+		behind.notBefore.Valid {
+		t.Errorf("with a call behind it: %+v, behind %+v", started, behind)
+	}
+	for _, q := range []string{"LockCallPerson", "UnstartCall", "RescheduleCall"} {
+		e.f.fail[q] = errors.New("boom")
+		if err := e.s.unstart(t.Context(), c, at); err == nil {
+			t.Errorf("%s did not fail", q)
+		}
+		delete(e.f.fail, q)
 	}
 }
 
 // TestSenderRoundCancel: when ctx ends while calls are made, the round returns the end once every attempt it started
 // has ended; the outcomes of the calls made are recorded, and the call that waited for a slot is left to its lease.
 func TestSenderRoundCancel(t *testing.T) {
-	e := newSender(t)
-	e.s.Concurrency = 2
-	gw := &roundGateway{}
-	e.s.Gateway = gw
-	e.page(t, 1, 10, 1)
-	e.page(t, 2, 10, 2)
-	e.page(t, 1, 11, 3)
-	ctx, cancel := context.WithCancel(t.Context())
-	both, release := make(chan struct{}), make(chan struct{})
-	var n atomic.Int32
-	gw.during = func(string) {
-		if n.Add(1) == 2 {
-			close(both)
+	synctest.Test(t, func(t *testing.T) {
+		e := newSender(t)
+		e.s.Concurrency = 2
+		gw := &roundGateway{}
+		e.s.Gateway = gw
+		e.page(t, 1, 10, 1)
+		e.page(t, 2, 10, 2)
+		e.page(t, 1, 11, 3)
+		ctx, cancel := context.WithCancel(t.Context())
+		release := make(chan struct{})
+		gw.during = func(string) { <-release }
+		done := make(chan error, 1)
+		go func() {
+			_, err := e.s.Round(ctx)
+			done <- err
+		}()
+		synctest.Wait()
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("the round returned while its calls were made: %v", err)
+		default:
 		}
-		<-release
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, err := e.s.Round(ctx)
-		done <- err
-	}()
-	<-both
-	cancel()
-	select {
-	case err := <-done:
-		t.Fatalf("the round returned while its calls were made: %v", err)
-	default:
-	}
-	close(release)
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Errorf("the round ended with %v", err)
-	}
-	if a, b, c := e.callOf(0), e.callOf(1), e.callOf(2); a.state != CallAccepted || b.state != CallAccepted ||
-		c.state != CallWaiting || len(gw.called()) != 2 {
-		t.Errorf("after the end: %+v %+v %+v", a, b, c)
-	}
+		close(release)
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Errorf("the round ended with %v", err)
+		}
+		if a, b, c := e.callOf(0), e.callOf(1), e.callOf(2); a.state != CallAccepted || b.state != CallAccepted ||
+			c.state != CallWaiting || len(gw.called()) != 2 {
+			t.Errorf("after the end: %+v %+v %+v", a, b, c)
+		}
+	})
 }
 
 // TestSenderRoundCancelAtGate: when ctx ends while an answer that held the gateway is recorded, the preparation that
-// waits at the gate and the call that waits there to be made stop, unsent, and the round returns once the answer is
-// recorded.
+// waits at the gate stops, and the call that waits there to be made stops too, unsent, and waits again, unstarted, due
+// at once; the round returns once the answer is recorded.
 func TestSenderRoundCancelAtGate(t *testing.T) {
 	e := newSender(t)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -391,12 +498,8 @@ func TestSenderRoundCancelAtGate(t *testing.T) {
 		<-release
 	}
 	gw := gatedRound(t, e, lim, func() { <-recording })
-	gw.answer = func(contact string) delivery.Outcome {
-		if contact == "+10000000001" {
-			return delivery.Outcome{Kind: delivery.OutcomeRetryAfter, RetryAfter: 30 * time.Second}
-		}
-		return delivery.Outcome{Kind: delivery.OutcomeOK}
-	}
+	gw.answer = answerA(delivery.Outcome{Kind: delivery.OutcomeRetryAfter,
+		RetryAfter: 30 * time.Second})
 	e.s.Concurrency = 3
 	done := make(chan error, 1)
 	go func() {
@@ -413,7 +516,7 @@ func TestSenderRoundCancelAtGate(t *testing.T) {
 		slices.Contains(got, personContact(4)) {
 		t.Errorf("called %v", got)
 	}
-	if b := e.callOf(1); b.attempts != 0 || b.state != CallSending {
+	if b := e.callOf(1); !unstarted(b) || !b.nextAttempt.Time.Equal(c0.Add(3*time.Second)) {
 		t.Errorf("the call that waited at the gate %+v", b)
 	}
 }

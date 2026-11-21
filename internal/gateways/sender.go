@@ -38,15 +38,18 @@ import (
 // the delivery client class through the limiter of the gateway's Connection, and records the outcome in another short
 // transaction, guarded by its lease. Lint 3 allows Notify here and in delivery's interactive path only.
 //
-// A round attempts up to Concurrency calls at once. It prepares them one after another in the order of the claim, so
-// that the tokens of a gateway's limiter, taken in the preparation's transaction from the bucket every replica shares,
-// go to the calls in that order; the call and the record of its outcome then run in a goroutine of their own, beside
-// the preparation of the next calls. The attempts of one sender meet under the same locks as those of two replicas:
-// the person's lock keeps two calls to one person through one gateway apart, and a person has at most one call that
-// can be claimed. What one round adds is its gate per gateway (gate): while an answer that may hold the gateway's
-// limiter or make it Broken is recorded, no other call through it is prepared or made, and a call prepared before the
-// round recorded a hold or a Broken state is not made after it, as when the round attempted its calls one after
-// another.
+// A round attempts up to Concurrency calls at once. Its own goroutine claims the due calls and prepares them one after
+// another in the order of the claim, each holding one of Concurrency slots, so that the tokens of a gateway's limiter,
+// taken in the preparation's transaction from the bucket every replica shares, go to the calls in that order; the call
+// and the record of its outcome then run in a goroutine of their own, holding the slot, beside the preparation of the
+// next calls. The attempts of one sender meet under the same locks as those of two replicas: the person's lock keeps
+// two calls to one person through one gateway apart, and a person has at most one call that can be claimed. What one
+// round adds is its gate per gateway (gate): no call of the round prepared before the round recorded that an answer
+// held the gateway's limiter or made it Broken is made through the gateway after that was recorded. A call that its
+// preparation started waits again, unstarted, so that the Pages that come due join it and its Alert Groups are read
+// again right before its first attempt (gated); a call being retried waits for the end of the hold or ends Not
+// delivered with gateway_broken. Calls that were made before the answer was handled are made beside it, as on two
+// replicas.
 //
 // A call is sent at least once: its Idempotency-Key calls/<public_id>, its contact, its text and its action data,
 // signed with the active button-signature key whose id the call keeps (button_key_id), so that the Keyring keeps that
@@ -63,10 +66,14 @@ import (
 //
 // SenderConcurrency is the sender's own: the calls a round attempts at once. Four keep the default limiter of a
 // gateway's Connection (connection.bridge.limiter, 10 calls a second) busy while the gateway answers each call within
-// 400 ms, where one call at a time would make one call per answer. Each attempt holds at most one connection of the
-// main pool at a time — its preparation's transaction, then its record's, none while the gateway answers —, so the
-// sender holds at most four besides its claim. Processing keeps to half of a pool of max(10, CPUs) (db.MinPoolConns),
-// and delivery, ingestion and the API share the rest with the sender.
+// 400 ms, where one call at a time would make one call per answer. A round holds at most four connections of the main
+// pool at once: its claims and preparations run on its own goroutine, each holding one of the four slots, and each
+// attempt holds at most one connection at a time — its preparation's transaction, then its record's, none while the
+// gateway answers. Beside them, the probes of Broken gateways that a round starts at its end, up to ProbeConcurrency,
+// which may run into the next round, hold one each for their short reads and transaction. Processing keeps to half of
+// a pool of max(10, CPUs) (db.MinPoolConns): at the peak, with a gateway that answers at once and no gateway Broken,
+// the sender and processing hold up to 9 of a pool of 10 and the others wait in the pool's queue; a gateway that takes
+// longer to answer than a transaction takes leaves the sender's slots without a connection most of the time.
 const (
 	SenderLease          = delivery.Lease
 	SenderBatch          = delivery.Batch
@@ -258,16 +265,22 @@ func (s *Sender) Round(ctx context.Context) (time.Duration, error) {
 
 // attemptDue claims the due calls, Batch at a time, and attempts them, up to Concurrency at once. It prepares each in
 // the order of the claim — critical first, then by when it came due — once a slot is free (start), and the next claim
-// follows once every call of a claim was prepared, without waiting for their answers. It returns once every attempt
-// it started has ended, also when ctx ends.
+// follows once every call of a claim was prepared, without waiting for their answers; a claim holds a slot too. It
+// returns once every attempt it started has ended, also when ctx ends.
 func (s *Sender) attemptDue(ctx context.Context) error {
 	rd := newRound(s.concurrency())
 	defer rd.attempts.Wait()
 	for {
+		select {
+		case rd.slots <- struct{}{}:
+		case <-ctx.Done():
+			return fmt.Errorf("claim the due calls: %w", ctx.Err())
+		}
 		// One statement, which commits alone: it selects the due calls SKIP LOCKED and leases them.
 		p := s.Lease.Params(s.batch())
 		rows, err := s.Store.ClaimDueCalls(ctx, dbgen.ClaimDueCallsParams{OrgID: s.OrgID, Owner: p.Owner,
 			LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now, Lim: p.Limit})
+		<-rd.slots
 		if err != nil {
 			return fmt.Errorf("claim the due calls: %w", err)
 		}
@@ -296,8 +309,10 @@ func (s *Sender) attemptDue(ctx context.Context) error {
 
 // start takes a slot of the round rd for the claimed call r, waits until the gate of its gateway is down, prepares it,
 // and when it is due, ends it or sends it and records the outcome in a goroutine that holds the slot until then; a
-// failure is logged and the call is attempted again once its lease runs out. A call claimed again while its attempt
-// still runs — its lease ran out during a slow call — is left to that attempt. Its error is the end of ctx.
+// failure is logged and the call is attempted again once its lease runs out. While it waits at the gate, the calls
+// after it in the claim wait too, whatever their gateway, so that the tokens of every gateway still go in the order of
+// the claim; the wait lasts until one answer's outcome is recorded. A call claimed again while its attempt still runs —
+// its lease ran out during a slow call — is left to that attempt. Its error is the end of ctx.
 func (s *Sender) start(ctx context.Context, rd *round, r dbgen.ClaimDueCallsRow) error {
 	select {
 	case rd.slots <- struct{}{}:
@@ -375,12 +390,13 @@ func (rd *round) gate(connection int64) *gate {
 }
 
 // gate keeps the calls of one round through one gateway in step with what the gateway's answers to the round's other
-// calls record, as when the round attempted its calls one after another. An answer that may hold the gateway's limiter
-// (a RetryAfter) or make the gateway Broken (Fatal or Transient) raises the gate until its outcome is recorded;
-// meanwhile no call through the gateway is prepared or made, so that a preparation after it reads the hold or the
-// Broken state from the database. The gate counts the Broken states the round recorded and keeps the end of the
-// latest hold, so that a call prepared before either is not made after it. A gate is never held across a
-// transaction or a call of the gateway; a nil gate, outside a round, lets every call through.
+// calls recorded. An answer that may hold the gateway's limiter (a RetryAfter) or make the gateway Broken (Fatal or
+// Transient) raises the gate from when the sender handles it until its outcome is recorded; a call that passed the
+// gate before is made beside it. While the gate is raised, no call through the gateway is prepared or made, so that a
+// preparation after it reads the hold or the Broken state from the database. The gate counts the Broken states the
+// round recorded and keeps the end of the latest hold, so that a call prepared before either is not made after it was
+// recorded (gated). A gate is never held across a transaction or a call of the gateway; a nil gate, outside a round,
+// lets every call through.
 type gate struct {
 	mu      sync.Mutex
 	raised  int
@@ -808,19 +824,34 @@ func (s *Sender) send(ctx context.Context, c *call) error {
 	return s.record(context.WithoutCancel(ctx), c, out)
 }
 
-// gated waits until the gate of the gateway of c is down, and reports whether c stops there, unsent: another call of
-// the round made the gateway Broken since c was prepared, and c ends Not delivered with gateway_broken, as its
-// preparation would have ended it (C-30.FR-8); or another call held the gateway's limiter until a time still to come,
-// and c waits until then plus SenderTokenMargin, which is no attempt, as it would have waited for a token. Its error is
-// the end of ctx, which leaves c to be attempted again once its lease runs out, or a failed end.
+// gated waits until the gate of the gateway of c is down, and reports whether c stops there, unsent, as a call that was
+// prepared before the round recorded that another call held the gateway's limiter until a time still to come or made
+// the gateway Broken. A call that this preparation started waits again, unstarted (unstart): until the hold ends plus
+// SenderTokenMargin, as it would have waited for a token; or, for a Broken gateway, due at once, so that its next
+// preparation reads the Broken state and its Alert Groups afresh and ends it Not delivered with gateway_broken
+// (C-30.FR-8). A call being retried keeps what its first attempt fixed: it waits until the hold ends plus
+// SenderTokenMargin, which is no attempt, or ends Not delivered with gateway_broken. The end of ctx stops c at the gate
+// too, with its error: a call this preparation started waits again, due at once, and one being retried is attempted
+// again once its lease runs out.
 func (s *Sender) gated(ctx context.Context, c *call) (bool, error) {
 	breaks, heldUntil, err := c.gate.wait(ctx)
+	now := s.Lease.Clocks.Business.Now().UTC()
+	started := c.row.State == CallWaiting
 	switch {
+	case err != nil && started:
+		// The undo must not end with ctx.
+		return true, errors.Join(err, s.unstart(context.WithoutCancel(ctx), c, now))
 	case err != nil:
+		return true, err
+	case breaks > c.breaks && started:
+		err := s.unstart(ctx, c, now)
+		s.Wake()
 		return true, err
 	case breaks > c.breaks:
 		return true, s.notDelivered(ctx, c, groups.PageGatewayBroken, 0, delivery.Outcome{})
-	case heldUntil.After(s.Lease.Clocks.Business.Now()):
+	case heldUntil.After(now) && started:
+		return true, s.unstart(ctx, c, heldUntil.Add(SenderTokenMargin))
+	case heldUntil.After(now):
 		if _, err := s.Store.RescheduleCall(ctx, dbgen.RescheduleCallParams{OrgID: s.OrgID, ID: c.row.ID,
 			Owner: s.Lease.Owner, At: heldUntil.Add(SenderTokenMargin)}); err != nil {
 			return true, fmt.Errorf("reschedule the call %s: %w", c.row.PublicID, err)
@@ -828,6 +859,34 @@ func (s *Sender) gated(ctx context.Context, c *call) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// unstart undoes the start that the preparation of the call c made, which was never attempted, so that c waits again,
+// due at at, as before its preparation (UnstartCall), in a transaction that takes the person's lock first, as a Page
+// does. When a Page queued a call behind c since its start, c stays started and waits until at, as a call whose first
+// attempt was asked to wait; a lost lease changes nothing.
+func (s *Sender) unstart(ctx context.Context, c *call, at time.Time) error {
+	undone := false
+	err := s.Store.InCallTx(ctx, func(_ DBTX, q CallQueries) error {
+		if err := s.lockPerson(ctx, q, c.row.ConnectionID, c.row.UserID); err != nil {
+			return err
+		}
+		n, err := q.UnstartCall(ctx, dbgen.UnstartCallParams{OrgID: s.OrgID, ID: c.row.ID, Owner: s.Lease.Owner,
+			At: at})
+		if err != nil {
+			return fmt.Errorf("undo the start of the call %s: %w", c.row.PublicID, err)
+		}
+		undone = n > 0
+		return nil
+	})
+	if err != nil || undone {
+		return err
+	}
+	if _, err := s.Store.RescheduleCall(ctx, dbgen.RescheduleCallParams{OrgID: s.OrgID, ID: c.row.ID,
+		Owner: s.Lease.Owner, At: at}); err != nil {
+		return fmt.Errorf("reschedule the call %s: %w", c.row.PublicID, err)
+	}
+	return nil
 }
 
 // callOutcome is the outcome label of muster_gateway_calls_total of an answer: accepted, a replayed answer included,

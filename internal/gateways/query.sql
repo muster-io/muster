@@ -416,6 +416,23 @@ SET next_attempt_at = @at::timestamptz, lease_owner = NULL, lease_until = NULL,
     last_error = coalesce(sqlc.narg('error')::text, last_error)
 WHERE org_id = @org_id AND id = @id AND state IN ('waiting', 'sending') AND lease_owner = @owner::text;
 
+-- UnstartCall undoes the start of a call that its round stopped before it was made (sender.go, gate): it waits again,
+-- due at @at, without its contact, language, text, action data and the id of their key, and frees its lease, so that
+-- the Pages that come due join it and its Alert Groups are read again right before its first attempt, as when its
+-- preparation had found no limiter token. Only a call this replica holds the lease of, started and never attempted,
+-- and only while no call waits behind it: the caller holds the person's lock, and a Page that came due since the start
+-- queued a call that waits behind it; the call then stays started (no row).
+-- name: UnstartCall :execrows
+UPDATE gateway_calls g
+SET state = 'waiting', contact_id = NULL, language = NULL, text = NULL, action_data = NULL, button_key_id = NULL,
+    first_attempt_at = NULL, next_attempt_at = @at::timestamptz, lease_owner = NULL, lease_until = NULL
+WHERE g.org_id = @org_id AND g.id = @id AND g.state = 'sending' AND g.attempts = 0 AND g.first_failed_at IS NULL
+  AND g.lease_owner = @owner::text
+  AND NOT EXISTS (SELECT 1
+                  FROM gateway_calls w
+                  WHERE w.org_id = @org_id AND w.connection_id = g.connection_id AND w.user_id = g.user_id
+                    AND w.state = 'waiting');
+
 -- RecordCallRetry counts a failed attempt of the budget and makes the call due again at a later time.
 -- name: RecordCallRetry :execrows
 UPDATE gateway_calls
