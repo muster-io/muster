@@ -13,7 +13,7 @@ WHERE id = @org_id;
 -- @q matches the name or the slug, ignoring case.
 -- name: ListTeams :many
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
-       t.working_end, t.working_time_zone, t.created_at, t.version,
+       t.working_end, t.working_time_zone, t.created_at, t.version, t.managed_by,
        (SELECT count(*)
         FROM team_users tu
         JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
@@ -31,7 +31,7 @@ LIMIT @page_size;
 -- GetTeam reads a Team that is not deleted with the number of people in it.
 -- name: GetTeam :one
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
-       t.working_end, t.working_time_zone, t.created_at, t.version,
+       t.working_end, t.working_time_zone, t.created_at, t.version, t.managed_by,
        (SELECT count(*)
         FROM team_users tu
         JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
@@ -53,12 +53,12 @@ FOR NO KEY UPDATE;
 -- name: InsertTeam :one
 INSERT INTO teams (
     org_id, public_id, name, slug, description, own_working_hours, working_days, working_start, working_end,
-    working_time_zone, created_at, updated_at
+    working_time_zone, managed_by, created_at, updated_at
 )
 VALUES (
     @org_id, @public_id, @name, @slug, @description, @own_working_hours, sqlc.narg('working_days')::text[],
-    sqlc.narg('working_start')::text, sqlc.narg('working_end')::text, sqlc.narg('working_time_zone')::text, @now,
-    @now
+    sqlc.narg('working_start')::text, sqlc.narg('working_end')::text, sqlc.narg('working_time_zone')::text,
+    sqlc.narg('managed_by')::text, @now, @now
 )
 RETURNING id;
 
@@ -68,7 +68,7 @@ UPDATE teams
 SET name = @name, slug = @slug, description = @description, own_working_hours = @own_working_hours,
     working_days = sqlc.narg('working_days')::text[], working_start = sqlc.narg('working_start')::text,
     working_end = sqlc.narg('working_end')::text, working_time_zone = sqlc.narg('working_time_zone')::text,
-    updated_at = @now, version = version + 1
+    managed_by = sqlc.narg('managed_by')::text, updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- DeleteTeam soft-deletes a Team and removes its Working hours: the row stays for the names that point at it, and its

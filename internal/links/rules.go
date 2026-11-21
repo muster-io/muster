@@ -17,6 +17,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/links/dbgen"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/templates"
@@ -58,6 +59,8 @@ type Rule struct {
 	URLTemplate string
 	CreatedAt   time.Time
 	Version     int64
+	// ManagedBy is the tool that keeps the rule as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 	// compiled are its Matchers, compiled.
 	compiled []matchers.Matcher
 }
@@ -68,6 +71,8 @@ type RuleInput struct {
 	Matchers    []Matcher
 	Scope       Scope
 	URLTemplate string
+	// ManagedBy is the mark of the tool that keeps the rule as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // RulePage is a page of Link rules; Next, the id to continue after, is nil on the last page.
@@ -82,10 +87,12 @@ type ruleView struct {
 	Matchers    []Matcher `json:"matchers"`
 	Scope       Scope     `json:"scope"`
 	URLTemplate string    `json:"url_template"`
+	ManagedBy   *string   `json:"managed_by"`
 }
 
 func viewOfRule(r Rule) ruleView {
-	return ruleView{Name: r.Name, Matchers: r.Matchers, Scope: r.Scope, URLTemplate: r.URLTemplate}
+	return ruleView{Name: r.Name, Matchers: r.Matchers, Scope: r.Scope, URLTemplate: r.URLTemplate,
+		ManagedBy: r.ManagedBy}
 }
 
 func ruleResource(r Rule) audit.Resource {
@@ -95,7 +102,7 @@ func ruleResource(r Rule) audit.Resource {
 func ruleOf(r dbgen.GetLinkRuleRow) Rule {
 	out := Rule{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Builtin: r.Builtin, Matchers: []Matcher{},
 		Scope: Scope{Type: r.ScopeType, Label: r.ScopeLabel.String}, URLTemplate: r.UrlTemplate,
-		CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
+		CreatedAt: r.CreatedAt.UTC(), Version: r.Version, ManagedBy: managedby.Of(r.ManagedBy)}
 	return out
 }
 
@@ -218,6 +225,9 @@ func checkRule(in RuleInput) ([]matchers.Matcher, error) {
 	if err := checkName("/name", in.Name); err != nil {
 		return nil, err
 	}
+	if in.ManagedBy.Check() != nil {
+		return nil, &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
+	}
 	compiled := make([]matchers.Matcher, 0, len(in.Matchers))
 	for i, m := range in.Matchers {
 		pointer := "/matchers/" + strconv.Itoa(i)
@@ -334,7 +344,7 @@ func (s *Service) CreateRule(ctx context.Context, r Requester, in RuleInput) (Ru
 		id := publicid.New(publicid.LinkRule)
 		ruleID, err := q.InsertLinkRule(ctx, dbgen.InsertLinkRuleParams{OrgID: s.orgID, PublicID: id, Name: in.Name,
 			ScopeType: in.Scope.Type, ScopeLabel: scopeLabel(in.Scope), UrlTemplate: in.URLTemplate,
-			Now: s.business.Now().UTC()})
+			ManagedBy: managedby.Text(in.ManagedBy.Apply(nil)), Now: s.business.Now().UTC()})
 		if err != nil {
 			return fmt.Errorf("create the link rule: %w", nameTaken(err, ruleNameKey, ErrRuleNameTaken))
 		}
@@ -404,6 +414,7 @@ func (s *Service) UpdateRule(ctx context.Context, r Requester, publicID string, 
 		}
 		next := before
 		next.Name, next.Matchers, next.Scope, next.URLTemplate = in.Name, in.Matchers, in.Scope, in.URLTemplate
+		next.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		if next.Matchers == nil {
 			next.Matchers = []Matcher{}
 		}
@@ -414,7 +425,7 @@ func (s *Service) UpdateRule(ctx context.Context, r Requester, publicID string, 
 		}
 		if err := q.UpdateLinkRule(ctx, dbgen.UpdateLinkRuleParams{OrgID: s.orgID, ID: before.ID, Name: next.Name,
 			ScopeType: next.Scope.Type, ScopeLabel: scopeLabel(next.Scope), UrlTemplate: next.URLTemplate,
-			Now: s.business.Now().UTC()}); err != nil {
+			ManagedBy: managedby.Text(next.ManagedBy), Now: s.business.Now().UTC()}); err != nil {
 			return fmt.Errorf("update the link rule %s: %w", before.PublicID,
 				nameTaken(err, ruleNameKey, ErrRuleNameTaken))
 		}
@@ -428,8 +439,11 @@ func (s *Service) UpdateRule(ctx context.Context, r Requester, publicID string, 
 		if updated, err = s.getRule(ctx, q, before.PublicID); err != nil {
 			return err
 		}
-		if err := s.requestRerender(ctx, q); err != nil {
-			return err
+		// A change of the mark alone changes no link (C-33.FR-11).
+		if !managedby.Only(changes) {
+			if err := s.requestRerender(ctx, q); err != nil {
+				return err
+			}
 		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionRuleUpdated, Resource: ruleResource(updated), Diff: changes, SourceAddress: r.Address})

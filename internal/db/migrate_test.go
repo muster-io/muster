@@ -2759,18 +2759,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (55)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (56)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":55`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":56`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":55`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":56`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2786,10 +2786,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (55)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (56)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":55`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":56`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -5524,6 +5524,64 @@ func TestIntegrationDeliveriesRetentionIndex(t *testing.T) {
 		e.step(t, 1)
 		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 55 || index(t) != 1 {
 			t.Errorf("up again: version %d, dirty %v, %v, %d indexes", v, dirty, err, index(t))
+		}
+	})
+}
+
+// TestIntegrationManagedBy runs 0056 over a database at 55: up adds a nullable managed_by text, without a default, a
+// CHECK or an index, to the twelve tables of C-33.FR-11, and a stored row reads null until a write marks it; down drops
+// the columns and keeps the rows; up again adds them.
+func TestIntegrationManagedBy(t *testing.T) {
+	tables := []string{"integrations", "routes", "teams", "schedules", "escalation_chains", "lookup_tables",
+		"link_rules", "connections", "destinations", "organizations", "outbound_policies", "oidc_settings"}
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 55)
+		columns := func(t *testing.T) int {
+			t.Helper()
+			var n int
+			err := e.d.Pool.QueryRow(t.Context(), `SELECT count(*) FROM information_schema.columns
+				WHERE table_schema = current_schema() AND column_name = 'managed_by' AND table_name = ANY($1)
+				AND data_type = 'text' AND is_nullable = 'YES' AND column_default IS NULL`, tables).Scan(&n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		others := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT (SELECT count(*) FROM information_schema.columns
+				WHERE table_schema = current_schema() AND column_name = 'managed_by')
+				+ (SELECT count(*) FROM pg_constraint WHERE pg_get_constraintdef(oid) LIKE '%managed_by%')
+				+ (SELECT count(*) FROM pg_indexes WHERE indexdef LIKE '%managed_by%')`)
+		}
+		if got := others(t); got != 0 {
+			t.Fatalf("before 0056: %d columns, constraints or indexes name managed_by", got)
+		}
+		e.step(t, 1)
+		if got := columns(t); got != len(tables) {
+			t.Errorf("after up: %d columns", got)
+		}
+		if got := others(t); got != len(tables) {
+			t.Errorf("after up: %d columns, constraints or indexes name managed_by, want only the %d columns", got,
+				len(tables))
+		}
+		if got := e.count(t, `SELECT count(*) FROM organizations WHERE managed_by IS NULL`); got != 1 {
+			t.Errorf("after up: %d Organizations without a mark", got)
+		}
+		e.exec(t, `UPDATE organizations SET managed_by = 'terraform'`)
+		e.step(t, -1)
+		if got := others(t); got != 0 {
+			t.Errorf("after down: %d columns, constraints or indexes name managed_by", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM organizations`); got != 1 {
+			t.Errorf("after down: %d Organizations", got)
+		}
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 56 || columns(t) != len(tables) {
+			t.Errorf("up again: version %d, dirty %v, %v, %d columns", v, dirty, err, columns(t))
+		}
+		if got := e.count(t, `SELECT count(*) FROM organizations WHERE managed_by IS NULL`); got != 1 {
+			t.Errorf("up again: %d Organizations without a mark", got)
 		}
 	})
 }
