@@ -196,8 +196,8 @@ func TestIntegrationClaimsUpdateByKey(t *testing.T) {
 // each passing 1 − 1/n of a column with n distinct values: with one Connection, or one webhook Destination, no row
 // passed, and the plan built for one row looped over every Destination through its pending deliveries, or probed the
 // head of every pending webhook event, before sorting them. The backlog: 300 Destinations on one Connection, 30,000
-// deliveries, two in five due, and 9,000 webhook events of one Destination, two in five due, three per Alert Group;
-// each row due at its own time.
+// deliveries, two in five due, and 9,000 webhook events of one Destination, three per Alert Group, those of two in five
+// Alert Groups due; the due times spread over the last hour.
 func TestIntegrationClaimChoicesReadTheirBatch(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
