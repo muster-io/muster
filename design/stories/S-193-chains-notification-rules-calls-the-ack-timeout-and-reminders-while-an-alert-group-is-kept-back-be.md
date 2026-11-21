@@ -34,11 +34,10 @@ files_touched:
   - internal/timers/worker.go
   - internal/runtime/runtime.go
   - internal/runtime/runtime_test.go
-  - internal/logging/events.go
   - docs/concepts/escalation-chains.md
   - test/e2e/maintenance_chains_test.go
 acceptance:
-  - "[C-34.FR-14, C-34.AC-6] While an Alert Group is kept back no Escalation chain starts on it and no step is made, no action of a Notification rule and no call through a Notification gateway is made for it, no `escalation_webhook` is sent and its ack timeout sends no notice; a firing Alert Group of a Route with a chain and no Destination, created during a window of that Route, starts no chain at its creation, as C-32.FR-5 would otherwise have it, and its chain starts when the window ends, its gateway step calling the fake gateway (`escalation_test.go`, `engine_test.go`, `test/e2e/maintenance_chains_test.go`)."
+  - "[C-34.FR-14, C-34.AC-3, C-34.AC-6] While an Alert Group is kept back no Escalation chain starts on it and no step is made, no action of a Notification rule and no call through a Notification gateway is made for it, no `escalation_webhook` is sent and its ack timeout sends no notice (the Alert Group of C-34.AC-3 records no step of its Route's chain); a firing Alert Group of a Route with a chain and no Destination, created during a window of that Route, starts no chain at its creation, as C-32.FR-5 would otherwise have it, and its chain starts when the window ends, its gateway step calling the fake gateway (`escalation_test.go`, `engine_test.go`, `test/e2e/maintenance_chains_test.go`)."
   - "[C-34.FR-15, C-34.AC-9] When an Alert Group becomes kept back, the Escalation chains running on it stop as at a start-over, and so do the runs of the Notification rules they started, so that the stop check of C-30.FR-4 drops their waiting calls: a call that the chain queued is not sent; its running ack timeout stops; its Assignees and Unclaimed stay as they are (`escalation_test.go`, `runs_integration_test.go`, `sender_test.go`, `calls_integration_test.go`)."
   - "[C-34.FR-18, C-34.FR-19, C-34.AC-9, C-34.AC-5] When it stops being kept back while firing and nobody owns it, its chains — or its ack timeout where no chain applies — start over at their first step, once, at the same moment as the Publication or the Thread reply of S-192; for one never published they start at its first Publication, and where no Destination can publish it when it stops being kept back; its first ack timeout notice comes `route.ack_timeout` after it; one acknowledged or snoozed during the window starts none and gets its Reminders (`escalation_test.go`, `timers_test.go`, `test/e2e/maintenance_chains_test.go`)."
   - "[C-34.FR-7, C-34.AC-8] A Team that joins an Alert Group whose chains run leaves them running with no step skipped, whether or not the Team is in a window; an Alert Group that is no longer kept back because a Team joined starts its chains at that Publication or Thread reply only when it is firing and nobody owns it (`escalation_test.go`, `test/e2e/maintenance_chains_test.go`)."
@@ -87,11 +86,14 @@ issue: null
   `webhook.go`; `internal/notificationrules/runs.go`; `internal/gateways/calls.go`, `sender.go`): a step due for a
   kept-back Alert Group is not made — its run is already stopped by the transition, and the engine, locking the Alert
   Group through the dispatcher, does nothing when it finds it kept back or the run no longer `running`; a waiting call of
-  a stopped run is dropped by the stop check of C-30.FR-4; `escalation_webhook` is not sent. This extends the stop checks;
-  it adds no stop reason beyond the system transition's.
+  a stopped run is dropped by the stop check of C-30.FR-4; `escalation_webhook` is not sent. This extends the stop checks.
+  The runs that become kept back stop with the existing stop command `started_over` (C-34.FR-15: "as at a start-over"),
+  as S-204 does for an attach: `escalation_runs.stop_command` and the spec enum `EscalationRunStop.command` need no new
+  value, so there is no migration and no change to `api/openapi.yaml`.
 - **Timers** (`internal/timers/worker.go`, `internal/runtime/runtime.go`): no new kind; the handlers read the state.
-- **Log events**: `escalation_run_stopped` gains the Command value `maintenance` and `escalation_run_started` the cause
-  `maintenance_ended`, both existing events of S-169 (`internal/logging/events.go`).
+- **Log events**: the existing `escalation_run_stopped` and `escalation_run_started` of S-169 are used as they are: a
+  run stopped by becoming kept back logs the stop command `started_over`, and a start over at the end of a window logs
+  `escalation_run_started` as any other start over; no event is added.
 - **Documentation**: Concepts → Escalation chains gains the row "A Maintenance window" in "When chains run" and the
   sentence on the ack timeout in "Chains and the ack timeout"; the page for the whole capability is S-196's.
 
@@ -154,16 +156,16 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-34.FR-7 | full | the rule is S-191; a joining Team never stops chains is here |
+| C-34.FR-7 | partial | a joining Team never stops chains; the rule is completed by S-191 |
 | C-34.FR-14 | full | |
 | C-34.FR-15 | full | |
-| C-34.FR-18 | full | the Publication is S-192; the chains and the ack timeout here |
-| C-34.FR-19 | full | |
-| C-34.AC-3 | partial | no step of the Route's chain is recorded; the rest is S-191, S-192 |
-| C-34.AC-5 | full | |
+| C-34.FR-18 | partial | the chains and the ack timeout; the Publication with the mark is completed by S-192 |
+| C-34.FR-19 | partial | the chains starting over; the Thread reply and `destination_joined` are completed by S-192 |
+| C-34.AC-3 | partial | no step of the Route's chain is recorded; the rest is completed by S-191 and S-192 |
+| C-34.AC-5 | partial | the chain and the ack timeout notice; the publications and the Storm are completed by S-192 |
 | C-34.AC-6 | full | |
-| C-34.AC-8 | full | |
-| C-34.AC-9 | full | |
+| C-34.AC-8 | partial | the chains left running; the rule and the event are completed by S-191 |
+| C-34.AC-9 | partial | the chain; the times (S-190), the decision (S-191), the Root message and Thread reply (S-192) complete it |
 | C-34.AC-10 | full | |
-| C-34.AC-14 | full | |
+| C-34.AC-14 | partial | no chain until the end; the events are completed by S-192 |
 | C-32.FR-5 | partial | the Maintenance-window rows of its table |

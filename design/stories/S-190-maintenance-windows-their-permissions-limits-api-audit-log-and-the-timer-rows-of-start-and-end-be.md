@@ -40,7 +40,7 @@ files_touched:
   - internal/teams/teams.go
   - internal/teams/query.sql
   - internal/leader/tasks.go
-  - internal/leader/query.sql
+  - internal/leader/leader_test.go
   - internal/runtime/runtime.go
   - internal/runtime/runtime_test.go
   - internal/logging/events.go
@@ -53,7 +53,8 @@ files_touched:
   - docs/install/versions.md
   - test/e2e/maintenance_windows_test.go
 acceptance:
-  - "[C-34.FR-2, C-34.FR-5, C-34.AC-1] A Service account whose Role is Responder opens a window on a Team with `createMaintenanceWindow`, a Responder who is not in the Team closes it with `endMaintenanceWindow`, and the Audit log records `maintenance_window.created` and `maintenance_window.updated` with a before/after diff, the actor and the Transport; a Viewer reads windows with `maintenance:read` and gets `403` on `createMaintenanceWindow` (`maintenancewindows_test.go`, `test/e2e/maintenance_windows_test.go`)."
+  - "[C-34.FR-2, C-34.FR-5, C-34.AC-1] A Service account whose Role is Responder opens a window on a Team with `createMaintenanceWindow`, a Responder who is not in the Team closes it with `endMaintenanceWindow` (the API half of C-34.AC-1; the close from the UI is S-194's), and the Audit log records `maintenance_window.created` and `maintenance_window.updated` with a before/after diff, the actor and the Transport; a Viewer reads windows with `maintenance:read` and gets `403` on `createMaintenanceWindow` (`maintenancewindows_test.go`, `test/e2e/maintenance_windows_test.go`)."
+  - "[C-34.FR-4, C-34.AC-1] The API takes the start and the end as RFC 3339 times with an offset (a `+03:00` offset and a `Z` time name the same instant) and returns them in UTC (`maintenancewindows_test.go`)."
   - "[C-34.FR-3, C-34.AC-1] A window whose end is not after its start or is in the past, whose planned start is in the past, that lasts longer or starts further ahead than `maintenance.limits` (7 days, 90 days), or whose object is the built-in \"Muster\" Integration is refused with `422` at the pointer of the field; a missing or stale `If-Match` gets `428` and `412` (`windows_test.go`, `limits_test.go`, `maintenancewindows_test.go`)."
   - "[C-34.FR-1, C-34.FR-3, C-34.AC-2] A planned window changes in every field but its object and is deleted; an active one changes its end, its reason and `maintenance.urgent_passes` only (a change of its start gets `422`), is closed with `endMaintenanceWindow`, which sets its end to now, and is refused deletion with `409`; an ended one refuses every change with `409`; the object never changes (`windows_test.go`, `maintenancewindows_test.go`)."
   - "[C-34.FR-3, C-34.AC-2] Deleting an Integration, a Route or a Team closes its active windows and deletes its planned ones in the same transaction, each recorded in the Audit log; an ended window stays (`maintenance_integration_test.go`)."
@@ -61,7 +62,7 @@ acceptance:
   - "[C-34.FR-22, C-34.AC-9] The handler of each timer logs `maintenance_window_started` and `maintenance_window_ended` (INFO) once, with the window's `public_id`, its object and the number of Alert Groups kept back or released, which is 0 until S-191 wires `maintenance.Effects`; each is logged once with two replicas (`timers_test.go`, `test/e2e/maintenance_windows_test.go`)."
   - "[C-34.FR-1, C-34.FR-21] `listMaintenanceWindows` pages by cursor and filters by `object_type`, `object_id` and `state`; `getIntegration`, `getRoute` and `getTeam` read `maintenance` {`windows`: active windows, `kept_back_count`} (0 until S-191); the ended windows are pruned by the Leader after `retention.audit_log` (`maintenancewindows_test.go`, `maintenance_integration_test.go`)."
   - "[C-34.FR-2] The migration adds the Permissions `maintenance:read` (Admin, Responder, Viewer) and `maintenance:write` (Admin, Responder), and reference.md moves them from the table of L2 into the main tables, so `TestIntegrationRoleMatrix` counts them (`auth_integration_test.go`)."
-verify: "make ci test-integration e2e-go"
+verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
 issue: null
 ---
@@ -114,21 +115,29 @@ issue: null
   `maintenance_window_start` and `maintenance_window_end`, and the table gains `maintenance_window_id` (FK, `ON DELETE
   CASCADE`); the migration replaces `timers_kind_vN_check` and `timers_subject_vN_check` — each added `NOT VALID`,
   validated in a second transaction and the old one dropped in a third, as `0047` and `0049` do — with the next
-  versions in the order the stories merge, the subject of these kinds being the window (`alert_group_id`, `storm_id`,
-  `escalation_run_id` null) and a unique partial index keeping one timer per window and kind. The Permissions are seeded
+  versions in the order the stories merge (today `timers_kind_v3_check` and `timers_subject_v3_check` of `0049`), the
+  subject of these kinds being the window (`alert_group_id`, `storm_id`, `escalation_run_id` and
+  `notification_rule_run_id` null) and a unique partial index keeping one timer per window and kind. The Permissions are seeded
   by the migration as `0025` and `0046` do for theirs. The down migration deletes the timers of the new kinds first.
 - **Package** (`internal/maintenance`, ADR-0016: flat CRUD, `org_id` in every query): `windows.go` — the rules of
   C-34.FR-3 and the Audit log with a before/after diff; `limits.go` — `maintenance.limits`; `timers.go` — the handlers
   of the two kinds and the interface `maintenance.Effects` (`Started`, `Ended`, `Changed`), which S-191 implements and
-  `internal/runtime` wires, returning the number of Alert Groups for the log. The packages `integrations`, `routing` and
-  `teams` call `maintenance.CloseOnDelete` in the transaction of their delete; none of them is imported by
-  `maintenance`.
+  `internal/runtime` wires, returning the number of Alert Groups for the log.
+- **Imports** (ADR-0016: an interface is declared by its consumer; the same choice is stated in S-191, so that no
+  import cycle arises, `groups` → `routing` → `maintenance` → `groups` among them): `maintenance` imports none of
+  `routing`, `teams`, `integrations`, `groups` or `delivery`; it reads the names it needs for the windows' objects
+  (`MaintenanceWindow.object.name`, the existence of the object, its `org_id`) with its own queries in
+  `internal/maintenance/query.sql`. The packages `integrations`, `routing` and `teams` each declare the small interface
+  they consume in the transaction of their delete (`WindowCloser`: `CloseOnDelete(ctx, tx, orgID, objectID)`), and
+  `internal/runtime` wires `maintenance` into the three. The API handlers import `maintenance`.
 - **Settings**: `maintenance.limits` (P-92), `maintenance.presets` (read by the UI), `maintenance.urgent_passes`,
   `retention.audit_log` (now also the ended windows).
 - **Log events** (`internal/logging/events.go`; the reference pages regenerate through `internal/tools/refgen`):
   `maintenance_window_started`, `maintenance_window_ended` (INFO).
-- **Leader** (`internal/leader/tasks.go`): the retention task deletes ended windows past `retention.audit_log`; it is safe
-  to run twice (ADR-0007).
+- **Leader** (`internal/leader/tasks.go`): a new `Work` function field, `MaintenanceWindowRetention`, and its task
+  `maintenance_window_retention` (as `thread_reply_retention`), which deletes in batches the ended windows past
+  `retention.audit_log`; the SQL is in `internal/maintenance/query.sql`, `internal/runtime` wires it; it is safe to run
+  twice (ADR-0007).
 - **Documents**: reference.md moves the two Permissions into the Permissions tables; defaults.md and L2.md §5.3 confirm
   P-92 after the live check below; `docs/install/versions.md` notes the migration.
 
@@ -144,15 +153,15 @@ issue: null
    Integration.
 4. Add the spec, the handlers and the reads of the three objects. Check: `make generate-check`;
    `maintenancewindows_test.go`.
-5. Add the Leader's pruning, the log events and the documents. Check: `make ci test-integration`; `make docs-check`
-   is not needed, the reference pages are checked by `make generate-check`.
+5. Add the Leader's pruning, the log events and the documents. Check: `make ci test-integration docs-check`
+   (`docs/install/versions.md` and the reference pages are checked there).
 6. Write `test/e2e/maintenance_windows_test.go`. Check: the Verification below with two replicas.
 
 ## Verification
 
 ```sh
 make dev > dev.log 2>&1 &
-API=localhost:8080/api/v1; CLK=localhost:8082/_dev/clock   # A: the admin's token; S: a Service account (Responder) token; V: a Viewer's
+API=localhost:8080/api/v1; CLK=localhost:8082/_dev/clock   # A: the admin's token; S: a Service account (Responder) token; R: a Responder's token, a person who is not in the Team "payments"; V: a Viewer's
 NOW=$(curl -s $CLK | jq -r .now)
 # a Service account opens a window on the Team "payments" (TP) for 30 minutes
 W=$(curl -s -H "$S" -X POST $API/maintenance-windows -d "{\"object\":{\"type\":\"team\",\"id\":\"$TP\"},\"start\":\"$NOW\",\"end\":\"$(date -u -d "$NOW +30 min" +%FT%TZ)\",\"reason\":\"deploy\"}" | jq -r .id)
@@ -174,7 +183,7 @@ curl -s -X POST $CLK -d '{"advance_seconds": 700}' > /dev/null; sleep 2
 curl -s -H "$A" $API/maintenance-windows/$P | jq -r .state                                   # ended
 grep -c "\"event\":\"maintenance_window_ended\".*$P" dev.log                                 # 1
 # the Responder closes the first window; the Audit log has both entries
-curl -s -H "$A" -X POST $API/maintenance-windows/$W/end | jq -r .state                       # ended
+curl -s -H "$R" -X POST $API/maintenance-windows/$W/end | jq -r .state                       # ended
 curl -s -H "$A" "$API/audit-log?limit=10" | jq -c '[.items[].action] | map(select(startswith("maintenance_window")))'
 # ["maintenance_window.updated","maintenance_window.created", ...]
 # deleting the Team closes an active and deletes a planned window
@@ -209,10 +218,10 @@ and `E2E_REPLICAS=2` for the timer rows.
 | C-34.FR-1 | full | |
 | C-34.FR-2 | full | |
 | C-34.FR-3 | full | |
-| C-34.FR-4 | partial | the API's times; the UI's time zone is S-194 |
+| C-34.FR-4 | partial | the API's times (RFC 3339 in, UTC out); the UI's time zone is completed by S-194 |
 | C-34.FR-5 | partial | opening, closing, changing and deleting; the start and end as log events here, as lifecycle events of Alert Groups S-191 |
 | C-34.FR-21 | partial | the resource and the reads of the three objects; `kept_back` on Alert Groups is S-191, in webhooks S-192 |
-| C-34.FR-22 | partial | the log events; the metrics are S-191 and S-192, the opt-in telemetry see Open questions of S-191 |
-| C-34.AC-1 | full | |
+| C-34.FR-22 | partial | the log events; the metrics are S-191 and S-192; what the telemetry category reads is recorded by S-191, and reporting it belongs to the opt-in telemetry item of L2 §1.5 (a question for the maintainer, Open question 1 of S-191) |
+| C-34.AC-1 | partial | the API half: the Service account, the Responder who closes through the API, the Viewer, the refusals; "a Responder closes it from the UI" is completed by S-194 |
 | C-34.AC-2 | full | |
 | C-34.AC-9 | partial | the times and once-only logging; the effects on an Alert Group are S-191 and S-193 |

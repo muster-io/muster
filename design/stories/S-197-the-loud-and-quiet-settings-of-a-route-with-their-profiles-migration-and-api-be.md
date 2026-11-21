@@ -5,7 +5,7 @@ capability: C-36
 kind: be
 layer: L2
 depends_on: [S-162, S-140, S-154]
-covers: [C-36.FR-1, C-36.FR-8, C-36.FR-9, C-36.FR-10, C-36.AC-1, C-36.AC-8]
+covers: [C-36.FR-1, C-36.FR-8, C-36.FR-9, C-36.FR-10, C-36.AC-1, C-36.AC-8, C-08.FR-1, C-08.FR-7]
 files_touched:
   - api/openapi.yaml
   - internal/db/migrations/00NN_route_loud_events.up.sql
@@ -63,7 +63,8 @@ issue: null
   `uniqueItems` yields no pointer.
 - **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md` §4.8):
   `routes.loud_events text[] NOT NULL DEFAULT` the seven names, `routes.new_alerts_remove_ack boolean NOT NULL DEFAULT
-  false`, with a CHECK that `loud_events` holds only the seven names and no name twice. The defaults are what the
+  false`, with a CHECK that `loud_events` holds only the seven names (`loud_events <@ ARRAY[...]::text[]`); a name twice
+  cannot be a CHECK, which takes no subquery, so the domain refuses it with `422` and the column does not. The defaults are what the
   migration gives every existing Route (C-36.FR-10); the application writes both fields on every create, so the defaults
   matter only to a replica of the earlier version, which records every event with the loudness of L1 whatever a Route
   edited meanwhile on a new replica says — C-36.FR-10 accepts this for a rolling update, which
@@ -84,7 +85,7 @@ issue: null
 ## Steps
 
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up; `migrate_test.go` finds the
-   existing Routes with the seven names and `false`, and the CHECK refusing an eighth name and a repeated one.
+   existing Routes with the seven names and `false`, and the CHECK refusing an eighth name.
 2. Write the policy fields, the profiles and the validation. Check: `routes_test.go`, `profiles_test.go`.
 3. Add the spec and the handlers. Check: `make generate-check`; `routes_test.go` for the refusals and the
    create/update without the fields.
@@ -145,3 +146,5 @@ None.
 | C-36.FR-10 | partial | the migration, the defaults and the optional input; the upgrade note's suggestion to untick events is S-201 |
 | C-36.AC-1 | partial | the profiles and the stored Route; the form filled from the profile is S-200 |
 | C-36.AC-8 | full | the rows of the lifecycle event tables record what they recorded, since S-198 starts from all seven Loud events |
+| C-08.FR-1 | partial | revised for L2: the Loud and Quiet settings of a Route, in its API; the section of the form is S-200's |
+| C-08.FR-7 | partial | revised for L2: the profiles carry the Loud events and the removal of an acknowledgement; the form pre-filled from them is S-200's |

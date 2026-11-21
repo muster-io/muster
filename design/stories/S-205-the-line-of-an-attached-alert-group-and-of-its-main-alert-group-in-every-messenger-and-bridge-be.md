@@ -5,7 +5,7 @@ capability: C-37
 kind: be
 layer: L2
 depends_on: [S-203, S-126, S-168, S-113, S-081, S-075, S-100, S-067]
-covers: [C-37.FR-1, C-37.FR-7, C-37.FR-10, C-37.FR-11, C-37.FR-15, C-37.AC-1, C-37.AC-5, C-37.AC-6, C-37.AC-7, C-37.AC-8]
+covers: [C-37.FR-1, C-37.FR-7, C-37.FR-10, C-37.FR-11, C-37.FR-15, C-37.AC-1, C-37.AC-5, C-37.AC-6, C-37.AC-7, C-37.AC-8, C-09.FR-14, C-09.FR-22]
 files_touched:
   - internal/messages/layout.go
   - internal/messages/layout_test.go
@@ -173,13 +173,17 @@ has Text commands.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-37.FR-1 | full | the Commands and Permission are S-202's |
-| C-37.FR-7 | full | the status, loudness and independence of the main Alert Group are S-203's |
+| C-37.FR-1 | partial | no button or Text command in messengers; the Commands and Permission are completed by S-202, the UI by S-207 |
+| C-37.FR-7 | partial | the messenger side of the rule: only an update of the line, a Quiet line in a new Destination; the status, loudness and independence of the main Alert Group are completed by S-203 |
 | C-37.FR-10 | full | |
 | C-37.FR-11 | full | |
 | C-37.FR-15 | partial | the messenger column; the state's rows S-202, S-203; webhooks S-206 |
-| C-37.AC-1 | full | the Timeline, Audit log and API half is S-202's |
+| C-37.AC-1 | partial | the Root message and Thread reply; the Timeline, Audit log and API half is completed by S-202 |
 | C-37.AC-5 | partial | the Root message "Resolved with #1287"; the statuses S-203, the chain S-204 |
 | C-37.AC-6 | partial | the Root message edited back; the Reminder 4 hours later is S-204 |
 | C-37.AC-7 | partial | the line in a new Destination; the entries S-203 |
 | C-37.AC-8 | full | |
+| C-09.FR-14 | partial | revised for L2: the Root message's line of an attached Alert Group and of its main one; the notice, the section and the Alerts on the page are S-206 and S-207 |
+| C-09.FR-22 | partial | revised for L2: the messenger column of the five events of Attach and Detach; the rows are S-202 and S-203 |
+| reference.md Loud and Quiet | partial | revised for L2: every event of an attached Alert Group Quiet in the messengers; the rule is S-203's |
+| reference.md Buttons and links by status | full | revised for L2: an attached Root message has no buttons |

@@ -5,7 +5,7 @@ capability: C-37
 kind: be
 layer: L2
 depends_on: [S-203, S-174, S-168, S-044]
-covers: [C-37.FR-9, C-37.FR-12, C-37.FR-13, C-37.FR-14, C-37.FR-15, C-37.AC-4, C-37.AC-9, C-37.AC-10, C-37.AC-11]
+covers: [C-37.FR-9, C-37.FR-12, C-37.FR-13, C-37.FR-14, C-37.FR-15, C-37.AC-4, C-37.AC-9, C-37.AC-10, C-37.AC-11, C-09.FR-13, C-09.FR-14, C-09.FR-15, C-10.FR-14, C-15.FR-2]
 files_touched:
   - api/openapi.yaml
   - internal/groups/bulk.go
@@ -163,12 +163,17 @@ files are extended for the list, the statistics and the events.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-37.FR-9 | full | the Commands' refusal from any Transport is S-203's; the bulk item here |
+| C-37.FR-9 | partial | the bulk item; the Commands' refusal from any Transport is completed by S-203 |
 | C-37.FR-12 | partial | the API for the page's section and Alerts; the page is S-207 |
 | C-37.FR-13 | partial | the filter, the count and the bulk Attach in the API; the mark, the filter control and the bar are S-207 |
-| C-37.FR-14 | full | `resolved_with` on the read is S-203's |
-| C-37.FR-15 | full | the Timeline rows are S-202, S-203, the messenger column S-205 |
-| C-37.AC-4 | full | the refusals of FR-2 and `403` S-202, `alert_group_attached` S-203 |
+| C-37.FR-14 | partial | the statistics; `resolved_with` on the read is S-203's, "Resolved with #{M}" on the page S-207's |
+| C-37.FR-15 | partial | webhook events one to one with `attached_to`; the Timeline rows are S-202 and S-203, the messenger column S-205 |
+| C-37.AC-4 | partial | the bulk Acknowledge; the refusals of FR-2 and `403` are S-202's, `alert_group_attached` S-203's |
 | C-37.AC-9 | full | |
 | C-37.AC-10 | full | |
-| C-37.AC-11 | full | the limit is S-202's |
+| C-37.AC-11 | partial | the bulk Attach; the limit is completed by S-202 |
+| C-09.FR-13 | partial | revised for L2: the filter Attached and the count, in the API; the mark in the list is S-207's |
+| C-09.FR-14 | partial | revised for L2: the Alerts of attached Alert Groups and the attached ones of a main one, in the API; the notice, the section and the Alerts on the page are S-207's, the Root message's line S-205's |
+| C-09.FR-15 | full | revised for L2: an Alert Group resolved with its main one is left out of the statistics |
+| C-10.FR-14 | full | revised for L2: the bulk Attach, and the bulk refusal of an attached Alert Group |
+| C-15.FR-2 | partial | revised for L2: the five events of Attach and Detach and `attached_to` in `alert_group` in events mode |

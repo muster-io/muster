@@ -5,7 +5,7 @@ capability: C-36
 kind: be
 layer: L2
 depends_on: [S-198, S-169, S-155, S-173, S-174]
-covers: [C-36.FR-2, C-36.FR-6, C-36.FR-7, C-36.AC-3, C-36.AC-5, C-36.AC-6, C-36.AC-7]
+covers: [C-36.FR-2, C-36.FR-6, C-36.FR-7, C-36.AC-3, C-36.AC-5, C-36.AC-6, C-36.AC-7, C-32.FR-5, C-09.FR-4, C-09.FR-6, C-09.FR-9, C-09.FR-22, C-17.FR-1]
 files_touched:
   - api/openapi.yaml
   - internal/groups/transitions.go
@@ -41,7 +41,7 @@ acceptance:
   - "[C-36.FR-6, C-36.FR-2, C-36.AC-5] With `new_alerts_remove_ack` on, a new Alert joining an Alert Group acknowledged by Alice makes it firing without an Owner and records `alerts_added` (removes) of kind `alerts` with the reason \"New Alerts arrived\", Loud with the Mentions `[owner, new_alerts]`; the Thread reply names the reason, mentions Alice and lists the new Alerts, the Root message shows Ack again, and the first acknowledgement is still Alice's (`transitions_test.go`, `groups_integration_test.go`, `test/e2e/new_alerts_remove_ack_test.go`)."
   - "[C-36.FR-6, C-36.AC-5] With `new_alerts` off in `loud_events` as well, the same entry is Loud with `[owner]` only, and the Thread reply still mentions Alice; with `new_alerts_remove_ack` off, new Alerts in an acknowledged Alert Group stay the Quiet `alerts_added` of L1 and the acknowledgement stays (`loudness_test.go`, `events_test.go`, `test/e2e/new_alerts_remove_ack_test.go`)."
   - "[C-36.FR-7, C-36.AC-5] The removal is a system transition of the dispatcher with Muster as the actor and the Transport `system`, in the Timeline and not in the Audit log; where no chain applies the next ack timeout notice comes 15 minutes later (`route.ack_timeout`) on the development clock, no Reminder follows, the count of unanswered Reminders ends, and the Alert Group can become Unclaimed again (`timers_test.go`, `groups_integration_test.go`, `test/e2e/new_alerts_remove_ack_test.go`)."
-  - "[C-36.FR-7, C-36.AC-6] With a chain named on the Route, the removal starts the chain over at step 1 with `started_over` on the runs it replaces, and the Assignees, cleared by the acknowledgement, are filled again by the Pages that follow; an Acknowledge by Alice afterwards records `acknowledged`, not `takeover`, and an Acknowledge through a Notification gateway applies again (`runs_integration_test.go`, `test/e2e/new_alerts_remove_ack_test.go`, `test/e2e/gateway_acknowledge_test.go`)."
+  - "[C-36.FR-7, C-36.AC-6, C-32.FR-5] With a chain named on the Route, the removal starts the chain over at step 1 with `started_over` on the runs it replaces, and the Assignees, cleared by the acknowledgement, are filled again by the Pages that follow; an Acknowledge by Alice afterwards records `acknowledged`, not `takeover`, and an Acknowledge through a Notification gateway applies again (`runs_integration_test.go`, `test/e2e/new_alerts_remove_ack_test.go`, `test/e2e/gateway_acknowledge_test.go`)."
   - "[C-36.FR-6, C-36.AC-7] With `new_alerts_remove_ack` on, a Replacement, a Continuation and a new Alert in a snoozed Alert Group leave the status as it was, and so do the Alerts of a Reopen into acknowledged, which keeps its Owner; a critical Alert joining an acknowledged warning Alert Group with `urgent_rise_removes_ack` on records `alerts_added` (acknowledged) and `urgency_raised` (removes) and no `alerts_added` (removes); with `urgent_rise_removes_ack` off it records `alerts_added` (removes) (`transitions_test.go`, `groups_integration_test.go`)."
   - "[C-36.FR-6] The reply of the removal is sent at once and opens the Thread batching window; further new Alerts within it go into one reply when it closes; the entry is of the kind `alerts` on `alert-groups/{id}/timeline` with `from_status`, `to_status`, `previous_owner` and `reason_code` `new_alerts`, which the web Timeline shows as \"New Alerts arrived\" in English and Russian (`enqueue_test.go`, `alertgroups_test.go`, `timeline.test.tsx`)."
   - "[C-36.AC-3] The table-driven test of S-198 gains the removal row: Loud with `[owner]` whatever `loud_events` holds, plus `new_alerts` when the Route lists it (`loudness_test.go`)."
@@ -140,7 +140,7 @@ G=$(AG 'alertname%3D%22PaymentsDown%22')
 curl -s -H "$AL" -X POST $API/alert-groups/$G/acknowledge | jq -r '.status'                                   # acknowledged
 PUTA e1 b '{"labels":{"alertname":"PaymentsDown","severity":"warning","service":"web"}}'; NOTIFY e1 '{"reason":"another service"}'; sleep 2
 curl -s -H "$A" $API/alert-groups/$G | jq -c '{status, owner}'                                                 # {"status":"firing","owner":null}
-psql "$MUSTER_DB" -c "select first_acknowledged_at is not null as first from alert_groups where public_id = '$G'"   # t: the first acknowledgement stays Alice's
+psql "$MUSTER_DB" -c "select first_acknowledged_by_user_id = (select id from users where login = 'alice') as alice from alert_groups where public_id = '$G'"   # t: the first acknowledgement stays Alice's
 curl -s -H "$A" "$API/alert-groups/$G/timeline?kind=alerts" | jq -c '[.items[] | select(.event=="alerts_added")] | last | {l: .loudness, m: .mentions, f: .from_status, t: .to_status, p: .previous_owner.login, r: .reason_code}'
 # {"l":"loud","m":["owner","new_alerts"],"f":"acknowledged","t":"firing","p":"alice","r":"new_alerts"}
 curl -s 127.0.0.1:18065/_fake/requests | jq -r '[.[] | select(.path | test("/posts$"))] | last | .body.message'   # "New Alerts arrived; the acknowledgement of @alice is removed ..."
@@ -180,7 +180,14 @@ None.
 | C-36.FR-2 | partial | the removal row joins the table of S-198, which has the other rows |
 | C-36.FR-6 | full | |
 | C-36.FR-7 | full | |
+| C-32.FR-5 | partial | the row of the table of points that start chains over: new Alerts that remove an acknowledgement, where the Route says so; the Maintenance-window rows are S-193's, the Attach and Detach rows S-204's |
 | C-36.AC-3 | partial | the removal row of the table-driven test; the other rows are S-198 |
 | C-36.AC-5 | full | |
 | C-36.AC-6 | full | |
 | C-36.AC-7 | full | |
+| C-09.FR-4 | partial | revised for L2: a Reopen into acknowledged keeps its Owner and its Alerts remove nothing; the Reopen as a Loud event is S-198's, a Reopen never attaches again S-203's |
+| C-09.FR-6 | partial | revised for L2: the removal of an acknowledgement by new Alerts, never in a snoozed Alert Group; new Alerts as a Loud event is S-198's, in an attached Alert Group S-203's |
+| C-09.FR-9 | partial | revised for L2: the order of the rise to critical against new Alerts; `rise_to_urgent` as a Loud event is S-198's |
+| C-09.FR-22 | partial | revised for L2: the row `alerts_added` (removes); the loudness of the other rows is S-198's |
+| C-17.FR-1 | partial | revised for L2: the ack timeout and the chains start over when new Alerts remove an acknowledgement; the first chain stops it (S-169), they stop on Attach and start over on Detach (S-204) |
+| reference.md Loud and Quiet | partial | revised for L2: the removal of an acknowledgement; the Loud events of a Route are S-198's |

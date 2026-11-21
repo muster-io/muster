@@ -5,7 +5,7 @@ capability: C-37
 kind: fe
 layer: L2
 depends_on: [S-202, S-203, S-204, S-206, S-159, S-158]
-covers: [C-37.FR-1, C-37.FR-12, C-37.FR-13, C-37.FR-14, C-37.AC-12]
+covers: [C-37.FR-1, C-37.FR-12, C-37.FR-13, C-37.FR-14, C-37.AC-12, C-09.FR-13, C-09.FR-14]
 files_touched:
   - web/src/routes/alert-groups.$alertGroupId.tsx
   - web/src/routes/alert-groups.index.tsx
@@ -39,8 +39,8 @@ files_touched:
   - web/e2e/phone-width.spec.ts
   - design/prd/l1/reference.md
 acceptance:
-  - "[C-37.FR-12, C-37.AC-12] In a real browser, Ivan opens a critical Alert Group, presses \"Attach to #…\" and gets the dialog \"Attach #{N} to the main Alert Group\" with the search \"Number or title\", which offers only open Alert Groups that may be a main one — not itself, not resolved, not attached — and, once one is chosen, lists what changes: the status it will take, the Escalation chains that stop, and \"#{N} is critical and #{M} is not: its Escalation chains for critical stop.\"; pressing \"Attach\" attaches it (`attach-dialog.test.tsx`, `attach-detach.spec.ts`)."
-  - "[C-37.FR-12, C-37.AC-12] The page of the attached Alert Group shows the notice \"This Alert Group is attached to #{M} and follows its status.\" with the link and \"Detach\", offers no command but Add Note, and shows \"Resolved with #{M}\" once the main Alert Group resolved it; the page of the main Alert Group has a section \"Attached Alert Groups\" with the number, title, Route, status, firing and total Alerts and \"Detach\" for each, and its Alerts section lists the Alerts of each attached Alert Group under its number after its own (`alert-group-notices.test.tsx`, `attached-alert-groups.test.tsx`, `command-buttons.test.tsx`, `attach-detach.spec.ts`)."
+  - "[C-37.FR-1, C-37.FR-12, C-37.AC-12] In a real browser, Ivan opens a critical Alert Group, presses \"Attach to #…\" and gets the dialog \"Attach #{N} to the main Alert Group\" with the search \"Number or title\", which offers only open Alert Groups that may be a main one — not itself, not resolved, not attached — and, once one is chosen, lists what changes: the status it will take, the Escalation chains that stop, and \"#{N} is critical and #{M} is not: its Escalation chains for critical stop.\"; pressing \"Attach\" attaches it (`attach-dialog.test.tsx`, `attach-detach.spec.ts`)."
+  - "[C-37.FR-12, C-37.FR-14, C-37.AC-12] The page of the attached Alert Group shows the notice \"This Alert Group is attached to #{M} and follows its status.\" with the link and \"Detach\", offers no command but Add Note, and shows \"Resolved with #{M}\" once the main Alert Group resolved it; the page of the main Alert Group has a section \"Attached Alert Groups\" with the number, title, Route, status, firing and total Alerts and \"Detach\" for each, and its Alerts section lists the Alerts of each attached Alert Group under its number after its own (`alert-group-notices.test.tsx`, `attached-alert-groups.test.tsx`, `command-buttons.test.tsx`, `attach-detach.spec.ts`)."
   - "[C-37.FR-13, C-37.AC-12] The Alert Group list shows an attached Alert Group with the mark \"→ #{M}\", a main one with how many are attached, and the filter \"Attached\" — all (the default), only attached, none attached — kept in the URL and combined with the other filters; the filter \"only attached\" shows the Alert Group with \"→ #1287\" (`alert-group-filters.test.tsx`, `alert-group-header.test.tsx`, `alert-group-list.spec.ts`)."
   - "[C-37.FR-13] The bar of a selection offers \"Attach to #…\" with the same search for the selected Alert Groups, each through the dispatcher with its own outcome in the result dialog, and a bulk Acknowledge that meets an attached Alert Group shows its refusal naming the main one; every control needs `alert-groups:attach` or its own Permission and a Viewer sees none (`bulk-actions-bar.test.tsx`, `attach-detach.spec.ts`)."
   - "[C-37.FR-12, C-37.AC-12] \"Detach\" on the page, the section or the notice detaches it and brings its commands back with the status it kept; the Timeline names the main Alert Group in the entries `attached`, `status_followed` and `detached` with a link to it (`timeline.test.tsx`, `attach-detach.spec.ts`)."
@@ -155,7 +155,9 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-37.FR-1 | partial | the UI's Attach and Detach; the API S-202, the messengers' lack of them S-205 |
-| C-37.FR-12 | full | the page's API is S-206's |
-| C-37.FR-13 | full | the filter, the count and the bulk Attach in the API are S-206's |
+| C-37.FR-12 | partial | the dialog, the notice and the section; the page's API is completed by S-206 |
+| C-37.FR-13 | partial | the mark, the filter control and the bar; the filter, the count and the bulk Attach in the API are completed by S-206 |
 | C-37.FR-14 | partial | "Resolved with #{M}" on the page; the statistics are S-206's |
 | C-37.AC-12 | full | |
+| C-09.FR-13 | partial | revised for L2: the mark "→ #{M}", the count and the filter Attached in the list; the API is S-206's |
+| C-09.FR-14 | partial | revised for L2: the notice, the section of attached Alert Groups and their Alerts on the page; the API is S-206's, the Root message's line S-205's |

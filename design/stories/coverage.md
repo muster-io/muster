@@ -1268,9 +1268,9 @@ S-195, S-196. They start after the tag of 0.2.0 and ship in a 0.2.x patch releas
 | C-34.FR-19 | S-192 (part), S-193 (part) | complete | the Thread reply and `destination_joined` (S-192); the chains starting over (S-193) |
 | C-34.FR-20 | S-194 (part), S-195 (part) | complete | the sections, banner and list (S-194); the Alert Group page and list (S-195) |
 | C-34.FR-21 | S-190 (part), S-191 (part), S-192 (part) | complete | the resource (S-190); `kept_back` on Alert Groups (S-191); in webhook events (S-192) |
-| C-34.FR-22 | S-190 (part), S-191 (part), S-192 (part) | complete | log events (S-190), `muster_maintenance_kept_back_total` (S-191), `muster_maintenance_released_total` (S-192); the Features category of the opt-in telemetry waits for a telemetry capability |
-| C-34.FR-23 | S-196 | complete | the statistics count kept-back Alert Groups as any other, with no code of their own |
-| C-34.AC-1 | S-190 | complete |  |
+| C-34.FR-22 | S-190 (part), S-191 (part), S-192 (part) | complete | log events (S-190), `muster_maintenance_kept_back_total` (S-191), `muster_maintenance_released_total` (S-192); what the telemetry category reads is the rows of `maintenance_windows` (S-190), and reporting it belongs to the opt-in telemetry item of L2 §1.5, a question for the maintainer (Open question 1 of S-191) |
+| C-34.FR-23 | S-196 | complete | the page and its CI example; the statistics count kept-back Alert Groups as any other, with no code of their own; the Terraform resource `muster_maintenance_window` is in no story of the provider (S-182 to S-189), a question for the maintainer (Open question 1 of S-196) |
+| C-34.AC-1 | S-190 (part), S-194 (part) | complete | the Service account, the Responder who closes through the API, the Viewer and the refusals (S-190); the close from the UI (S-194) |
 | C-34.AC-2 | S-190 | complete |  |
 | C-34.AC-3 | S-191 (part), S-192 (part), S-193 (part) | complete | the state and Timeline (S-191); nothing delivered, no Storm (S-192); no chain step (S-193) |
 | C-34.AC-4 | S-191 (part), S-192 (part) | complete | the Quiet `maintenance_ended` (S-191); "Not posted" (S-192) |
@@ -1330,7 +1330,7 @@ S-208. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
 | C-37.FR-3 | S-202 (part), S-203 (part) | complete | the pair of Attach and Detach (S-202); a main Alert Group with its attached ones (S-203) |
 | C-37.FR-4 | S-202 (part), S-204 (part) | complete | the status taken, Assignees and Unclaimed (S-202); chains, ack timeout, Reminders and the end of a Snooze (S-204) |
 | C-37.FR-5 | S-203 (part), S-204 (part) | complete | following (S-203); starting no chain or timer of its own (S-204) |
-| C-37.FR-6 | S-203 | complete |  |
+| C-37.FR-6 | S-203 (part), S-204 (part) | complete | the three endings (S-203); the chain and the ack timeout of an Alert Group that the system detaches start over (S-204) |
 | C-37.FR-7 | S-203 (part), S-205 (part) | complete | the status, the loudness and the main Alert Group's independence (S-203); the messengers (S-205) |
 | C-37.FR-8 | S-202 (part), S-204 (part) | complete | what Detach keeps (S-202); chains, ack timeout and Reminders starting over (S-204) |
 | C-37.FR-9 | S-203 (part), S-206 (part) | complete | the Commands from any Transport (S-203); the bulk item (S-206) |
@@ -1528,7 +1528,7 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-08.FR-1 | S-111 (part), S-115 (part), S-121 (part), S-123 (part), S-125 (part), S-154 (part), S-158 (part), S-197 (part), S-200 (part) | complete | the Escalation chains of a Route (S-154) and on its form (S-158); the Loud and Quiet settings (S-197) and their section of the form (S-200) |
 | C-08.FR-6 | S-111 | complete |  |
 | C-08.FR-7 | S-162, S-197 (part), S-200 (part) | complete | the profiles' Loud events and removal of an acknowledgement (S-197) pre-fill the section of the form (S-200) |
-| C-08 UI | S-112, S-119, S-123, S-129, S-158, S-200 | complete | the Escalation chains on the Route form (S-158); the section "Loud and Quiet" (S-200) |
+| C-08 UI | S-112, S-119, S-123, S-129, S-158, S-200 (part) | complete | the Escalation chains on the Route form (S-158); the section "Loud and Quiet" (S-200) |
 | C-08.AC-11 | S-162 | complete |  |
 | C-09.FR-1 | S-111 (part), S-118 (part), S-169 (part), S-168 (part), S-202 (part), S-203 (part) | complete | the running chains (S-169) and the Assignees (S-168); the attached state (S-202) and following (S-203) |
 | C-09.FR-4 | S-198 (part), S-199 (part), S-203 (part) | complete | added for L2: the Reopen into firing as a Loud event of the Route (S-198); a Reopen into acknowledged keeps its Owner and its Alerts remove nothing (S-199); a Reopen never attaches again (S-203) |
@@ -1603,5 +1603,5 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-24.FR-2 | S-139 | complete | the step `scopes` reports it and the Connection keeps it |
 | C-24.FR-4 | S-125 | complete |  |
 | C-24.FR-6 | S-171 | complete | `<!subteam^ID>`; no `<!everyone>` (F-127) |
-| reference.md Loud and Quiet | S-198, S-199, S-203 (part), S-205 (part) | complete | the Loud events of a Route and the rows that stay Loud (S-198), the removal of an acknowledgement (S-199), every event of an attached Alert Group Quiet (S-203, S-205) |
+| reference.md Loud and Quiet | S-198 (part), S-199 (part), S-203 (part), S-205 (part) | complete | the Loud events of a Route and the rows that stay Loud (S-198), the removal of an acknowledgement (S-199), every event of an attached Alert Group Quiet (S-203, S-205) |
 | reference.md Buttons and links by status | S-205 | complete | an attached Root message has none |

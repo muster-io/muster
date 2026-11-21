@@ -5,7 +5,7 @@ capability: C-36
 kind: docs
 layer: L2
 depends_on: [S-198, S-199, S-200]
-covers: [C-36.FR-11]
+covers: [C-36.FR-10, C-36.FR-11]
 files_touched:
   - docs/concepts/loud-and-quiet.md
   - docs/concepts/routes-and-group-keys.md
@@ -16,8 +16,8 @@ files_touched:
   - web/e2e/screenshots/routes-and-templates.spec.ts
 acceptance:
   - "[C-36.FR-11] Concepts → Loud and Quiet describes the two settings of a Route, the table of which Loud event governs which row and the rows that stay Loud on every Route (takeovers, Reminders, auto-unacknowledge, the Owner of an ended or removed acknowledgement, Pages by Mention), the two Route profiles and what they pre-fill, and what Quiet means in each messenger — a new message without Mentions, `disable_notification` in Telegram, `notify` false in outgoing webhook events; it replaces the sentence that Muster fixes the loudness of every change and the section \"Why the rule is fixed\" with what stays fixed (an edit never notifies anybody)."
-  - "[C-36.FR-11] The page has the section \"New Alerts remove the acknowledgement\": what it does, the order against the rise to Urgent (which is checked first), what it never does (a Replacement, a Continuation, a snoozed Alert Group, a Reopen, an attached Alert Group), what it starts over (Escalation chains, or the ack timeout; Reminders end; an Acknowledge afterwards is not a Takeover), and the worked scenario of a payments Route with Alice's acknowledgement."
-  - "[C-36.FR-11] Concepts → Statuses and commands, Concepts → Routes and group keys, Concepts → What critical changes and the outgoing webhooks' events page point to it where they mention acknowledgements, the profiles' table or `notify`; Operations → Upgrades tells operators that every existing Route keeps all seven Loud events after the upgrade and suggests unticking events on Informational Routes."
+  - "[C-36.FR-11] The page has the section \"New Alerts remove the acknowledgement\": what it does, the order against the rise to Urgent (which is checked first), what it never does (a Replacement, a Continuation, a snoozed Alert Group, a Reopen; the attached Alert Group is added to the list by S-208, which describes Attach and Detach), what it starts over (Escalation chains, or the ack timeout; Reminders end; an Acknowledge afterwards is not a Takeover), and the worked scenario of a payments Route with Alice's acknowledgement."
+  - "[C-36.FR-10, C-36.FR-11] Concepts → Statuses and commands, Concepts → Routes and group keys, Concepts → What critical changes and the outgoing webhooks' events page point to it where they mention acknowledgements, the profiles' table or `notify`; Operations → Upgrades tells operators that every existing Route keeps all seven Loud events after the upgrade and suggests unticking events on Informational Routes."
   - "[C-36.FR-11] `make docs-check` passes: the page builds strictly, every image has alternative text, every link and anchor resolves and `docslinkcheck` finds `field.loud_quiet`; the screenshot of the section in the Route form is taken by `make docs-screenshots GUIDES=routes-and-templates`."
 verify: "make docs-check"
 operator_attention: false
@@ -38,7 +38,8 @@ issue: null
 **OUT**
 
 - The behaviour and the form: S-197 to S-200. The API reference, which `make docs` renders from the spec.
-- Attach and Detach, whose effect on loudness the page names with a pointer: S-208.
+- Attach and Detach, whose effect on loudness, and the rule that new Alerts in an attached Alert Group never remove an
+  acknowledgement, the page names with a pointer added by S-208. This story's page does not describe C-37 before it ships.
 
 ## Contracts
 
@@ -90,4 +91,5 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-36.FR-11 | full | the form's link is S-200's |
+| C-36.FR-10 | partial | the upgrade note that suggests unticking events; the migration and the optional input are completed by S-197 |
+| C-36.FR-11 | partial | the page; the form's link is completed by S-200 |

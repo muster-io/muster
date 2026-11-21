@@ -148,6 +148,10 @@ issue: 700
   `muster_acceptance_probe`, which only the acceptance tests' provider has, never the shipped one: Terraform and
   OpenTofu configure a provider only when a resource or data source uses it, so the configuration errors of
   C-33.AC-1 show only through a read of the probe.
+  `make testacc` takes two variables, which the Makefile passes to `go test` as `-run` and `-skip`: `ACC_RUN`, a regular
+  expression that selects the tests to run (empty: all of them), and `ACC_SKIP`, a regular expression of the tests to
+  leave out, which defaults to `_oldCLI$` so that the ordinary run skips the tests that only the job `old-cli` runs, on
+  the CLIs of version 1.10; `ACC_RUN='_oldCLI$$' ACC_SKIP=` (the `$$` is make's escape of `$`) runs those alone.
 - **CI** (`ci.yml`, `acceptance.yml`): `ci.yml` on pull requests, pushes to `master`, daily and by hand — jobs `lint`
   (golangci-lint, the header check), `test` (`go test -race`, coverage at least 80 % of `internal/` without
   `internal/client/gen/`), `generate`, `spec`, `docs`, `licenses`, `vulncheck`, `goreleaser` (`check` and a snapshot
@@ -217,11 +221,16 @@ None.
 ## Notes
 
 - Suggested commit: `feat: add the provider skeleton with its client, configuration and release pipeline`.
-- Starts after Muster's tag `v0.2.0` (journal D757), which carries S-179 to S-181: `depends_on` names S-181, the last
-  of them, since it cannot name a tag, and the tag is the maintainer's to announce. The skeleton was built before the
-  tag (muster-io/terraform-provider-muster#1), so `api/MUSTER_COMMIT` pins a commit of Muster's `master` until then;
-  when `v0.2.0` exists, with `managed_by` and the MIT `info.license`, a pull request runs `make spec-sync VERSION=0.2.0`,
-  which replaces it with `api/MUSTER_VERSION` `0.2.0`.
+- The contract planned this story after Muster's tag `v0.2.0` (journal D757), which carries S-179 to S-181: `depends_on`
+  names S-181, the last of them, since it cannot name a tag, and the tag is the maintainer's to announce. The skeleton
+  was in fact built before the tag (muster-io/terraform-provider-muster#1), so `api/MUSTER_COMMIT` pins a commit of
+  Muster's `master` until then; when `v0.2.0` exists, with `managed_by` and the MIT `info.license`, a pull request runs
+  `make spec-sync VERSION=0.2.0`, which replaces it with `api/MUSTER_VERSION` `0.2.0`.
+- A question for the maintainer, non-blocking: the PRD's C-33.AC-1 says that with only the provider block a
+  configuration "stops" with "Muster 0.1.4 is older than 0.2.0 ...", which cannot be observed, since Terraform and
+  OpenTofu configure a provider that nothing uses never; that is why the acceptance probe exists (Contracts). The
+  maintainer is asked to amend the wording of C-33.AC-1 to "a configuration that reads a resource or data source of
+  the provider"; this story does not edit the PRD.
 - Corrected after muster-io/terraform-provider-muster#1: the pin by commit until the tag, the test-only data source
   `muster_acceptance_probe` in place of the manual `terraform plan` checks, and the image tag `vX.Y.Z`.
 - **Maintainer** (operator attention): install on this repository the GitHub App that release-please uses in Muster's

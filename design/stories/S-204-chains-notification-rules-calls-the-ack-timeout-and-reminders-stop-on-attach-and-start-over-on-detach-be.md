@@ -5,7 +5,7 @@ capability: C-37
 kind: be
 layer: L2
 depends_on: [S-203, S-169, S-155, S-157, S-168]
-covers: [C-37.FR-4, C-37.FR-5, C-37.FR-8, C-37.AC-2, C-37.AC-5, C-37.AC-6]
+covers: [C-37.FR-4, C-37.FR-5, C-37.FR-6, C-37.FR-8, C-37.AC-2, C-37.AC-5, C-37.AC-6, C-32.FR-5, C-17.FR-1]
 files_touched:
   - internal/groups/escalation.go
   - internal/groups/escalation_test.go
@@ -159,9 +159,12 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-37.FR-4 | full | the status taken is S-202's |
-| C-37.FR-5 | partial | the chains, ack timeout and Reminders never start by following; the status itself is S-203's |
-| C-37.FR-8 | full | |
+| C-37.FR-4 | partial | the chains, ack timeout, Reminders and the end of a Snooze; the status taken, the Assignees and Unclaimed are completed by S-202 |
+| C-37.FR-5 | partial | the chains, ack timeout and Reminders never start by following; the status itself is completed by S-203 |
+| C-37.FR-6 | partial | the chain and the ack timeout of an Alert Group that the system detaches; the endings themselves are S-203's |
+| C-37.FR-8 | partial | chains, ack timeout and Reminders starting over; what Detach keeps is completed by S-202 |
+| C-17.FR-1 | partial | revised for L2: the ack timeout and chains stop on Attach and start over on Detach; the first chain stops it (S-169), new Alerts that remove an acknowledgement start them over (S-199) |
+| C-32.FR-5 | partial | the rows of an attachment in the table of the points that start, start over and stop chains; the Maintenance-window rows are S-193's, the removal's S-199's |
 | C-37.AC-2 | full | |
 | C-37.AC-5 | partial | the chain at step 1 after a system detach; the statuses and the Root message are S-203 and S-205 |
 | C-37.AC-6 | partial | Ivan keeps the Alert Group and the first Reminder comes 4 hours after the Detach; the Root message edited back is S-205 |

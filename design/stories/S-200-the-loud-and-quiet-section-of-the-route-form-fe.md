@@ -5,7 +5,7 @@ capability: C-36
 kind: fe
 layer: L2
 depends_on: [S-197, S-198, S-199, S-112, S-123, S-158]
-covers: [C-36.FR-9, C-36.FR-11, C-36.AC-1, C-36.AC-10]
+covers: [C-36.FR-9, C-36.FR-11, C-36.AC-1, C-36.AC-10, C-08.FR-1, C-08.FR-7]
 files_touched:
   - web/src/components/route-policy-loud-quiet.tsx
   - web/src/components/route-policy-loud-quiet.test.tsx
@@ -23,7 +23,7 @@ files_touched:
   - web/e2e/route-loud-quiet.spec.ts
   - web/e2e/routes.spec.ts
 acceptance:
-  - "[C-36.AC-1, C-36.AC-10] In a real browser, creating a Route and choosing the Informational profile fills the section \"Loud and Quiet\" with only \"New Alert Group\" ticked and \"New Alerts remove the acknowledgement\" unticked, and saving stores `loud_events` `[new_alert_group]` and `new_alerts_remove_ack` false; choosing Paging fills all seven ticked (`route-policy-loud-quiet.test.tsx`, `route-form.test.tsx`, `route-loud-quiet.spec.ts`)."
+  - "[C-36.AC-1, C-36.AC-10, C-08.FR-1, C-08.FR-7] In a real browser, creating a Route and choosing the Informational profile fills the section \"Loud and Quiet\" with only \"New Alert Group\" ticked and \"New Alerts remove the acknowledgement\" unticked, and saving stores `loud_events` `[new_alert_group]` and `new_alerts_remove_ack` false; choosing Paging fills all seven ticked (`route-policy-loud-quiet.test.tsx`, `route-form.test.tsx`, `route-loud-quiet.spec.ts`)."
   - "[C-36.FR-9, C-36.AC-10] On a Route whose ack timeout is off the tick box \"Ack timeout\" is unavailable with \"The ack timeout is off on this Route\" and keeps its stored value; turning the ack timeout on in the form ticks it, and the Admin may untick it before saving; a Route that gains an ack timeout on an Informational profile therefore sends no Quiet notice unless the tick is removed (`route-policy-loud-quiet.test.tsx`, `route-policy-timers.test.tsx`, `route-loud-quiet.spec.ts`)."
   - "[C-36.AC-10] The section lists the seven tick boxes \"New Alert Group\", \"New Alerts\", \"Reopen\", \"Ack timeout\", \"End of Snooze\", \"Rise to critical\" and \"Start of a Storm\", the note \"Pages of Escalation chains, Reminders, Takeovers and the Mention of an Owner who loses an acknowledgement are always Loud.\" and the tick box \"New Alerts remove the acknowledgement\" with its explanation; a change is saved with `If-Match` and the Audit log shows it as a diff of `loud_events` and `new_alerts_remove_ack`, in English and in Russian (`audit-diff.test.tsx`, `route-loud-quiet.spec.ts`)."
   - "[C-36.FR-11] The section links to the documentation page on Loud and Quiet with \"Learn more\", through the existing entry `field.loud_quiet`; without `routes:write` the section is read-only and shows the same ticks (`route-policy-loud-quiet.test.tsx`, `route-form.test.tsx`)."
@@ -122,7 +122,10 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-36.FR-9 | full | the stored value is S-197's |
+| C-36.FR-9 | partial | the unavailable box that ticks on; the stored value is completed by S-197 |
 | C-36.FR-11 | partial | the link from the form; the page is S-201 |
-| C-36.AC-1 | full | the profiles and the stored Route are S-197's |
+| C-36.AC-1 | partial | the form filled from the profile; the profiles and the stored Route are completed by S-197 |
 | C-36.AC-10 | full | |
+| C-08.FR-1 | partial | revised for L2: the Loud and Quiet section of the Route form; the fields are S-197's |
+| C-08.FR-7 | partial | revised for L2: the profiles' Loud events and removal of an acknowledgement pre-fill the section; the profiles are S-197's |
+| C-08 UI | partial | revised for L2: the section "Loud and Quiet" of the Route form |

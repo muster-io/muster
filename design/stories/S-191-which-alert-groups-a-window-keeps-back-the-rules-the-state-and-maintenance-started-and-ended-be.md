@@ -26,6 +26,8 @@ files_touched:
   - internal/groups/transitions.go
   - internal/groups/grouping.go
   - internal/groups/move.go
+  - internal/groups/updates.go
+  - internal/groups/updates_test.go
   - internal/groups/teams.go
   - internal/groups/read.go
   - internal/groups/list.go
@@ -50,10 +52,10 @@ files_touched:
   - design/prd/l1/reference.md
   - test/e2e/maintenance_keep_back_test.go
 acceptance:
-  - "[C-34.FR-6, C-34.AC-3, C-34.AC-15] A window of a Route keeps back every open Alert Group of the Route; during one, an Alert Group created from a webhook has its Alerts on its page and in the Alerts view and a Timeline with `created` and a Quiet `maintenance_started` of the kind `system` naming the window; moving the open Alert Groups of the Route to the Default route (C-09.FR-19) records `maintenance_ended` with the cause `moved`, unless a window of the Default route covers them (`maintenance_integration_test`, `keepback_test.go`, `test/e2e/maintenance_keep_back_test.go`)."
+  - "[C-34.FR-6, C-34.AC-3, C-34.AC-15] A window of a Route keeps back every open Alert Group of the Route; during one, an Alert Group created from a webhook has its Alerts on its page and in the Alerts view and a Timeline with `created` and a Quiet `maintenance_started` of the kind `system` naming the window; moving the open Alert Groups of the Route to the Default route (C-09.FR-19) records `maintenance_ended` with the cause `moved`, unless a window of the Default route covers them (`keepback_integration_test.go`, `keepback_test.go`, `test/e2e/maintenance_keep_back_test.go`)."
   - "[C-34.FR-6, C-34.AC-7] A window of an Integration keeps back an Alert Group only while every Integration of its Alerts is in a window; an Alert Group whose Alerts all come from it is kept back, and so are the `MusterHeartbeatLost` and `MusterSnapshotTruncated` of that Integration, matched by their `integration` label, because the window of an Integration covers the Internal alerts about it; one with Alerts from it and from an Integration outside a window is not (`keepback_test.go`, `test/e2e/maintenance_keep_back_test.go`)."
   - "[C-34.FR-7, C-34.AC-8] A window of a Team keeps back an Alert Group only while every Team of the Alert Group is in a window; an Alert Group of payments alone is kept back, one of payments and analytics is not, and when an Alert of analytics joins the first it records `maintenance_ended` with the cause `team_joined` naming the Team; the Team that owns the Route is not counted, and an Alert Group without a Team is never kept back by a Team's window; a Team that joins an Alert Group never makes it kept back (`keepback_test.go`, `groups_integration_test.go`)."
-  - "[C-34.FR-8, C-34.FR-16, C-34.AC-9] Only creation, a move to another Route and the start of a window that covers it make an Alert Group kept back; the start covers an open Alert Group whether or not it was published, and records `maintenance_started` once; a joining Alert or Team, becoming Urgent, and the end, change or deletion of a window only release; an extended end or `urgent_passes` turned off again takes back nothing already released; at the end or the early close every Alert Group the window kept back is decided again, and one that another window still keeps back stays so until that one ends, on any replica (`keepback_test.go`, `effects_test.go`, `test/e2e/maintenance_keep_back_test.go` with `E2E_REPLICAS=2`)."
+  - "[C-34.FR-5, C-34.FR-8, C-34.FR-16, C-34.AC-9] The start of a window records `maintenance_started` and its end or early close `maintenance_ended` on the Alert Groups concerned, as lifecycle events of the Timeline, beside the Audit log entries of the window itself (S-190). Only creation, a move to another Route and the start of a window that covers it make an Alert Group kept back; the start covers an open Alert Group whether or not it was published, and records `maintenance_started` once; a joining Alert or Team, becoming Urgent, and the end, change or deletion of a window only release; an extended end or `urgent_passes` turned off again takes back nothing already released; at the end or the early close every Alert Group the window kept back is decided again, and one that another window still keeps back stays so until that one ends, on any replica (`keepback_test.go`, `effects_test.go`, `test/e2e/maintenance_keep_back_test.go` with `E2E_REPLICAS=2`)."
   - "[C-34.FR-9, C-34.AC-12] A new window keeps back Urgent Alert Groups; a rise to critical of an Alert Group kept back by a window with `urgent_passes` stops keeping it back with `maintenance_ended` (cause `urgent`), and so does raising its Route's Minimum severity and turning the setting on in an active window; under two overlapping windows of which only one lets them through the same rise keeps it back; when the Severity level falls again it is not kept back again (`keepback_test.go`)."
   - "[C-34.FR-10, C-34.AC-11] While it is kept back an Alert Group is ingested and grouped as usual: Alerts join and resolve, the Reopen window and the Grace period apply, the system resolves it, its Severity level and Teams follow its Alerts; a Snooze that ends makes it firing with `snooze_ended` and Acknowledge from a Command acknowledges it, each in the Timeline (`maintenance_test.go`, `groups_integration_test.go`)."
   - "[C-34.FR-13, C-34.AC-18] `maintenance_started` is Quiet without Mentions and `maintenance_ended` records its cause (`window_ended`, `window_closed`, `window_changed`, `window_deleted`, `urgent`, `team_joined`, `moved`) and is Loud with the Mentions of the entries for `new_alert_group` when the Alert Group is firing and nobody owns it, Quiet otherwise, each of the Timeline kind `system` and a system transition of the dispatcher with Muster as the actor; a table-driven test checks that every row of the L2 lifecycle event table for these events produces exactly one Timeline entry with its `event`, kind, `loudness` and `mentions` (`events_test.go`)."
@@ -100,16 +102,25 @@ issue: null
 - **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md`):
   `alert_groups.kept_back boolean NOT NULL DEFAULT false`, `alert_group_maintenance_windows` (`org_id`,
   `alert_group_id` FK cascade, `maintenance_window_id` FK, primary key both) — the windows that keep it back, so the
-  banner and the cause name them — and an index of the kept-back open Alert Groups by Route. The `timeline_entries`
-  event CHECK (`timeline_entries_event_vN_check`) gains the two events and, since their kind is `system`, the kind
-  CHECK needs no change; the migration replaces the event CHECK, `webhook_events` of `destinations.webhook_events`
-  (the CHECK of the event names, as S-118 and S-121 extend it) and `open_group_updates_kind_vN_check` if the re-render
-  of an Alert Group's mark needs a kind of its own, each with the next version in the order the stories merge and
-  every value present when it merges. The Timeline kind `system` already exists.
-- **Packages and their imports** (ADR-0016; as S-169): `groups` imports none of `maintenance` and declares the
-  interface it consumes, `groups.KeepBack` (`Decide(ctx, tx, g) (Decision, error)`), which `maintenance` implements and
-  `internal/runtime` wires; `maintenance` imports `groups`, `routing`, `teams` and `integrations` for the lookups.
-  `Decision` carries whether the Alert Group is kept back and by which windows. The rules sit in
+  banner and the cause name them — and an index of the kept-back open Alert Groups by Route. The two events have the
+  Timeline kind `system` and a `system_event`, so the migration replaces four CHECKs of `timeline_entries` —
+  `timeline_entries_event_v4_check` (the event names), `timeline_entries_event_kind_v4_check` (the pairs of event and
+  kind, which lists the `system` events one by one), `timeline_entries_system_event_v3_check` (the `system_event`
+  names) and `timeline_entries_system_v3_check` (kind `system` exactly when `system_event` is set, with the pairs of
+  the events that carry the same name in both) — each added `NOT VALID`, validated in a second transaction and the old
+  one dropped in a third, with the next version in the order the stories merge and every value present when it merges;
+  it adds `timeline_entries.maintenance_window_id` (no foreign key, as the actor columns have none: the Timeline
+  outlives the window) and `timeline_entries.cause`, the cause of a `maintenance_ended`. It also replaces
+  `webhook_events_event_v4_check` on the table `webhook_events` (the CHECK of the event names, as S-118 and S-121
+  extend it) and `open_group_updates_kind_v9_check` if the re-render of an Alert Group's mark needs a kind of its own,
+  each with the next version in the order the stories merge. The Timeline kind `system` already exists.
+- **Packages and their imports** (ADR-0016; as S-169; the same choice as S-190, so that no import cycle arises:
+  `groups` imports `routing` and `teams`, which declare `WindowCloser` and import no `maintenance`): `groups` imports
+  none of `maintenance` and declares the interface it consumes, `groups.KeepBack` (`Decide(ctx, tx, g) (Decision,
+  error)`), which `maintenance` implements and `internal/runtime` wires; `maintenance` imports `groups` for the types
+  of the Alert Group and its transitions, and none of `routing`, `teams`, `integrations` or `delivery`: the Route,
+  the Integrations and the Teams of an Alert Group's Alerts, and the `integration` label of an Internal alert, are read
+  by queries of its own in `internal/maintenance/query.sql`. `Decision` carries whether the Alert Group is kept back and by which windows. The rules sit in
   `maintenance/keepback.go` as pure functions over the Alert Group's Route, the Integrations and Teams of its Alerts
   (and the `integration` label of an Internal alert), the windows active at the business clock and their
   `urgent_passes`; `groups/maintenance.go` holds the transitions `MaintenanceStarted` and `MaintenanceEnded`, which the
@@ -121,6 +132,9 @@ issue: null
   whether it is still kept back; the result is stored with its windows, `maintenance_started` and `maintenance_ended`
   are recorded once on the change, and the cause of a release is the first of: the window's end, close, change or
   deletion, a rise to Urgent, a joining Team, a move.
+- **Raised Minimum severity** (`internal/groups/updates.go`): the system transition `minimumSeverityChanged` that
+  re-evaluates the open Alert Groups of a Route whose Minimum severity was raised also asks `KeepBack`, so that the
+  release on a rise to Urgent through the Route's setting records `maintenance_ended` with the cause `urgent`.
 - **Delivery's view** (`internal/delivery/enqueue.go`): the re-render after the change carries `kept_back` and the
   cause in `groups.Rendering`, which S-192 reads; this story adds the fields and a test that the table of events knows
   the two rows (`enqueue_test.go`).
@@ -181,12 +195,19 @@ window extended and a window whose `urgent_passes` is turned off again, the tabl
 
 ## Open questions
 
-1. **Telemetry.** C-34.FR-22 says the Features category of the opt-in telemetry reports whether Maintenance windows are
-   used (ADR-0019), but the telemetry has no capability or story yet. This story adds nothing for it; the story that
-   builds the Features category reads `count(maintenance_windows) > 0`. Reported to the maintainer as a PRD gap.
-2. **Columns of the state.** As in S-190, the PRD names no columns; `alert_groups.kept_back` and
-   `alert_group_maintenance_windows` are named here for the maintainer to confirm in review.
-3. **Internal alerts and the Integration rule.** The `integration` label of `MusterHeartbeatLost` and
+1. **Telemetry (non-blocking for the rest of this story).** C-34.FR-22 says the Features category of the opt-in
+   telemetry reports whether Maintenance windows are used (ADR-0019), but the opt-in telemetry item of L2 §1.5 has no
+   capability or story yet. This story records what the category will read — the rows of `maintenance_windows`, so
+   "used" is `count(maintenance_windows) > 0` — and reports nothing; reporting it belongs to the opt-in telemetry item.
+   The maintainer decides which story carries it.
+2. **Columns of the state.** As in S-190, the PRD names no columns; `alert_groups.kept_back`,
+   `alert_group_maintenance_windows`, `timeline_entries.maintenance_window_id` and `timeline_entries.cause` are named
+   here for the maintainer to confirm in review.
+3. **Names of the causes (non-blocking: names to confirm).** The PRD names the causes of `maintenance_ended` in prose
+   only; the seven enum values `window_ended`, `window_closed`, `window_changed`, `window_deleted`, `urgent`,
+   `team_joined` and `moved` (`MaintenanceEndedCause`) are this contract's names. The maintainer confirms them in review
+   of the story; S-192, S-195 and S-196 use them.
+4. **Internal alerts and the Integration rule.** The `integration` label of `MusterHeartbeatLost` and
    `MusterSnapshotTruncated` is the immutable id of an Integration (C-06.FR-14); the rule reads it as "the Integration
    of the Alert" for the Alert Groups of the built-in Integration. The PRD says "the Internal alerts about that
    Integration" only for these two; other Internal alerts with an `integration` label, if the registry has more, follow
@@ -196,8 +217,9 @@ window extended and a window whose `urgent_passes` is turned off again, the tabl
 
 - Suggested commit: `feat(maintenance): keep back the alert groups of a window and record its start and end on them`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. The migration number
-  is assigned by the orchestrator at dispatch; it replaces `timeline_entries_event_vN_check`, the `webhook_events`
-  event CHECK and, if needed, `open_group_updates_kind_vN_check`, each with the next version in merge order.
+  is assigned by the orchestrator at dispatch; it replaces `timeline_entries_event_v4_check`, `timeline_entries_event_kind_v4_check`,
+  `timeline_entries_system_event_v3_check` and `timeline_entries_system_v3_check`, `webhook_events_event_v4_check` and,
+  if needed, `open_group_updates_kind_v9_check`, each with the next version in merge order.
 - Interim on `edge` until S-192 and S-193 merge: an Alert Group kept back is still delivered and its chains still run,
   and `maintenance_ended` sends nothing, so do not open windows on an installation that relies on them until all three
   merge; the end-to-end tests of this story use their own data.
@@ -218,7 +240,7 @@ window extended and a window whose `urgent_passes` is turned off again, the tabl
 | C-34.FR-5 | partial | the start and the end as lifecycle events of the Alert Groups kept back; the Audit log of windows is S-190 |
 | C-34.FR-16 | full | every Alert Group decided again at the end; what is published is S-192's, under FR-17 to FR-19 |
 | C-34.FR-21 | partial | `kept_back` on Alert Groups; in webhook events S-192 |
-| C-34.FR-22 | partial | `muster_maintenance_kept_back_total` and the counts; `muster_maintenance_released_total` is S-192 |
+| C-34.FR-22 | partial | `muster_maintenance_kept_back_total` and the counts; `muster_maintenance_released_total` is S-192; what the telemetry category reads is the rows of `maintenance_windows` (S-190), and reporting it belongs to the opt-in telemetry item of L2 §1.5 (a question for the maintainer, Open question 1) |
 | C-34.AC-3 | partial | everything but "the fake servers receive nothing" and the Storm, S-192, and the chain, S-193 |
 | C-34.AC-4 | partial | the Timeline entry; the delivery state is S-192 |
 | C-34.AC-7 | full | |

@@ -26,6 +26,7 @@ files_touched:
   - internal/delivery/membership_test.go
   - internal/delivery/pages.go
   - internal/delivery/threads.go
+  - internal/delivery/threads_test.go
   - internal/delivery/render.go
   - internal/delivery/render_test.go
   - internal/delivery/webhookevents.go
@@ -38,8 +39,15 @@ files_touched:
   - internal/groups/maintenance_test.go
   - internal/groups/read.go
   - internal/groups/query.sql
-  - internal/messages/builtin.go
-  - internal/messages/builtin_test.go
+  - internal/messages/texts/en.json
+  - internal/messages/texts/ru.json
+  - internal/messages/render.go
+  - internal/messages/render_test.go
+  - internal/messages/layout.go
+  - internal/messages/layout_test.go
+  - internal/messages/replies.go
+  - internal/messages/default_test.go
+  - internal/messages/message.go
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
   - internal/metrics/catalogue.go
@@ -88,17 +96,22 @@ issue: null
 
 ## Contracts
 
-- **Spec**: `DeliveryState` of a Destination on the Alert Group read gains the reason `resolved_in_maintenance`
-  ("Not posted: resolved during a Maintenance window" in the UI); `AlertGroupWebhookBody` gains `kept_back`;
+- **Spec**: `AlertGroupDelivery` (read through `listAlertGroupDeliveries`, `GET /alert-groups/{id}/deliveries`, not
+  through `getAlertGroup`) gains `withheld_reason` (a nullable enum `WithheldReason`, whose only value is
+  `resolved_in_maintenance`, "Not posted: resolved during a Maintenance window" in the UI; null for every other
+  delivery, a Storm's and a Broken Destination's withheld ones included); `AlertGroupWebhookBody` gains `kept_back`;
   `MaintenanceEndedCause` is S-191's.
 - **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md`):
   the mark's time comes from the window, so the migration adds
   `deliveries.published_after_maintenance_at timestamptz` (the end that released it, for the mark on its Root message),
   `deliveries.held_by_maintenance boolean NOT NULL DEFAULT false` (kept back by a window, like `held_by_storm_id` for
-  Storms; the Alert Group's own `kept_back` decides, the column keeps the queue index) and extends the reasons of the
-  `withheld` state (the column `withheld_reason`, or the existing CHECK it is listed in) with `resolved_in_maintenance`,
-  replacing its CHECK with the next version in the order the stories merge and every value present when it merges. The
-  queue index of due deliveries skips `held_by_maintenance`.
+  Storms; the Alert Group's own `kept_back` decides, the column keeps the queue index) and
+  `deliveries.withheld_reason text` with `deliveries_withheld_reason_check CHECK (withheld_reason IN
+  ('resolved_in_maintenance'))` (null passes; the reason is cleared when a delivery comes back from `withheld`). The
+  `thread_replies` event CHECK `thread_replies_event_v2_check` (of `0049`) gains `maintenance_ended`, the event of the
+  Loud Thread reply of the end, so the migration replaces it with the next version in the order the stories merge,
+  added `NOT VALID`, validated in a second transaction and the old one dropped in a third, with every value present when
+  it merges. The queue index of due deliveries skips `held_by_maintenance`.
 - **Delivery** (`internal/delivery`): `enqueue.go` reads `groups.Rendering.KeptBack` (S-191) and enqueues the Root
   message update only, Quietly, with the mark, for a Destination that has a Root message, and nothing otherwise; the
   creation of a kept-back Alert Group records its deliveries `pending` and `held_by_maintenance`, as a Storm's held ones,
@@ -113,10 +126,13 @@ issue: null
   `groups.Rendering` with `Released` (the cause, the window's end, whether it resolved, whether it was ever published); the
   decision of FR-17 to FR-19 is made in `Enqueue` from that, in the dispatcher's transaction. Publications that follow
   go through the existing limiters and `urgent` ordering of C-11.FR-3; a release never calls `joinStorm`.
-- **Messages** (`internal/messages/builtin.go`): the marks "In a Maintenance window until {time}" and "Published after a
-  Maintenance window that ended at {time}" and the Thread reply "The Maintenance window ended: still firing, {N}
-  alerts", English and Russian, with the time in the Destination's or the Organization's time zone as other times of a
-  Root message.
+- **Messages** (`internal/messages/texts/en.json` and `ru.json`, the built-in texts, both languages): the marks "In a
+  Maintenance window until {time}" and "Published after a Maintenance window that ended at {time}" as `notice.*` keys
+  rendered like the existing notes (`LateNote` and its neighbours in `render.go`, tested in `render_test.go` and
+  `default_test.go`), and the Thread reply "The Maintenance window ended: still firing, {N} alerts" as a `reply.*` key
+  built in `replies.go`, with the time in the Destination's or the Organization's time zone as other times of a Root
+  message. The marks are part of the `layout` a bridge receives (`layout.go`, C-29.FR-8): the Root message's data, not
+  only its rendered text, carries them, as S-205 does for the line of an attached Alert Group.
 - **Metrics** (`internal/metrics/catalogue.go`): `muster_maintenance_released_total{route,outcome}`; the reference pages
   regenerate.
 - **Events documentation** (`docs/outgoing-webhooks/events.md`): the two events and the field `kept_back`.
@@ -126,7 +142,7 @@ issue: null
 ## Steps
 
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up.
-2. Enqueue, the edits with the mark, and silence of replies, Pages and `destination_joined` while kept back. Check:
+2. Enqueue, the edits with the mark, and no replies, Pages or `destination_joined` while kept back. Check:
    `enqueue_test.go`, `worker_test.go`, `render_test.go`, `membership_test.go`.
 3. Exclude from Storms and send events mode with `kept_back`. Check: `storm_test.go`, `webhookevents_test.go`,
    `body_test.go`.
@@ -142,15 +158,16 @@ issue: null
 make dev > dev.log 2>&1 &
 API=localhost:8080/api/v1; FAM=127.0.0.1:18065/_fake; CLK=localhost:8082/_dev/clock
 # a window on the Route R, now +30 min; an Alert Group G1 of R created during it
-curl -s $FAM/requests | jq length                      # 0 new requests for G1: nothing in payments-critical
-curl -s -H "$A" $API/alert-groups/$G1 | jq -c '[.deliveries[] | .state]'   # nothing published; pending, held
+# G1's alertname is PaymentsAPIDown; the fake records every request, so filter by what only G1 puts in a post
+curl -s $FAM/requests | jq '[.[] | select(.path | test("posts")) | select(.body | contains("PaymentsAPIDown"))] | length'   # 0: nothing posted for G1
+curl -s -H "$A" $API/alert-groups/$G1/deliveries | jq -c '[.items[] | .state]'   # nothing published; ["pending"]
 # G1 still firing at the end: the clock passes the end
 curl -s -X POST $CLK -d '{"advance_seconds": 1860}' > /dev/null; sleep 2
 curl -s $FAM/requests | jq -r '.[-1].body' | grep -c 'Published after a Maintenance window that ended at'   # 1
 curl -s -H "$A" "$API/alert-groups/$G1/timeline?kind=system" | jq -c '[.items[] | {e: .event, l: .loudness}] | last'
 # {"e":"maintenance_ended","l":"loud"}  (the Mentions of the entries for new_alert_group are in the post)
 # G2 resolved during the window: never posted
-curl -s -H "$A" $API/alert-groups/$G2 | jq -c '[.deliveries[] | .reason]'   # ["resolved_in_maintenance"]
+curl -s -H "$A" $API/alert-groups/$G2/deliveries | jq -c '[.items[] | {state, withheld_reason}]'   # [{"state":"withheld","withheld_reason":"resolved_in_maintenance"}]
 curl -s localhost:8082/metrics | grep 'muster_maintenance_released_total'   # outcome="published" 1, outcome="resolved" 1
 # G3, published before the window: its Root message shows the mark, and at the end one Loud Thread reply
 curl -s $FAM/requests | jq -r '.[] | select(.path | test("posts")) | .body' | grep -c 'The Maintenance window ended: still firing, 2 alerts'   # 1
@@ -168,15 +185,17 @@ release by `urgent_passes`, and the Telegram and Slack fakes.
 
 1. **The mark's time on a Root message.** The mark says "ended at {time}"; for an early close that is the close time. The
    contract of this story takes the window's `ends_at` after the close (S-190 sets it to now); no PRD change.
-2. **Columns.** `deliveries.published_after_maintenance_at` and `held_by_maintenance` are named here, since the PRD names
-   none; the maintainer confirms them in review.
+2. **Columns and the spec field.** `deliveries.published_after_maintenance_at`, `deliveries.held_by_maintenance` and
+   `deliveries.withheld_reason` with its value `resolved_in_maintenance`, and the field `withheld_reason` of
+   `AlertGroupDelivery` (the existing schema has no reason of the `withheld` state at all), are named here, since the PRD
+   names none; the maintainer confirms the names in review of the story, as S-195 reads them.
 
 ## Notes
 
 - Suggested commit: `feat(delivery): hold back the messages of kept-back alert groups and publish them with a mark when the window ends`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. The migration number is
-  assigned by the orchestrator at dispatch; it replaces the CHECK of the `withheld` reason with the next version in the
-  order the stories merge.
+  assigned by the orchestrator at dispatch; it replaces `thread_replies_event_v2_check` with the next version in the
+  order the stories merge (it gains `maintenance_ended`) and adds `deliveries_withheld_reason_check`.
 - The Thread replies due while kept back are dropped, not delayed (C-34.FR-11), unlike a Storm's held replies; the
   Timeline records what happened.
 - Interim until S-193: chains and the ack timeout of an Alert Group published before the window still run while it is kept
@@ -190,18 +209,18 @@ release by `urgent_passes`, and the Telegram and Slack fakes.
 | C-34.FR-11 | full | |
 | C-34.FR-12 | full | |
 | C-34.FR-13 | partial | the messenger and webhook effects of the events; the events are S-191 |
-| C-34.FR-17 | full | |
+| C-34.FR-17 | partial | the rule and the reason `withheld_reason`; the delivery state's text in the UI is completed by S-195 |
 | C-34.FR-18 | partial | the publication with the mark; the chains that start at it are S-193 |
 | C-34.FR-19 | partial | the Thread reply and `destination_joined`; the chains starting over are S-193 |
 | C-34.FR-21 | partial | `kept_back` in webhook events |
 | C-34.FR-22 | partial | `muster_maintenance_released_total` |
-| C-34.AC-3 | full | |
-| C-34.AC-4 | full | |
+| C-34.AC-3 | partial | nothing delivered and no Storm; the state and Timeline are S-191's, the chain step that does not run is completed by S-193 |
+| C-34.AC-4 | partial | "Not posted" and the final update; the Quiet `maintenance_ended` is S-191's |
 | C-34.AC-5 | partial | the publications and the Storm; the chain and the ack timeout notice are S-193 |
 | C-34.AC-9 | partial | the Root message and Thread reply; the chain is S-193 |
-| C-34.AC-11 | full | |
-| C-34.AC-12 | full | |
+| C-34.AC-11 | partial | the button of a Root message answered on the interactive path; the Snooze and the Command from the API are S-191's |
+| C-34.AC-12 | partial | the Loud publication; the release and its event are S-191's |
 | C-34.AC-13 | full | |
 | C-34.AC-14 | partial | the events; "starts no chain" is checked with S-193 |
-| C-34.AC-17 | full | |
+| C-34.AC-17 | partial | `muster_maintenance_released_total`; `muster_maintenance_kept_back_total` and the log events are S-191's and S-190's |
 | C-26.FR-5 | partial | `destination_joined` waits for the end of a Maintenance window |

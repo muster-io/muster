@@ -25,7 +25,7 @@ files_touched:
   - web/e2e/docs-links-forms.spec.ts
 acceptance:
   - "[C-37.FR-17] Concepts → Attach and Detach, in the navigation, says when to attach — several Alert Groups stand for one problem, as the worked scenario of the database primary and the payments errors shows — and when Incidents of L3 will fit better (several teams working on one problem together); what an attached Alert Group does and does not do (follows the status of its main Alert Group, its chains and timers stop, its Root messages are one line without buttons, every event on it is Quiet, it takes its own Alerts and the main Alert Group does not count them, Commands on it are refused with `alert_group_attached` but Add Note and Detach work); that attachment is one level deep and has a limit `alert_group.attach_max`; what Detach returns to (the status, Owner and Snooze end it followed last, chains or the ack timeout starting over, Reminders from the Detach); what happens when either Alert Group resolves; and how statistics count."
-  - "[C-37.FR-17] The page names the Permission `alert-groups:attach` and who has it, says that Attach and Detach come from the web UI and the API and never from messengers, and has an API example: attaching from the API with `curl` against `attachAlertGroup` and listing the attached with `attached_to`; `docs/concepts/statuses-and-commands.md`, `alert-groups.md`, `loud-and-quiet.md` and `api-tokens.md` point to it where they list Commands, statistics, Quiet events and Permissions, and `docs/outgoing-webhooks/events.md` lists the five events and `attached_to`."
+  - "[C-37.FR-17] The page names the Permission `alert-groups:attach` and who has it, says that Attach and Detach come from the web UI and the API and never from messengers, and has an API example: attaching from the API with `curl` against `attachAlertGroup` and listing the attached with `attached_to`; `docs/concepts/statuses-and-commands.md`, `alert-groups.md`, `loud-and-quiet.md` and `api-tokens.md` point to it where they list Commands, statistics, Quiet events and Permissions, and `loud-and-quiet.md` says in its section \"New Alerts remove the acknowledgement\" that new Alerts in an attached Alert Group never remove an acknowledgement, and `docs/outgoing-webhooks/events.md` lists the five events and `attached_to`."
   - "[C-37.FR-17] \"Learn more\" on the dialog \"Attach to #…\" and in the notice of an attached Alert Group opens the page; the entry `page.attach_detach` is in `web/src/lib/docs-links.json` with its `GUIDE_ABOUT` text; `make docs-check` passes, including `docslinkcheck`, every image has its alternative text and every link and anchor resolves."
   - "[C-37.FR-17] The page has screenshots of the dialog and of the page of a main Alert Group with its section, taken by `make docs-screenshots GUIDES=alert-groups` with the development clock."
 verify: "make docs-check"
@@ -57,7 +57,9 @@ issue: null
   work-specific system is named.
 - **Neighbours**: `statuses-and-commands.md` (the Commands table gains Attach and Detach, with "Who may"),
   `alert-groups.md` (the statistics sentence that an Alert Group resolved with its main one is left out),
-  `loud-and-quiet.md` (every event on an attached Alert Group is Quiet; S-201's page), `escalation-chains.md` (the row
+  `loud-and-quiet.md` (every event on an attached Alert Group is Quiet, and its section "New Alerts remove the
+  acknowledgement", which S-201 wrote without C-37, gains an attached Alert Group among what it never does, since that
+  Alert Group follows its main one), `escalation-chains.md` (the row
   S-204 added links to the page), `configure/api-tokens.md` (the Permission `alert-groups:attach` in the table of
   Permissions), `outgoing-webhooks/events.md` (the five events and `attached_to`).
 - **Texts**: the English UI texts of S-207, in bold as the pages name controls today; the Russian pages, if the site has

@@ -5,7 +5,7 @@ capability: C-37
 kind: be
 layer: L2
 depends_on: [S-198, S-169, S-168, S-174, S-173, S-197]
-covers: [C-37.FR-1, C-37.FR-2, C-37.FR-3, C-37.FR-4, C-37.FR-8, C-37.FR-15, C-37.FR-16, C-37.AC-1, C-37.AC-4, C-37.AC-6, C-37.AC-11]
+covers: [C-37.FR-1, C-37.FR-2, C-37.FR-3, C-37.FR-4, C-37.FR-8, C-37.FR-15, C-37.FR-16, C-37.AC-1, C-37.AC-4, C-37.AC-6, C-37.AC-11, C-09.FR-1, C-09.FR-22, C-10.FR-1, C-10.FR-2, C-10.FR-16]
 files_touched:
   - api/openapi.yaml
   - internal/db/migrations/00NN_alert_group_attachments.up.sql
@@ -47,7 +47,7 @@ files_touched:
   - test/e2e/attach_detach_test.go
 acceptance:
   - "[C-37.FR-1, C-37.FR-15, C-37.AC-1] On the setup of scenario 1, attaching `#1288` to `#1287` with `attachAlertGroup` records `attached` on `#1288` and `alert_group_attached` on `#1287`, each Quiet without Mentions with the person and the Transport, one Audit log entry `alert_group.attached` naming both Alert Groups, the actor and the Transport, and `detachAlertGroup` records `detached` and `alert_group_detached` and the entry `alert_group.detached` (`attach_test.go`, `groups_integration_test.go`, `test/e2e/attach_detach_test.go`)."
-  - "[C-37.FR-1, C-37.AC-4] The Permission `alert-groups:attach` is held by Admins and Responders and not by Viewers, a Service account may attach, and a Viewer gets `403` on both operations; `allowed_commands` lists `attach` and `detach` where they are allowed, and `muster_commands_total{command}` counts `attach` and `detach` (`allowed_test.go`, `commands_test.go`, `metrics_test.go`, `auth_integration_test.go`)."
+  - "[C-37.FR-1, C-37.AC-4, C-10.FR-1, C-10.FR-2, C-10.FR-16] The Permission `alert-groups:attach` is held by Admins and Responders and not by Viewers, a Service account may attach, and a Viewer gets `403` on both operations; `allowed_commands` lists `attach` and `detach` where they are allowed, and `muster_commands_total{command}` counts `attach` and `detach` (`allowed_test.go`, `commands_test.go`, `metrics_test.go`, `auth_integration_test.go`)."
   - "[C-37.FR-2, C-37.AC-4] Each refusal of FR-2 returns `409` with its code — `attach_to_itself`, `already_resolved`, `already_attached`, `has_attached_alert_groups`, `main_resolved`, `main_is_attached` (naming its main Alert Group) and `attach_limit_reached` — a request that fails two checks gets the first in that order, a main Alert Group that does not exist in the Organization gets `404`, and Detach of an Alert Group that is not attached gets `409` `not_attached` (`attach_test.go`, `commands_test.go`, `test/e2e/attach_detach_test.go`)."
   - "[C-37.FR-2] An Alert Group may be attached to one of any Route and Integration of the Organization, and the attachment is one level deep with no cycle: `#1291` attached to `#1288`, which is attached to `#1287`, is refused with `main_is_attached` naming `#1287` (`attach_test.go`, `test/e2e/attach_detach_test.go`)."
   - "[C-37.FR-3] Attach and Detach lock the main Alert Group first and then the Alert Group, and two Attaches that cross — `#A` to `#B` and `#B` to `#A` — end with exactly one succeeding, never both (`groups_integration_test.go`)."
@@ -109,7 +109,7 @@ issue: null
   columns are null for every existing Alert Group. The migration seeds the Permission `alert-groups:attach` for Admin and
   Responder as `0025` and `0046` seed theirs, and replaces `timeline_entries_event_vN_check`,
   `timeline_entries_event_kind_vN_check`, `timeline_entries_system_event_vN_check`, `timeline_entries_system_vN_check`,
-  `webhook_events_event_vN_check` (the event names of `destinations.webhook_events` as S-118 and S-121 extend it) and
+  `webhook_events_event_vN_check` (on the table `webhook_events`: the event names, as S-118 and S-121 extend it) and
   `thread_replies_event_vN_check` with the five events added — each added `NOT VALID`, validated in a second
   transaction and the old one dropped in a third, as `0047` and `0049` do — with the next versions in the order the
   stories merge and every value present when it merges. The down migration deletes the entries and Thread replies of the
@@ -183,13 +183,16 @@ curl -s -H "$I" -X POST $API/alert-groups/$AG1287/acknowledge > /dev/null
 curl -s -H "$I" -X POST $API/alert-groups/$AG1290/attach -d "{\"main_alert_group_id\":\"$AG1287\"}" | jq -c '{status, owner: .owner.login}'   # {"status":"acknowledged","owner":"ivan"}
 # Detach keeps it
 curl -s -H "$I" -X POST $API/alert-groups/$AG1290/detach | jq -c '{status, owner: .owner.login, a: .attached_to}'   # {"status":"acknowledged","owner":"ivan","a":null}
-# the limit: alert_group.attach_max reduced for the check (the dev environment variable), the next attach is refused
+# the limit: alert_group.attach_max is built in (100) and no environment variable changes it (ADR-0010), so attach 99 more
+# firing Alert Groups to #1287 in a loop (the e2e test does the same), which makes 100 with #1288; the next attach is refused
+curl -s -H "$I" -X POST $API/alert-groups/$AG_101/attach -d "{\"main_alert_group_id\":\"$AG1287\"}" | jq -c '{status, code}'   # {"status":409,"code":"attach_limit_reached"}
 psql "$MUSTER_DB" -c "select number, attached_to_id is not null as attached from alert_groups order by number"
 ```
 
 `test/e2e/attach_detach_test.go` repeats these checks and adds the order of the checks over every pair, a Service account
-that attaches, the crossing Attaches, the limit, an Alert Group of another Route and Integration, and the Audit log and
-Timeline entries of each row.
+that attaches, the crossing Attaches, the limit (100 attached, the 101st refused), an Alert Group of another Route and
+Integration, and the Audit log and Timeline entries of each row; `attach_test.go` proves the limit as well, with the
+setting read at the moment of the Attach.
 
 ## Open questions
 
@@ -225,3 +228,8 @@ Timeline entries of each row.
 | C-37.AC-4 | partial | the refusals of FR-2 and `403`; `alert_group_attached` is S-203, the bulk Acknowledge S-206 |
 | C-37.AC-6 | partial | Detach keeps the Alert Group acknowledged by Ivan; the Root message edited back is S-205, the first Reminder 4 hours later S-204 |
 | C-37.AC-11 | partial | the limit; the bulk Attach is S-206 |
+| C-09.FR-1 | partial | revised for L2: the attached state of an Alert Group; following is S-203's |
+| C-09.FR-22 | partial | revised for L2: the five events of Attach and Detach as rows of the closed table; the system endings are S-203's, the messenger column S-205's |
+| C-10.FR-1 | partial | revised for L2: the Commands Attach and Detach; the refusal of the other Commands on an attached Alert Group is S-203's |
+| C-10.FR-2 | full | revised for L2: `alert-groups:attach` for Admins and Responders, a Service account included |
+| C-10.FR-16 | full | revised for L2: `attach` and `detach` in `allowed_commands` |

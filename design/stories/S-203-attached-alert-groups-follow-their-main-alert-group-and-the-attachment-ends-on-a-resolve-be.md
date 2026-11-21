@@ -5,8 +5,10 @@ capability: C-37
 kind: be
 layer: L2
 depends_on: [S-202, S-199, S-173, S-169, S-063]
-covers: [C-37.FR-3, C-37.FR-5, C-37.FR-6, C-37.FR-7, C-37.FR-9, C-37.FR-15, C-37.AC-3, C-37.AC-4, C-37.AC-5, C-37.AC-7]
+covers: [C-37.FR-3, C-37.FR-5, C-37.FR-6, C-37.FR-7, C-37.FR-9, C-37.FR-15, C-37.AC-3, C-37.AC-4, C-37.AC-5, C-37.AC-7, C-09.FR-1, C-09.FR-4, C-09.FR-6, C-09.FR-9, C-09.FR-22, C-10.FR-1, C-26.FR-5, C-30.FR-6]
 files_touched:
+  - api/openapi.yaml
+  - web/src/test/fixtures/alert-groups.ts
   - internal/groups/follow.go
   - internal/groups/follow_test.go
   - internal/groups/attach.go
@@ -42,7 +44,7 @@ acceptance:
   - "[C-37.FR-5, C-37.AC-3] Acknowledge, a Takeover, Snooze and Unsnooze of `#1287` through the API each record `status_followed` on `#1288` with the same status and Owner and the person behind it, as a system transition of the dispatcher with Muster as the actor and the Transport `system`, and no Audit log entry for `#1288`; Unacknowledge of `#1287` makes `#1288` firing without an Owner and starts none of its Escalation chains (`follow_test.go`, `groups_integration_test.go`, `test/e2e/attach_follow_test.go`)."
   - "[C-37.FR-5] The other changes of the main Alert Group are followed too — the end of a Snooze, auto-unacknowledge, a rise to critical that removes the acknowledgement (C-09.FR-9), new Alerts that remove it (C-36.FR-6) and an Owner disabled or deleted — each as one `status_followed`; following an acknowledgement sets the first acknowledgement of the attached Alert Group, when it has none, to the main Alert Group's Owner, and following never starts its own Escalation chains, ack timeout or Reminders whatever status it takes (`follow_test.go`, `release_test.go`, `timers_test.go`, `test/e2e/attach_follow_test.go`)."
   - "[C-37.FR-6, C-37.AC-5] Resolving `#1287` by hand resolves `#1288` with the same person as the resolver, records `status_followed` with that person, sets `resolved_with_id`, ends the attachment, and groups the Alerts of it that still fire again after the Route's Grace period as after any manual resolve (`follow_test.go`, `groups_integration_test.go`, `test/e2e/attach_follow_test.go`)."
-  - "[C-37.FR-6, C-37.AC-5] When the system resolves `#1287` while an Alert of `#1290` still fires, `#1290` records `detached` with the reason \"#1287 resolved by itself\", keeps its status, is no longer attached and lives on its own; an attached Alert Group whose own Alerts all resolve is resolved by the system as any other (C-09.FR-3), the attachment ends, and `#1287` records `alert_group_detached` and no longer lists it; an Unresolve or a Reopen of either never attaches again (`follow_test.go`, `groups_integration_test.go`, `test/e2e/attach_follow_test.go`)."
+  - "[C-37.FR-6, C-37.FR-15, C-37.AC-5] When the system resolves `#1287` while an Alert of `#1290` still fires, `#1290` records `detached` with the reason \"#1287 resolved by itself\" and `#1287` records `alert_group_detached`, `#1290` keeps its status, is no longer attached and lives on its own; an attached Alert Group whose own Alerts all resolve is resolved by the system as any other (C-09.FR-3), the attachment ends, and `#1287` records `alert_group_detached` and no longer lists it; an Unresolve or a Reopen of either never attaches again (`follow_test.go`, `groups_integration_test.go`, `test/e2e/attach_follow_test.go`)."
   - "[C-37.FR-7, C-37.AC-7] A new critical Alert joining an attached, acknowledged warning Alert Group records Quiet entries only, without Mentions, the Owner's included, ends no Snooze, removes no acknowledgement and leaves it acknowledged; its Severity level and Teams follow its Alerts, and the Severity level, Urgent flag, Teams, Destinations and Escalation chains of the main Alert Group do not take its Alerts into account; `destination_joined` into a Destination it reaches meanwhile is Quiet (`loudness_test.go`, `transitions_test.go`, `groups_integration_test.go`)."
   - "[C-37.FR-9, C-37.AC-4] While an Alert Group is attached, Acknowledge, Unacknowledge, Resolve, Snooze and Unsnooze on it, from any Transport, are refused with `409` `alert_group_attached` and the message \"#1288 follows #1287; act on #1287, or detach it first\"; Add Note and Detach stay allowed; an acknowledgement reported by a Notification gateway is answered as one for an Alert Group someone owns (`commands_test.go`, `test/e2e/attach_follow_test.go`, `test/e2e/gateway_acknowledge_test.go`)."
   - "[C-37.FR-3] Every Command and system transition that touches a main Alert Group or an attached one locks the main Alert Group first and then its attached Alert Groups in the order of their ids, and following runs in the transaction of the change of the main Alert Group: an Acknowledge of the main Alert Group, a Detach of one attached and a resolve by the system, run concurrently, end without a deadlock and with consistent status and attachments (`walks_integration_test.go`, `groups_integration_test.go`)."
@@ -79,8 +81,10 @@ issue: null
 ## Contracts
 
 - **Spec** (`api/openapi.yaml`): the problem code `alert_group_attached` (`409`) is added to the Commands that it refuses
-  and to the catalogue in `internal/api/problem.go`; `AlertGroup` gains `resolved_with` (an `AlertGroupRef` or null, the
-  read of `resolved_with_id`). S-202 added the other fields and the five events.
+  and to the catalogue in `internal/api/problem.go`; `AlertGroup` gains the required `resolved_with` (an `AlertGroupRef`
+  or null, the read of `resolved_with_id`), which the builder of `web/src/test/fixtures/alert-groups.ts` sets to null so
+  that the TypeScript check stays green after `make generate`, as S-202's fields do. S-202 added the other fields and the
+  five events.
 - **Schema**: none new; `alert_groups.resolved_with_id` and `attached_to_id` are S-202's.
 - **Following** (`internal/groups/follow.go`, ADR-0016: one command layer): after the transition of a main Alert Group
   has been applied and recorded in a transaction, the dispatcher reads the Alert Groups whose `attached_to_id` is the
@@ -97,8 +101,9 @@ issue: null
   same resolver and the reason of its status, records `status_followed`, sets `resolved_with_id`, clears
   `attached_to_id`, and for each starts the Grace period of its own Route (C-09.FR-5); the main Alert Group resolved by
   the system detaches each attached one, which still has firing Alerts, with `detached` and the reason "#{M} resolved by
-  itself", keeping its followed status, Owner and Snooze end, and the main Alert Group records nothing for it
-  (C-37.FR-6 names no `alert_group_detached` for this case); an attached Alert Group whose own Alerts all resolve is
+  itself", keeping its followed status, Owner and Snooze end, as after a Detach (C-37.FR-6, FR-8), and the main Alert
+  Group records `alert_group_detached` for each, since C-37.FR-15 records it whenever an attached Alert Group is
+  detached; an attached Alert Group whose own Alerts all resolve is
   resolved by the system through the existing path, the attachment ends and the main Alert Group records
   `alert_group_detached`. The unresolved or reopened Alert Group never attaches again, since `attached_to_id` is cleared
   when the attachment ends.
@@ -182,8 +187,9 @@ None.
 - Interim on `edge` between this story and S-204: following sets no chain and starts no timer, but the ack timeout and
   Reminders of an attached Alert Group that S-202 left running are stopped only by S-204; a detached Alert Group's chains
   do not yet start over.
-- The main Alert Group resolved by the system records no `alert_group_detached` for the Alert Groups it detaches, as
-  C-37.FR-6 says; the attached ones record `detached` and their pages show it.
+- The main Alert Group resolved by the system records `alert_group_detached` for each Alert Group it detaches, and each of
+  those records `detached` with the reason "#{M} resolved by itself" (C-37.FR-6, FR-15: whenever an attached Alert Group is
+  detached the main one records it); their pages show it.
 - A rise to critical that would have ended an attached Alert Group's Snooze changes nothing, as FR-7 says; its Severity
   level still rises and the Quiet `severity_raised` or `urgency_raised` (removes nothing) records it.
 
@@ -192,12 +198,21 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-37.FR-3 | partial | the lock order of a main Alert Group with its attached ones; the pair of Attach and Detach is S-202's |
-| C-37.FR-5 | full | |
-| C-37.FR-6 | full | the Root message edit "Resolved with #{M}" is S-205's, the statistics S-206's |
+| C-37.FR-5 | partial | following; starting no chain or timer of its own is completed by S-204 |
+| C-37.FR-6 | partial | the three endings of an attachment; the chain and the ack timeout of an Alert Group that the system detaches start over in S-204; the Root message edit "Resolved with #{M}" is S-205's, the statistics S-206's |
 | C-37.FR-7 | partial | the status, the loudness and the independence of the main Alert Group; the messenger side of the rule — only an update of its line, a Quiet line in a new Destination — is S-205 |
 | C-37.FR-9 | partial | the Commands from any Transport; a bulk command's item outcome is S-206 |
-| C-37.FR-15 | partial | `status_followed` and the system `detached` and `alert_group_detached`; the messenger column S-205, webhooks S-206 |
+| C-37.FR-15 | partial | `status_followed`, and `detached` and `alert_group_detached` when the system ends an attachment (a resolve of the main Alert Group, or of the attached one's own Alerts); the messenger column S-205, webhooks S-206 |
 | C-37.AC-3 | full | |
 | C-37.AC-4 | partial | `alert_group_attached`; the bulk Acknowledge is S-206 |
 | C-37.AC-5 | partial | the statuses and the entries; the Root message "Resolved with #1287" and the chain at step 1 are S-205 and S-204 |
 | C-37.AC-7 | partial | the entries, the status and the main Alert Group; the Quiet line in a new Destination is S-205 |
+| C-09.FR-1 | partial | revised for L2: following the main Alert Group's status; the attached state is S-202's |
+| C-09.FR-4 | partial | revised for L2: a Reopen never attaches again; the Reopen as a Loud event is S-198's, a Reopen into acknowledged S-199's |
+| C-09.FR-6 | partial | revised for L2: new Alerts in an attached Alert Group change no status; the removal of an acknowledgement is S-199's |
+| C-09.FR-9 | partial | revised for L2: a rise changes no status of an attached Alert Group; `rise_to_urgent` as a Loud event is S-198's |
+| C-09.FR-22 | partial | revised for L2: `status_followed` and the system endings of an attachment; the five rows are S-202's, the messenger column S-205's |
+| C-10.FR-1 | partial | revised for L2: the refusal of the other Commands on an attached Alert Group; the Commands Attach and Detach are S-202's |
+| C-26.FR-5 | partial | `destination_joined` into a Destination an attached Alert Group reaches is Quiet |
+| C-30.FR-6 | partial | an acknowledgement for an attached Alert Group is answered as one for an Alert Group someone owns |
+| reference.md Loud and Quiet | partial | revised for L2: every event of an attached Alert Group is Quiet; the messenger side is S-205's |

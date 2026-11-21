@@ -56,13 +56,15 @@ issue: null
 
 ## Contracts
 
-- **API used**: `getAlertGroup` (`kept_back`, `maintenance_windows`, the delivery reason `resolved_in_maintenance`),
-  `listAlertGroups` (`kept_back`), `listAlertGroupTimeline` (the entries with `maintenance_window` and `cause`).
+- **API used**: `getAlertGroup` (`kept_back`, `maintenance_windows`), `listAlertGroupDeliveries` (the `withheld_reason`
+  `resolved_in_maintenance` of an `AlertGroupDelivery`, added by S-192), `listAlertGroups` (`kept_back`),
+  `getAlertGroupTimeline` (the entries with `maintenance_window` and `cause`).
 - **Components**: `alert-group-kept-back.tsx` — the banner of the page, from `maintenance_windows`, with the window's
   object, end and a link to the object's page; `alert-group-header.tsx` shows it and the badge; `alert-group-table.tsx`
   and `alert-group-filters.tsx` — the badge and the filter, with `alert-group-search.ts` for the URL;
   `alert-group-deliveries.tsx` — the state's text; `timeline.tsx` — the generic text of S-148 gains the two events and the
-  six causes; `lib/commands.ts` is unchanged except that a Command on a kept-back Alert Group stays enabled (they work,
+  seven causes of S-191 (`window_ended`, `window_closed`, `window_changed`, `window_deleted`, `urgent`, `team_joined`,
+  `moved`); `lib/commands.ts` is unchanged except that a Command on a kept-back Alert Group stays enabled (they work,
   C-34.FR-10).
 - **Texts** (EN / RU), from the Banners table of reference.md: "Kept back by the Maintenance window of {object} until
   {time}: nothing is delivered and no Escalation chain runs." / «Удержано окном обслуживания {object} до {time}: ничего
@@ -108,5 +110,5 @@ None.
 |---|---|---|
 | C-34.FR-13 | partial | the Timeline texts; the events are S-191, S-192 |
 | C-34.FR-17 | partial | the delivery state's text; the rule is S-192 |
-| C-34.FR-20 | full | with S-194 |
-| C-34.AC-16 | full | with S-194 |
+| C-34.FR-20 | partial | the Alert Group page and list; the Integration, Route and Team pages and the list of windows are completed by S-194 |
+| C-34.AC-16 | partial | the Alert Group page and list at 360 px; the other pages are completed by S-194 |

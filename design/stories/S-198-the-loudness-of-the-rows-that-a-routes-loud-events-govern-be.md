@@ -5,7 +5,7 @@ capability: C-36
 kind: be
 layer: L2
 depends_on: [S-197, S-140, S-121, S-169, S-155, S-044]
-covers: [C-36.FR-1, C-36.FR-2, C-36.FR-3, C-36.FR-4, C-36.FR-5, C-36.AC-2, C-36.AC-3, C-36.AC-4, C-36.AC-9]
+covers: [C-36.FR-1, C-36.FR-2, C-36.FR-3, C-36.FR-4, C-36.FR-5, C-36.AC-2, C-36.AC-3, C-36.AC-4, C-36.AC-9, C-09.FR-4, C-09.FR-6, C-09.FR-9, C-09.FR-22, C-15.FR-2, C-17.FR-2, C-17.FR-11, C-26.FR-5, C-28.FR-4]
 files_touched:
   - internal/groups/loudness.go
   - internal/groups/loudness_test.go
@@ -146,10 +146,7 @@ sent after it.
 
 ## Open questions
 
-1. **`destination_joined` and a Team's Destination.** C-36.FR-4 says the Route that decides is the Alert Group's, also in
-   the Destinations of its Teams; this contract follows it, so a Team Destination's first publication of a firing Alert
-   Group is Quiet when the Route lacks `new_alert_group`. The maintainer confirms it is intended, since a Team's
-   Destination is not the Route's.
+None.
 
 ## Notes
 
@@ -158,6 +155,16 @@ sent after it.
   migration: both columns are S-197's.
 - The first publication of a Storm summary is a delivery event, not a lifecycle entry, so it reads the Route's settings
   at publication time and records no Timeline entry (C-11.FR-21).
+- C-36.FR-4 settles `destination_joined` into a Team's Destination: the Route of the Alert Group decides, so the first
+  publication there of a firing Alert Group is Quiet when the Route lacks `new_alert_group`.
+- The rows of C-34 (S-191's `maintenance_started` and `maintenance_ended`) and the rows of C-37 (S-203's and S-204's) are
+  in `Table` too: the test that every row is governed or always Loud meets them. Whichever of the stories merges second
+  classifies the rows of the other — S-198 when it merges after S-191, S-191 when it merges after S-198 — as S-204 does
+  for the rows it records; until then they are listed as always Loud with their own rules.
+- A question for the maintainer (non-blocking, a PRD gap): C-34.FR-13 makes `maintenance_ended` Loud with the Mentions of
+  the entries for `new_alert_group` when the Alert Group is firing and nobody owns it, and C-36 does not say whether a
+  Route that makes `created` Quiet (no `new_alert_group` in `loud_events`) makes it Quiet too. This story keeps it Loud
+  (not governed by a Loud event) until the maintainer says otherwise.
 - The Quiet `alerts_added` of an acknowledged or snoozed Alert Group keeps its L1 row; only the row of a firing Alert
   Group is governed by `new_alerts`.
 
@@ -174,3 +181,13 @@ sent after it.
 | C-36.AC-3 | partial | every row but the removal's, which S-199 adds to the same table-driven test |
 | C-36.AC-4 | full | |
 | C-36.AC-9 | full | |
+| C-09.FR-4 | partial | revised for L2: the Reopen into firing as a Loud event of the Route; a Reopen into acknowledged keeps its Owner and its Alerts remove nothing are S-199's, a Reopen never attaches again S-203's |
+| C-09.FR-6 | partial | revised for L2: new Alerts as a Loud event of the Route; the removal of an acknowledgement is S-199's, new Alerts in an attached Alert Group S-203's |
+| C-09.FR-9 | partial | revised for L2: `rise_to_urgent` as a Loud event; the order against new Alerts is S-199's |
+| C-09.FR-22 | partial | revised for L2: the loudness a Route's Loud events give the rows; the row `alerts_added` (removes) is S-199's |
+| C-15.FR-2 | partial | revised for L2: `notify` of an events-mode webhook event from the loudness a Route gives the event |
+| C-17.FR-2 | partial | revised for L2: the ack timeout notice Quiet where the Route does not list `ack_timeout` |
+| C-17.FR-11 | partial | revised for L2: `ack_timeout` and `notices_missed` take the loudness of the Route's Loud events |
+| C-26.FR-5 | partial | `destination_joined` Quiet where the Route does not list `new_alert_group` |
+| C-28.FR-4 | partial | an entry for a Loud event that the Route makes Quiet mentions nobody there |
+| reference.md Loud and Quiet | partial | revised for L2: the Loud events of a Route and the rows that stay Loud; the removal of an acknowledgement is S-199's |
