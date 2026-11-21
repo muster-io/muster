@@ -487,11 +487,9 @@ WITH due AS MATERIALIZED (
     WHERE x.org_id = $3 AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= $4::timestamptz
       AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND d.published_at IS NOT NULL
       AND ds.health = 'healthy'
-      AND CASE WHEN $6::bigint[] IS NULL THEN true
-               ELSE x.destination_id <> ALL ($6::bigint[]) END
+      AND x.destination_id <> ALL (coalesce($6::bigint[], '{}'))
       AND (ds.connection_id IS NULL
-           OR CASE WHEN $7::bigint[] IS NULL THEN true
-                   ELSE ds.connection_id <> ALL ($7::bigint[]) END)
+           OR ds.connection_id <> ALL (coalesce($7::bigint[], '{}')))
       AND NOT EXISTS (SELECT 1
                       FROM thread_replies p
                       WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'

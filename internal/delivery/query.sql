@@ -822,11 +822,9 @@ WITH due AS MATERIALIZED (
     WHERE x.org_id = @org_id AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= @due::timestamptz
       AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND d.published_at IS NOT NULL
       AND ds.health = 'healthy'
-      AND CASE WHEN sqlc.narg('skip_destinations')::bigint[] IS NULL THEN true
-               ELSE x.destination_id <> ALL (sqlc.narg('skip_destinations')::bigint[]) END
+      AND x.destination_id <> ALL (coalesce(sqlc.narg('skip_destinations')::bigint[], '{}'))
       AND (ds.connection_id IS NULL
-           OR CASE WHEN sqlc.narg('skip_connections')::bigint[] IS NULL THEN true
-                   ELSE ds.connection_id <> ALL (sqlc.narg('skip_connections')::bigint[]) END)
+           OR ds.connection_id <> ALL (coalesce(sqlc.narg('skip_connections')::bigint[], '{}')))
       AND NOT EXISTS (SELECT 1
                       FROM thread_replies p
                       WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'
