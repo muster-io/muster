@@ -808,7 +808,11 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
+}).optional().describe('The person; absent for a group or everyone, which `mention` names.'),
+  "mention": zod.object({
+  "kind": zod.enum(['group', 'everyone']),
+  "name": zod.string()
+}).optional().describe('The group or everyone in the chat; absent for a person.'),
   "entry": zod.object({
   "position": zod.int().min(getAlertGroupTimelineResponseItemsItemFiveTwoMentionEntryPositionMin),
   "target": zod.object({
@@ -832,10 +836,10 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "deleted": zod.boolean()
 }).optional().describe('The Team of a `team` or `on_call_of_team` target.')
 })).describe('The target of a Mention entry as read, with the User or the Team it names; a deleted User reads `deactivated`, a deleted Team `deleted`, and such an entry mentions nobody.')
-}).describe('The Mention entry that named a person, as on the Destination — its position in the Destination\'s `mention_entries` and its target; in the Timeline, as it was when the message was delivered.'),
-  "event": zod.enum(['new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).describe('A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).'),
-  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination\'s Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).')
-}).optional().describe('For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); nothing was written in the Thread for it.')
+}).optional().describe('The entry that named the person or the Mention; absent for a template\'s token.'),
+  "event": zod.enum(['new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent', 'storm_started']).optional().describe('The Loud event the entry applied to; absent for a template\'s token.'),
+  "reason": zod.enum(['no_account_link', 'bridge_cannot_mention_people', 'message_too_long']).describe('Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination\'s Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11). `message_too_long` is also the reason of a group, a Team mention or everyone in the chat that such a line left out, the only reason a Mention that names no one person is not delivered.')
+}).optional().describe('For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge\'s Mention line left out for length (C-12.FR-11); nothing was written in the Thread for it.')
 })).and(zod.object({
   "kind": zod.enum(['delivery'])
 })),zod.object({

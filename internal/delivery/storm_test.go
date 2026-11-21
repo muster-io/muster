@@ -171,7 +171,7 @@ func (f *fakeDB) LockStorm(_ context.Context, arg dbgen.LockStormParams) (dbgen.
 	r := f.routes[st.route]
 	return dbgen.LockStormRow{ID: st.id, RouteID: st.route, StartedAt: st.started, CalmSince: tz(st.calmSince),
 		AlertGroupCount: st.alertGroupCount, UrgentCount: st.urgentCount, RoutePublicID: r.publicID,
-		RouteName: r.name, StormThreshold: r.threshold}, nil
+		StormThreshold: r.threshold}, nil
 }
 
 func (f *fakeDB) GetStormRankTime(_ context.Context, arg dbgen.GetStormRankTimeParams) (time.Time, error) {
@@ -705,7 +705,7 @@ func TestStormFailures(t *testing.T) {
 	e.db.before["StartStorm"] = func() { e.db.storms[98] = &fakeStorm{id: 98, route: routeID} }
 	e.addGroupErr(t, 4003)
 	for _, q := range []string{"LockStorm", "GetStormRankTime", "SetStormCalmSince", "SetStormTimer", "CountHeldOpen",
-		"ListStormSummaries", "SetDesired", "ReleaseHeldOpen", "WithholdHeldResolved", "EndStorm", "NotifyDelivery",
+		"ListStormSummaries", "GetRouteDelivery", "SetDesired", "ReleaseHeldOpen", "WithholdHeldResolved", "EndStorm", "NotifyDelivery",
 		"Notify"} {
 		e := start(t)
 		e.addGroup(t, 4002, false)
@@ -1005,5 +1005,97 @@ func TestStormSummaryRevived(t *testing.T) {
 				t.Errorf("the summary published again is %s", c.Loudness)
 			}
 		})
+	}
+}
+
+// TestStormRouteChanged is C-11.FR-6 and C-12.FR-10 (#542): a rename of the Route during its Storm edits its Storm
+// summary in each Destination Quietly, with no Mention and the Storm's counts, and wakes the delivery workers; a second
+// call, a Route without an active Storm and a summary that left its Destination change nothing; a failure is returned.
+func TestStormRouteChanged(t *testing.T) {
+	e := stormStarted(t)
+	st := e.onlyStorm(t)
+	e.db.dests[destWH].limit = 6000
+	e.db.routeDests[routeID] = []int64{destMM, destWH}
+	e.changed(t, routeID, []int64{destWH}, nil)
+	e.round(t)
+	r := e.db.routes[routeID]
+	r.name = "renamed"
+	e.db.routes[routeID] = r
+	e.rec.Reset()
+	notified := e.db.notified
+	if err := e.svc.StormRouteChanged(t.Context(), nil, routeID); err != nil {
+		t.Fatal(err)
+	}
+	if e.db.notified == notified {
+		t.Error("the delivery workers were not woken")
+	}
+	e.round(t)
+	for _, dest := range []int64{destMM, destWH} {
+		calls := e.callsTo(dest)
+		if len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate || calls[0].Loudness != groups.Quiet ||
+			len(calls[0].Mentions) != 0 ||
+			!strings.HasPrefix(textOf(calls[0]), "Storm on Route renamed: 1 new Alert Groups, 0 Urgent") {
+			t.Fatalf("calls to %d: %+v", dest, calls)
+		}
+	}
+	e.rec.Reset()
+	if err := e.svc.StormRouteChanged(t.Context(), nil, routeID); err != nil {
+		t.Fatal(err)
+	}
+	e.round(t)
+	if calls := e.rec.Calls(); len(calls) != 0 {
+		t.Errorf("a second call made %+v", calls)
+	}
+	if err := e.svc.StormRouteChanged(t.Context(), nil, routeID+1000); err != nil {
+		t.Errorf("a route without a storm: %v", err)
+	}
+
+	for _, name := range []string{"LockActiveStorm", "ListStormSummaries", "GetRouteDelivery", "EnsureStormSummary",
+		"NotifyDelivery"} {
+		e.db.fail[name] = errBoom
+		if err := e.svc.StormRouteChanged(t.Context(), nil, routeID); !errors.Is(err, errBoom) {
+			t.Errorf("%s = %v", name, err)
+		}
+		delete(e.db.fail, name)
+	}
+
+	for _, d := range e.db.deliveries {
+		if d.storm == st.id {
+			d.state = "retired"
+		}
+	}
+	r.name = "again"
+	e.db.routes[routeID] = r
+	before := e.db.calls["GetRouteDelivery"]
+	if err := e.svc.StormRouteChanged(t.Context(), nil, routeID); err != nil {
+		t.Fatal(err)
+	}
+	if e.db.calls["GetRouteDelivery"] != before {
+		t.Error("a storm whose summaries ended read its route")
+	}
+}
+
+// TestStormEndReadsRoute is C-12.FR-10 (#542): the final state of a Storm summary names the Route as GetRouteDelivery
+// reads it when the Storm ends. The fake's LockStorm reads the Route as it is too, so the test does not show the race
+// with a save that the calm check waited for.
+func TestStormEndReadsRoute(t *testing.T) {
+	e := stormStarted(t)
+	st := e.onlyStorm(t)
+	e.db.dests[destWH].limit = 6000
+	e.db.routeDests[routeID] = []int64{destMM, destWH}
+	e.changed(t, routeID, []int64{destWH}, nil)
+	e.round(t)
+	r := e.db.routes[routeID]
+	r.name = "renamed"
+	e.db.routes[routeID] = r
+	e.rec.Reset()
+	for st.ended == nil {
+		e.calmCheck(t, st)
+	}
+	e.round(t)
+	if !slices.ContainsFunc(e.callsTo(destWH), func(c deliverytest.Call) bool {
+		return strings.HasPrefix(textOf(c), "Storm over on Route renamed")
+	}) {
+		t.Errorf("the final summary: %+v", e.callsTo(destWH))
 	}
 }

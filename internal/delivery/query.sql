@@ -1011,19 +1011,24 @@ VALUES (@org_id, @public_id, @occurred_at, @destination_id, sqlc.narg('alert_gro
         sqlc.narg('storm_id')::bigint, @kind, @loudness, @mentions::text[], sqlc.narg('error_class')::text,
         sqlc.narg('error')::text, sqlc.narg('detail')::jsonb);
 
--- ListOpenMentions reads which of the people @user_ids have an open warning about an undelivered Mention on the
--- Destination (C-28.FR-3): the person and the entry's target of each latest mention_not_delivered or
--- mention_delivered of the Destination per person and target since @since, the start of retention.alert_details,
--- whose latest is mention_not_delivered. On delivery_events_mentions_idx.
+-- ListOpenMentions reads which of the people @user_ids, and which groups and mentions of everyone that a bridge's
+-- entries named, have an open warning about an undelivered Mention on the Destination (C-28.FR-3, C-12.FR-11): the
+-- person — 0 for a group or everyone — the Mention — null for a person — and the entry's target of each latest
+-- mention_not_delivered or mention_delivered of the Destination per person or Mention and target since @since, the
+-- start of retention.alert_details, whose latest is mention_not_delivered. A template's token, which names no entry,
+-- has no warning. On delivery_events_mentions_idx.
 -- name: ListOpenMentions :many
-SELECT latest.user_id::bigint AS user_id, latest.target::jsonb AS target
-FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'target')
-             e.detail ->> 'user_id' AS user_id, e.detail -> 'target' AS target, e.kind
+SELECT coalesce(latest.user_id::bigint, 0)::bigint AS user_id, latest.mention::jsonb AS mention,
+       latest.target::jsonb AS target
+FROM (SELECT DISTINCT ON (e.detail ->> 'user_id', e.detail -> 'mention', e.detail -> 'target')
+             e.detail ->> 'user_id' AS user_id, e.detail -> 'mention' AS mention, e.detail -> 'target' AS target,
+             e.kind
       FROM delivery_events e
       WHERE e.org_id = @org_id AND e.destination_id = @destination_id
         AND e.kind IN ('mention_not_delivered', 'mention_delivered') AND e.occurred_at >= @since
-        AND e.detail ->> 'user_id' = ANY(@user_ids::text[])
-      ORDER BY e.detail ->> 'user_id', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
+        AND (e.detail ->> 'user_id' = ANY(@user_ids::text[]) OR e.detail -> 'mention' IS NOT NULL)
+        AND e.detail -> 'target' IS NOT NULL
+      ORDER BY e.detail ->> 'user_id', e.detail -> 'mention', e.detail -> 'target', e.occurred_at DESC, e.id DESC) latest
 WHERE latest.kind = 'mention_not_delivered';
 
 -- GetGroupForDeliveries reads the id of an Alert Group by public_id.
@@ -1381,10 +1386,13 @@ SET held_by_storm_id = NULL, publication_loud = (publication_loud AND @loud::boo
     published_by_configuration = NOT @loud::boolean, next_attempt_at = @now, updated_at = @now
 WHERE org_id = @org_id AND id = @id AND held_by_storm_id IS NOT NULL;
 
--- LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.
+-- LockStorm reads, and locks, a Storm that has not ended, with the public_id and Storm threshold of its Route. The
+-- Route's row is not locked, so a lock that waited for a save of the Route still reads the Route as it was before: the
+-- end of the Storm reads the name and the language the summaries show again, in a statement of its own
+-- (GetRouteDelivery).
 -- name: LockStorm :one
 SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
-       r.name AS route_name, r.language AS route_language, r.storm_threshold
+       r.storm_threshold
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = @org_id AND s.id = @id AND s.ended_at IS NULL

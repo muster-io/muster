@@ -498,19 +498,41 @@ function EntryDetails({ entry }: { entry: TimelineEntry }) {
     );
   }
   if (entry.kind === "delivery" && entry.mention !== undefined) {
-    const { user, entry: named, event, reason } = entry.mention;
+    // A person, or a group or everyone in the chat that a bridge's line of Mentions left out; a template's token has
+    // no entry and no event.
+    const { user, mention, entry: named, event, reason } = entry.mention;
+    if (user !== undefined) {
+      rows.push(
+        <Detail key="mention-person" term={t("timeline.details.mentionPerson")}>
+          <span data-testid="mention-person">
+            {user.login !== undefined && user.login !== "" ? `@${user.login}` : userName(t, user)}
+          </span>
+        </Detail>,
+      );
+    } else if (mention !== undefined) {
+      rows.push(
+        <Detail key="mention-named" term={t("timeline.details.mentionNamed")}>
+          <span data-testid="mention-named">{`@${mention.name}`}</span>
+        </Detail>,
+      );
+    }
     rows.push(
-      <Detail key="mention-person" term={t("timeline.details.mentionPerson")}>
-        <span data-testid="mention-person">
-          {user.login !== undefined && user.login !== "" ? `@${user.login}` : userName(t, user)}
+      <Detail key="mention-entry" term={t("timeline.details.mentionEntry")}>
+        <span data-testid="mention-entry">
+          {named === undefined
+            ? t("timeline.details.mentionFromTemplate")
+            : targetLabel(t, named.target)}
         </span>
       </Detail>,
-      <Detail key="mention-entry" term={t("timeline.details.mentionEntry")}>
-        <span data-testid="mention-entry">{targetLabel(t, named.target)}</span>
-      </Detail>,
-      <Detail key="mention-event" term={t("timeline.details.mentionEvent")}>
-        <span data-testid="mention-event">{eventName(t, event)}</span>
-      </Detail>,
+    );
+    if (event !== undefined) {
+      rows.push(
+        <Detail key="mention-event" term={t("timeline.details.mentionEvent")}>
+          <span data-testid="mention-event">{eventName(t, event)}</span>
+        </Detail>,
+      );
+    }
+    rows.push(
       <Detail key="mention-reason" term={t("timeline.details.mentionReason")}>
         <span data-testid="mention-reason">{notDeliveredReasonText(t, reason)}</span>
       </Detail>,

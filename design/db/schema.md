@@ -1675,7 +1675,11 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   warning. Both are Quiet, without Mentions; their `detail` holds the person (`user_id`), the entry (`entry_id`,
   `position` and `target`, the target in the API's form, which identifies the entry across saves of the Destination,
   which write its entries again), the Loud event (`event`) and, for `mention_not_delivered`, the `reason`
-  (`no_account_link`, `bridge_cannot_mention_people` or `message_too_long`, a free value that no CHECK constrains). The
+  (`no_account_link`, `bridge_cannot_mention_people` or `message_too_long`, a free value that no CHECK constrains). A
+  group, a Team mention or everyone in the chat that an entry named and a bridge's line of Mentions left out for length
+  (C-12.FR-11, #626) is recorded the same way, keyed by `mention` (`{"kind": "group" | "everyone", "name": …}`) in
+  place of `user_id`; one of a template's token names no entry, so its `detail` has only `mention` and `reason`, and it
+  is written only about an Alert Group and never warns. The
   Timeline lists `mention_not_delivered` and never `mention_delivered`. The warnings of a Destination are computed
   from them, never stored, on the partial index `delivery_events_mentions_idx` `(org_id, destination_id, kind,
   occurred_at DESC) WHERE kind IN ('mention_not_delivered', 'mention_delivered')`: created on the parent alone,
@@ -2434,9 +2438,10 @@ in order once it commits, and a run of many batches stalls them once per batch, 
 no worker claims it before the save commits, and its run classifies with every save before it. A row
 `organization_message_settings` is inserted the same way while one of the Organization is still unclaimed, and a row
 `team_name` while one of the same Team is, a row `organization_links` while one of the Organization is, a row
-`user_name` or `account_links` while one of either kind of the same User is, and a row `service_account_name` while
-one of the same Service account is: the run renders with the settings, the name, the rules, the tables and the links
-as they are then.
+`user_name` or `account_links` while one of either kind of the same User is, a row `service_account_name` while
+one of the same Service account is, a row `route_minimum_severity` while one of the same Route is, and a row
+`route_message_labels` or `route_message_settings` while one of either kind of the same Route is: the run renders with
+the settings, the name, the rules, the tables, the links and the Route as they are then.
 
 Every walk also takes the resolved Alert Groups of its scope whose final edit still waits, those with a `pending`
 delivery — in its Destination for `destination_buttons` and `destination_connection`, in a Destination that follows

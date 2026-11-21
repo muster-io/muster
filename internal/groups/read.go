@@ -523,33 +523,49 @@ type DeliveryView struct {
 	Mention     *MentionView
 }
 
-// MentionView is an undelivered Mention as the Timeline shows it (C-28.FR-3): the person, the entry that named them —
-// its position and target then — the Loud event and the reason.
+// MentionView is an undelivered Mention as the Timeline shows it (C-28.FR-3): the person — or, through a bridge whose
+// Mention line left it out for length (C-12.FR-11), the group or everyone in the chat, with no person — the entry that
+// named them — its position and target then, no target for a template's token — the Loud event, empty for a token, and
+// the reason.
 type MentionView struct {
 	User     *ActorRef
+	Mention  *MentionName
 	Position int
-	Target   MentionTarget
+	Target   *MentionTarget
 	Event    string
 	Reason   string
 }
 
-// MentionTarget is the target of a Mention entry that names people — a person, or the On-call of a Team or of the
-// Teams from the label — with its User or Team by public_id, and the User or the Team it names.
-type MentionTarget struct {
-	Kind   string    `json:"kind"`
-	UserID string    `json:"user_id,omitempty"`
-	TeamID string    `json:"team_id,omitempty"`
-	User   *ActorRef `json:"-"`
-	Team   *TeamRef  `json:"-"`
+// MentionName is a group — a group entry or a Team mention — or everyone in the chat as a Mention names it: its kind,
+// group or everyone, and its name, the group's name or the word.
+type MentionName struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
-// mentionDetail is the detail of a mention_not_delivered delivery event, as delivery writes it.
+// MentionTarget is the target of a Mention entry — a person, the On-call of a Team or of the Teams from the label, a
+// Team, the Teams from the label, a group or everyone — with its User or Team by public_id, its group or its word, and
+// the User or the Team it names.
+type MentionTarget struct {
+	Kind     string    `json:"kind"`
+	UserID   string    `json:"user_id,omitempty"`
+	TeamID   string    `json:"team_id,omitempty"`
+	Group    string    `json:"group,omitempty"`
+	GroupID  string    `json:"group_id,omitempty"`
+	Everyone string    `json:"everyone,omitempty"`
+	User     *ActorRef `json:"-"`
+	Team     *TeamRef  `json:"-"`
+}
+
+// mentionDetail is the detail of a mention_not_delivered delivery event, as delivery writes it: user_id for a person
+// and mention for a group or everyone, and no entry for a template's token.
 type mentionDetail struct {
-	UserID   int64         `json:"user_id"`
-	Position int           `json:"position"`
-	Target   MentionTarget `json:"target"`
-	Event    string        `json:"event"`
-	Reason   string        `json:"reason"`
+	UserID   int64          `json:"user_id"`
+	Mention  *MentionName   `json:"mention"`
+	Position int            `json:"position"`
+	Target   *MentionTarget `json:"target"`
+	Event    string         `json:"event"`
+	Reason   string         `json:"reason"`
 }
 
 // TimelineEntry is one entry of the Timeline (TimelineEntry): a lifecycle event or a system entry, a Note or a
@@ -842,16 +858,21 @@ func (s *Service) deliveryEvents(ctx context.Context, gid int64, desc bool, at p
 // deliveryMentionNotDelivered is the kind of the delivery event of an undelivered Mention.
 const deliveryMentionNotDelivered = "mention_not_delivered"
 
-// mentionOf is the undelivered Mention of a mention_not_delivered row: its person by id, which actors names, and the
-// Team its entry's target names.
+// mentionOf is the undelivered Mention of a mention_not_delivered row: its person by id, which actors names, or its
+// group or everyone in the chat, and the Team its entry's target names; a template's token has no entry.
 func mentionOf(r dbgen.ListTimelineDeliveryEventsRow) (*MentionView, error) {
 	var d mentionDetail
 	if err := json.Unmarshal(r.Detail, &d); err != nil {
 		return nil, fmt.Errorf("read the undelivered mention of delivery event %s: %w", r.PublicID, err)
 	}
-	m := &MentionView{User: &ActorRef{Kind: "user", id: d.UserID}, Position: d.Position, Target: d.Target,
-		Event: d.Event, Reason: d.Reason}
-	if d.Target.UserID != "" {
+	m := &MentionView{Mention: d.Mention, Position: d.Position, Target: d.Target, Event: d.Event, Reason: d.Reason}
+	if d.Mention == nil {
+		m.User = &ActorRef{Kind: "user", id: d.UserID}
+	}
+	if d.Target == nil {
+		return m, nil
+	}
+	if d.Target.UserID != "" && m.User != nil {
 		// A person entry names the person it did not mention.
 		m.Target.User = m.User
 	}
@@ -891,7 +912,7 @@ func (s *Service) actors(ctx context.Context, entries []TimelineEntry) error {
 					f(r)
 				}
 			}
-			if e.Delivery != nil && e.Delivery.Mention != nil {
+			if e.Delivery != nil && e.Delivery.Mention != nil && e.Delivery.Mention.User != nil {
 				f(e.Delivery.Mention.User)
 			}
 			if e.Note != nil && e.Note.Author != nil && e.Note.Author != e.Actor.Ref {
