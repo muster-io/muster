@@ -165,7 +165,7 @@ func (s *Server) DeleteLookupTable(ctx context.Context, req gen.DeleteLookupTabl
 
 func tableInputOf(b gen.LookupTableBase) links.TableInput {
 	in := links.TableInput{Name: b.Name, Description: b.Description, Columns: b.Columns,
-		Entries: make([]links.Entry, len(b.Entries))}
+		Entries: make([]links.Entry, len(b.Entries)), ManagedBy: managedByIn(b.ManagedBy)}
 	for i, e := range b.Entries {
 		in.Entries[i] = links.Entry{Key: e.Key, Values: e.Values}
 	}
@@ -175,7 +175,8 @@ func tableInputOf(b gen.LookupTableBase) links.TableInput {
 func lookupTableOf(t links.Table) gen.LookupTable {
 	tag, description := etag(t.Version), t.Description
 	out := gen.LookupTable{Id: t.PublicID, Name: t.Name, Description: &description, Columns: t.Columns,
-		Entries: make([]gen.LookupEntry, len(t.Entries)), CreatedAt: t.CreatedAt, Etag: &tag}
+		Entries: make([]gen.LookupEntry, len(t.Entries)), CreatedAt: t.CreatedAt, Etag: &tag,
+		ManagedBy: managedByOf(t.ManagedBy)}
 	if out.Columns == nil {
 		out.Columns = []string{}
 	}
@@ -281,7 +282,8 @@ func (s *Server) DeleteLinkRule(ctx context.Context, req gen.DeleteLinkRuleReque
 
 func ruleInputOf(b gen.LinkRuleBase) links.RuleInput {
 	in := links.RuleInput{Name: b.Name, Matchers: make([]links.Matcher, len(b.Matchers)),
-		Scope: links.Scope{Type: string(b.Scope.Type), Label: value(b.Scope.Label)}, URLTemplate: b.UrlTemplate}
+		Scope: links.Scope{Type: string(b.Scope.Type), Label: value(b.Scope.Label)}, URLTemplate: b.UrlTemplate,
+		ManagedBy: managedByIn(b.ManagedBy)}
 	for i, m := range b.Matchers {
 		in.Matchers[i] = links.Matcher{Label: m.Label, Op: string(m.Op), Value: m.Value}
 	}
@@ -292,7 +294,7 @@ func linkRuleOf(r links.Rule) gen.LinkRule {
 	tag := etag(r.Version)
 	out := gen.LinkRule{Id: r.PublicID, Name: r.Name, Builtin: r.Builtin, Matchers: make([]gen.Matcher, len(r.Matchers)),
 		Scope: gen.LinkRuleScope{Type: gen.LinkRuleScopeType(r.Scope.Type)}, UrlTemplate: r.URLTemplate,
-		CreatedAt: r.CreatedAt, Etag: &tag}
+		CreatedAt: r.CreatedAt, Etag: &tag, ManagedBy: managedByOf(r.ManagedBy)}
 	if r.Scope.Type == links.ScopeLabelValue {
 		out.Scope.Label.Set(r.Scope.Label)
 	} else {

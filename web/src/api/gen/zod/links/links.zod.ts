@@ -22,6 +22,10 @@ export const ListLookupTablesQueryParams = zod.object({
 
 
 
+export const listLookupTablesResponseItemsItemOneManagedByMax = 32;
+
+
+export const listLookupTablesResponseItemsItemOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listLookupTablesResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -33,7 +37,8 @@ export const ListLookupTablesResponse = zod.object({
   "entries": zod.array(zod.object({
   "key": zod.string().min(1),
   "values": zod.record(zod.string(), zod.string()).describe('One value per column; every column has a value.')
-})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).')
+})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).'),
+  "managed_by": zod.string().max(listLookupTablesResponseItemsItemOneManagedByMax).regex(listLookupTablesResponseItemsItemOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A table of keys and columns. A template reads one cell with `lookup "<table>" <key> "<column>"`, for example `lookup "grafana" .Labels.cluster "datasource_uid"`. The built-in "Explore" rule uses a table with the columns `address` and `datasource_uid`, one row per environment or cluster.').and(zod.object({
   "id": zod.string().regex(listLookupTablesResponseItemsItemTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "created_at": zod.iso.datetime({"offset":true}),
@@ -49,6 +54,10 @@ export const ListLookupTablesResponse = zod.object({
 
 
 
+export const createLookupTableBodyManagedByMax = 32;
+
+
+export const createLookupTableBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const CreateLookupTableBody = zod.object({
@@ -58,13 +67,18 @@ export const CreateLookupTableBody = zod.object({
   "entries": zod.array(zod.object({
   "key": zod.string().min(1),
   "values": zod.record(zod.string(), zod.string()).describe('One value per column; every column has a value.')
-})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).')
+})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).'),
+  "managed_by": zod.string().max(createLookupTableBodyManagedByMax).regex(createLookupTableBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A table of keys and columns. A template reads one cell with `lookup "<table>" <key> "<column>"`, for example `lookup "grafana" .Labels.cluster "datasource_uid"`. The built-in "Explore" rule uses a table with the columns `address` and `datasource_uid`, one row per environment or cluster.')
 
 
 
 
 
+export const createLookupTableResponseOneManagedByMax = 32;
+
+
+export const createLookupTableResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createLookupTableResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -75,7 +89,8 @@ export const CreateLookupTableResponse = zod.object({
   "entries": zod.array(zod.object({
   "key": zod.string().min(1),
   "values": zod.record(zod.string(), zod.string()).describe('One value per column; every column has a value.')
-})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).')
+})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).'),
+  "managed_by": zod.string().max(createLookupTableResponseOneManagedByMax).regex(createLookupTableResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A table of keys and columns. A template reads one cell with `lookup "<table>" <key> "<column>"`, for example `lookup "grafana" .Labels.cluster "datasource_uid"`. The built-in "Explore" rule uses a table with the columns `address` and `datasource_uid`, one row per environment or cluster.').and(zod.object({
   "id": zod.string().regex(createLookupTableResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "created_at": zod.iso.datetime({"offset":true}),
@@ -96,6 +111,10 @@ export const GetLookupTableParams = zod.object({
 
 
 
+export const getLookupTableResponseOneManagedByMax = 32;
+
+
+export const getLookupTableResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getLookupTableResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -106,7 +125,8 @@ export const GetLookupTableResponse = zod.object({
   "entries": zod.array(zod.object({
   "key": zod.string().min(1),
   "values": zod.record(zod.string(), zod.string()).describe('One value per column; every column has a value.')
-})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).')
+})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).'),
+  "managed_by": zod.string().max(getLookupTableResponseOneManagedByMax).regex(getLookupTableResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A table of keys and columns. A template reads one cell with `lookup "<table>" <key> "<column>"`, for example `lookup "grafana" .Labels.cluster "datasource_uid"`. The built-in "Explore" rule uses a table with the columns `address` and `datasource_uid`, one row per environment or cluster.').and(zod.object({
   "id": zod.string().regex(getLookupTableResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "created_at": zod.iso.datetime({"offset":true}),
@@ -132,6 +152,10 @@ export const UpdateLookupTableHeader = zod.object({
 
 
 
+export const updateLookupTableBodyManagedByMax = 32;
+
+
+export const updateLookupTableBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateLookupTableBody = zod.object({
@@ -141,13 +165,18 @@ export const UpdateLookupTableBody = zod.object({
   "entries": zod.array(zod.object({
   "key": zod.string().min(1),
   "values": zod.record(zod.string(), zod.string()).describe('One value per column; every column has a value.')
-})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).')
+})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).'),
+  "managed_by": zod.string().max(updateLookupTableBodyManagedByMax).regex(updateLookupTableBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A table of keys and columns. A template reads one cell with `lookup "<table>" <key> "<column>"`, for example `lookup "grafana" .Labels.cluster "datasource_uid"`. The built-in "Explore" rule uses a table with the columns `address` and `datasource_uid`, one row per environment or cluster.')
 
 
 
 
 
+export const updateLookupTableResponseOneManagedByMax = 32;
+
+
+export const updateLookupTableResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateLookupTableResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -158,7 +187,8 @@ export const UpdateLookupTableResponse = zod.object({
   "entries": zod.array(zod.object({
   "key": zod.string().min(1),
   "values": zod.record(zod.string(), zod.string()).describe('One value per column; every column has a value.')
-})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).')
+})).describe('Rows. The keys of `values` must be exactly `columns` (`422` otherwise).'),
+  "managed_by": zod.string().max(updateLookupTableResponseOneManagedByMax).regex(updateLookupTableResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A table of keys and columns. A template reads one cell with `lookup "<table>" <key> "<column>"`, for example `lookup "grafana" .Labels.cluster "datasource_uid"`. The built-in "Explore" rule uses a table with the columns `address` and `datasource_uid`, one row per environment or cluster.').and(zod.object({
   "id": zod.string().regex(updateLookupTableResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "created_at": zod.iso.datetime({"offset":true}),
@@ -197,6 +227,10 @@ export const ListLinkRulesQueryParams = zod.object({
 
 
 
+export const listLinkRulesResponseItemsItemOneManagedByMax = 32;
+
+
+export const listLinkRulesResponseItemsItemOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listLinkRulesResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -212,7 +246,8 @@ export const ListLinkRulesResponse = zod.object({
   "type": zod.enum(['alert_group', 'label_value']),
   "label": zod.string().nullish().describe('The label whose every value yields a link, for `label_value`.')
 }),
-  "url_template": zod.string().describe('Go template that may call `lookup table key column`.')
+  "url_template": zod.string().describe('Go template that may call `lookup table key column`.'),
+  "managed_by": zod.string().max(listLinkRulesResponseItemsItemOneManagedByMax).regex(listLinkRulesResponseItemsItemOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(listLinkRulesResponseItemsItemTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('The built-in "Explore" rule cannot be deleted (`409` `builtin_immutable`).'),
@@ -227,6 +262,10 @@ export const ListLinkRulesResponse = zod.object({
  */
 
 
+export const createLinkRuleBodyManagedByMax = 32;
+
+
+export const createLinkRuleBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const CreateLinkRuleBody = zod.object({
@@ -240,11 +279,16 @@ export const CreateLinkRuleBody = zod.object({
   "type": zod.enum(['alert_group', 'label_value']),
   "label": zod.string().nullish().describe('The label whose every value yields a link, for `label_value`.')
 }),
-  "url_template": zod.string().describe('Go template that may call `lookup table key column`.')
+  "url_template": zod.string().describe('Go template that may call `lookup table key column`.'),
+  "managed_by": zod.string().max(createLinkRuleBodyManagedByMax).regex(createLinkRuleBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 })
 
 
 
+export const createLinkRuleResponseOneManagedByMax = 32;
+
+
+export const createLinkRuleResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createLinkRuleResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -259,7 +303,8 @@ export const CreateLinkRuleResponse = zod.object({
   "type": zod.enum(['alert_group', 'label_value']),
   "label": zod.string().nullish().describe('The label whose every value yields a link, for `label_value`.')
 }),
-  "url_template": zod.string().describe('Go template that may call `lookup table key column`.')
+  "url_template": zod.string().describe('Go template that may call `lookup table key column`.'),
+  "managed_by": zod.string().max(createLinkRuleResponseOneManagedByMax).regex(createLinkRuleResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(createLinkRuleResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('The built-in "Explore" rule cannot be deleted (`409` `builtin_immutable`).'),
@@ -279,6 +324,10 @@ export const GetLinkRuleParams = zod.object({
 
 
 
+export const getLinkRuleResponseOneManagedByMax = 32;
+
+
+export const getLinkRuleResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getLinkRuleResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -293,7 +342,8 @@ export const GetLinkRuleResponse = zod.object({
   "type": zod.enum(['alert_group', 'label_value']),
   "label": zod.string().nullish().describe('The label whose every value yields a link, for `label_value`.')
 }),
-  "url_template": zod.string().describe('Go template that may call `lookup table key column`.')
+  "url_template": zod.string().describe('Go template that may call `lookup table key column`.'),
+  "managed_by": zod.string().max(getLinkRuleResponseOneManagedByMax).regex(getLinkRuleResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(getLinkRuleResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('The built-in "Explore" rule cannot be deleted (`409` `builtin_immutable`).'),
@@ -318,6 +368,10 @@ export const UpdateLinkRuleHeader = zod.object({
 
 
 
+export const updateLinkRuleBodyManagedByMax = 32;
+
+
+export const updateLinkRuleBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateLinkRuleBody = zod.object({
@@ -331,11 +385,16 @@ export const UpdateLinkRuleBody = zod.object({
   "type": zod.enum(['alert_group', 'label_value']),
   "label": zod.string().nullish().describe('The label whose every value yields a link, for `label_value`.')
 }),
-  "url_template": zod.string().describe('Go template that may call `lookup table key column`.')
+  "url_template": zod.string().describe('Go template that may call `lookup table key column`.'),
+  "managed_by": zod.string().max(updateLinkRuleBodyManagedByMax).regex(updateLinkRuleBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 })
 
 
 
+export const updateLinkRuleResponseOneManagedByMax = 32;
+
+
+export const updateLinkRuleResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateLinkRuleResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -350,7 +409,8 @@ export const UpdateLinkRuleResponse = zod.object({
   "type": zod.enum(['alert_group', 'label_value']),
   "label": zod.string().nullish().describe('The label whose every value yields a link, for `label_value`.')
 }),
-  "url_template": zod.string().describe('Go template that may call `lookup table key column`.')
+  "url_template": zod.string().describe('Go template that may call `lookup table key column`.'),
+  "managed_by": zod.string().max(updateLinkRuleResponseOneManagedByMax).regex(updateLinkRuleResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(updateLinkRuleResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "builtin": zod.boolean().describe('The built-in "Explore" rule cannot be deleted (`409` `builtin_immutable`).'),

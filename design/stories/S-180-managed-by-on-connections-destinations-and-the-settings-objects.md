@@ -54,7 +54,7 @@ issue: 698
   `OrganizationInput` (through `OrganizationBase`), `OutboundPolicy` and `OidcSettingsInput` (through
   `OidcSettingsBase`), so that the reads carry it; not in the reads' `required` lists, as in S-179.
 - **Tables**: `connections`, `destinations`, `organizations`, `outbound_policies` and `oidc_settings`, the columns of
-  migration 0055 (S-179); no migration of its own.
+  migration 0056 (S-179); no migration of its own.
 - **Writes**: as in S-179 — create stores the value or null, an update keeps it when left out and clears it on null,
   the Audit log diff includes it; `internal/managedby.Validate` checks it. The operations of Secrets
   (`setDestinationSecret`, `deleteDestinationSecret`) and Signing secrets do not take the field and keep it. Nothing

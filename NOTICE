@@ -66,10 +66,13 @@ re-implemented under their Alertmanager names from their documented behaviour; n
 MIT-licensed parts
 ==================
 
-One part of the repository is licensed under the MIT License instead of the AGPL-3.0-only, so that bridges derived
-from it may stay closed (design/adr/0017-bridge-protocol-for-messengers-without-native-support.md):
+Two parts of the repository are licensed under the MIT License instead of the AGPL-3.0-only, so that bridges derived
+from the Bridge protocol may stay closed (design/adr/0017-bridge-protocol-for-messengers-without-native-support.md)
+and clients generated from the API specification, the Terraform provider among them, may carry any licence
+(design/adr/0001-agpl-license-cla-and-dependency-policy.md):
 
   - api/bridge.yaml  the Bridge protocol specification; its info.license says MIT
+  - api/openapi.yaml  the API specification; its info.license says MIT
 
   MIT License, Copyright The Muster Authors.
 

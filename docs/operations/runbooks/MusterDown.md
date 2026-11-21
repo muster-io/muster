@@ -38,9 +38,10 @@ only; Muster cannot raise it about itself.
     - `shutdown_requested`: the replica received SIGTERM, for example during a rollout.
 4. When the process runs but the scrape fails, check the scrape configuration against `MUSTER_LISTEN_INTERNAL`: the
    port, the path `/metrics` and the network policy between Prometheus and the replica.
-5. Run `muster doctor` with the replica's settings. The lines `database`, `session_connection` and `key_canary` name
-   a database that cannot be reached, a session connection whose advisory locks or `LISTEN` do not work, and master
-   keys that do not decrypt the stored data.
+5. Run `muster doctor` with the replica's settings. The lines `database`, `schema`, `session_connection` and
+   `key_canary` name a database that cannot be reached, a schema this binary refuses (dirty, or newer than it knows),
+   a session connection whose advisory locks or `LISTEN` do not work, and master keys that do not decrypt the stored
+   data.
 
 ## Fix
 

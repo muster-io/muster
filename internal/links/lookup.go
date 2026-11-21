@@ -8,7 +8,8 @@
 // rule, or per value of a label, then the runbook_url and dashboard_url annotations and the generatorURL as "Source",
 // each kept only as an http(s) URL. A rule that fails is left out and counted. Every change of a table or a rule is
 // recorded in the Audit log and, in its transaction, asks the open Alert Group updates of internal/groups to re-render
-// the open Root messages Quietly, whose links it may change (KindLinks); delivery edits only those whose links did.
+// the open Root messages Quietly, whose links it may change (KindLinks); delivery edits only those whose links did. A
+// change of the mark managed_by alone (C-33.FR-11) changes no link and asks nothing.
 package links
 
 import (
@@ -35,6 +36,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/links/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/templates"
 )
@@ -315,6 +317,8 @@ type Table struct {
 	Entries     []Entry
 	CreatedAt   time.Time
 	Version     int64
+	// ManagedBy is the tool that keeps the table as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 }
 
 // TableInput is what createLookupTable and updateLookupTable write; the rows replace the stored ones as a whole. A
@@ -324,6 +328,8 @@ type TableInput struct {
 	Description *string
 	Columns     []string
 	Entries     []Entry
+	// ManagedBy is the mark of the tool that keeps the table as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // ListFilter selects a page in the order of creation, after the id After when it is set.
@@ -344,10 +350,12 @@ type tableView struct {
 	Description string   `json:"description"`
 	Columns     []string `json:"columns"`
 	Entries     []Entry  `json:"entries"`
+	ManagedBy   *string  `json:"managed_by"`
 }
 
 func viewOfTable(t Table) tableView {
-	return tableView{Name: t.Name, Description: t.Description, Columns: t.Columns, Entries: t.Entries}
+	return tableView{Name: t.Name, Description: t.Description, Columns: t.Columns, Entries: t.Entries,
+		ManagedBy: t.ManagedBy}
 }
 
 func tableResource(t Table) audit.Resource {
@@ -382,7 +390,8 @@ func (s *Service) ListTables(ctx context.Context, f ListFilter) (TablePage, erro
 
 func tableOf(r dbgen.GetLookupTableRow) Table {
 	return Table{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description,
-		Columns: slices.Clone(r.ColumnNames), Entries: []Entry{}, CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
+		Columns: slices.Clone(r.ColumnNames), Entries: []Entry{}, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
+		ManagedBy: managedby.Of(r.ManagedBy)}
 }
 
 // withEntries reads the rows of the tables.
@@ -474,6 +483,9 @@ func checkTable(in TableInput) error {
 	if in.Description != nil && utf8.RuneCountInString(*in.Description) > MaxDescriptionLength {
 		return &FieldError{Pointer: "/description", Code: CodeTooLong,
 			Detail: fmt.Sprintf("The description is longer than %d characters.", MaxDescriptionLength)}
+	}
+	if in.ManagedBy.Check() != nil {
+		return &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
 	}
 	if len(in.Columns) == 0 {
 		return &FieldError{Pointer: "/columns", Code: CodeRequired, Detail: "A Lookup table has at least one column."}
@@ -579,7 +591,8 @@ func (s *Service) CreateTable(ctx context.Context, r Requester, in TableInput) (
 			description = *in.Description
 		}
 		tableID, err := q.InsertLookupTable(ctx, dbgen.InsertLookupTableParams{OrgID: s.orgID, PublicID: id,
-			Name: in.Name, Description: description, ColumnNames: in.Columns, Now: s.business.Now().UTC()})
+			Name: in.Name, Description: description, ColumnNames: in.Columns,
+			ManagedBy: managedby.Text(in.ManagedBy.Apply(nil)), Now: s.business.Now().UTC()})
 		if err != nil {
 			return fmt.Errorf("create the lookup table: %w", nameTaken(err, tableNameKey, ErrTableNameTaken))
 		}
@@ -652,6 +665,7 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 		}
 		next := before
 		next.Name, next.Columns, next.Entries = in.Name, in.Columns, in.Entries
+		next.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -662,7 +676,7 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 		}
 		if err := q.UpdateLookupTable(ctx, dbgen.UpdateLookupTableParams{OrgID: s.orgID, ID: before.ID,
 			Name: next.Name, Description: next.Description, ColumnNames: next.Columns,
-			Now: s.business.Now().UTC()}); err != nil {
+			ManagedBy: managedby.Text(next.ManagedBy), Now: s.business.Now().UTC()}); err != nil {
 			return fmt.Errorf("update the lookup table %s: %w", before.PublicID,
 				nameTaken(err, tableNameKey, ErrTableNameTaken))
 		}
@@ -676,8 +690,11 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 		if updated, err = s.getTable(ctx, q, before.PublicID); err != nil {
 			return err
 		}
-		if err := s.requestTableRerender(ctx, q, before.Name, next.Name); err != nil {
-			return err
+		// A change of the mark alone changes no link (C-33.FR-11).
+		if !managedby.Only(changes) {
+			if err := s.requestTableRerender(ctx, q, before.Name, next.Name); err != nil {
+				return err
+			}
 		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionTableUpdated, Resource: tableResource(updated), Diff: changes, SourceAddress: r.Address})

@@ -310,6 +310,78 @@ func TestRouteTemplates(t *testing.T) {
 	}
 }
 
+// TestLineTemplateWithoutListedAlerts is C-29.FR-3 and C-12.FR-6 on a Route with a line template: an Alert Group with
+// no Alert to list — none left in it, as a person-resolved one whose Alerts still firing moved to another Alert Group
+// at the end of its Grace period, none read, or a single one — has no Alerts line, so its Root message renders in
+// every markup without the line template, without a Failure and without a panic; read through Load and settled as
+// delivery.MessageRenderer.Roots does, it leaves the Route's template error alone and raises no Internal alert.
+func TestLineTemplateWithoutListedAlerts(t *testing.T) {
+	const line = `{{ .Labels.instance }} {{ .Annotations.summary }}`
+	markups := []Markup{MarkupMarkdown, MarkupHTML, MarkupPlain, MarkupCommonMark, MarkupMrkdwn}
+	for _, tc := range []struct {
+		name   string
+		status string
+		alerts int
+		total  int64
+	}{
+		{name: "grace_period_ended", status: ColourResolved},
+		{name: "firing_without_alerts", status: ColourFiring},
+		{name: "alerts_not_read", status: ColourFiring, total: 3},
+		{name: "one_alert", status: ColourFiring, alerts: 1, total: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := source(tc.status, tc.alerts)
+			src.TotalAlerts, src.Route.Line = tc.total, ptr(line)
+			if tc.status == ColourResolved {
+				src.ResolvedByKind, src.ResolvedBy = "user", "Alice"
+			}
+			r := newRenderer(t)
+			for _, mk := range markups {
+				out := r.Root(src, mk)
+				m := out.Message
+				if out.Failure != nil || slices.Contains(out.Rendered, TemplateLine) || m.AlertsLine != nil ||
+					m.Kind != KindRoot || m.Heading == nil || m.Heading.Number != 12 || m.Summary != "Pods are down" {
+					t.Errorf("%s: %+v", mk, out)
+				}
+				if tc.status == ColourResolved && !strings.Contains(m.Footer, "Alice") {
+					t.Errorf("%s: footer %q", mk, m.Footer)
+				}
+				if got := Layout(m, mk); !strings.Contains(got, "PodDown") {
+					t.Errorf("%s layout\n%s", mk, got)
+				}
+			}
+		})
+	}
+	t.Run("load_and_settle", func(t *testing.T) {
+		g := source(ColourResolved, 0)
+		g.Route.Line, g.ResolvedByKind = ptr(line), "user"
+		f := &fakeQueries{group: g}
+		r := withFake(t, f)
+		src, err := r.Load(t.Context(), nil, g.ID)
+		if err != nil || len(src.Alerts) != 0 || src.TotalAlerts != 0 || src.Route.Line == nil {
+			t.Fatalf("load %+v, %v", src, err)
+		}
+		var failures []Failure
+		var rendered []string
+		for _, mk := range markups {
+			out := r.Root(src, mk)
+			if out.Failure != nil {
+				failures = append(failures, *out.Failure)
+			}
+			rendered = append(rendered, out.Rendered...)
+			if out.Message.AlertsLine != nil || out.Message.Heading == nil {
+				t.Errorf("%s: %+v", mk, out)
+			}
+		}
+		after, err := r.Settle(t.Context(), nil, src, failures, rendered)
+		if err != nil || after == nil || len(failures) != 0 || len(rendered) != 0 || f.routeErr != "" ||
+			len(f.internal) != 0 {
+			t.Errorf("settle %v: failures %+v, rendered %v, route error %q, internal %v", err, failures, rendered,
+				f.routeErr, f.internal)
+		}
+	})
+}
+
 // histogramCount is the number of observations of muster_template_render_duration_seconds for a kind.
 func histogramCount(t *testing.T, kind string) uint64 {
 	t.Helper()

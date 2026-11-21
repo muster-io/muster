@@ -97,6 +97,7 @@ func (g *notifier) last() sent {
 
 // limiter is the limiter of the tests: a token is free unless deny, due at due then; holds records the holds.
 type limiter struct {
+	mu    sync.Mutex
 	deny  bool
 	due   time.Time
 	holds []time.Time
@@ -108,10 +109,14 @@ func (l *limiter) ConnectionToken(_ context.Context, _ DBTX, orgID, connection i
 	if orgID != 1 || connection == 0 {
 		return false, time.Time{}, errors.New("the wrong connection")
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return !l.deny, l.due, l.err
 }
 
 func (l *limiter) HoldConnection(_ context.Context, _ DBTX, _, _ int64, until time.Time) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.holds = append(l.holds, until)
 	return l.err
 }
@@ -176,10 +181,23 @@ func newSender(t *testing.T) *senderEnv {
 	e := &senderEnv{q: q, f: f, gw: &notifier{}, lim: &limiter{}, pages: &pages{}, business: business,
 		real: realClock,
 		log:  &bytes.Buffer{}}
+	// One call at a time: the fake's transactions are not isolated from one another, and these tests follow the order
+	// of the calls; round_test.go and the integration tests attempt several at once.
 	e.s = &Sender{OrgID: 1, Store: f, Lease: db.Lease{Owner: "r1", Duration: SenderLease,
 		Clocks: clock.Clocks{Business: business, Real: realClock}}, Gateway: e.gw, Limiter: e.lim, Keys: signKeys{},
-		Pages: e.pages, Log: logging.New(e.log, logging.LevelInfo), Random: func() float64 { return 0 }}
+		Pages: e.pages, Log: logging.New(e.log, logging.LevelInfo), Random: func() float64 { return 0 },
+		Concurrency: 1}
 	return e
+}
+
+// attempt prepares the claimed call r outside any round and, when it is due, ends it or sends it and records the
+// outcome, as one attempt of a round does.
+func (s *Sender) attempt(ctx context.Context, r dbgen.ClaimDueCallsRow) {
+	c, err := s.prepare(ctx, r)
+	if err == nil && c != nil {
+		err = s.finish(ctx, c)
+	}
+	s.failed(ctx, r.PublicID, err)
 }
 
 // round runs one round of the sender.
@@ -749,7 +767,8 @@ func TestSenderRun(t *testing.T) {
 	if got := callOutcome(delivery.OutcomeMarkupRejected); got != "unknown" {
 		t.Errorf("markup_rejected counts as %s", got)
 	}
-	if (&Sender{}).limiter() == nil || (&Sender{}).batch() != SenderBatch || (&Sender{}).maxWait() != SenderMaxWait {
+	if (&Sender{}).limiter() == nil || (&Sender{}).batch() != SenderBatch || (&Sender{}).maxWait() != SenderMaxWait ||
+		(&Sender{}).concurrency() != SenderConcurrency {
 		t.Error("the defaults")
 	}
 	woken := make(chan struct{})
