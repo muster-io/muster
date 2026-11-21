@@ -524,8 +524,18 @@ func (q *Queries) InsertAlertTeams(ctx context.Context, arg InsertAlertTeamsPara
 }
 
 const insertOpenGroupUpdate = `-- name: InsertOpenGroupUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.route_id = $3 AND u.leased_by IS NULL
+      AND (u.kind = $2::text
+           OR (u.kind IN ('route_message_labels', 'route_message_settings')
+               AND $2::text IN ('route_message_labels', 'route_message_settings')))
+    FOR UPDATE
+)
 INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
-VALUES ($1, $2, $3, $4)
+SELECT $1, $2::text, $3, $4::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
 `
 
 type InsertOpenGroupUpdateParams struct {
@@ -535,8 +545,11 @@ type InsertOpenGroupUpdateParams struct {
 	RequestedAt time.Time
 }
 
-// InsertOpenGroupUpdate requests that a change of configuration reach the open Alert Groups of its scope (C-26.FR-9):
-// the worker of any replica claims the row.
+// InsertOpenGroupUpdate requests that a change of configuration of the Route @route_id reach its open Alert Groups
+// (C-26.FR-9): the worker of any replica claims the row. A row of the Route that no worker has claimed yet already
+// covers the save when it is of the same kind, or when both kinds re-render the Root messages (route_message_labels and
+// route_message_settings, which share their run): its run reads the Route as it is then. It is locked, so that no worker
+// claims it before this transaction commits, and no second one is inserted.
 func (q *Queries) InsertOpenGroupUpdate(ctx context.Context, arg InsertOpenGroupUpdateParams) error {
 	_, err := q.db.Exec(ctx, insertOpenGroupUpdate,
 		arg.OrgID,

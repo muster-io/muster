@@ -1386,10 +1386,13 @@ SET held_by_storm_id = NULL, publication_loud = (publication_loud AND @loud::boo
     published_by_configuration = NOT @loud::boolean, next_attempt_at = @now, updated_at = @now
 WHERE org_id = @org_id AND id = @id AND held_by_storm_id IS NOT NULL;
 
--- LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.
+-- LockStorm reads, and locks, a Storm that has not ended, with the public_id and Storm threshold of its Route. The
+-- Route's row is not locked, so a lock that waited for a save of the Route still reads the Route as it was before: the
+-- end of the Storm reads the name and the language the summaries show again, in a statement of its own
+-- (GetRouteDelivery).
 -- name: LockStorm :one
 SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
-       r.name AS route_name, r.language AS route_language, r.storm_threshold
+       r.storm_threshold
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = @org_id AND s.id = @id AND s.ended_at IS NULL
