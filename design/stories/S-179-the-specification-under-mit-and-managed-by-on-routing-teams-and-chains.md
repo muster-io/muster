@@ -144,11 +144,9 @@ None.
 ## Notes
 
 - Suggested commit: `feat(api): publish the specification under MIT and mark configuration managed by a tool`.
-- The migration's number is not fixed here: the orchestrator gives the next free one when the story starts (stories
-  README §4), and `migrate_test.go`, `schema.md` and `versions.md` use it; 0055 is the next free number when this
-  contract was written.
-- Merged before the tag of 0.2.0, this story and S-180 make 0.2.0 the provider's minimum version (C-33.FR-4); merged
-  after it, the minimum is the first `0.2.x` that carries both, and S-182 states that version.
+- The migration is 0055, as the orchestrator assigned it; `migrate_test.go`, `schema.md` and `versions.md` use it.
+- This story, S-180 and S-181 ship in 0.2.0, as the maintainer decided, so 0.2.0 is the provider's minimum version
+  (C-33.FR-4); `versions.md` notes 0055 under 0.2.0.
 - The open stories of the stage "L2 Paging" change some of the same files (`internal/escalation`, the chain handlers);
   the implementer rebases on them rather than waiting for them, since nothing here depends on their behaviour.
 - The licence change is the one ADR-0001 already decided for "the L2 change of the specification"; this is that

@@ -67,7 +67,8 @@ issue: null
 
 - The Destinations of Routes and Teams, which are the Destination entries of those resources (S-186, S-187).
 - Tests, checks and previews of Destinations, and the rotation of a Signing secret (`generateSigningSecret`,
-  `retirePreviousSigningSecret`): operations, not configuration (Open questions).
+  `retirePreviousSigningSecret`): operations, not configuration; the maintainer left the rotation out of the first
+  release (C-33.FR-5).
 
 ## Contracts
 
@@ -134,9 +135,9 @@ The pull request carries this output and the acceptance run.
 
 ## Open questions
 
-- The rotation of a webhook Destination's Signing secret, which keeps the previous one valid until it is retired, is
-  left out of the first release; a later release may add a `signing_secret_rotation` trigger. Recommendation: leave it
-  out and document rotation in the web UI.
+None. The rotation of a webhook Destination's Signing secret, which keeps the previous one valid until it is retired,
+is left out of the first release, as the maintainer decided; the resource's documentation points to the rotation in
+the web UI and the API.
 
 ## Notes
 

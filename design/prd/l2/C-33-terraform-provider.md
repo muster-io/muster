@@ -37,8 +37,9 @@ D506, D757). Alert Groups, Overrides and everything personal stay out of it: the
   CLA, like the bridge libraries (ADR-0001, ADR-0017); its stories are written in Muster's repository with
   `repository: muster-io/terraform-provider-muster`. It is built on terraform-plugin-framework with the plugin protocol
   version 6, its address is `registry.terraform.io/muster-io/muster` (`muster-io/muster` in the OpenTofu Registry),
-  and it has its own `0.x` versions, released by release-please, independent of Muster's. The documentation states
-  the lowest Terraform and OpenTofu versions it works with, which its acceptance tests run.
+  and it has its own `0.x` versions, released by release-please, independent of Muster's. The lowest supported CLIs
+  are Terraform 1.11 and OpenTofu 1.11, the first with write-only attributes (FR-10); the documentation states them,
+  and the acceptance tests run them.
 - **C-33.FR-2** Muster's API specification `api/openapi.yaml` is MIT, as ADR-0001 decided for L2: its
   `info.license`, `NOTICE` and `api/README.md` say so. The provider keeps a byte-for-byte copy of the specification
   of the Muster version it is built against, which it names, and generates its client from that copy with oapi-codegen;
@@ -52,9 +53,9 @@ D506, D757). Alert Groups, Overrides and everything personal stay out of it: the
   that is not a release version, such as that of a development build, is accepted with a warning. `401` stops with an
   error that names `MUSTER_TOKEN` or `token`; `403` says that the token needs the Admin Role. `getSystemStatus` is
   chosen on purpose: it needs a Permission only Admins have, so the same call checks the version and the Role.
-- **C-33.FR-4** The minimum version is the first Muster release that carries the `managed_by` marker of FR-11 — 0.2.0
-  when the stories of the marker merge before its tag (journal D757). A field that a newer Muster adds and the provider
-  does not know is never sent, so an update keeps its stored value (the API's rule for omitted fields).
+- **C-33.FR-4** The minimum version is Muster 0.2.0, which carries the `managed_by` marker of FR-11: the marker ships
+  in 0.2.0 (journal D757 and the maintainer's answers to this specification). A field that a newer Muster adds and the
+  provider does not know is never sent, so an update keeps its stored value (the API's rule for omitted fields).
 - **C-33.FR-5** The first release manages the whole configuration, each object as one resource:
 
   | Resource | Object | API |
@@ -80,7 +81,9 @@ D506, D757). Alert Groups, Overrides and everything personal stay out of it: the
   outgoing webhook Destination and the URL template of a Link rule — with the Lookup tables they read. Out of scope:
   Alert Groups and their Commands; Overrides, which Responders make while they work (C-27.FR-3); everything personal —
   the profile, a person's own Notification rules, contacts at Notification gateways, Account links, Personal access
-  tokens and iCal feeds; Users and Service accounts; and the checks, tests and previews of Connections and Destinations.
+  tokens and iCal feeds; Users and Service accounts, which only the data source `muster_user` reads; the checks, tests
+  and previews of Connections and Destinations; and the rotation of an outgoing webhook's Signing secret, which stays
+  in the web UI and the API in the first release.
 - **C-33.FR-6** Data sources find objects that Terraform does not create: `muster_user` by `login`, `email` or `id`
   (`listUsers`, `getUser`), `muster_connection` by `name` or `id`, of any type (`listConnections`, `getConnection`), and
   `muster_team` by `slug` or `id` (`listTeams`, `getTeam`). Each answers one object, and an error when none or more
@@ -141,7 +144,8 @@ D506, D757). Alert Groups, Overrides and everything personal stay out of it: the
   own, and the OIDC settings page its own. Saving from the web UI keeps the mark. The texts exist in English and
   Russian.
 - **C-33.FR-13** The provider sends `managed_by` `terraform` with every create and update of an object it manages, so
-  that an imported object gets the mark at its next apply. When a resource is removed from the state without being
+  that an imported object gets the mark at its next apply; it writes `terraform` under OpenTofu too, and the value is
+  not configurable. When a resource is removed from the state without being
   destroyed, the mark stays until somebody clears it.
 - **C-33.FR-14** The objects that exist once — the Organization's settings, the Outbound address policy, the OIDC
   settings — and the Default route are never created or deleted by the provider. Creating their resource reads the
@@ -169,8 +173,10 @@ D506, D757). Alert Groups, Overrides and everything personal stay out of it: the
 - **C-33.FR-17** Errors of the API reach the person as diagnostics with the problem's title, detail and `code`, at the
   attribute that its `errors` point at where there is one. A refusal that protects data — a Connection used by
   Destinations, a Team with Schedules, a Route with open Alert Groups — is reported as Muster gives it, and the
-  provider never works around it. `429` is retried after its `Retry-After`; reads are retried on transient failures, and
-  writes are never retried except after `429`. An object that answers `404` on a read, deleted or soft-deleted in
+  provider never works around it: destroying a Route with open Alert Groups ends with Muster's `409`
+  `route-has-open-alert-groups`, and moving them first (`moveOpenAlertGroups`) is left to the person. `429` is
+  retried after its `Retry-After`; reads are retried on transient failures, and writes are never retried except after
+  `429`. An object that answers `404` on a read, deleted or soft-deleted in
   Muster, is removed from the state, so that the next plan creates it again.
 - **C-33.FR-18** The documentation of the provider is generated with tfplugindocs from the schema's descriptions, with
   an example and the import of every resource and data source, and has guides: getting started with a Service account

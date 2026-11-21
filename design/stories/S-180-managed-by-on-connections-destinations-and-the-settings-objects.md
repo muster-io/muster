@@ -103,6 +103,7 @@ None.
 ## Notes
 
 - Suggested commit: `feat(api): mark connections, destinations and settings managed by a tool`.
+- Ships in 0.2.0 with S-179 and S-181, as the maintainer decided (C-33.FR-4).
 - The Organization's settings span several pages of the web UI but are one object with one ETag, so they carry one
   mark; the Outbound address policy and the OIDC settings have ETags of their own and carry their own.
 
