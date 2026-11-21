@@ -186,6 +186,17 @@ func (f *fakeStore) CountUserCodes(_ context.Context, a dbgen.CountUserCodesPara
 	return dbgen.CountUserCodesRow{Requests: n, Oldest: oldest}, nil
 }
 
+func (f *fakeStore) CountUserContactCodes(_ context.Context, a dbgen.CountUserContactCodesParams) (
+	dbgen.CountUserContactCodesRow, error) {
+	if err := f.err("CountUserContactCodes"); err != nil {
+		return dbgen.CountUserContactCodesRow{}, err
+	}
+	n, oldest := f.count(func(k fakeCode) bool {
+		return k.userID == a.UserID && bytes.Equal(k.contactHash, a.ContactHash)
+	}, a.Since)
+	return dbgen.CountUserContactCodesRow{Requests: n, Oldest: oldest}, nil
+}
+
 func (f *fakeStore) CountContactCodes(_ context.Context, a dbgen.CountContactCodesParams) (
 	dbgen.CountContactCodesRow, error) {
 	if err := f.err("CountContactCodes"); err != nil {

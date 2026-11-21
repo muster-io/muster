@@ -368,32 +368,94 @@ func (s *Service) checkBridge(ctx context.Context, row dbgen.GetConnectionRow, b
 	if err != nil {
 		return CheckResult{}, err
 	}
-	conn := bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c}
-	var info bridge.Info
-	var r bridge.Result
-	var stored error
-	var latency time.Duration
-	id := row.ID
-	if _, err := s.cfg.Interactive.Do(ctx, delivery.Subject{Connection: &id}, delivery.ReadOp(
-		func(ctx context.Context, call delivery.Call) delivery.Outcome {
-			start := s.cfg.Clocks.Real.Now()
-			info, r, stored = s.info.Refresh(ctx, conn, call.Class)
-			latency = s.cfg.Clocks.Real.Now().Sub(start)
-			return r.Outcome()
-		})); err != nil {
+	read, err := s.refreshInfo(ctx, row, c)
+	if err != nil {
 		return CheckResult{}, err
 	}
-	if stored != nil {
-		return CheckResult{}, stored
+	if read.stored != nil {
+		return CheckResult{}, read.stored
 	}
 	// The step info read the bridge as a probe of a Broken Notification gateway does: its success ends the state
 	// (C-30.FR-8), whatever the step event_delivery says.
-	if r.OK() && row.GatewayBrokenSince.Valid && s.cfg.Gateways.Checked != nil {
+	if read.result.OK() && row.GatewayBrokenSince.Valid && s.cfg.Gateways.Checked != nil {
 		if err := s.cfg.Gateways.Checked(ctx, row.ID); err != nil {
 			return CheckResult{}, err
 		}
 	}
-	return bridgeResult(info, r, latency, c.Via(), row.BridgeEventDelivery.String), nil
+	return bridgeResult(read.info, read.result, read.latency, c.Via(), row.BridgeEventDelivery.String), nil
+}
+
+// infoRead is a read of the info of a Bridge Connection: the info, how the read ended, its latency on the real clock,
+// and stored, a failure of the store of a fresh read.
+type infoRead struct {
+	info    bridge.Info
+	result  bridge.Result
+	latency time.Duration
+	stored  error
+}
+
+// refreshInfo reads the info of the Bridge Connection row again through its client c on the interactive path, limited
+// by the Connection, through the InfoCache, which stores a fresh read for the version of row, keeps and logs it. The
+// error is a call that did not run, such as no limiter token within the budget, a *delivery.LimitedError.
+func (s *Service) refreshInfo(ctx context.Context, row dbgen.GetConnectionRow, c *bridge.Client) (infoRead, error) {
+	conn := bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c}
+	var read infoRead
+	id := row.ID
+	if _, err := s.cfg.Interactive.Do(ctx, delivery.Subject{Connection: &id}, delivery.ReadOp(
+		func(ctx context.Context, call delivery.Call) delivery.Outcome {
+			start := s.cfg.Clocks.Real.Now()
+			read.info, read.result, read.stored = s.info.Refresh(ctx, conn, call.Class)
+			read.latency = s.cfg.Clocks.Real.Now().Sub(start)
+			return read.result.Outcome()
+		})); err != nil {
+		return infoRead{}, err
+	}
+	return read, nil
+}
+
+// readSavedInfo reads the info of the Bridge Connection c right after a save created it or gave it a new base URL or
+// bot token committed, as its check reads it (refreshInfo), so that a Connection's info is never unknown once it is
+// saved (C-22.FR-2, #658): a call that depends on it, such as a Page through one of its Destinations, finds it. The
+// read is stored only for the version saved, so that it never overwrites what a later save forgot. It returns c with
+// the info stored. A read that fails or cannot run changes nothing, never fails the save, and is logged as
+// bridge_info_read_failed; the read is in the Request log of the Connection, and its check reads info again.
+func (s *Service) readSavedInfo(ctx context.Context, c Connection) Connection {
+	failed := func(reason string) Connection {
+		s.cfg.Log.Log(ctx, logging.BridgeInfoReadFailed, logging.F("connection", c.PublicID),
+			logging.F("error", reason))
+		return c
+	}
+	row, err := s.row(ctx, s.cfg.Store, c.PublicID)
+	if errors.Is(err, ErrNotFound) {
+		return c
+	}
+	if err != nil {
+		return failed(err.Error())
+	}
+	// A later save changed the Connection meanwhile and reads info for its own version.
+	if row.Version != c.Version {
+		return c
+	}
+	client, err := s.bridgeClient(row)
+	if err != nil {
+		return failed(err.Error())
+	}
+	read, err := s.refreshInfo(ctx, row, client)
+	switch {
+	case err != nil:
+		return failed(err.Error())
+	case !read.result.OK():
+		return failed(strings.TrimSpace(read.result.CheckCode() + " " + string(read.result.Error)))
+	case read.stored != nil:
+		return failed(read.stored.Error())
+	}
+	if row, err = s.row(ctx, s.cfg.Store, c.PublicID); err != nil || row.Version != c.Version {
+		return c
+	}
+	if saved, err := connectionOf(row); err == nil {
+		return saved
+	}
+	return c
 }
 
 // ProbeGateway is the probe of the Broken Notification gateway connectionID (gateways.Prober, C-30.FR-8): getInfo read

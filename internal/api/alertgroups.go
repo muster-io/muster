@@ -532,21 +532,34 @@ func (s *Server) CreateAlertGroupNote(ctx context.Context, req gen.CreateAlertGr
 }
 
 // undeliveredMentionOf is the API form of the undelivered Mention of a mention_not_delivered, nil for another delivery
-// event (C-28.FR-3). Its entry's target names a person or a Team, the only targets that name people.
+// event (C-28.FR-3): a person, or the group or everyone in the chat that a bridge's Mention line left out (C-12.FR-11);
+// a template's token has neither an entry nor an event.
 func undeliveredMentionOf(m *groups.MentionView) *gen.UndeliveredMention {
 	if m == nil {
 		return nil
 	}
+	out := &gen.UndeliveredMention{User: userRefOf(m.User), Reason: gen.MentionNotDeliveredReason(m.Reason)}
+	if n := m.Mention; n != nil {
+		out.Mention = &gen.NamedMention{Kind: gen.NamedMentionKind(n.Kind), Name: n.Name}
+	}
+	if m.Event != "" {
+		event := gen.MentionEvent(m.Event)
+		out.Event = &event
+	}
+	if m.Target == nil {
+		return out
+	}
 	t := gen.MentionTarget{Kind: gen.MentionTargetKind(m.Target.Kind), TeamId: nonEmptyString(m.Target.TeamID),
-		UserId: nonEmptyString(m.Target.UserID), User: userRefOf(m.Target.User)}
+		UserId: nonEmptyString(m.Target.UserID), Group: nonEmptyString(m.Target.Group),
+		GroupId: nonEmptyString(m.Target.GroupID), User: userRefOf(m.Target.User)}
+	if m.Target.Everyone != "" {
+		w := gen.MentionTargetEveryone(m.Target.Everyone)
+		t.Everyone = &w
+	}
 	if tm := m.Target.Team; tm != nil {
 		t.Team = &gen.TeamRef{Id: tm.PublicID, Name: tm.Name, Slug: tm.Slug, Deleted: tm.Deleted}
 	}
-	out := &gen.UndeliveredMention{Entry: gen.MentionEntryRef{Position: m.Position, Target: t},
-		Event: gen.MentionEvent(m.Event), Reason: gen.MentionNotDeliveredReason(m.Reason)}
-	if u := userRefOf(m.User); u != nil {
-		out.User = *u
-	}
+	out.Entry = &gen.MentionEntryRef{Position: m.Position, Target: t}
 	return out
 }
 

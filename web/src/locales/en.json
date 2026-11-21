@@ -3621,6 +3621,8 @@
       "labelConflicts": "Static labels the alerts already had",
       "mentionEntry": "Entry",
       "mentionEvent": "Event",
+      "mentionFromTemplate": "the message template",
+      "mentionNamed": "Mention",
       "mentionPerson": "Person",
       "mentionReason": "Reason",
       "owner": "Owner",

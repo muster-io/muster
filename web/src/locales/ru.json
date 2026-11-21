@@ -3751,6 +3751,8 @@
       "labelConflicts": "Статические метки, которые уже были у алертов",
       "mentionEntry": "Строка",
       "mentionEvent": "Событие",
+      "mentionFromTemplate": "шаблон сообщения",
+      "mentionNamed": "Упоминание",
       "mentionPerson": "Человек",
       "mentionReason": "Причина",
       "owner": "Владелец",

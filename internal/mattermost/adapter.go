@@ -49,12 +49,14 @@ type Targets interface {
 // Adapter is the delivery adapter of Mattermost Destinations (C-11.FR-7, C-13): Publish, Update and Reply, called by
 // the delivery worker and the interactive path only, in the client class of their Call, and Check, the Destination
 // check of C-13.FR-10 for the Broken probe. PublicURL and IngestURL are MUSTER_PUBLIC_URL and MUSTER_INGEST_URL, and
-// Version the version that the attachment's footer names.
+// Version the version that the attachment's footer names. Keys, the Keyring, derive the callback secret of each
+// button; without them a button carries none, and its presses are not verified.
 type Adapter struct {
 	Targets   Targets
 	PublicURL string
 	IngestURL string
 	Version   string
+	Keys      SecretKeys
 }
 
 var (
@@ -137,7 +139,9 @@ func (a *Adapter) target(ctx context.Context, c delivery.Call) (Target, *deliver
 	return t, nil
 }
 
-// look is how the messages of the call are laid out for the Target.
+// look is how the messages of the call are laid out for the Target. The callback secret of a button is derived with
+// the key that signed its action id, which a retry of an older Desired state may name after a rotation; a key that
+// left the Keyring yields none, and its action id would not verify either.
 func (a *Adapter) look(c delivery.Call, t Target) look {
 	l := look{markup: messages.MarkupMarkdown, space: "mattermost:" + strconv.FormatInt(t.ConnectionID, 10),
 		callback: strings.TrimSuffix(a.IngestURL, "/") + CallbackPath + t.ConnectionPublicID,
@@ -145,6 +149,15 @@ func (a *Adapter) look(c delivery.Call, t Target) look {
 		icon:     strings.TrimSuffix(a.PublicURL, "/") + markPath, limit: LengthLimit}
 	if c.Plain {
 		l.markup = messages.MarkupPlain
+	}
+	if a.Keys != nil {
+		l.secret = func(action, keyID string) string {
+			s, err := CallbackSecret(a.Keys, keyID, t.ConnectionPublicID, action)
+			if err != nil {
+				return ""
+			}
+			return s
+		}
 	}
 	return l
 }

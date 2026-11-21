@@ -640,7 +640,13 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		// Under the lease only, so that a reply another replica sends again records its Mentions once.
 		if n == 1 {
 			group := a.row.AlertGroupID
-			if err := recordMentions(ctx, q, org, a.destination, &group, nil, asDelivered(a.resolved, out),
+			delivered := out
+			if a.row.PageID.Valid {
+				// A Page names its Team mention or everyone by no entry of the Destination, so that one left out for
+				// length is not a template's token: it is not recorded as a Mention not delivered.
+				delivered.LeftOutMentions = nil
+			}
+			if err := recordMentions(ctx, q, org, a.destination, &group, nil, asDelivered(a.resolved, delivered),
 				now); err != nil {
 				return replyNotRecorded, err
 			}

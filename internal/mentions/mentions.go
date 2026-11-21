@@ -709,7 +709,7 @@ func (s *Service) labelTeams(ctx context.Context, q Queries, org int64, r Reques
 // (MentionNotDeliveredReason, C-28.FR-3): no Account link in the Destination's identity space, which leaves them out of
 // the message, a bridge without native_mentions, or an Account link whose marker the bridge's message cannot build,
 // which names them by the plain name (C-22.FR-16), or a bridge message whose Mention line left their Mention out for
-// its length (C-12.FR-11).
+// its length (C-12.FR-11) — also the reason of a group or everyone in the chat left out so.
 const (
 	ReasonNoAccountLink             = "no_account_link"
 	ReasonBridgeCannotMentionPeople = "bridge_cannot_mention_people"
@@ -724,27 +724,38 @@ type EntryRef struct {
 	Target   EntryTarget
 }
 
-// Undelivered is a person whom an entry named for the Loud event Event and whom the message does not mention as
-// their messenger mentions them, with the reason (C-28.FR-3).
-type Undelivered struct {
-	UserID int64
-	Entry  EntryRef
-	Event  string
-	Reason string
+// Mention is a Mention that names no one person: a group — a group entry or a Team mention — by its name, or everyone
+// in the chat by its word; its Kind is TargetGroup or TargetEveryone. The zero Mention stands for a person.
+type Mention struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
-// Mentioned is a person whom an entry named for the Loud event Event and whom the message mentions as their
-// messenger mentions them; PublicID is the person's, as their target names them.
+// Undelivered is a person — or, with Mention set, a group or everyone in the chat — whom an entry named for the Loud
+// event Event and whom the message does not mention as their messenger mentions them, with the reason (C-28.FR-3). A
+// template's token that a bridge's message left out has a Mention and neither an entry nor an event (C-12.FR-11).
+type Undelivered struct {
+	UserID  int64
+	Mention Mention
+	Entry   EntryRef
+	Event   string
+	Reason  string
+}
+
+// Mentioned is a person — or, with Mention set, a group or everyone in the chat through a bridge — whom an entry named
+// for the Loud event Event and whom the message mentions as their messenger mentions them; PublicID is the person's,
+// as their target names them.
 type Mentioned struct {
 	UserID   int64
 	PublicID string
+	Mention  Mention
 	Entry    EntryRef
 	Event    string
 }
 
 // Result is the resolution of a Loud message's Mentions: its targets, in order, and for each person an entry named,
-// once per person and entry, either Undelivered or Mentioned. An outgoing webhook, which takes every person as data,
-// has neither.
+// once per person and entry, either Undelivered or Mentioned, and through a bridge the same for each group and
+// everyone in the chat an entry named. An outgoing webhook, which takes every person as data, has neither.
 type Result struct {
 	Targets     []Target
 	Undelivered []Undelivered
@@ -764,7 +775,8 @@ type Result struct {
 // link by their display name. Each person and group is mentioned once. Each person an entry named that is not deleted
 // is, once per entry, Undelivered — left out without an Account link, or named by the plain name through a bridge
 // whose stored info does not declare native_mentions, or has none — or Mentioned, with the first of the message's Loud
-// events the entry applies to.
+// events the entry applies to. Through a bridge each group and everyone in the chat an entry named is Mentioned too,
+// once per entry, so that a message whose Mention line leaves it out records it (LeftOutMentions).
 func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) (Result, error) {
 	if len(r.Mentions) == 0 {
 		return Result{}, nil
@@ -832,8 +844,14 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) (R
 		switch {
 		case p.everyone != "":
 			add(Target{Kind: TargetEveryone, Everyone: p.everyone})
+			if r.DestinationType == TypeBridge {
+				out.named(p, Mention{Kind: TargetEveryone, Name: p.everyone})
+			}
 		case p.group != "":
 			add(Target{Kind: TargetGroup, Group: p.group, GroupID: p.groupID})
+			if r.DestinationType == TypeBridge {
+				out.named(p, Mention{Kind: TargetGroup, Name: p.group})
+			}
 		case p.team != nil:
 			add(Target{Kind: TargetTeam, Team: &TeamTarget{Slug: p.team.Slug, Name: p.team.Name}})
 		case p.user != 0:
@@ -866,6 +884,48 @@ func (r Result) LeftOut(ids []string) Result {
 // Undelivered with bridge_cannot_mention_people, after the Undelivered of r. r is left as it is.
 func (r Result) Plain(ids []string) Result {
 	return r.undelivered(ids, ReasonBridgeCannotMentionPeople)
+}
+
+// LeftOutMentions is r once the delivered message left out for its length (C-12.FR-11) the Mentions of the groups and
+// everyone in the chat among targets, a template's tokens included: each Mentioned of theirs is Undelivered with
+// message_too_long, after the Undelivered of r, and then each of them that no entry named — a token's — once, without
+// an entry. r is left as it is.
+func (r Result) LeftOutMentions(targets []Target) Result {
+	var left []Mention
+	for _, t := range targets {
+		var m Mention
+		switch t.Kind {
+		case TargetGroup:
+			m = Mention{Kind: TargetGroup, Name: t.Group}
+		case TargetEveryone:
+			m = Mention{Kind: TargetEveryone, Name: t.Everyone}
+		default:
+			continue
+		}
+		if !slices.Contains(left, m) {
+			left = append(left, m)
+		}
+	}
+	if len(left) == 0 {
+		return r
+	}
+	out := Result{Targets: r.Targets, Undelivered: slices.Clone(r.Undelivered)}
+	var named []Mention
+	for _, m := range r.Mentioned {
+		if m.Mention.Kind == "" || !slices.Contains(left, m.Mention) {
+			out.Mentioned = append(out.Mentioned, m)
+			continue
+		}
+		out.Undelivered = append(out.Undelivered, Undelivered{Mention: m.Mention, Entry: m.Entry, Event: m.Event,
+			Reason: ReasonMessageTooLong})
+		named = append(named, m.Mention)
+	}
+	for _, m := range left {
+		if !slices.Contains(named, m) {
+			out.Undelivered = append(out.Undelivered, Undelivered{Mention: m, Reason: ReasonMessageTooLong})
+		}
+	}
+	return out
 }
 
 // undelivered is r with each Mentioned of the people whose public ids are ids Undelivered with the reason, after the
@@ -908,6 +968,17 @@ func (r *Result) record(p entryPart, id string, linked, plain bool) {
 	default:
 		r.Mentioned = append(r.Mentioned, Mentioned{UserID: p.user, PublicID: id, Entry: *p.entry, Event: p.event})
 	}
+}
+
+// named adds the group or everyone in the chat m of the part p, when an entry named it, as Mentioned once per Mention
+// and entry: only a bridge's message leaves such a Mention out, for its length (LeftOutMentions).
+func (r *Result) named(p entryPart, m Mention) {
+	if p.entry == nil || slices.ContainsFunc(r.Mentioned, func(o Mentioned) bool {
+		return o.Mention == m && o.Entry.ID == p.entry.ID
+	}) {
+		return
+	}
+	r.Mentioned = append(r.Mentioned, Mentioned{Mention: m, Entry: *p.entry, Event: p.event})
 }
 
 // entryPart is a part of the Mentions of a message with the entry that named it and the Loud event it was named for,

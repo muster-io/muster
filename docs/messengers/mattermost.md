@@ -136,6 +136,23 @@ to Muster yet, or that the button could not be verified — arrives as a message
 account without an Account link changes nothing. A request that does not come from a button of a Muster post in one of
 the Connection's channels gets no answer at all.
 
+### How Muster knows a press came from Mattermost
+
+Mattermost does not sign the requests it sends to Muster. Each button therefore carries, in its integration data, a
+callback secret of its own: Muster derives it from the [master key](../operations/key-rotation.md) that signed the
+button, the Connection and the button, and never stores it. The Mattermost server keeps the integration data to
+itself, removes it from the posts it sends to apps and browsers, and returns it with a press. Muster checks the secret
+before anything acts on the press, so a press made up from what a Telegram or Slack message, a bridge or the
+[Request log](../operations/request-log.md) shows changes nothing and is answered "This button could not be verified;
+nothing was changed." A [key rotation](../operations/key-rotation.md) gives the buttons of open Root messages new
+secrets when it signs them again.
+
+Root messages posted by a version of Muster that did not check callback secrets yet carry buttons without one. The first press on one of them
+changes nothing: the person reads "These buttons are out of date and are being updated; nothing was changed. Press again
+in a moment.", and Muster edits that Root message so that its buttons carry their secrets. The next press works. Any
+change of the Alert Group edits its Root message the same way. Buttons in Thread replies, such as a Reminder's, are
+never edited; an older Reminder's buttons stay refused, and the buttons on the Root message work.
+
 ### Where answers to presses show
 
 Muster first sends the answer as an ephemeral message, which shows in the channel, marked "(Only visible to you)".

@@ -255,6 +255,8 @@ func TestDoctorBridge(t *testing.T) {
 	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
 	before, audits, txs, infos := background.Get(), len(e.store.audit), e.store.tx, len(e.store.infos)
 	f.ResetRequests()
+	// The reads of info after the creations.
+	e.path.subjects = nil
 
 	got := findings(t, e.svc, e.store)
 	notOffered := "event_delivery: The bridge does not offer push event delivery."
