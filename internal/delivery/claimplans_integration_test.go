@@ -189,3 +189,89 @@ func TestIntegrationClaimsUpdateByKey(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationClaimChoicesReadTheirBatch is #683 on PostgreSQL: the choice of a claim that skips Destinations and
+// Connections reads about its batch of the due rows, in a custom plan and in a generic one alike, not the whole
+// backlog. A generic plan cannot see the arrays of skipped ids, and estimated `<> ALL` of one as ten unknown values,
+// each passing 1 − 1/n of a column with n distinct values: with one Connection, or one webhook Destination, no row
+// passed, and the plan built for one row looped over every Destination through its pending deliveries, or probed the
+// head of every pending webhook event, before sorting them. The backlog: 300 Destinations on one Connection, 30,000
+// deliveries, two in five due, and 9,000 webhook events of one Destination, two in five due, three per Alert Group;
+// each row due at its own time.
+func TestIntegrationClaimChoicesReadTheirBatch(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		now := t0
+		l.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, connection_id, mattermost_team_id,
+				mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			SELECT $1, 'DS' || lpad(upper(to_hex(n)), 12, '0'), 'mattermost', 'batch' || n, $3, 'team', 'batch' || n,
+			       '{}', 1000, 1, 'healthy', $2, $2
+			FROM generate_series(1, 300) n`, l.orgID, now, l.conn)
+		for _, stmt := range []string{
+			`INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+				group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level,
+				urgent, resolved_at, resolved_by_kind, resolve_reason, firing_alert_count, resolved_alert_count,
+				created_at, last_changed_at)
+			SELECT $1, 'AG' || lpad(upper(to_hex(n)), 12, '0'), 100000 + n,
+			       (SELECT id FROM routes WHERE org_id = $1 AND is_default), '{alertname}', '{}',
+			       sha256(convert_to('batch' || n, 'UTF8')), 'batch', '{}', '{}', '{}', 'resolved', 'warning', false,
+			       $2, 'system', 'gone', 0, 1, $2, $2
+			FROM generate_series(1, 3000) n`,
+			// Each Alert Group on 10 of the Destinations.
+			`INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, next_attempt_at, published_at,
+				created_at, updated_at)
+			SELECT g.org_id, ds.id, g.id, CASE WHEN (g.number * 31 + k * 17) % 5 < 2 THEN 'pending' ELSE 'delivered' END,
+			       $2::timestamptz - make_interval(secs => (g.number * 7 + k) % 3600), $2, $2, $2
+			FROM alert_groups g CROSS JOIN generate_series(0, 9) k
+			JOIN destinations ds ON ds.org_id = g.org_id
+			                    AND ds.public_id = 'DS' || lpad(upper(to_hex(g.number % 30 + 30 * k + 1)), 12, '0')
+			WHERE g.org_id = $1 AND g.title = 'batch'`,
+			// The head event of an Alert Group is due after the two behind it.
+			`INSERT INTO webhook_events (org_id, destination_id, alert_group_id, sequence, webhook_id, event, notify,
+				occurred_at, body, state, next_attempt_at, created_at)
+			SELECT g.org_id, (SELECT id FROM destinations WHERE public_id = 'DS000000000001'), g.id, s,
+			       'batch-' || g.id || '-' || s, 'created', false, $2, '{}',
+			       CASE WHEN g.number % 5 < 2 THEN 'pending' ELSE 'delivered' END,
+			       $2::timestamptz - make_interval(secs => (g.number * 7) % 3600 + s), $2
+			FROM alert_groups g CROSS JOIN generate_series(1, 3) s
+			WHERE g.org_id = $1 AND g.title = 'batch'`,
+		} {
+			l.exec(t, stmt, l.orgID, now)
+		}
+		l.exec(t, `ANALYZE`)
+
+		org, lease := l.orgID, now.Add(time.Minute)
+		for _, c := range []struct {
+			name, table string
+			claim       func(ctx context.Context, tx pgx.Tx) error
+		}{
+			{"ClaimDueDeliveries", "deliveries", func(ctx context.Context, tx pgx.Tx) error {
+				_, err := deliverydb.New(tx).ClaimDueDeliveries(ctx, deliverydb.ClaimDueDeliveriesParams{Owner: "r1",
+					LeaseUntil: lease, OrgID: org, Due: now, Now: now, Lim: 10})
+				return err
+			}},
+			{"ClaimDueWebhookEvents", "webhook_events", func(ctx context.Context, tx pgx.Tx) error {
+				_, err := deliverydb.New(tx).ClaimDueWebhookEvents(ctx, deliverydb.ClaimDueWebhookEventsParams{
+					Owner: "r1", LeaseUntil: lease, OrgID: org, Due: now, Now: now, Lim: 10})
+				return err
+			}},
+		} {
+			for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
+				read := dbtest.RowsRead(t, l.d.Pool.Config().ConnString(), mode, c.table, "x",
+					func(ctx context.Context, conn *pgx.Conn) {
+						tx, err := conn.Begin(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer func() { _ = tx.Rollback(ctx) }()
+						if err := c.claim(ctx, tx); err != nil {
+							t.Fatalf("%s: %v", c.name, err)
+						}
+					})
+				if read > 100 {
+					t.Errorf("%s, %s: the choice of 10 rows reads %.0f rows of %s", c.name, mode, read, c.table)
+				}
+			}
+		}
+	})
+}
