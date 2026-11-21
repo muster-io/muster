@@ -214,7 +214,9 @@ declares when the message is sent is not sent at all, so it is not recorded as l
 The Team mention or everyone in the chat that a Page names has no entry either. When a Page's Thread reply through a
 bridge has no room for it, "Mention not delivered" names the group or the word, the reason `message_too_long` and, in
 place of the entry, the Page: the number of its step and the name of its Escalation chain (`page` in the API). Like a
-template's token, it shows in the Timeline only and raises no warning on the Destination. The people a Page reply
+template's token, it shows in the Timeline only and raises no warning on the Destination. With today's limits this does
+not happen: a Page names one group or everyone at most, and its line has room for at least 250 characters, since a
+bridge declares a `max_body_length` of 500 or more. The people a Page reply
 leaves out are not reached instead, and the Page records `page_not_delivered` for them
 ([How a Page reaches a person](escalation-chains.md#how-a-page-reaches-a-person)).
 
