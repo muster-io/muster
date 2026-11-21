@@ -70,7 +70,8 @@ keep their rows; L2 adds causes to some of them: `unclaimed` is also recorded on
 Alert Group has run out (C-32.FR-7); an Acknowledge through a Notification gateway records `acknowledged` with the
 Transport `gateway` (C-30.FR-6); and a raised Minimum severity of a Route records the Quiet `severity_raised` or
 `urgency_raised` with its reason (C-26.FR-9). The Timeline kind `escalation` is new and joins the filter of the Timeline
-(C-09.FR-14). Lifecycle events of the later part of L2 — Maintenance windows, Attach and Detach — are added with it.
+(C-09.FR-14). Lifecycle events of the later part of L2 are added with their capabilities: those of Maintenance windows
+(C-34) are below, and Attach and Detach come with theirs.
 
 | Event | When | Loud or Quiet | Mentions | Timeline kind | In a messenger (C-11) | Capability |
 |---|---|---|---|---|---|---|
@@ -84,6 +85,10 @@ Transport `gateway` (C-30.FR-6); and a raised Minimum severity of a Route record
 | `escalation_step_skipped` | a step is skipped, with its reason (C-32.FR-14) | Quiet | — | `escalation` | nothing | C-32 |
 | `assignees_changed` | the Assignees change (C-32.FR-12) | Quiet | — | `escalation` | Root message update | C-32 |
 | `escalation_webhook` | a step sends to an outgoing webhook (C-32.FR-13) | Quiet | — | `escalation` | nothing; sent only to the outgoing webhook Destination of the step | C-32 |
+| `maintenance_started` | a Maintenance window starts to keep the Alert Group back (C-34.FR-13) | Quiet | — | `system` | Root message update with "In a Maintenance window until {time}" where it has a Root message; nothing otherwise | C-34 |
+| `maintenance_ended` | it stops being kept back while firing and nobody owns it (C-34.FR-13, C-34.FR-18, C-34.FR-19) | Loud | `new_alert_group` | `system` | new Root message with "Published after a Maintenance window that ended at {time}" where it was never published; otherwise a Thread reply "The Maintenance window ended: still firing, {N} alerts" | C-34 |
+| `maintenance_ended` | it stops being kept back while acknowledged or snoozed (C-34.FR-18, C-34.FR-19) | Quiet | — | `system` | new Root message in its status, with the same mark, where it was never published; otherwise a Root message update | C-34 |
+| `maintenance_ended` | it stops being kept back after it resolved (C-34.FR-17) | Quiet | — | `system` | nothing where it was never published, whose delivery state reads "Not posted: resolved during a Maintenance window"; otherwise a Root message update | C-34 |
 
 ## Transports
 
@@ -215,6 +220,13 @@ commands of Bridges, the UI and the API keep every action.
 | Profile, Escalation steps, Notification rules | no Notification gateway exists | "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)" | C-30, C-31, C-32 |
 | Answer to a person in a call | an acknowledgement of an Alert Group someone owns · a resolved one | "Already taken by {name}" · "Already resolved" | C-30 |
 | Bridge Connection in the role `gateway` | Broken | "Broken since HH:MM: {reason}. Muster tries again every {interval}." | C-30 |
+| Integration, Route and Team page | a Maintenance window of it is active | "In a Maintenance window until {time}: {N} Alert Groups kept back." | C-34 |
+| Team page, Maintenance windows | always (hint) | "Keeps back an Alert Group only while every Team of its Alerts is in a Maintenance window: Alert Groups shared with Teams outside a window are still delivered." | C-34 |
+| Alert Group page | a Maintenance window keeps it back | "Kept back by the Maintenance window of {object} until {time}: nothing is delivered and no Escalation chain runs." | C-34 |
+| Root message | a Maintenance window keeps back an Alert Group published before it | "In a Maintenance window until {time}" | C-34 |
+| Root message | first published when a Maintenance window stopped keeping it back | "Published after a Maintenance window that ended at {time}" | C-34 |
+| Thread reply | a Maintenance window stopped keeping back a firing Alert Group, published before it, that nobody owns | "The Maintenance window ended: still firing, {N} alerts" | C-34 |
+| Alert Group page, delivery state | resolved while a Maintenance window kept it back, never published there | "Not posted: resolved during a Maintenance window" | C-34 |
 
 ## Documentation links
 
@@ -384,10 +396,15 @@ by everyone who can read Destinations because they contain only references (`{{ 
 ### Permissions added in L2
 
 The capabilities of L2 add Permissions with the same rules. Each joins the table above, the `Permission` schema and
-the allocation that the migrations seed in the story that implements it; until then this section holds them. None is
-left: `escalation-chains:read` and `escalation-chains:write` joined the table above with the story of the Escalation
-chains (S-154). Attaching an Escalation chain to a Route needs `routes:write`, and to a Team `teams:write`; seeing and
+the allocation that the migrations seed in the story that implements it; until then this section holds them.
+`escalation-chains:read` and `escalation-chains:write` joined the table above with the story of the Escalation chains
+(S-154). Attaching an Escalation chain to a Route needs `routes:write`, and to a Team `teams:write`; seeing and
 changing another User's Notification rules and removing their gateway contacts need `users:read` and `users:write`.
+
+| Permission added in L2 | Allows | Admin | Responder | Viewer |
+|---|---|---|---|---|
+| `maintenance:read` | Read Maintenance windows (C-34); whether an Alert Group is kept back is part of its read, under `alert-groups:read` | ✓ | ✓ | ✓ |
+| `maintenance:write` | Open, plan, change, close and delete Maintenance windows of any Integration, Route or Team (C-34) | ✓ | ✓ | — |
 
 ## Internal alerts
 
@@ -398,7 +415,9 @@ only, so renaming the entity updates the name label of the open Internal alert i
 Internal alert and a chart rule for the same condition share one name and one runbook page. From L2, an Internal alert
 about a Team's object also carries the Team's slug under the Organization's Team label, outside the fingerprint, so
 that it belongs to the Team (C-25.FR-5); the Team label may not be the name of a label an Internal alert sets itself,
-such as `schedule` or `team_id`, and setting it to one is refused with `422` (C-25.FR-5).
+such as `schedule` or `team_id`, and setting it to one is refused with `422` (C-25.FR-5). From L2, a Maintenance window
+may not cover the built-in "Muster" Integration, and a window of an Integration also keeps back `MusterHeartbeatLost`
+and `MusterSnapshotTruncated` about that Integration (C-34.FR-3, C-34.FR-22).
 
 | Internal alert | Severity | Raised while | Labels besides `alertname` and `severity` | Raised by |
 |---|---|---|---|---|
@@ -516,5 +535,10 @@ windows were _provisional_ (P-88), as those of L1 were. `MusterScheduleGap` (S-1
 
 The metrics that the capabilities of L2 add. Each joins the [metrics catalogue](#metrics-catalogue) and the registry,
 with the entity labels it needs in the label policy of ADR-0014, in the story that implements it; until then this table
-holds them, outside the catalogue that the code checks. Every metric of L2 listed so far has joined the catalogue, the
+holds them, outside the catalogue that the code checks. The metrics of the core of L2 have joined the catalogue, the
 last `muster_pages_total` (S-155), whose `kind` `call` S-157 counts.
+
+| Metric | Type | Labels | Capability |
+|---|---|---|---|
+| `muster_maintenance_kept_back_total` | counter | `route` — Alert Groups that a Maintenance window started to keep back | C-34 |
+| `muster_maintenance_released_total` | counter | `route`, `outcome` (`published` — first published when no longer kept back; `updated` — published before the window; `resolved` — resolved while kept back) | C-34 |

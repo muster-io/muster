@@ -3,13 +3,15 @@
 
 // The fields of a Bridge Connection in the type slot of the Connection form (C-22.FR-1, FR-2, FR-18): the base URL, the
 // event delivery mode as two radio buttons with what each needs, and in push mode the write-only push secret and the
-// callback address with its hint, which a new Connection gets once it is saved; polling with a stored push secret says
+// callback address with its hint, which a new Connection gets once it is saved; a stored push secret shorter than 24
+// bytes, which the server reports, is shown as a warning while it is kept; polling with a stored push secret says
 // that saving removes it, as the server does. The limiter proposal offers half of the rate the bridge declares, never
 // by itself; the panel of what the bridge offers shows the info the last check read. The token, the proxy and the
 // limiter are the form's own. What the bridge sends is untrusted text, shown as text only. The event delivery mode has
 // "Learn more" beside its title.
 
 import type { TFunction } from "i18next";
+import { TriangleAlertIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -45,7 +47,10 @@ const LIMITER_MAX = 999_999_999;
 
 const PUSH_SECRET_PREFIX = "whsec_";
 
-/** A push secret in the Standard Webhooks form, as the server checks it: whsec_ and base64 of 1 byte or more. */
+/** The shortest key of a push secret, which Standard Webhooks recommends and the server requires. */
+export const MIN_PUSH_SECRET_BYTES = 24;
+
+/** A push secret in the Standard Webhooks form, as the server checks it: whsec_ and base64 of 24 bytes or more. */
 export function isPushSecret(text: string): boolean {
   if (!text.startsWith(PUSH_SECRET_PREFIX)) {
     return false;
@@ -55,7 +60,7 @@ export function isPushSecret(text: string): boolean {
     return false;
   }
   try {
-    return atob(key).length > 0;
+    return atob(key).length >= MIN_PUSH_SECRET_BYTES;
   } catch {
     return false;
   }
@@ -108,6 +113,8 @@ export interface BridgeConnectionFieldsProps {
   onPushSecretChange: (value: SecretChange) => void;
   /** Whether a push secret is stored, of an edit. */
   pushSecretStatus?: SecretStatus;
+  /** Whether the stored push secret is shorter than 24 bytes (push_secret_too_short), of an edit. */
+  pushSecretTooShort?: boolean;
   /** The callback address of a saved Connection; a new one has none yet. */
   callbackUrl?: string;
   /** The texts of the problems of the base URL, the event delivery mode and the push secret. */
@@ -124,6 +131,7 @@ export function BridgeConnectionFields({
   pushSecret,
   onPushSecretChange,
   pushSecretStatus,
+  pushSecretTooShort = false,
   callbackUrl,
   errors,
   disabled,
@@ -234,6 +242,18 @@ export function BridgeConnectionFields({
           <p id={`${secretId}-hint`} className="text-sm wrap-anywhere text-muted-foreground">
             {t("connections.bridge.pushSecretHint")}
           </p>
+          {pushSecretTooShort && pushSecret.mode === "keep" && (
+            <div
+              className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm"
+              data-testid="bridge-push-secret-too-short"
+            >
+              <TriangleAlertIcon
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
+              />
+              <p className="min-w-0 wrap-anywhere">{t("connections.bridge.pushSecretTooShort")}</p>
+            </div>
+          )}
           {callbackUrl === undefined ? (
             <p
               className="text-sm wrap-anywhere text-muted-foreground"

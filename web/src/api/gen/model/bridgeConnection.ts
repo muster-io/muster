@@ -4,6 +4,7 @@
  */
 import type { BridgeConnectionBase } from './bridgeConnectionBase';
 import type { BridgeConnectionType } from './bridgeConnectionType';
+import type { BridgeConnectionWarningsItem } from './bridgeConnectionWarningsItem';
 import type { BridgeInfo } from './bridgeInfo';
 import type { BridgeInfoRole } from './bridgeInfoRole';
 import type { GatewayState } from './gatewayState';
@@ -16,6 +17,8 @@ export type BridgeConnection = BridgeConnectionBase & ({
   id: PublicId;
   bot_token_status: SecretStatus;
   push_secret_status: SecretStatus;
+  /** Problems of the saved settings that do not stop the Connection. `push_secret_too_short` (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more ends the warning. */
+  warnings: BridgeConnectionWarningsItem[];
   /** `bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret. */
   readonly callback_url: string;
   /** The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed. */

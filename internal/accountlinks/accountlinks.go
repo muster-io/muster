@@ -46,10 +46,13 @@ const (
 	CodeLength   = 8
 	CodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 	MaxAttempts  = 5
-	// CodeRequestsPerUser and CodeRequestsPerTarget are account_link.mattermost_code_requests: code requests per
-	// requesting User and per target account within CodeRequestWindow.
+	// CodeRequestsPerUser, CodeRequestsPerTarget and CodesPerTarget are account_link.mattermost_code_requests within
+	// CodeRequestWindow: the code requests of a User, refused beyond it; those of a User for one target account,
+	// refused beyond it; and the codes one target account receives whoever asks, beyond which a request is answered as
+	// sent and nothing is sent, so that the answer never tells of other Users' requests.
 	CodeRequestsPerUser   = 5
 	CodeRequestsPerTarget = 3
+	CodesPerTarget        = 10
 	CodeRequestWindow     = time.Hour
 	// RequestPruneAfter is account_link.request_prune_after: a link request is deleted this long after it expired.
 	RequestPruneAfter = 24 * time.Hour
@@ -700,6 +703,12 @@ func (s *Service) logRejected(ctx context.Context, messenger, connection, reason
 		fields = append(fields, logging.F("error", replyErr.Error()))
 	}
 	s.cfg.Log.Log(ctx, logging.AccountLinkRejected, fields...)
+}
+
+// logWithheld logs a code request of the User userPublicID through the Connection connection whose code was withheld.
+func (s *Service) logWithheld(ctx context.Context, messenger, connection, userPublicID string) {
+	s.cfg.Log.Log(ctx, logging.AccountLinkCodeWithheld, logging.F("messenger", messenger),
+		logging.F("connection", connection), logging.F("user", userPublicID))
 }
 
 func (s *Service) logUnlinked(ctx context.Context, messenger, connection, userPublicID, reason string) {

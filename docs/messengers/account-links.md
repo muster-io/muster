@@ -54,9 +54,12 @@ linked to someone else; nothing changed.
 
 
 A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
-A new request replaces your earlier one. You can request 5 codes an hour, and one Mattermost account gets at most 3
-codes an hour, whoever asks (`account_link.mattermost_code_requests`); beyond that, wait until the oldest request is an hour old. A username the server does not
-know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.
+A new request replaces your earlier one. You can request 5 codes an hour, and 3 an hour for one Mattermost account
+(`account_link.mattermost_code_requests`); beyond that, wait until your oldest request is an hour old. What others ask
+for never refuses your request: one account receives at most 10 codes an hour whoever asks, and a request beyond them
+is answered as if its code were sent, but nothing is sent, so that the answer never tells of other people's requests.
+A username the server does not know, a bot account and a deactivated account cannot be linked. An account that is
+linked to another User is refused.
 
 The bot must be allowed to open direct messages with you; see [Direct messages](mattermost.md#direct-messages).
 
@@ -79,8 +82,10 @@ Slack accounts have this name. Enter the email instead.", do. A bot, a deleted a
 and an account that is linked to another User is refused.
 
 A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
-A new request replaces your earlier one. You can request 5 codes an hour, and one Slack account gets at most 3 codes an
-hour, whoever asks (`account_link.slack_code_requests`); beyond that, wait until the oldest request is an hour old.
+A new request replaces your earlier one. You can request 5 codes an hour, and 3 an hour for one Slack account
+(`account_link.slack_code_requests`); beyond that, wait until your oldest request is an hour old. As in Mattermost, one
+account receives at most 10 codes an hour whoever asks, and a request beyond them is answered as if its code were sent,
+but nothing is sent.
 
 The bot can send the code only while the Messages tab of its app is on. Slack documents that with it off it refuses the
 direct message, and then Muster answers that the Messages tab of the Slack app is turned off; the problem is
@@ -144,8 +149,9 @@ login, username or user id — and that its bot can start a direct chat. Your pr
 If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
 the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
 The limits are those of Mattermost: 5 attempts per code, a new request replaces your earlier one, 5 code requests an
-hour for you and at most 3 codes an hour for one account, whoever asks (`account_link.bridge_code_requests`). An account
-that is linked to another User is refused.
+hour for you and 3 an hour for you for one account, and at most 10 codes an hour to one account whoever asks, beyond
+which a request is answered as if its code were sent and nothing is sent (`account_link.bridge_code_requests`). An
+account that is linked to another User is refused.
 
 ## Several Connections of one messenger
 

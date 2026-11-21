@@ -148,9 +148,9 @@ The Messages tab is on and read-only
     Messages tab. Read-only means that the person reads the code and cannot write to the bot. Keep the tab on: Slack
     documents that with it off it refuses the bot's direct message, and the request for a code then fails with the
     problem `messages_tab_disabled` (`409`), which has not been seen yet on a real workspace. A refused request still
-    counts toward the limits of Account links, 5 requests an hour for a person and 3 for one Slack account
-    (`account_link.slack_code_requests`), so after you turn the tab on again, a person who tried several times may have
-    to wait up to an hour. Turn it on under **App Home → Show Tabs → Messages Tab**. See [Link
+    counts toward the limits of Account links, 5 requests an hour for a person and 3 from a person for one Slack
+    account (`account_link.slack_code_requests`), so after you turn the tab on again, a person who tried several times
+    may have to wait up to an hour. Turn it on under **App Home → Show Tabs → Messages Tab**. See [Link
     Slack](account-links.md#link-slack).
 
 The Home tab is off

@@ -113,6 +113,7 @@ export function bridgeConnection(
     gateway: null,
     proxy: { enabled: false },
     destination_count: 0,
+    warnings: [],
     created_at: CREATED_AT,
     etag: '"1"',
     ...overrides,

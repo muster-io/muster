@@ -181,6 +181,9 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 				var c *bridge.Client
 				c, f.Message = s.doctorBridge(ctx, dbgen.GetConnectionRow(r), each)
 				if f.OK() {
+					if short, _ := s.pushSecretTooShort(dbgen.GetConnectionRow(r)); short {
+						f.Warning = HintPushSecretTooShort
+					}
 					brClients[r.ID] = c
 				} else {
 					failed[r.ID] = f.Message

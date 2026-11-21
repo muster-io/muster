@@ -207,10 +207,11 @@ SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamp
 FROM account_link_requests
 WHERE org_id = @org_id AND user_id = @user_id AND messenger = 'mattermost' AND created_at > @since::timestamptz;
 
--- CountTargetCodeRequests counts the Mattermost code requests for one account of a Connection made after since, by
--- any User, with the oldest of them.
+-- CountTargetCodeRequests counts the Mattermost code requests for one account of a Connection made after since: those
+-- of any User, and those of the User user_id with the oldest of them.
 -- name: CountTargetCodeRequests :one
-SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+SELECT count(*)::bigint AS requests, count(*) FILTER (WHERE user_id = @user_id)::bigint AS user_requests,
+       coalesce(min(created_at) FILTER (WHERE user_id = @user_id), @since::timestamptz)::timestamptz AS user_oldest
 FROM account_link_requests
 WHERE org_id = @org_id AND connection_id = @connection_id AND target_external_id = @target_external_id
   AND messenger = 'mattermost' AND created_at > @since::timestamptz;
@@ -222,10 +223,11 @@ FROM account_link_requests
 WHERE org_id = @org_id AND user_id = @user_id AND messenger = 'bridge' AND method = 'code'
   AND created_at > @since::timestamptz;
 
--- CountTargetBridgeCodeRequests counts the Bridge code requests for one account of a Connection made after since, by
--- any User, with the oldest of them.
+-- CountTargetBridgeCodeRequests counts the Bridge code requests for one account of a Connection made after since:
+-- those of any User, and those of the User user_id with the oldest of them.
 -- name: CountTargetBridgeCodeRequests :one
-SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+SELECT count(*)::bigint AS requests, count(*) FILTER (WHERE user_id = @user_id)::bigint AS user_requests,
+       coalesce(min(created_at) FILTER (WHERE user_id = @user_id), @since::timestamptz)::timestamptz AS user_oldest
 FROM account_link_requests
 WHERE org_id = @org_id AND connection_id = @connection_id AND target_external_id = @target_external_id
   AND messenger = 'bridge' AND method = 'code' AND created_at > @since::timestamptz;
@@ -236,10 +238,11 @@ SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamp
 FROM account_link_requests
 WHERE org_id = @org_id AND user_id = @user_id AND messenger = 'slack' AND created_at > @since::timestamptz;
 
--- CountTargetSlackCodeRequests counts the Slack code requests for one account of a Connection made after since, by any
--- User, with the oldest of them.
+-- CountTargetSlackCodeRequests counts the Slack code requests for one account of a Connection made after since: those
+-- of any User, and those of the User user_id with the oldest of them.
 -- name: CountTargetSlackCodeRequests :one
-SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+SELECT count(*)::bigint AS requests, count(*) FILTER (WHERE user_id = @user_id)::bigint AS user_requests,
+       coalesce(min(created_at) FILTER (WHERE user_id = @user_id), @since::timestamptz)::timestamptz AS user_oldest
 FROM account_link_requests
 WHERE org_id = @org_id AND connection_id = @connection_id AND target_external_id = @target_external_id
   AND messenger = 'slack' AND created_at > @since::timestamptz;

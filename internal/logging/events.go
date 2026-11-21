@@ -654,6 +654,16 @@ var AccountLinkRejected = newEvent("account_link_rejected", LevelInfo, "C-18",
 		"error, when present, says why the bot's answer was not sent. Never carries the token or the code.",
 	"messenger", "connection", "reason", "error")
 
+// AccountLinkCodeWithheld is logged when the code of a link request was withheld (C-18.FR-3, C-22.FR-15,
+// C-24.FR-12).
+var AccountLinkCodeWithheld = newEvent("account_link_code_withheld", LevelInfo, "C-18",
+	"A User asked for a link code to a Mattermost, Bridge or Slack account that had received the codes "+
+		"account_link.mattermost_code_requests, account_link.bridge_code_requests or account_link.slack_code_requests "+
+		"allow within the hour across Users, so that nothing was sent and the request was answered as if it had been: "+
+		"messenger is mattermost, bridge or slack, connection the public_id of the Connection, user the public_id of "+
+		"the requesting User. Never carries the account, the handle or the code.",
+	"messenger", "connection", "user")
+
 // AccountLinkUnlinked is logged when an Account link was removed (C-18.FR-4, FR-6, C-03.FR-13).
 var AccountLinkUnlinked = newEvent("account_link_unlinked", LevelInfo, "C-18",
 	"An Account link was removed and recorded as account_link.unlink: messenger is telegram, mattermost, bridge or "+

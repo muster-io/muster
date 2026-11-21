@@ -86,8 +86,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Quietly, its chains have not started: a later rise by Alerts then starts only the chains it newly meets, a Team that
   joins starts only that Team's chains, and the other chains start at the next point of starting over, such as an
   Unacknowledge. New Alerts that remove an acknowledgement, where a Route allows it, become a point of starting over
-  with the Route's Loud and Quiet settings, and how a Maintenance window keeps chains waiting is specified with
-  Maintenance windows; both come later in L2. Steps are timer rows that any replica claims (ADR-0007); every step is a
+  with the Route's Loud and Quiet settings, later in L2; a Maintenance window that keeps an Alert Group back stops its
+  chains, and they start over at their first step when it stops keeping the Alert Group back (C-34.FR-15,
+  C-34.FR-18, C-34.FR-19). Steps are timer rows that any replica claims (ADR-0007); every step is a
   system transition of the dispatcher with Muster as the actor (ADR-0016).
 - **C-32.FR-6** When the first chain of an Alert Group starts, its running ack timeout stops and sends no more notices.
   When the Alert Group becomes firing again, its ack timeout starts over only if none of its chains starts; an Alert
