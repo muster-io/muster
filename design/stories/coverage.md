@@ -4,14 +4,14 @@
 - Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34, C-36, C-37, C-38, C-39 and the later ones of the 0.2.x patch releases among them). A
+[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34, C-36, C-37, C-38, C-39, C-40, C-41 and C-42 of the 0.2.x patch releases among them). A
 capability is done when its stories together cover every ID
 of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID
 fully or in part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
-  Every ID of L1, of the core of L2, of C-33, of C-34, of C-36, of C-37, of C-38 and of C-39 is complete. The sections of L2 follow the non-functional requirements
+  Every ID of L1, of the core of L2, of C-33, of C-34, of C-36, of C-37, of C-38, of C-39, of C-40, of C-41 and of C-42 is complete. The sections of L2 follow the non-functional requirements
   of L1, and the requirements of L1 that L2 revises have a section of their own at the end.
   [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 has a
   row here.
@@ -22,7 +22,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) ·
 [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) ·
 [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) ·
-[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [C-36](#c-36) · [C-37](#c-37) · [C-38](#c-38) · [C-39](#c-39) · [L1
+[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [C-36](#c-36) · [C-37](#c-37) · [C-38](#c-38) · [C-39](#c-39) · [C-40](#c-40) · [C-41](#c-41) · [C-42](#c-42) · [L1
 requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
@@ -67,6 +67,9 @@ requirements revised for L2](#l1-requirements-revised-for-l2)
 | C-37 Attach and Detach | L2 0.2.x | 29 | S-202, S-203, S-204, S-205, S-206, S-207, S-208 | yes | 29 of 29 |
 | C-38 Message layout editor | L2 0.2.x | 29 | S-209, S-210, S-211, S-212, S-213, S-214, S-215, S-216, S-217, S-218, S-219 | yes | 29 of 29 |
 | C-39 Theme switch | L2 0.2.x | 13 | S-220, S-221 | yes | 13 of 13 |
+| C-40 A dashboard on the Home page | L2 0.2.x | 21 | S-222, S-223, S-224, S-225, S-226, S-227 | yes | 21 of 21 |
+| C-41 An editor of whole Notification rule sequences | L2 0.2.x | 21 | S-228, S-229, S-230 | yes | 21 of 21 |
+| C-42 The step-by-step Destination test | L2 0.2.x | 22 | S-231, S-232, S-233, S-234, S-235, S-236, S-237, S-238, S-239 | yes | 22 of 22 |
 
 ## C-01
 
@@ -653,7 +656,7 @@ S-065, S-095
 | C-16.FR-3 | S-047 (part), S-048 (part), S-099 (part) | complete | the test of a Slack Destination, which cannot press, in S-099 |
 | C-16.FR-4 | S-047 (part), S-048 (part) | complete |  |
 | C-16.FR-5 | S-047 | complete |  |
-| C-16.FR-6 | S-047 | complete | a scope rule: a test is one "create" request, nothing more |
+| C-16.FR-6 | S-047 | complete | a scope rule: a test is one "create" request, nothing more; the step-by-step test of the full lifecycle is specified in C-42 (S-231 to S-239) |
 | C-16.FR-7 | S-047 | complete |  |
 | C-16.AC-1 | S-047 | complete |  |
 | C-16.AC-2 | S-047 | complete |  |
@@ -1031,7 +1034,7 @@ S-150, S-154, S-172
 | C-27.FR-6 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 until the test environment; P-88 decided |
 | C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-150 (part), S-172 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API and on the pages (S-150); the Destinations of the chains that Page the Schedule (S-172) |
-| C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part) | complete |  |
+| C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part), S-225 (part), S-226 (part) | complete | the Home page gains the section "Dashboard" after "I am an Assignee" and "On call now", which keep their places (S-225, S-226, C-40) |
 | C-27.FR-10 | S-134 (part), S-136 (part) | complete | P-82 confirmed with S-134; P-81 stays provisional |
 | C-27.FR-11 | S-131 | complete |  |
 | C-27.FR-12 | S-131 (part), S-154 (part) | complete | `schedule_in_use` raised for Escalation steps (S-154); P-66 confirmed with S-131 |
@@ -1136,7 +1139,7 @@ S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158
 | C-31.FR-2 | S-152 | complete |  |
 | C-31.FR-3 | S-155 (part), S-157 (part) | complete | Mention actions with the Pages of S-155, call actions S-157 |
 | C-31.FR-4 | S-152 (part), S-153 (part) | complete |  |
-| C-31.FR-5 | S-152 (part), S-153 (part) | complete | an editor of whole sequences in the profile is specified later in L2 |
+| C-31.FR-5 | S-152 (part), S-153 (part), S-228 (part), S-229 (part), S-230 (part) | complete | the switch (S-152, S-153); the editor of whole sequences in the profile and on a User's page (S-228, S-229) is specified in C-41, with the revision marker in S-230 |
 | C-31.FR-6 | S-161 | complete |  |
 | C-31.AC-1 | S-155 | complete |  |
 | C-31.AC-2 | S-157 | complete |  |
@@ -1160,7 +1163,7 @@ S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-1
 | C-32.FR-6 | S-169 | complete |  |
 | C-32.FR-7 | S-169 | complete |  |
 | C-32.FR-8 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram, Bridges and outgoing webhooks (S-177) |
-| C-32.FR-9 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram and Bridges (S-177) |
+| C-32.FR-9 | S-155 (part), S-177 (part), S-222 (part) | complete | Mattermost and Slack (S-155), Telegram and Bridges (S-177); each Page also records whether it was made outside Working hours, for the dashboard of C-40 (S-222) |
 | C-32.FR-10 | S-155 (part), S-157 (part) | complete |  |
 | C-32.FR-11 | S-155 (part), S-177 (part), S-157 (part), S-160 (part), S-161 (part) | complete | the push of Mentions in Thread replies checked by the spike S-160 |
 | C-32.FR-12 | S-168 (part), S-157 (part) | complete | P-89 decided with S-168: the Owner is named without a Team; Assignees by calls S-157 |
@@ -1412,6 +1415,98 @@ file, before it merged.
 | C-39.AC-5 | S-221 | complete |  |
 | C-39.AC-6 | S-221 | complete |  |
 
+## C-40
+
+[A dashboard on the Home page](../prd/l2/C-40-home-dashboard.md) · L2 0.2.x · stories: S-222, S-223, S-224, S-225,
+S-226, S-227. They start after the tag of 0.2.0 and ship in 0.2.x patch releases; their contracts were written against
+the open pull request that adds the capability file (#673), before it merged.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-40.FR-1 | S-225 (part), S-226 (part) | complete | the section, its place and the figures and chart (S-225); the tables (S-226) |
+| C-40.FR-2 | S-223 (part), S-225 (part) | complete | the period and the filters accepted by the reads (S-223); the controls, the URL and "Open in Statistics" (S-225) |
+| C-40.FR-3 | S-223 (part), S-224 (part), S-225 (part), S-226 (part) | complete | `alert-groups:read` on the reads (S-223, S-224); the visibility of every part to everyone who reads Alert Groups (S-225, S-226) |
+| C-40.FR-4 | S-223 (part), S-225 (part) | complete | the totals, medians and percentiles of `group_by=all` (S-223); the figures and the counts of open Alert Groups (S-225) |
+| C-40.FR-5 | S-223 (part), S-225 (part) | complete | the series with the critical split and the hours (S-223); the chart (S-225) |
+| C-40.FR-6 | S-222 (part), S-224 (part), S-226 (part) | complete | the recording on each Page (S-222); the read and the moment from which it counts (S-224); the table and its hint (S-226) |
+| C-40.FR-7 | S-223 (part), S-226 (part) | complete | the titles (S-223); the table and the link to the list (S-226) |
+| C-40.FR-8 | S-225 (part), S-226 (part) | complete | the separate reads, errors, refresh and hints (S-225); the tables as parts (S-226) |
+| C-40.FR-9 | S-225 (part), S-226 (part) | complete | the empty states of the figures and the chart (S-225) and of the tables (S-226) |
+| C-40.FR-10 | S-223 (part), S-224 | complete | the shape of the queries (S-223); P-96's data, the budgets and the indexes (S-224) |
+| C-40.FR-11 | S-225 (part), S-226 (part) | complete | the phone layout of the figures (S-225) and of the tables (S-226) |
+| C-40.FR-12 | S-227 | complete |  |
+| C-40.AC-1 | S-223 (part), S-225 (part) | complete | the figures through the API (S-223) and in the browser (S-225) |
+| C-40.AC-2 | S-223 | complete |  |
+| C-40.AC-3 | S-225 (part), S-226 (part) | complete | the filter Team, the URL and "Open in Statistics" (S-225); the tables (S-226) |
+| C-40.AC-4 | S-222 (part), S-224 (part), S-226 (part) | complete | the value at the moment of the Page (S-222); the numbers through the API (S-224); the table (S-226) |
+| C-40.AC-5 | S-223 (part), S-226 (part) | complete | the order through the API (S-223); the table and its link (S-226) |
+| C-40.AC-6 | S-223 (part), S-224 (part), S-225 (part), S-226 (part) | complete | the Permission and the lint of the reads (S-223, S-224); the Viewer's page (S-225, S-226) |
+| C-40.AC-7 | S-225 (part), S-226 (part) | complete | the empty installation and a failing part (S-225, S-226); the hint reads the counts only (S-225) |
+| C-40.AC-8 | S-225 (part), S-226 (part) | complete |  |
+| C-40.AC-9 | S-224 | complete | P-96 is confirmed with the measured values, or left provisional with the reason |
+
+## C-41
+
+[An editor of whole Notification rule sequences](../prd/l2/C-41-notification-rule-sequence-editor.md) · L2 0.2.x ·
+stories: S-228, S-229, S-230. They start after the tag of 0.2.0 and ship in 0.2.x patch releases; their contracts were
+written against the open pull request that adds the capability file (#673), before it merged. The capability adds no
+API, so it has no backend story.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-41.FR-1 | S-228 | complete |  |
+| C-41.FR-2 | S-228 | complete |  |
+| C-41.FR-3 | S-228 (part), S-229 (part) | complete | the profile's texts (S-228); the User page's text and the Organization's gateways (S-229) |
+| C-41.FR-4 | S-228 | complete |  |
+| C-41.FR-5 | S-228 | complete |  |
+| C-41.FR-6 | S-228 | complete |  |
+| C-41.FR-7 | S-229 | complete |  |
+| C-41.FR-8 | S-228 (part), S-229 (part) | complete | no marker on a person's rules (S-228) and the Organization's warning (S-229) |
+| C-41.FR-9 | S-229 | complete |  |
+| C-41.FR-10 | S-228 (part), S-229 (part) | complete | the profile (S-228); the User page and Alert handling (S-229) |
+| C-41.FR-11 | S-230 | complete | with the revision marker on C-31.FR-5 |
+| C-41.AC-1 | S-228 | complete |  |
+| C-41.AC-2 | S-228 | complete |  |
+| C-41.AC-3 | S-228 (part), S-229 (part) | complete | the profile's text (S-228); the User page's (S-229) |
+| C-41.AC-4 | S-228 | complete |  |
+| C-41.AC-5 | S-228 | complete |  |
+| C-41.AC-6 | S-229 | complete |  |
+| C-41.AC-7 | S-228 (part), S-229 (part) | complete |  |
+| C-41.AC-8 | S-228 | complete |  |
+| C-41.AC-9 | S-228 | complete |  |
+| C-41.AC-10 | S-229 | complete |  |
+
+## C-42
+
+[The step-by-step Destination test](../prd/l2/C-42-destination-test.md) · L2 0.2.x · stories: S-231, S-232, S-233,
+S-234, S-235, S-236, S-237, S-238, S-239. They start after the tag of 0.2.0 and ship in 0.2.x patch releases; their
+contracts were written against the open pull request that adds the capability file (#673), before it merged.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-42.FR-1 | S-231 (part), S-237 (part) | complete | the run, its operations and expiry (S-231); the form and the expiry notice (S-237) |
+| C-42.FR-2 | S-231 (part), S-232 (part), S-233 (part), S-237 (part) | complete | the eight steps for Mattermost (S-231), Telegram and Slack (S-232), a Bridge and an outgoing webhook (S-233); the steps on the page (S-237) |
+| C-42.FR-3 | S-231 (part), S-232 (part), S-233 (part), S-237 (part) | complete | the interactive path, masking and classes by type; the results and "Try again" on the page (S-237) |
+| C-42.FR-4 | S-231 (part), S-232 (part), S-233 (part), S-237 (part) | complete | "Would mention:" and the Mention-free message by type; on the page (S-237) |
+| C-42.FR-5 | S-231 (part), S-234, S-237 (part) | complete | the buttons from the button set (S-231); the presses, their answers and their record (S-234); the page (S-237) |
+| C-42.FR-6 | S-231 (part), S-232 (part), S-233 (part), S-234 (part) | complete | nothing written or counted by a run, by type and by press |
+| C-42.FR-7 | S-236 (part), S-238 (part) | complete | the offers (S-236); the listing on the page (S-238) |
+| C-42.FR-8 | S-235 (part), S-236 (part), S-238 (part) | complete | the timeline of a chain (S-235), of all chains (S-236) and on the page (S-238) |
+| C-42.FR-9 | S-235 (part), S-236, S-238 (part) | complete | the computation without effects (S-235); no Thread reply in a Test message (S-236); the page's words (S-238) |
+| C-42.FR-10 | S-231 (part), S-235 (part), S-236 (part) | complete | the steps' Permission and Audit log (S-231); playing, not recorded (S-235, S-236) |
+| C-42.FR-11 | S-237 (part), S-238 (part) | complete |  |
+| C-42.FR-12 | S-239 | complete |  |
+| C-42.AC-1 | S-231, S-237 (part) | complete | the eight steps through the API (S-231) and in the browser (S-237) |
+| C-42.AC-2 | S-233 | complete |  |
+| C-42.AC-3 | S-234, S-237 (part) | complete | the press answered and recorded (S-234); listed on the page (S-237) |
+| C-42.AC-4 | S-231 (part), S-232 (part), S-233 (part), S-237 (part) | complete | the entry that would mention nobody, by type |
+| C-42.AC-5 | S-231, S-237 (part) | complete | the expiry through the API (S-231) and on the page (S-237) |
+| C-42.AC-6 | S-235 (part), S-236, S-238 (part) | complete | the three-step chain (S-235); all chains (S-236); the page (S-238) |
+| C-42.AC-7 | S-235, S-238 (part) | complete |  |
+| C-42.AC-8 | S-231 (part), S-235 (part), S-236 (part) | complete | the steps (S-231), playing (S-235, S-236) |
+| C-42.AC-9 | S-237 (part), S-238 (part) | complete |  |
+| C-42.AC-10 | S-231 (part), S-236 (part) | complete | no Mention markup (S-231); no Thread reply from playing (S-236) |
+
 ## L1 requirements revised for L2
 
 The requirements of L1 that [L2 §6](../prd/L2.md#6-revisions-to-l1) revises, and those it adds to L1 files, with the
@@ -1449,9 +1544,9 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-09.FR-28 | S-174 (part), S-175 (part) | complete | added for L2: By people in the API (S-174) and on the page (S-175) |
 | C-09.FR-29 | S-174 (part), S-175 (part) | complete | added for L2: By Team in the API (S-174), the view and its link to By people (S-175) |
 | C-09.FR-30 | S-174 (part), S-175 (part) | complete | added for L2: the filters in the API (S-174), on the page and in the URL (S-175) |
-| C-09.FR-31 | S-176 | complete | added for L2: the section on statistics |
+| C-09.FR-31 | S-176, S-227 (part) | complete | added for L2: the section on statistics (S-176) and its subsection on the dashboard (S-227) |
 | C-09 UI | S-175 | complete | the views By Team and By people and the filters |
-| C-09 API surface | S-174 | complete | `group_by=team`, the filters, `alert-group-actor-statistics` |
+| C-09 API surface | S-174, S-223 (part), S-224 (part) | complete | `group_by=team`, the filters, `alert-group-actor-statistics` (S-174); `group_by=all` with the critical split, `alert-title-statistics` (S-223) and `page-statistics` (S-224) for the dashboard of C-40 |
 | C-09.AC-8 | S-111 | complete |  |
 | C-09.AC-27 | S-174 (part), S-175 (part) | complete | added for L2 |
 | C-09.AC-28 | S-174 (part), S-175 (part) | complete | added for L2 |
