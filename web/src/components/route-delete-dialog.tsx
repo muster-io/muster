@@ -27,6 +27,7 @@ import {
 } from "../api/gen/endpoints/routes/routes";
 import type { Route } from "../api/gen/model";
 import { isApiError, isStale, problemText } from "../lib/api";
+import { ManagedByDeleteLine } from "./managed-by";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -110,6 +111,7 @@ export function RouteDeleteDialog({ route }: { route: Route }) {
                 ? t("routes.delete.openAlertGroups", { count })
                 : t("routes.delete.description")}
             </DialogDescription>
+            <ManagedByDeleteLine tool={route.managed_by} />
           </DialogHeader>
           {refused && (
             <Alert data-testid="route-delete-refused">

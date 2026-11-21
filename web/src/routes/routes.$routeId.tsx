@@ -24,6 +24,7 @@ import {
 import type { Route as RouteModel } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import { RouteDeleteDialog } from "../components/route-delete-dialog";
 import { RouteForm } from "../components/route-form";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -52,6 +53,7 @@ function EditForm({ current }: { current: RouteModel }) {
   }
   return (
     <>
+      <ManagedByWarning object="route" tool={current.managed_by} />
       {replaced && (
         <Alert data-testid="route-replaced">
           <AlertDescription>{t("routes.errors.changedElsewhere")}</AlertDescription>
@@ -115,7 +117,10 @@ export function RouteEditor({ routeId }: { routeId: string }) {
           {t("routes.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <PageTitle docs="page.routes">{route?.name ?? t("routes.edit.title")}</PageTitle>
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            <PageTitle docs="page.routes">{route?.name ?? t("routes.edit.title")}</PageTitle>
+            <ManagedByBadge tool={route?.managed_by} />
+          </div>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && route !== undefined && !route.is_default && (
             <RouteDeleteDialog route={route} />

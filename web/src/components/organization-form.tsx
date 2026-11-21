@@ -42,6 +42,7 @@ import type {
 import { applyFieldErrors, fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { RequirePermission } from "./app-shell";
 import { PageTitle } from "./docs-link";
+import { type ManagedBy, ManagedByBadge, type ManagedObject, ManagedByWarning } from "./managed-by";
 import { organizationDocs } from "./organization-nav";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -52,7 +53,7 @@ export type OrganizationPatch = Partial<OrganizationBase> & {
   outgoing_heartbeat?: OrganizationInput["outgoing_heartbeat"];
 };
 
-/** The Organization as an update: everything as read, the stored Secrets kept, the patch applied. */
+/** The Organization as an update: everything as read but the mark, the stored Secrets kept, the patch applied. */
 export function organizationInput(
   org: Organization,
   patch: OrganizationPatch = {},
@@ -61,6 +62,8 @@ export function organizationInput(
     id: _id,
     etag: _etag,
     critical_is_urgent: _criticalIsUrgent,
+    // The mark is left out, which keeps it (C-33.FR-11): a save from the web UI never writes it.
+    managed_by: _managedBy,
     outgoing_heartbeat: heartbeat,
     ...rest
   } = org;
@@ -310,7 +313,11 @@ function OrganizationView({
   const query = useGetOrganization();
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <PageHeading title={title} hint={hint} />
+      <PageHeading
+        title={title}
+        hint={hint}
+        mark={{ object: "organization", tool: query.data?.managed_by }}
+      />
       {query.data === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}
@@ -323,17 +330,32 @@ function OrganizationView({
 }
 
 /** The heading of an Organization page, with the Guide link of its entry of the sub-navigation. */
-export function PageHeading({ title, hint }: { title: string; hint?: string }) {
+export function PageHeading({
+  title,
+  hint,
+  mark,
+}: {
+  title: string;
+  hint?: string;
+  /** The object the page edits, when it can carry a "Managed by" mark (C-33.FR-12): the mark and its warning. */
+  mark?: { object: ManagedObject; tool: ManagedBy };
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const docs = organizationDocs(pathname);
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col items-start gap-1">
       {docs === undefined ? (
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
       ) : (
         <PageTitle docs={docs}>{title}</PageTitle>
       )}
+      {mark !== undefined && <ManagedByBadge tool={mark.tool} />}
       {hint !== undefined && <p className="text-muted-foreground">{hint}</p>}
+      {mark !== undefined && (
+        <div className="w-full">
+          <ManagedByWarning object={mark.object} tool={mark.tool} />
+        </div>
+      )}
     </div>
   );
 }

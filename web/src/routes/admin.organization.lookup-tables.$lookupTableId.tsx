@@ -23,6 +23,7 @@ import type { LookupTable } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
 import { LookupTableDeleteDialog, LookupTableEditor } from "../components/lookup-table-editor";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
@@ -50,6 +51,7 @@ function EditForm({ current }: { current: LookupTable }) {
   }
   return (
     <>
+      <ManagedByWarning object="lookupTable" tool={current.managed_by} />
       {replaced && (
         <Alert data-testid="lookup-table-replaced">
           <AlertDescription>{t("lookupTables.errors.changedElsewhere")}</AlertDescription>
@@ -109,9 +111,12 @@ function LookupTableView({ lookupTableId }: { lookupTableId: string }) {
           {t("lookupTables.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <PageTitle docs="page.lookup_tables" className="font-mono">
-            {table?.name ?? t("lookupTables.edit.title")}
-          </PageTitle>
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            <PageTitle docs="page.lookup_tables" className="font-mono">
+              {table?.name ?? t("lookupTables.edit.title")}
+            </PageTitle>
+            <ManagedByBadge tool={table?.managed_by} />
+          </div>
           {/* Outside the editor, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && table !== undefined && <LookupTableDeleteDialog table={table} />}
         </div>

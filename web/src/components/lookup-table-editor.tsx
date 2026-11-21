@@ -24,6 +24,7 @@ import {
 import type { LookupTable, LookupTableBase } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { DocsLink } from "./docs-link";
+import { ManagedByDeleteLine } from "./managed-by";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -886,6 +887,7 @@ export function LookupTableDeleteDialog({ table }: { table: LookupTable }) {
               {t("lookupTables.delete.title", { name: table.name })}
             </DialogTitle>
             <DialogDescription>{t("lookupTables.delete.description")}</DialogDescription>
+            <ManagedByDeleteLine tool={table.managed_by} />
           </DialogHeader>
           {remove.isError && (
             <Alert variant="destructive">

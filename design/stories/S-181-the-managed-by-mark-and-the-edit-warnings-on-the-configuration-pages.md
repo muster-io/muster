@@ -22,8 +22,13 @@ files_touched:
   - web/src/routes/destinations.$destinationId.tsx
   - web/src/routes/admin.organization.lookup-tables.$lookupTableId.tsx
   - web/src/routes/admin.organization.link-rules.$linkRuleId.tsx
-  - web/src/routes/admin.organization.tsx
+  - web/src/components/connection-form.tsx
+  - web/src/components/link-rule-form.tsx
+  - web/src/components/lookup-table-editor.tsx
+  - web/src/components/organization-form.tsx
+  - web/src/components/organization-form.test.tsx
   - web/src/routes/admin.organization.outbound.tsx
+  - web/src/routes/admin.organization.outgoing-heartbeat.tsx
   - web/src/routes/admin.oidc.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -31,7 +36,8 @@ files_touched:
 acceptance:
   - "[C-33.FR-12] `ManagedByBadge` renders \"Managed by terraform\" («Управляется terraform») for `managed_by` `terraform` and nothing for null or a read without the field; `ManagedByWarning` renders the warning of C-33.FR-12 with the object's kind and the tool, and nothing without a mark; the delete line renders \"terraform creates it again on its next run.\" (`managed-by.test.tsx`)."
   - "[C-33.FR-12, C-33.AC-4] In a real browser, in English and in Russian, a Route marked `terraform` shows \"Managed by terraform\" next to its title and the warning above its form; changing its name and pressing \"Save\" saves it with no extra step and the Route still reads `managed_by` `terraform`; its delete dialog shows the line of C-33.FR-12; a Route without a mark shows neither (`managed-by.spec.ts`)."
-  - "[C-33.FR-12, C-33.AC-4] With marks on an Integration, a Team, a Schedule, an Escalation chain, a Connection, a Destination, a Lookup table and a Link rule, each page shows the mark next to its title and the warning in its form; with the Organization marked, every page under Organization shows the Organization's mark, and the Outbound address policy page and the OIDC settings page show their own marks only when those objects carry them (`managed-by.spec.ts`)."
+  - "[C-33.FR-12, C-33.AC-4] With marks on an Integration, a Team, a Schedule, an Escalation chain, a Connection, a Destination, a Lookup table and a Link rule, each page shows the mark next to its title and the warning in its form; with the Organization marked, every page that edits its settings (General, Severity levels, Alert handling, Security, Retention, Outgoing heartbeat) shows the Organization's mark, and the Outbound address policy page and the OIDC settings page show their own marks only when those objects carry them (`managed-by.spec.ts`)."
+  - "[C-33.FR-11, C-33.FR-12] The update that a page of the Organization sends has no `managed_by`, whether the Organization is marked or not (`organization-form.test.tsx`)."
 verify: "make ci && make e2e-web"
 operator_attention: false
 issue: 699
@@ -62,16 +68,23 @@ issue: 699
   Team page shows its slug; `ManagedByWarning` (`{object, tool}`), an informational banner — not an error, never
   disabling the form — above the form's first section; `managedByDeleteLine(tool)`, the line that the delete dialogs
   add. The object's kind in the warning is the singular of its page title in lower case, as the existing dialogs name
-  it ("route", "team", "escalation chain", …).
+  it ("route", "team", "escalation chain", …). The singletons have no such title, so their words are "organization"
+  («организация»), "outbound address policy" («политика исходящих адресов») and "OIDC configuration" («настройки
+  OIDC»): the page titles ("General", "Retention", "Outbound addresses", "OIDC") name a part of the object or are not
+  nouns that fit "This … is managed by", and one word serves every page of the Organization. The read-only page of an
+  Integration shows the badge only; its warning is on the edit page, which is the form that saves.
 - **Texts** (`en.json`, `ru.json`), keys under `managedBy`: "Managed by {{tool}}" / «Управляется {{tool}}»; "This
   {{object}} is managed by {{tool}}. Changes you save here are undone by the next run of {{tool}}: change its code
   instead." / «Этим объектом ({{object}}) управляет {{tool}}. Изменения, сохранённые здесь, отменит следующий запуск
   {{tool}}: меняйте его код.»; "{{tool}} creates it again on its next run." / «{{tool}} создаст его снова при следующем
   запуске.». The tool's name is shown as the API gives it, untranslated.
 - **Saving**: the forms keep sending what they send today; the API keeps a left-out `managed_by` (C-33.FR-11), so a
-  save from the web UI keeps the mark. The Organization's pages read the mark of `getOrganization` in their shared
-  layout (`admin.organization.tsx`); the Outbound address policy page reads that of `getOutboundPolicy`, and the OIDC
-  settings page that of `getOidcSettings`.
+  save from the web UI keeps the mark; the Organization's update leaves `managed_by` out of its body
+  (`organizationInput` drops it), as every other form does. The pages that edit the Organization's settings (General,
+  Severity levels, Alert handling, Security, Retention, Outgoing heartbeat) show the mark of `getOrganization`, which
+  they read already, in their heading; Keyring, System status, Audit log and the pages of Lookup tables and Link rules
+  show none of it. The Outbound address policy page reads the mark of `getOutboundPolicy`, and the OIDC settings page
+  that of `getOidcSettings`; neither shows the Organization's.
 - **Phone width**: the mark wraps under the title at 360 pixels without horizontal scrolling.
 
 ## Steps
@@ -93,13 +106,14 @@ Playwright at 1280 × 800, in English, and again in Russian:
 
 1. Routes → "tf-route" → "Managed by terraform" next to the title; the banner "This route is managed by terraform.
    Changes you save here are undone by the next run of terraform: change its code instead." above the form.
-2. Change the name to "tf-route-2" → "Save" → the page shows "tf-route-2" and still "Managed by terraform";
-   `GET /routes/{id}` answers `managed_by` `terraform`.
+2. Change the name to "tf-route-2" → "Save" → the Routes list opens, as after any Route save; the page of "tf-route-2"
+   shows "Managed by terraform" still; `GET /routes/{id}` answers `managed_by` `terraform`.
 3. "Delete" → the dialog contains "terraform creates it again on its next run."; "Cancel".
 4. A Route created in the web UI → no mark, no banner, no delete line.
-5. Each other marked object's page → its mark and banner; Organization → General, Severity levels, Retention →
-   "Managed by terraform" on each; Organization → Outbound → no mark; mark the policy through the API and reload →
-   the mark.
+5. Each other marked object's page → its mark and banner (the read-only Integration page: its mark only; the banner is
+   on its edit page); Organization → General, Severity levels, Retention → "Managed by terraform" on each; Keyring →
+   no mark; Organization → Outbound, and the OIDC settings page → no mark; mark the policy and the OIDC settings
+   through the API and reload → the mark and the banner on each.
 6. At 360 × 740, the Route page with its mark passes `expectNoHorizontalScroll`.
 
 `make e2e-web` runs these steps in `managed-by.spec.ts`.

@@ -35,6 +35,7 @@ import { BridgeInfoPanel } from "../components/bridge-connection-fields";
 import { CallbackHint } from "../components/callback-hint";
 import { ConnectionCheck } from "../components/connection-check";
 import { PageTitle } from "../components/docs-link";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import { GatewayHealth, isGatewayOnly } from "../components/gateway-health";
 import {
   ConnectionDeleteDialog,
@@ -228,6 +229,7 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
             >
               {connection?.name ?? t("connections.edit.title")}
             </PageTitle>
+            <ManagedByBadge tool={connection?.managed_by} />
             {connection?.type === "slack" && <SlackConnectionInfo connection={connection} />}
             {connection !== undefined &&
               connection.type !== "bridge" &&
@@ -254,6 +256,7 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
         </p>
       ) : FORM_TYPES.has(connection.type) ? (
         <RequestLogTabs search={search} onSearch={onSearch} scope={{ connection: connection.id }}>
+          <ManagedByWarning object="connection" tool={connection.managed_by} />
           {connection.type === "slack" && <SlackSharedAppWarning connection={connection} />}
           <EditForm current={connection} />
         </RequestLogTabs>

@@ -23,6 +23,7 @@ import type { LinkRule } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
 import { LinkRuleDeleteDialog, LinkRuleForm } from "../components/link-rule-form";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
@@ -50,6 +51,7 @@ function EditForm({ current }: { current: LinkRule }) {
   }
   return (
     <>
+      <ManagedByWarning object="linkRule" tool={current.managed_by} />
       {replaced && (
         <Alert data-testid="link-rule-replaced">
           <AlertDescription>{t("linkRules.errors.changedElsewhere")}</AlertDescription>
@@ -109,7 +111,10 @@ function LinkRuleView({ linkRuleId }: { linkRuleId: string }) {
           {t("linkRules.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <PageTitle docs="page.link_rules">{rule?.name ?? t("linkRules.edit.title")}</PageTitle>
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            <PageTitle docs="page.link_rules">{rule?.name ?? t("linkRules.edit.title")}</PageTitle>
+            <ManagedByBadge tool={rule?.managed_by} />
+          </div>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && rule !== undefined && <LinkRuleDeleteDialog rule={rule} />}
         </div>
