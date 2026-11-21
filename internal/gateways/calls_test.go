@@ -46,6 +46,8 @@ type fakeCalls struct {
 	recovered map[int64]time.Time
 	// stopped are the runs of chains and the rule runs that stopped, by id, which stop the items that name them.
 	stopped map[int64]bool
+	// claiming runs before each claim of the due calls (round_test.go).
+	claiming func()
 }
 
 type fakeCall struct {
@@ -332,6 +334,9 @@ func (f *fakeCalls) NotifyCalls(_ context.Context, channel string) error {
 }
 
 func (f *fakeCalls) ClaimDueCalls(_ context.Context, a dbgen.ClaimDueCallsParams) ([]dbgen.ClaimDueCallsRow, error) {
+	if f.claiming != nil {
+		f.claiming()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.err("ClaimDueCalls"); err != nil {

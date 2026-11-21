@@ -38,6 +38,16 @@ import (
 // the delivery client class through the limiter of the gateway's Connection, and records the outcome in another short
 // transaction, guarded by its lease. Lint 3 allows Notify here and in delivery's interactive path only.
 //
+// A round attempts up to Concurrency calls at once. It prepares them one after another in the order of the claim, so
+// that the tokens of a gateway's limiter, taken in the preparation's transaction from the bucket every replica shares,
+// go to the calls in that order; the call and the record of its outcome then run in a goroutine of their own, beside
+// the preparation of the next calls. The attempts of one sender meet under the same locks as those of two replicas:
+// the person's lock keeps two calls to one person through one gateway apart, and a person has at most one call that
+// can be claimed. What one round adds is its gate per gateway (gate): while an answer that may hold the gateway's
+// limiter or make it Broken is recorded, no other call through it is prepared or made, and a call prepared before the
+// round recorded a hold or a Broken state is not made after it, as when the round attempted its calls one after
+// another.
+//
 // A call is sent at least once: its Idempotency-Key calls/<public_id>, its contact, its text and its action data,
 // signed with the active button-signature key whose id the call keeps (button_key_id), so that the Keyring keeps that
 // key while the gateway may still report the data, are fixed at its first attempt and identical on every retry, on any
@@ -50,6 +60,11 @@ import (
 // The defaults of the sender, as the delivery worker's (internal/delivery): the lease of a claimed call, renewed
 // before its attempt; the calls one claim takes; the margin after the time a limiter token is due; the longest and
 // the shortest wait between rounds; and the first wait after a failed round.
+//
+// SenderConcurrency is the sender's own: the calls a round attempts at once. Each attempt holds at most one connection
+// of the main pool at a time — its preparation's transaction, then its record's, none while the gateway answers —, so
+// the sender holds at most this many besides its claim. Processing keeps to half of a pool of max(10, CPUs)
+// (db.MinPoolConns), and delivery, ingestion and the API share the rest with the sender.
 const (
 	SenderLease          = delivery.Lease
 	SenderBatch          = delivery.Batch
@@ -57,6 +72,7 @@ const (
 	SenderMaxWait        = delivery.MaxWait
 	SenderMinWait        = delivery.MinWait
 	SenderFailureBackoff = delivery.FailureBackoff
+	SenderConcurrency    = 4
 )
 
 // Limiter takes the tokens of the limiter of a gateway's Connection, through the transaction db of the call's
@@ -108,9 +124,11 @@ type Sender struct {
 	Log    *logging.Logger
 	// Random is uniform in [0, 1) and jitters delivery.transient_backoff; nil is math/rand/v2.
 	Random func() float64
-	// MaxWait bounds the wait between rounds, and Batch the calls one claim takes; zero is the default.
-	MaxWait time.Duration
-	Batch   int32
+	// MaxWait bounds the wait between rounds, Batch the calls one claim takes, and Concurrency the calls a round
+	// attempts at once; zero is the default.
+	MaxWait     time.Duration
+	Batch       int32
+	Concurrency int
 	// Wait waits for d or until a wake arrives; nil waits on the real clock.
 	Wait func(ctx context.Context, d time.Duration, wake <-chan struct{})
 
@@ -185,6 +203,13 @@ func (s *Sender) batch() int32 {
 	return s.Batch
 }
 
+func (s *Sender) concurrency() int {
+	if s.Concurrency <= 0 {
+		return SenderConcurrency
+	}
+	return s.Concurrency
+}
+
 func (s *Sender) limiter() Limiter {
 	if s.Limiter == nil {
 		return ConnectionLimiter{}
@@ -192,36 +217,13 @@ func (s *Sender) limiter() Limiter {
 	return s.Limiter
 }
 
-// Round attempts every due call, Batch at a time, then probes the Broken gateways that are due, and returns how long
-// until the next call or probe can be claimed, at most MaxWait. A call that fails is logged and attempted again once
-// its lease runs out; the round goes on.
+// Round attempts every due call, Batch at a time and up to Concurrency at once (attemptDue), then probes the Broken
+// gateways that are due, and returns how long until the next call or probe can be claimed, at most MaxWait. A call
+// that fails is logged and attempted again once its lease runs out; the round goes on. It returns once every attempt
+// it started has ended, also when ctx ends.
 func (s *Sender) Round(ctx context.Context) (time.Duration, error) {
-	for {
-		// One statement, which commits alone: it selects the due calls SKIP LOCKED and leases them.
-		p := s.Lease.Params(s.batch())
-		rows, err := s.Store.ClaimDueCalls(ctx, dbgen.ClaimDueCallsParams{OrgID: s.OrgID, Owner: p.Owner,
-			LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now, Lim: p.Limit})
-		if err != nil {
-			return 0, fmt.Errorf("claim the due calls: %w", err)
-		}
-		slices.SortFunc(rows, func(a, b dbgen.ClaimDueCallsRow) int {
-			switch {
-			case a.Critical != b.Critical && a.Critical:
-				return -1
-			case a.Critical != b.Critical:
-				return 1
-			}
-			if c := a.NextAttemptAt.Compare(b.NextAttemptAt); c != 0 {
-				return c
-			}
-			return cmp.Compare(a.ID, b.ID)
-		})
-		for _, r := range rows {
-			s.attempt(ctx, r)
-		}
-		if len(rows) < int(s.batch()) {
-			break
-		}
+	if err := s.attemptDue(ctx); err != nil {
+		return 0, err
 	}
 	d := s.maxWait()
 	if s.Broken != nil {
@@ -252,6 +254,212 @@ func (s *Sender) Round(ctx context.Context) (time.Duration, error) {
 	return d, nil
 }
 
+// attemptDue claims the due calls, Batch at a time, and attempts them, up to Concurrency at once. It prepares each in
+// the order of the claim — critical first, then by when it came due — once a slot is free (start), and the next claim
+// follows once every call of a claim was prepared, without waiting for their answers. It returns once every attempt
+// it started has ended, also when ctx ends.
+func (s *Sender) attemptDue(ctx context.Context) error {
+	rd := newRound(s.concurrency())
+	defer rd.attempts.Wait()
+	for {
+		// One statement, which commits alone: it selects the due calls SKIP LOCKED and leases them.
+		p := s.Lease.Params(s.batch())
+		rows, err := s.Store.ClaimDueCalls(ctx, dbgen.ClaimDueCallsParams{OrgID: s.OrgID, Owner: p.Owner,
+			LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now, Lim: p.Limit})
+		if err != nil {
+			return fmt.Errorf("claim the due calls: %w", err)
+		}
+		slices.SortFunc(rows, func(a, b dbgen.ClaimDueCallsRow) int {
+			switch {
+			case a.Critical != b.Critical && a.Critical:
+				return -1
+			case a.Critical != b.Critical:
+				return 1
+			}
+			if c := a.NextAttemptAt.Compare(b.NextAttemptAt); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.ID, b.ID)
+		})
+		for _, r := range rows {
+			if err := s.start(ctx, rd, r); err != nil {
+				return fmt.Errorf("attempt the due calls: %w", err)
+			}
+		}
+		if len(rows) < int(s.batch()) {
+			return nil
+		}
+	}
+}
+
+// start takes a slot of the round rd for the claimed call r, waits until the gate of its gateway is down, prepares it,
+// and when it is due, ends it or sends it and records the outcome in a goroutine that holds the slot until then; a
+// failure is logged and the call is attempted again once its lease runs out. A call claimed again while its attempt
+// still runs — its lease ran out during a slow call — is left to that attempt. Its error is the end of ctx.
+func (s *Sender) start(ctx context.Context, rd *round, r dbgen.ClaimDueCallsRow) error {
+	select {
+	case rd.slots <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if !rd.begin(r.ID) {
+		<-rd.slots
+		return nil
+	}
+	g := rd.gate(r.ConnectionID)
+	// What the round recorded before this preparation, the preparation reads from the database.
+	breaks, _, err := g.wait(ctx)
+	if err != nil {
+		rd.end(r.ID)
+		return err
+	}
+	c, err := s.prepare(ctx, r)
+	if err != nil || c == nil {
+		rd.end(r.ID)
+		s.failed(ctx, r.PublicID, err)
+		return nil
+	}
+	c.gate, c.breaks = g, breaks
+	rd.attempts.Go(func() {
+		defer rd.end(r.ID)
+		s.failed(ctx, r.PublicID, s.finish(ctx, c))
+	})
+	return nil
+}
+
+// round is what the attempts of one Round share: a slot for each call attempted at once, the calls whose attempt
+// runs, and the gate of each gateway.
+type round struct {
+	slots    chan struct{}
+	attempts sync.WaitGroup
+	mu       sync.Mutex
+	running  map[int64]bool
+	gates    map[int64]*gate
+}
+
+func newRound(concurrency int) *round {
+	return &round{slots: make(chan struct{}, concurrency), running: map[int64]bool{}, gates: map[int64]*gate{}}
+}
+
+// begin marks the call id as attempted; false when its attempt runs already.
+func (rd *round) begin(id int64) bool {
+	rd.mu.Lock()
+	defer rd.mu.Unlock()
+	if rd.running[id] {
+		return false
+	}
+	rd.running[id] = true
+	return true
+}
+
+// end marks the attempt of the call id as ended and frees its slot.
+func (rd *round) end(id int64) {
+	rd.mu.Lock()
+	delete(rd.running, id)
+	rd.mu.Unlock()
+	<-rd.slots
+}
+
+// gate is the gate of the gateway of the Connection connection in this round.
+func (rd *round) gate(connection int64) *gate {
+	rd.mu.Lock()
+	defer rd.mu.Unlock()
+	g := rd.gates[connection]
+	if g == nil {
+		g = &gate{}
+		rd.gates[connection] = g
+	}
+	return g
+}
+
+// gate keeps the calls of one round through one gateway in step with what the gateway's answers to the round's other
+// calls record, as when the round attempted its calls one after another. An answer that may hold the gateway's limiter
+// (a RetryAfter) or make the gateway Broken (Fatal or Transient) raises the gate until its outcome is recorded;
+// meanwhile no call through the gateway is prepared or made, so that a preparation after it reads the hold or the
+// Broken state from the database. The gate counts the Broken states the round recorded and keeps the end of the
+// latest hold, so that a call prepared before either is not made after it. A gate is never held across a
+// transaction or a call of the gateway; a nil gate, outside a round, lets every call through.
+type gate struct {
+	mu      sync.Mutex
+	raised  int
+	lowered chan struct{}
+	breaks  int
+	// heldUntil is the end of the latest hold of the gateway's limiter the round recorded (business clock).
+	heldUntil time.Time
+}
+
+// wait waits until g is down and returns how many Broken states and the end of the latest hold the round recorded;
+// its error is the end of ctx, which stops a call at the gate even when the gate is down.
+func (g *gate) wait(ctx context.Context) (breaks int, heldUntil time.Time, err error) {
+	if g == nil {
+		return 0, time.Time{}, nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, time.Time{}, err
+		}
+		if g.raised == 0 {
+			return g.breaks, g.heldUntil, nil
+		}
+		lowered := g.lowered
+		g.mu.Unlock()
+		select {
+		case <-lowered:
+		case <-ctx.Done():
+		}
+		g.mu.Lock()
+	}
+}
+
+// raise raises g while an answer is recorded; the function it returns lowers it again, once.
+func (g *gate) raise() func() {
+	if g == nil {
+		return func() {}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.raised == 0 {
+		g.lowered = make(chan struct{})
+	}
+	g.raised++
+	return sync.OnceFunc(func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.raised--
+		if g.raised == 0 {
+			close(g.lowered)
+		}
+	})
+}
+
+// hold records that the gateway's limiter is held until until, once committed.
+func (g *gate) hold(until time.Time) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.heldUntil = later(g.heldUntil, until)
+}
+
+// broke records that the gateway is Broken, once committed.
+func (g *gate) broke() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.breaks++
+}
+
+// mayStop reports an answer whose outcome may hold the gateway's limiter or make the gateway Broken (record).
+func mayStop(out delivery.Outcome) bool {
+	return out.Kind == delivery.OutcomeRetryAfter || out.Kind == delivery.OutcomeTransient ||
+		(out.Kind == delivery.OutcomeFatal && !out.NotSent)
+}
+
 // call is a claimed call that its preparation found due: the row as it was read under its lease, the Alert Groups it
 // is about, and what its attempt sends — its contact, and its text and language — or, when it cannot be sent, the
 // reason it ends Not delivered with: the gateway was deleted or is no Notification gateway any more, or the person
@@ -269,6 +477,10 @@ type call struct {
 	dropped bool
 	// firstAttempt is when the call made its first attempt, this one for a call that waited (business clock).
 	firstAttempt time.Time
+	// gate is the gate of the call's gateway in the round that attempts it, nil outside a round, and breaks how many
+	// Broken states of the gateway the round had recorded when the call was prepared.
+	gate   *gate
+	breaks int
 }
 
 // outcome is how c ended for its Pages: accepted, Not delivered with reason, or dropped without a reason.
@@ -287,21 +499,22 @@ func (c *call) outcome(accepted bool, reason string) groups.CallOutcome {
 // key is the Idempotency-Key of the call, the same for each of its attempts.
 func (c call) key() string { return "calls/" + c.row.PublicID }
 
-// attempt prepares the claimed call r and, when it is due, sends it and records the outcome; a failure is logged and
-// the call is attempted again once its lease runs out.
-func (s *Sender) attempt(ctx context.Context, r dbgen.ClaimDueCallsRow) {
-	c, err := s.prepare(ctx, r)
+// finish ends the prepared call c as its preparation found it — dropped, or Not delivered unsent — or sends it and
+// records the outcome.
+func (s *Sender) finish(ctx context.Context, c *call) error {
 	switch {
-	case err != nil, c == nil:
 	case c.dropped:
-		err = s.drop(ctx, c)
+		return s.drop(ctx, c)
 	case c.unsent != "":
-		err = s.notDelivered(ctx, c, c.unsent, 0, delivery.Outcome{})
-	default:
-		err = s.send(ctx, c)
+		return s.notDelivered(ctx, c, c.unsent, 0, delivery.Outcome{})
 	}
+	return s.send(ctx, c)
+}
+
+// failed logs err, the failure of the attempt of the call publicID, unless ctx ended.
+func (s *Sender) failed(ctx context.Context, publicID string, err error) {
 	if err != nil && ctx.Err() == nil {
-		s.Log.Log(ctx, logging.GatewayCallFailed, logging.F("call", r.PublicID), logging.F("error", err.Error()))
+		s.Log.Log(ctx, logging.GatewayCallFailed, logging.F("call", publicID), logging.F("error", err.Error()))
 	}
 }
 
@@ -563,6 +776,8 @@ func (s *Sender) sign(publicID string) (data, keyID string, err error) {
 // send makes the attempt of the call c — its text and its action data, signed at its first attempt and the same on
 // every retry, under its Idempotency-Key — in the delivery client class, counts it, and records its outcome. A call
 // that a replica of an earlier version started has no stored data, and its attempt is signed with the active key.
+// The attempt waits for the gate of the gateway first (gated), and an answer that may hold the gateway's limiter or
+// make it Broken raises the gate until its outcome is recorded.
 func (s *Sender) send(ctx context.Context, c *call) error {
 	data := c.data
 	if data == "" {
@@ -571,10 +786,17 @@ func (s *Sender) send(ctx context.Context, c *call) error {
 			return err
 		}
 	}
+	if stopped, err := s.gated(ctx, c); stopped || err != nil {
+		return err
+	}
 	out := s.Gateway.Notify(ctx, delivery.Call{Class: outbound.ClassDelivery,
 		Key: c.key()}, delivery.Notification{Connection: c.row.ConnectionID, Contact: c.contact, Text: c.text,
 		Language: c.language, Action: &delivery.NotificationAction{Data: data,
 			Label: messages.T(c.language, "gatewayCall.action", nil)}})
+	if mayStop(out) {
+		lower := c.gate.raise()
+		defer lower()
+	}
 	outcome := callOutcome(out.Kind)
 	metrics.GatewayCalls.With(c.row.ConnectionPublicID, outcome).Inc()
 	s.Log.Log(ctx, logging.GatewayCallAttempted, logging.F("call", c.row.PublicID),
@@ -582,6 +804,28 @@ func (s *Sender) send(ctx context.Context, c *call) error {
 		logging.F("outcome", outcome), logging.F("replayed", out.Replayed))
 	// The call was made: the end of ctx must not lose its outcome.
 	return s.record(context.WithoutCancel(ctx), c, out)
+}
+
+// gated waits until the gate of the gateway of c is down, and reports whether c stops there, unsent: another call of
+// the round made the gateway Broken since c was prepared, and c ends Not delivered with gateway_broken, as its
+// preparation would have ended it (C-30.FR-8); or another call held the gateway's limiter until a time still to come,
+// and c waits until then plus SenderTokenMargin, which is no attempt, as it would have waited for a token. Its error is
+// the end of ctx, which leaves c to be attempted again once its lease runs out, or a failed end.
+func (s *Sender) gated(ctx context.Context, c *call) (bool, error) {
+	breaks, heldUntil, err := c.gate.wait(ctx)
+	switch {
+	case err != nil:
+		return true, err
+	case breaks > c.breaks:
+		return true, s.notDelivered(ctx, c, groups.PageGatewayBroken, 0, delivery.Outcome{})
+	case heldUntil.After(s.Lease.Clocks.Business.Now()):
+		if _, err := s.Store.RescheduleCall(ctx, dbgen.RescheduleCallParams{OrgID: s.OrgID, ID: c.row.ID,
+			Owner: s.Lease.Owner, At: heldUntil.Add(SenderTokenMargin)}); err != nil {
+			return true, fmt.Errorf("reschedule the call %s: %w", c.row.PublicID, err)
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // callOutcome is the outcome label of muster_gateway_calls_total of an answer: accepted, a replayed answer included,
@@ -599,7 +843,8 @@ func callOutcome(k delivery.OutcomeKind) string {
 }
 
 // record records the outcome out of an attempt of c (C-11.FR-8 applied to calls): ok, replayed or not, ends it
-// accepted; a RetryAfter waits exactly as asked, holds the gateway's limiter and counts no attempt, but its time counts
+// accepted; a RetryAfter waits exactly as asked, holds the gateway's limiter — on the gate of the round too, once
+// committed — and counts no attempt, but its time counts
 // toward the time budget of delivery.transient_budget, after which it ends Not delivered with call_budget_used; a
 // Transient one is an attempt of delivery.transient_budget, retried after delivery.transient_backoff and Not delivered
 // with call_budget_used once the budget is used; a Fatal answer — the gateway refused the call or its bridge — and an
@@ -622,15 +867,22 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 				s.notDeliveredAt(ctx, c, groups.PageCallBudgetUsed, 0, out, now))
 		}
 		until := now.Add(out.RetryAfter)
-		return s.Store.InCallTx(ctx, func(tx DBTX, q CallQueries) error {
+		held := false
+		err := s.Store.InCallTx(ctx, func(tx DBTX, q CallQueries) error {
+			held = false
 			n, err := q.RescheduleCall(ctx, dbgen.RescheduleCallParams{OrgID: s.OrgID, ID: c.row.ID,
 				Owner: s.Lease.Owner, At: until.Add(SenderTokenMargin), ErrorClass: nonEmpty(string(out.Kind)),
 				Error: nonEmpty(string(out.Error)), FailedAt: pgtype.Timestamptz{Time: now, Valid: true}})
 			if err != nil || n == 0 {
 				return err
 			}
+			held = true
 			return s.limiter().HoldConnection(ctx, tx, s.OrgID, c.row.ConnectionID, until)
 		})
+		if err == nil && held {
+			c.gate.hold(until)
+		}
+		return err
 	case delivery.OutcomeTransient:
 		attempts := c.row.Attempts + 1
 		first := c.row.FirstFailedAt
@@ -702,6 +954,7 @@ func (s *Sender) accepted(ctx context.Context, c *call, out delivery.Outcome, no
 // breaks nothing when the gateway's last Broken state ended at or after ended, as an end that a probe or a check made
 // while this Break waited for the gateway's lock supersedes the failure. A crash between the end and the Break leaves
 // the call ended without the state, which the Leader's reconciliation of the Broken state (Reconcile) makes up for.
+// A gateway Broken once committed is recorded on the gate of the round, so that no call of it prepared before is made.
 func (s *Sender) breakAfter(ctx context.Context, c *call, cause string, out delivery.Outcome, ended time.Time,
 	err error) error {
 	if err != nil || s.Broken == nil {
@@ -711,8 +964,12 @@ func (s *Sender) breakAfter(ctx context.Context, c *call, cause string, out deli
 	if cause == causeUnavailable {
 		reason = repeatedPrefix + reason
 	}
-	return s.Broken.breakAfter(ctx, brokenGateway{id: c.row.ConnectionID, publicID: c.row.ConnectionPublicID}, cause,
-		reason, pgtype.Timestamptz{Time: ended, Valid: true})
+	broken, err := s.Broken.breakAfter(ctx, brokenGateway{id: c.row.ConnectionID, publicID: c.row.ConnectionPublicID},
+		cause, reason, pgtype.Timestamptz{Time: ended, Valid: true})
+	if broken {
+		c.gate.broke()
+	}
+	return err
 }
 
 // notDelivered ends the call c Not delivered with reason, counting attempted attempts, and records page_not_delivered
