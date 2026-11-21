@@ -106,7 +106,7 @@ decided by the maintainer in its review (#673).
   with a link to Escalation chains for those who may change them; no title with more than one Alert Group — "No alert
   started more than one Alert Group in this period.". A figure without data shows "—", never 0 minutes.
 - **C-40.FR-10** Each part answers within 1 second at the 95th percentile for the last 7 days and within 3 seconds for
-  90 days, on the data of the load test extended to 500,000 summary rows and 50,000 Pages (_provisional_, P-93). Every
+  90 days, on the data of the load test extended to 500,000 summary rows and 50,000 Pages (_provisional_, P-96). Every
   read starts from the Alert Groups that started in the period, through the index the statistics already use
   (`alert_groups_started_idx`), filters by `org_id` (lint 1) and reads summary rows, never the Alerts inside Alert
   Groups; "Who was Paged" reads the Pages of those Alert Groups and their people. The story measures each plan on that
@@ -171,7 +171,7 @@ Checked with the fake Alertmanager, a fake gateway and the development clock, th
   the counts of open Alert Groups again and none of the other parts.
 - **C-40.AC-8** In a real browser 360 CSS pixels wide the Home page with the dashboard has no horizontal scrolling of
   the page, in English and in Russian.
-- **C-40.AC-9** On the data of P-93, each operation answers within its budget for 7 and for 90 days, and its plan
+- **C-40.AC-9** On the data of P-96, each operation answers within its budget for 7 and for 90 days, and its plan
   starts from `alert_groups_started_idx`.
 
 ## Related ADRs
