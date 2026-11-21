@@ -45,7 +45,7 @@ acceptance:
   - "[C-33.FR-11] The mark changes nothing else: a Route marked `terraform` routes, delivers and is reordered as before, and an update through the web session with its CSRF token succeeds on a marked Team (`TestManagedBy`)."
 verify: "make ci && make e2e-go"
 operator_attention: false
-issue: null
+issue: 697
 ---
 
 # S-179. The API specification under MIT, and the managed_by mark on Integrations, Routes, Teams, Schedules, Escalation chains, Lookup tables and Link rules (BE)

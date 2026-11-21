@@ -88,6 +88,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   interactive path. Events are handled once per id (C-22.FR-11); one older than `bridge.event_max_age` is dropped
   unanswered and logged as `bridge_acknowledgement_dropped`, so that an event a gateway sends again after
   `bridge.event_dedup_window` never makes the person an Owner again.
+  _Revised for L2 (2026-11-21):_ an acknowledgement for an attached Alert Group is answered as one for an Alert Group
+  that someone owns (C-37.FR-9).
 - **C-30.FR-7** A call the person does not acknowledge lets the Escalation chain and the Notification rules go on. A
   call that ends Not delivered — refused, an unknown answer, or the retry budget used up — records the lifecycle event
   `page_not_delivered` naming the person and the gateway.

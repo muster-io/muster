@@ -58,7 +58,7 @@ acceptance:
   - "[C-33.FR-20] `goreleaser check` passes on `.goreleaser.yml`, which builds the platforms of the Contracts into `terraform-provider-muster_<version>_<os>_<arch>.zip` with `terraform-provider-muster_<version>_SHA256SUMS`, its detached GPG signature and `terraform-provider-muster_<version>_manifest.json` from `terraform-registry-manifest.json` (protocol version 6.0); `goreleaser release --snapshot --clean --skip=sign` builds them in CI; release-please keeps a release pull request with `0.x` versions, and its tag starts `release.yml`."
 verify: "make ci"
 operator_attention: true
-issue: null
+issue: 700
 ---
 
 # S-182. The Terraform provider's repository, its generated client, the provider configuration with the version check, CI with acceptance tests against muster dev, and the release pipeline

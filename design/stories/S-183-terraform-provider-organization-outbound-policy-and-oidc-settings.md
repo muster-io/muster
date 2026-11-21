@@ -33,7 +33,7 @@ acceptance:
   - "[C-33.FR-5] The OIDC settings take the Role mapping as `group_mappings`, each entry with its `claim`, `group` and `role`, in order; an unknown Role is refused by the server with a diagnostic at that entry's `role` (`TestAccOidcSettings_mapping`)."
 verify: "make ci testacc"
 operator_attention: false
-issue: null
+issue: 701
 ---
 
 # S-183. The Terraform resources of the objects that exist once: the Organization's settings with the default Notification rules, the Outbound address policy and the OIDC settings with the Role mapping (BE)

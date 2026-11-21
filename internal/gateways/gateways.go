@@ -4,10 +4,11 @@
 // Package gateways holds the Notification gateways of C-30: the Bridge Connections whose stored info declares the
 // role gateway, and the contacts of people at them (C-30.FR-3). A person adds a contact from their own web session and
 // confirms it with a code that the gateway delivers through sendNotification on the interactive path; the code is
-// hashed at rest, compared in constant time and only in the session that asked for it (ADR-0013), within the limits
-// of gateway.contact_code and gateway.contact_code_requests on the business clock. An Admin sees and removes the
-// contacts of any User, never sets one. A contact is personal data, not a Secret: it is stored in plain text, and
-// masked wherever it would be logged. Deleting a User erases their contacts and codes (C-03.FR-13).
+// kept at rest as its HMAC with a Keyring sub-key, compared in constant time and only in the session that asked for
+// it (ADR-0013), within the limits of gateway.contact_code and gateway.contact_code_requests on the business clock. An
+// Admin sees and removes the contacts of any User, never sets one. A contact is personal data, not a Secret: it is
+// stored in plain text, and masked wherever it would be logged. Deleting a User erases their contacts and codes
+// (C-03.FR-13).
 package gateways
 
 import (
@@ -25,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
 )
@@ -106,10 +108,21 @@ type Path interface {
 	Do(ctx context.Context, s delivery.Subject, op delivery.Op) (delivery.Outcome, error)
 }
 
+// CodeKeys sign the codes of contacts and check them with every key they hold; *keyring.Keyring implements them.
+type CodeKeys interface {
+	Sign(p keyring.Purpose, msg []byte) (mac []byte, keyID string, err error)
+	Verify(p keyring.Purpose, keyID string, msg, mac []byte) (bool, error)
+	KeyIDs() []string
+}
+
+var _ CodeKeys = (*keyring.Keyring)(nil)
+
 // Config is what the Service needs.
 type Config struct {
 	OrgID int64
 	Store Store
+	// Keys sign the codes as they are stored: the Keyring.
+	Keys  CodeKeys
 	Audit *audit.Writer
 	// Business is the business clock: the times of contacts and codes, the expiry of a code and the request limits.
 	Business clock.Clock

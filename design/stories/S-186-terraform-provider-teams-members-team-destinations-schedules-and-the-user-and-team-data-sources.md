@@ -43,7 +43,7 @@ acceptance:
   - "[C-33.FR-9, C-33.AC-7] `muster_team` and `muster_schedule` import by `public_id`, `muster_team_destinations` by the Team's, and `muster_team_member` by `<team id>/<user id>`; each plans without changes after its import (`TestAcc*_import`)."
 verify: "make ci testacc"
 operator_attention: false
-issue: null
+issue: 704
 ---
 
 # S-186. The Terraform resources of Teams, Team members, a Team's Destinations and Schedules with their Rotation layers, and the data sources muster_user and muster_team (BE)

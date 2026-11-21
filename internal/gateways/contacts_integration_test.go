@@ -8,6 +8,7 @@ package gateways_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"os"
 	"regexp"
@@ -23,6 +24,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/gateways"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 )
@@ -58,6 +60,7 @@ type env struct {
 	clock  *clock.Manual
 	gw     *sender
 	svc    *gateways.Service
+	keys   *keyring.Keyring
 	people map[string]gateways.Requester
 }
 
@@ -92,18 +95,22 @@ func setup(t *testing.T, s dbtest.Server) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	keys := openKeys(t, d, 'a', 'b')
+	// A real ciphertext, which a key rotation re-encrypts.
+	token, keyID, err := keys.Encrypt("connections.bot_token", []byte("token"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for id, roles := range map[string]string{"CN0000000000G1": `["gateway"]`, "CN0000000000B1": `["messenger"]`} {
 		exec(`INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
 			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, bridge_info, created_at, updated_at)
-			VALUES ($1, $2, 'bridge', $2, 'http://gw', 'poll', '\x00', 'k1', $3, 1, 1, jsonb_build_object('roles', $4::jsonb), $3,
-			$3)`, org.ID, id, t0, roles)
+			VALUES ($1, $2, 'bridge', $2, 'http://gw', 'poll', $5, $6, $3, 1, 1, jsonb_build_object('roles', $4::jsonb), $3,
+			$3)`, org.ID, id, t0, roles, token, keyID)
 	}
 	c := clock.NewManual(t0)
 	gw := &sender{}
-	e := &env{d: d, orgID: org.ID, clock: c, gw: gw, people: map[string]gateways.Requester{},
-		svc: gateways.New(gateways.Config{OrgID: org.ID, Store: gateways.NewStore(d.Pool),
-			Audit: audit.NewWriter(logger, c), Business: c, Log: logger, Gateway: gw,
-			Path: deliverytest.Unlimited(org.ID, clock.Clocks{Business: c, Real: clock.Real{}})})}
+	e := &env{d: d, orgID: org.ID, clock: c, gw: gw, keys: keys, people: map[string]gateways.Requester{}}
+	e.svc = e.service(t, keys)
 	for i, login := range []string{"petr", "olga", "ivan", "anna", "lev"} {
 		pub := "SR00000000000" + string(rune('A'+i))
 		var uid int64
@@ -129,6 +136,84 @@ func setup(t *testing.T, s dbtest.Server) *env {
 		}
 	}
 	return e
+}
+
+// openKeys is the Keyring of master keys of the bytes fills over the database d: on a new database the first key
+// becomes active, otherwise the key that keyring_state names.
+func openKeys(t *testing.T, d *db.DB, fills ...byte) *keyring.Keyring {
+	t.Helper()
+	var keys [][]byte
+	for _, f := range fills {
+		keys = append(keys, bytes.Repeat([]byte{f}, keyring.KeySize))
+	}
+	k, err := keyring.New(keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := k.Establish(t.Context(), keyring.NewStore(d.Pool), t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Open(t.Context(), logging.New(&bytes.Buffer{}, logging.LevelInfo), st); err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// service is the Service of the Organization with the Keyring keys.
+func (e *env) service(t *testing.T, keys *keyring.Keyring) *gateways.Service {
+	t.Helper()
+	logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
+	return gateways.New(gateways.Config{OrgID: e.orgID, Store: gateways.NewStore(e.d.Pool), Keys: keys,
+		Audit: audit.NewWriter(logger, e.clock), Business: e.clock, Log: logger, Gateway: e.gw,
+		Path: deliverytest.Unlimited(e.orgID, clock.Clocks{Business: e.clock, Real: clock.Real{}})})
+}
+
+// TestIntegrationSignedCodes: a code is stored as its HMAC with the Keyring, not as the SHA-256 of "public_id:code";
+// after `muster secrets rotate-key` made another key active within the code's gateway.contact_code it still confirms,
+// and a code stored as that SHA-256 before the upgrade confirms too.
+func TestIntegrationSignedCodes(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		petr, olga := e.people["petr"], e.people["olga"]
+		a, err := e.svc.Create(ctx, petr, "CN0000000000G1", "+10000000001")
+		if err != nil {
+			t.Fatal(err)
+		}
+		code := e.gw.last()
+		var cliLog bytes.Buffer
+		logger := logging.New(&cliLog, logging.LevelInfo)
+		keys := openKeys(t, e.d, 'a', 'b')
+		b := keys.KeyIDs()[1]
+		if _, err := (keyring.Rotation{Store: keyring.NewRotationStore(e.d.Pool), Keys: keys,
+			Audit: audit.NewWriter(logger, e.clock), Log: logger, Business: e.clock,
+			Real: clock.Real{}}).Activate(ctx, b, "ops"); err != nil {
+			t.Fatal(err)
+		}
+		rotated := openKeys(t, e.d, 'a', 'b')
+		if rotated.ActiveKeyID() != b {
+			t.Fatalf("active %s, want %s", rotated.ActiveKeyID(), b)
+		}
+		svc := e.service(t, rotated)
+		e.clock.Advance(gateways.CodeTTL - time.Second)
+		if got, err := svc.Confirm(ctx, petr, a.PublicID, code); err != nil || !got.Confirmed() {
+			t.Errorf("the code after the rotation: %+v, %v", got, err)
+		}
+		o, err := svc.Create(ctx, olga, "CN0000000000G1", "+10000000002")
+		if err != nil {
+			t.Fatal(err)
+		}
+		code = e.gw.last()
+		plain := sha256.Sum256([]byte(o.PublicID + ":" + code))
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE gateway_contact_codes SET code_hash = $1 WHERE org_id = $2
+			AND user_id = $3`, plain[:], e.orgID, olga.UserID); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := svc.Confirm(ctx, olga, o.PublicID, code); err != nil || !got.Confirmed() {
+			t.Errorf("a code stored before the upgrade: %+v, %v", got, err)
+		}
+	})
 }
 
 func (e *env) count(t *testing.T, sql string, args ...any) int {
@@ -160,9 +245,10 @@ func TestIntegrationReplacement(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n := e.count(t, `SELECT count(*) FROM gateway_contact_codes WHERE code_hash = sha256($1::bytea)
-			AND position($2::bytea in code_hash) = 0`, []byte(a.PublicID+":"+e.gw.last()), []byte(e.gw.last())); n != 1 {
-			t.Errorf("%d codes stored as the hash of the contact and the code", n)
+		if n := e.count(t, `SELECT count(*) FROM gateway_contact_codes WHERE code_hash <> sha256($1::bytea)
+			AND octet_length(code_hash) = 32 AND position($2::bytea in code_hash) = 0`,
+			[]byte(a.PublicID+":"+e.gw.last()), []byte(e.gw.last())); n != 1 {
+			t.Errorf("%d codes stored as an HMAC of the contact and the code", n)
 		}
 		if _, err := e.svc.Confirm(ctx, petr, a.PublicID, e.gw.last()); err != nil {
 			t.Fatal(err)
@@ -479,14 +565,15 @@ func TestIntegrationParallelSends(t *testing.T) {
 			t.Errorf("%d codes left valid", n)
 		}
 		var newest string
-		var newestID int64
-		if err := e.d.Pool.QueryRow(ctx, `SELECT max(id) FROM gateway_contact_codes`).Scan(&newestID); err != nil {
+		var stored []byte
+		if err := e.d.Pool.QueryRow(ctx, `SELECT code_hash FROM gateway_contact_codes ORDER BY id DESC LIMIT 1`).
+			Scan(&stored); err != nil {
 			t.Fatal(err)
 		}
 		e.gw.mu.Lock()
 		for _, c := range e.gw.codes {
-			if e.count(t, `SELECT count(*) FROM gateway_contact_codes WHERE id = $1 AND code_hash = sha256($2::bytea)`,
-				newestID, []byte(a.PublicID+":"+c)) == 1 {
+			if ok, err := e.keys.Verify(keyring.PurposeGatewayContactCode, e.keys.ActiveKeyID(),
+				[]byte(a.PublicID+":"+c), stored); err == nil && ok {
 				newest = c
 			}
 		}
