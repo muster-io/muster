@@ -39,6 +39,10 @@ export const listDestinationsResponseItemsItemOneOneMentionEntriesMax = 100;
 export const listDestinationsResponseItemsItemOneOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const listDestinationsResponseItemsItemOneOneManagedByMax = 32;
+
+
+export const listDestinationsResponseItemsItemOneOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listDestinationsResponseItemsItemOneTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemOneTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemOneTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -77,6 +81,10 @@ export const listDestinationsResponseItemsItemTwoOneMentionEntriesMax = 100;
 export const listDestinationsResponseItemsItemTwoOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const listDestinationsResponseItemsItemTwoOneManagedByMax = 32;
+
+
+export const listDestinationsResponseItemsItemTwoOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listDestinationsResponseItemsItemTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemTwoTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemTwoTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -119,6 +127,10 @@ export const listDestinationsResponseItemsItemThreeOneMentionEntriesMax = 100;
 export const listDestinationsResponseItemsItemThreeOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const listDestinationsResponseItemsItemThreeOneManagedByMax = 32;
+
+
+export const listDestinationsResponseItemsItemThreeOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listDestinationsResponseItemsItemThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemThreeTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemThreeTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -157,6 +169,10 @@ export const listDestinationsResponseItemsItemFourOneMentionEntriesMax = 100;
 export const listDestinationsResponseItemsItemFourOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const listDestinationsResponseItemsItemFourOneManagedByMax = 32;
+
+
+export const listDestinationsResponseItemsItemFourOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listDestinationsResponseItemsItemFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemFourTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemFourTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -195,6 +211,10 @@ export const listDestinationsResponseItemsItemFiveOneMentionEntriesMax = 100;
 export const listDestinationsResponseItemsItemFiveOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const listDestinationsResponseItemsItemFiveOneManagedByMax = 32;
+
+
+export const listDestinationsResponseItemsItemFiveOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listDestinationsResponseItemsItemFiveTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemFiveTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listDestinationsResponseItemsItemFiveTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -281,7 +301,8 @@ export const ListDestinationsResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(listDestinationsResponseItemsItemOneOneManagedByMax).regex(listDestinationsResponseItemsItemOneOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemOneTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -495,7 +516,8 @@ export const ListDestinationsResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(listDestinationsResponseItemsItemTwoOneManagedByMax).regex(listDestinationsResponseItemsItemTwoOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Telegram Destination is configured by its channel only; Muster finds the channel\'s discussion group itself (see `TelegramDestination.discussion_group_id`).').and(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemTwoTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -763,7 +785,8 @@ export const ListDestinationsResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(listDestinationsResponseItemsItemThreeOneManagedByMax).regex(listDestinationsResponseItemsItemThreeOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -987,7 +1010,8 @@ export const ListDestinationsResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.')
+}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.'),
+  "managed_by": zod.string().max(listDestinationsResponseItemsItemFourOneManagedByMax).regex(listDestinationsResponseItemsItemFourOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Bridge Destination (C-22.FR-3) is a channel of the bridge\'s messenger, named by its id. Saving it runs the bridge\'s `checkChannel`, which posts nothing, and keeps the channel\'s name the bridge answers.').and(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -1200,7 +1224,8 @@ export const ListDestinationsResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.')
+}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'),
+  "managed_by": zod.string().max(listDestinationsResponseItemsItemFiveOneManagedByMax).regex(listDestinationsResponseItemsItemFiveOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection\'s workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel\'s name.').and(zod.object({
   "id": zod.string().regex(listDestinationsResponseItemsItemFiveTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -1377,6 +1402,10 @@ export const createDestinationBodyOneMentionEntriesMax = 100;
 export const createDestinationBodyOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationBodyOneManagedByMax = 32;
+
+
+export const createDestinationBodyOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 export const createDestinationBodyTwoConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationBodyTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1393,6 +1422,10 @@ export const createDestinationBodyTwoMentionEntriesMax = 100;
 export const createDestinationBodyTwoOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationBodyTwoManagedByMax = 32;
+
+
+export const createDestinationBodyTwoManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 
@@ -1413,6 +1446,10 @@ export const createDestinationBodyThreeOneMentionEntriesMax = 100;
 export const createDestinationBodyThreeOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationBodyThreeOneManagedByMax = 32;
+
+
+export const createDestinationBodyThreeOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 export const createDestinationBodyFourConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationBodyFourMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1429,6 +1466,10 @@ export const createDestinationBodyFourMentionEntriesMax = 100;
 export const createDestinationBodyFourOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationBodyFourManagedByMax = 32;
+
+
+export const createDestinationBodyFourManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 export const createDestinationBodyFiveConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationBodyFiveMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1445,6 +1486,10 @@ export const createDestinationBodyFiveMentionEntriesMax = 100;
 export const createDestinationBodyFiveOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationBodyFiveManagedByMax = 32;
+
+
+export const createDestinationBodyFiveManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const CreateDestinationBody = zod.union([zod.object({
@@ -1508,7 +1553,8 @@ export const CreateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(createDestinationBodyOneManagedByMax).regex(createDestinationBodyOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }),zod.object({
   "type": zod.enum(['telegram']),
   "name": zod.string().min(1),
@@ -1569,7 +1615,8 @@ export const CreateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(createDestinationBodyTwoManagedByMax).regex(createDestinationBodyTwoManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Telegram Destination is configured by its channel only; Muster finds the channel\'s discussion group itself (see `TelegramDestination.discussion_group_id`).'),zod.object({
   "type": zod.enum(['webhook']),
   "name": zod.string().min(1),
@@ -1682,7 +1729,8 @@ export const CreateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(createDestinationBodyThreeOneManagedByMax).regex(createDestinationBodyThreeOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -1753,7 +1801,8 @@ export const CreateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.')
+}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.'),
+  "managed_by": zod.string().max(createDestinationBodyFourManagedByMax).regex(createDestinationBodyFourManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Bridge Destination (C-22.FR-3) is a channel of the bridge\'s messenger, named by its id. Saving it runs the bridge\'s `checkChannel`, which posts nothing, and keeps the channel\'s name the bridge answers.'),zod.object({
   "type": zod.enum(['slack']),
   "name": zod.string().min(1),
@@ -1814,7 +1863,8 @@ export const CreateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.')
+}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'),
+  "managed_by": zod.string().max(createDestinationBodyFiveManagedByMax).regex(createDestinationBodyFiveManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection\'s workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel\'s name.')]).describe('A Destination as written; `type` selects the variant and cannot change on update. Routes and Teams attach it through their `destination_entries`.')
 
 
@@ -1833,6 +1883,10 @@ export const createDestinationResponseDestinationOneOneMentionEntriesMax = 100;
 export const createDestinationResponseDestinationOneOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationResponseDestinationOneOneManagedByMax = 32;
+
+
+export const createDestinationResponseDestinationOneOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createDestinationResponseDestinationOneTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationOneTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationOneTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1871,6 +1925,10 @@ export const createDestinationResponseDestinationTwoOneMentionEntriesMax = 100;
 export const createDestinationResponseDestinationTwoOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationResponseDestinationTwoOneManagedByMax = 32;
+
+
+export const createDestinationResponseDestinationTwoOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createDestinationResponseDestinationTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationTwoTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationTwoTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1913,6 +1971,10 @@ export const createDestinationResponseDestinationThreeOneMentionEntriesMax = 100
 export const createDestinationResponseDestinationThreeOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationResponseDestinationThreeOneManagedByMax = 32;
+
+
+export const createDestinationResponseDestinationThreeOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createDestinationResponseDestinationThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationThreeTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationThreeTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1951,6 +2013,10 @@ export const createDestinationResponseDestinationFourOneMentionEntriesMax = 100;
 export const createDestinationResponseDestinationFourOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationResponseDestinationFourOneManagedByMax = 32;
+
+
+export const createDestinationResponseDestinationFourOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createDestinationResponseDestinationFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationFourTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationFourTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1989,6 +2055,10 @@ export const createDestinationResponseDestinationFiveOneMentionEntriesMax = 100;
 export const createDestinationResponseDestinationFiveOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const createDestinationResponseDestinationFiveOneManagedByMax = 32;
+
+
+export const createDestinationResponseDestinationFiveOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createDestinationResponseDestinationFiveTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationFiveTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createDestinationResponseDestinationFiveTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -2075,7 +2145,8 @@ export const CreateDestinationResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(createDestinationResponseDestinationOneOneManagedByMax).regex(createDestinationResponseDestinationOneOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationOneTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -2289,7 +2360,8 @@ export const CreateDestinationResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(createDestinationResponseDestinationTwoOneManagedByMax).regex(createDestinationResponseDestinationTwoOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Telegram Destination is configured by its channel only; Muster finds the channel\'s discussion group itself (see `TelegramDestination.discussion_group_id`).').and(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationTwoTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -2557,7 +2629,8 @@ export const CreateDestinationResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(createDestinationResponseDestinationThreeOneManagedByMax).regex(createDestinationResponseDestinationThreeOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -2781,7 +2854,8 @@ export const CreateDestinationResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.')
+}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.'),
+  "managed_by": zod.string().max(createDestinationResponseDestinationFourOneManagedByMax).regex(createDestinationResponseDestinationFourOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Bridge Destination (C-22.FR-3) is a channel of the bridge\'s messenger, named by its id. Saving it runs the bridge\'s `checkChannel`, which posts nothing, and keeps the channel\'s name the bridge answers.').and(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -2994,7 +3068,8 @@ export const CreateDestinationResponse = zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.')
+}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'),
+  "managed_by": zod.string().max(createDestinationResponseDestinationFiveOneManagedByMax).regex(createDestinationResponseDestinationFiveOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection\'s workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel\'s name.').and(zod.object({
   "id": zod.string().regex(createDestinationResponseDestinationFiveTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -3177,6 +3252,10 @@ export const getDestinationResponseOneOneMentionEntriesMax = 100;
 export const getDestinationResponseOneOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const getDestinationResponseOneOneManagedByMax = 32;
+
+
+export const getDestinationResponseOneOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getDestinationResponseOneTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseOneTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseOneTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -3215,6 +3294,10 @@ export const getDestinationResponseTwoOneMentionEntriesMax = 100;
 export const getDestinationResponseTwoOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const getDestinationResponseTwoOneManagedByMax = 32;
+
+
+export const getDestinationResponseTwoOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getDestinationResponseTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseTwoTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseTwoTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -3257,6 +3340,10 @@ export const getDestinationResponseThreeOneMentionEntriesMax = 100;
 export const getDestinationResponseThreeOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const getDestinationResponseThreeOneManagedByMax = 32;
+
+
+export const getDestinationResponseThreeOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getDestinationResponseThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseThreeTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseThreeTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -3295,6 +3382,10 @@ export const getDestinationResponseFourOneMentionEntriesMax = 100;
 export const getDestinationResponseFourOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const getDestinationResponseFourOneManagedByMax = 32;
+
+
+export const getDestinationResponseFourOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getDestinationResponseFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseFourTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseFourTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -3333,6 +3424,10 @@ export const getDestinationResponseFiveOneMentionEntriesMax = 100;
 export const getDestinationResponseFiveOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const getDestinationResponseFiveOneManagedByMax = 32;
+
+
+export const getDestinationResponseFiveOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getDestinationResponseFiveTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseFiveTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getDestinationResponseFiveTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -3418,7 +3513,8 @@ export const GetDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(getDestinationResponseOneOneManagedByMax).regex(getDestinationResponseOneOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(getDestinationResponseOneTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -3632,7 +3728,8 @@ export const GetDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(getDestinationResponseTwoOneManagedByMax).regex(getDestinationResponseTwoOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Telegram Destination is configured by its channel only; Muster finds the channel\'s discussion group itself (see `TelegramDestination.discussion_group_id`).').and(zod.object({
   "id": zod.string().regex(getDestinationResponseTwoTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -3900,7 +3997,8 @@ export const GetDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(getDestinationResponseThreeOneManagedByMax).regex(getDestinationResponseThreeOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(getDestinationResponseThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -4124,7 +4222,8 @@ export const GetDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.')
+}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.'),
+  "managed_by": zod.string().max(getDestinationResponseFourOneManagedByMax).regex(getDestinationResponseFourOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Bridge Destination (C-22.FR-3) is a channel of the bridge\'s messenger, named by its id. Saving it runs the bridge\'s `checkChannel`, which posts nothing, and keeps the channel\'s name the bridge answers.').and(zod.object({
   "id": zod.string().regex(getDestinationResponseFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -4337,7 +4436,8 @@ export const GetDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.')
+}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'),
+  "managed_by": zod.string().max(getDestinationResponseFiveOneManagedByMax).regex(getDestinationResponseFiveOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection\'s workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel\'s name.').and(zod.object({
   "id": zod.string().regex(getDestinationResponseFiveTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -4523,6 +4623,10 @@ export const updateDestinationBodyOneMentionEntriesMax = 100;
 export const updateDestinationBodyOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationBodyOneManagedByMax = 32;
+
+
+export const updateDestinationBodyOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 export const updateDestinationBodyTwoConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationBodyTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -4539,6 +4643,10 @@ export const updateDestinationBodyTwoMentionEntriesMax = 100;
 export const updateDestinationBodyTwoOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationBodyTwoManagedByMax = 32;
+
+
+export const updateDestinationBodyTwoManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 
@@ -4559,6 +4667,10 @@ export const updateDestinationBodyThreeOneMentionEntriesMax = 100;
 export const updateDestinationBodyThreeOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationBodyThreeOneManagedByMax = 32;
+
+
+export const updateDestinationBodyThreeOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 export const updateDestinationBodyFourConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationBodyFourMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -4575,6 +4687,10 @@ export const updateDestinationBodyFourMentionEntriesMax = 100;
 export const updateDestinationBodyFourOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationBodyFourManagedByMax = 32;
+
+
+export const updateDestinationBodyFourManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 export const updateDestinationBodyFiveConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationBodyFiveMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -4591,6 +4707,10 @@ export const updateDestinationBodyFiveMentionEntriesMax = 100;
 export const updateDestinationBodyFiveOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationBodyFiveManagedByMax = 32;
+
+
+export const updateDestinationBodyFiveManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateDestinationBody = zod.union([zod.object({
@@ -4654,7 +4774,8 @@ export const UpdateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(updateDestinationBodyOneManagedByMax).regex(updateDestinationBodyOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }),zod.object({
   "type": zod.enum(['telegram']),
   "name": zod.string().min(1),
@@ -4715,7 +4836,8 @@ export const UpdateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(updateDestinationBodyTwoManagedByMax).regex(updateDestinationBodyTwoManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Telegram Destination is configured by its channel only; Muster finds the channel\'s discussion group itself (see `TelegramDestination.discussion_group_id`).'),zod.object({
   "type": zod.enum(['webhook']),
   "name": zod.string().min(1),
@@ -4828,7 +4950,8 @@ export const UpdateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(updateDestinationBodyThreeOneManagedByMax).regex(updateDestinationBodyThreeOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -4899,7 +5022,8 @@ export const UpdateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.')
+}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.'),
+  "managed_by": zod.string().max(updateDestinationBodyFourManagedByMax).regex(updateDestinationBodyFourManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Bridge Destination (C-22.FR-3) is a channel of the bridge\'s messenger, named by its id. Saving it runs the bridge\'s `checkChannel`, which posts nothing, and keeps the channel\'s name the bridge answers.'),zod.object({
   "type": zod.enum(['slack']),
   "name": zod.string().min(1),
@@ -4960,7 +5084,8 @@ export const UpdateDestinationBody = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.')
+}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'),
+  "managed_by": zod.string().max(updateDestinationBodyFiveManagedByMax).regex(updateDestinationBodyFiveManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection\'s workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel\'s name.')]).describe('A Destination as written; `type` selects the variant and cannot change on update. Routes and Teams attach it through their `destination_entries`.')
 
 
@@ -4979,6 +5104,10 @@ export const updateDestinationResponseOneOneMentionEntriesMax = 100;
 export const updateDestinationResponseOneOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationResponseOneOneManagedByMax = 32;
+
+
+export const updateDestinationResponseOneOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateDestinationResponseOneTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseOneTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseOneTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -5017,6 +5146,10 @@ export const updateDestinationResponseTwoOneMentionEntriesMax = 100;
 export const updateDestinationResponseTwoOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationResponseTwoOneManagedByMax = 32;
+
+
+export const updateDestinationResponseTwoOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateDestinationResponseTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseTwoTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseTwoTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -5059,6 +5192,10 @@ export const updateDestinationResponseThreeOneMentionEntriesMax = 100;
 export const updateDestinationResponseThreeOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationResponseThreeOneManagedByMax = 32;
+
+
+export const updateDestinationResponseThreeOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateDestinationResponseThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseThreeTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseThreeTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -5097,6 +5234,10 @@ export const updateDestinationResponseFourOneMentionEntriesMax = 100;
 export const updateDestinationResponseFourOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationResponseFourOneManagedByMax = 32;
+
+
+export const updateDestinationResponseFourOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateDestinationResponseFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseFourTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseFourTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -5135,6 +5276,10 @@ export const updateDestinationResponseFiveOneMentionEntriesMax = 100;
 export const updateDestinationResponseFiveOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const updateDestinationResponseFiveOneManagedByMax = 32;
+
+
+export const updateDestinationResponseFiveOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateDestinationResponseFiveTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseFiveTwoMentionsNewAlertGroupUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateDestinationResponseFiveTwoMentionsNewAlertsUserIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -5220,7 +5365,8 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(updateDestinationResponseOneOneManagedByMax).regex(updateDestinationResponseOneOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(updateDestinationResponseOneTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -5434,7 +5580,8 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(updateDestinationResponseTwoOneManagedByMax).regex(updateDestinationResponseTwoOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Telegram Destination is configured by its channel only; Muster finds the channel\'s discussion group itself (see `TelegramDestination.discussion_group_id`).').and(zod.object({
   "id": zod.string().regex(updateDestinationResponseTwoTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -5702,7 +5849,8 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).describe('A rate limit of `limit` calls per `per_seconds`.'),
+  "managed_by": zod.string().max(updateDestinationResponseThreeOneManagedByMax).regex(updateDestinationResponseThreeOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).and(zod.object({
   "id": zod.string().regex(updateDestinationResponseThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -5926,7 +6074,8 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.')
+}).describe('`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection\'s `info.limits.send_per_second_per_channel` when its info has it.'),
+  "managed_by": zod.string().max(updateDestinationResponseFourOneManagedByMax).regex(updateDestinationResponseFourOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Bridge Destination (C-22.FR-3) is a channel of the bridge\'s messenger, named by its id. Saving it runs the bridge\'s `checkChannel`, which posts nothing, and keeps the channel\'s name the bridge answers.').and(zod.object({
   "id": zod.string().regex(updateDestinationResponseFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({
@@ -6139,7 +6288,8 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
-}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.')
+}).describe('`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'),
+  "managed_by": zod.string().max(updateDestinationResponseFiveOneManagedByMax).regex(updateDestinationResponseFiveOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 }).describe('A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection\'s workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel\'s name.').and(zod.object({
   "id": zod.string().regex(updateDestinationResponseFiveTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "mentions": zod.object({

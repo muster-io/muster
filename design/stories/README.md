@@ -12,7 +12,8 @@ the review checks the code against.
 
 Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24` and the [core of
 L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`, with the statistics by people and by Team that L2 adds to
-`C-09`, and the capabilities of L2 specified after its core, from `C-33`. Every functional requirement (`C-NN.FR-n`)
+`C-09`, and the capabilities of L2 specified after its core, from `C-33`, among them those of the 0.2.x patch
+releases: `C-34`, `C-36`, `C-37`, `C-38`, `C-39`, `C-40`, `C-41` and `C-42`. Every functional requirement (`C-NN.FR-n`)
 and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the [coverage table](coverage.md)
 shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices
 are in the [ADRs](../adr/README.md).
@@ -141,6 +142,9 @@ under `docs/assets/screenshots/` — are generated and checked in too, and never
   in the three stages of its adoption ([L2 §1.3](../prd/L2.md#13-adoption)): "L2 Teams" (C-25, C-26, the buttons of
   C-28 and C-29), "L2 On call" (C-27, Team mentions and the Mention entries) and "L2 Paging" (C-30 – C-32); beside
   them, "L2 Statistics" (S-174 to S-176, for C-09) needs only the Teams of Alert Groups and runs in parallel. The
+  capabilities specified after the core follow, the Terraform provider and then those of "L2 0.2.x", which start after
+  the tag of 0.2.0 and ship in its patch releases (C-34 from S-190, C-36 from S-197, C-37 from S-202, C-38 from
+  S-209, C-39 from S-220, C-40 from S-222, C-41 from S-228, C-42 from S-231). The
   architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
@@ -278,7 +282,8 @@ deployment, `docs` documentation. A story for another repository names it after 
 | L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
 | **L2 core** | 8 | | **68** |
 | L2 Terraform provider | C-33 | S-179 – S-189 | 11 |
-| **L2** | 9 | | **79** |
+| L2 0.2.x | C-34, C-36, C-37, C-38, C-39, C-40, C-41, C-42 | S-190 – S-239 | 50 |
+| **L2** | 17 | | **129** |
 
 ### Foundation
 
@@ -743,6 +748,151 @@ then Integrations and Connections, Destinations, Teams and Schedules, and last E
 complete example; S-188 writes the guides and publishes the first release in both Registries, with the maintainer's
 signing key and accounts. S-189, Muster's page on configuration as code, follows the release so that its links to the
 Registries resolve.
+
+### L2 0.2.x
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-190](S-190-maintenance-windows-their-permissions-limits-api-audit-log-and-the-timer-rows-of-start-and-end-be.md) | C-34 | Maintenance windows with their Permissions, limits, API, Audit log and the timer rows of their start and end (BE) | be | S-115, S-118, S-169 |
+| [S-191](S-191-which-alert-groups-a-window-keeps-back-the-rules-the-state-and-maintenance-started-and-ended-be.md) | C-34 | Which Alert Groups a window keeps back — the rules of the three objects, Urgent, the Internal alerts of an Integration, and maintenance_started and maintenance_ended (BE) | be | S-190, S-111, S-118, S-121, S-169 |
+| [S-192](S-192-nothing-new-delivered-for-a-kept-back-alert-group-and-its-publication-with-the-mark-at-the-end-be.md) | C-34 | Nothing new delivered for a kept-back Alert Group, and its publication with the mark when the window ends (BE) | be | S-191, S-121, S-140, S-169, S-155 |
+| [S-193](S-193-chains-notification-rules-calls-the-ack-timeout-and-reminders-while-an-alert-group-is-kept-back-be.md) | C-34 | Escalation chains, Notification rules, calls, the ack timeout and Reminders while an Alert Group is kept back (BE) | be | S-192, S-169, S-155, S-156, S-157, S-168 |
+| [S-194](S-194-the-maintenance-windows-sections-of-the-integration-route-and-team-pages-and-the-list-of-windows-fe.md) | C-34 | The Maintenance windows sections of the Integration, Route and Team pages, and the list of windows (FE) | fe | S-190, S-191, S-123, S-120, S-158 |
+| [S-195](S-195-the-kept-back-banner-badge-and-filter-on-the-alert-group-page-and-list-and-the-marks-in-the-timeline-fe.md) | C-34 | The "Kept back" banner, badge and filter on the Alert Group page and list, and the marks in the Timeline and delivery states (FE) | fe | S-194, S-192, S-159 |
+| [S-196](S-196-documentation-maintenance-windows.md) | C-34 | Documentation: Maintenance windows | docs | S-193, S-194, S-195 |
+| [S-197](S-197-the-loud-and-quiet-settings-of-a-route-with-their-profiles-migration-and-api-be.md) | C-36 | The Loud and Quiet settings of a Route with their profiles, migration and API (BE) | be | S-162, S-140, S-154 |
+| [S-198](S-198-the-loudness-of-the-rows-that-a-routes-loud-events-govern-be.md) | C-36 | The loudness of the rows that a Route's Loud events govern (BE) | be | S-197, S-140, S-121, S-169, S-155, S-044 |
+| [S-199](S-199-new-alerts-remove-the-acknowledgement-and-start-chains-and-the-ack-timeout-over-be.md) | C-36 | New Alerts remove the acknowledgement, and start Escalation chains and the ack timeout over (BE) | be | S-198, S-169, S-155, S-173, S-174 |
+| [S-200](S-200-the-loud-and-quiet-section-of-the-route-form-fe.md) | C-36 | The "Loud and Quiet" section of the Route form (FE) | fe | S-197, S-198, S-199, S-112, S-123, S-158 |
+| [S-201](S-201-documentation-loud-and-quiet-per-route-and-new-alerts-that-remove-the-acknowledgement.md) | C-36 | Documentation: Loud and Quiet per Route, and new Alerts that remove the acknowledgement | docs | S-198, S-199, S-200 |
+| [S-202](S-202-attach-and-detach-commands-with-their-permission-refusals-limit-state-and-audit-log-be.md) | C-37 | The Commands Attach and Detach with their Permission, refusals, limit, state and Audit log (BE) | be | S-198, S-169, S-168, S-174, S-173, S-197 |
+| [S-203](S-203-attached-alert-groups-follow-their-main-alert-group-and-the-attachment-ends-on-a-resolve-be.md) | C-37 | Attached Alert Groups follow their main Alert Group, and the attachment ends on a resolve (BE) | be | S-202, S-199, S-173, S-169, S-063 |
+| [S-204](S-204-chains-notification-rules-calls-the-ack-timeout-and-reminders-stop-on-attach-and-start-over-on-detach-be.md) | C-37 | Escalation chains, Notification rules, calls, the ack timeout and Reminders stop on Attach and start over on Detach (BE) | be | S-203, S-169, S-155, S-157, S-168 |
+| [S-205](S-205-the-line-of-an-attached-alert-group-and-of-its-main-alert-group-in-every-messenger-and-bridge-be.md) | C-37 | The line of an attached Alert Group and of its main Alert Group in every messenger and bridge, with the Thread replies and the answers to presses (BE) | be | S-203, S-126, S-168, S-113, S-081, S-075, S-100, S-067 |
+| [S-206](S-206-the-attached-filter-bulk-attach-the-alerts-of-attached-alert-groups-statistics-and-webhook-events-be.md) | C-37 | The attached filter and counts of the Alert Group list, bulk Attach, the Alerts of attached Alert Groups, statistics and webhook events (BE) | be | S-203, S-174, S-168, S-044 |
+| [S-207](S-207-the-attach-dialog-the-notice-and-section-on-the-alert-group-page-and-the-mark-filter-and-bulk-attach-of-the-list-fe.md) | C-37 | The Attach dialog, the notice and the section on the Alert Group page, and the mark, filter and bulk Attach of the list (FE) | fe | S-202, S-203, S-204, S-206, S-159, S-158 |
+| [S-208](S-208-documentation-attach-and-detach.md) | C-37 | Documentation: Attach and Detach | docs | S-204, S-205, S-206, S-207, S-201 |
+| [S-209](S-209-spike-slack-fields-in-one-section-and-where-a-mattermost-attachment-draws-its-fields.md) | C-38 | Spike: how many fields Slack takes in one section, and where a Mattermost attachment draws its fields | docs | — |
+| [S-210](S-210-the-message-layout-of-a-route-with-its-checks-migration-api-audit-log-and-the-rerender-be.md) | C-38 | The message layout of a Route with its checks, migration, API, Audit log and the re-render row (BE) | be | S-209, S-125, S-162 |
+| [S-211](S-211-the-root-message-follows-the-message-layout-in-mattermost-slack-and-telegram-with-the-shortening-and-templates-be.md) | C-38 | The Root message follows the message layout in Mattermost, Slack and Telegram, with the shortening and the templates (BE) | be | S-210, S-209, S-125, S-168, S-113 |
+| [S-212](S-212-the-order-of-the-blocks-in-the-bridge-layout-the-bridge-adapter-muster-bridge-check-and-the-fake-bridge-be.md) | C-38 | The order of the blocks in the Bridge layout, the Bridge adapter, muster bridge check and the fake bridge (BE) | be | S-211, S-126, S-171 |
+| [S-213](S-213-the-order-of-the-message-blocks-in-the-go-bridge-library-be.md) | C-38 | The order of the message blocks in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-212, S-127 |
+| [S-214](S-214-the-order-of-the-message-blocks-in-the-python-bridge-library-be.md) | C-38 | The order of the message blocks in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-212, S-128 |
+| [S-215](S-215-the-preview-of-an-unsaved-message-layout-on-an-alert-group-that-arrived-with-the-payload-of-each-messenger-be.md) | C-38 | The preview of an unsaved message layout on an Alert Group that arrived, with the payload of each messenger (BE) | be | S-211, S-212, S-129, S-113, S-036 |
+| [S-216](S-216-the-test-message-with-the-routes-layout-or-an-unsaved-one-built-from-any-alert-group-the-preview-shows-be.md) | C-38 | The test message with the Route's layout or an unsaved one, built from any Alert Group the preview shows (BE) | be | S-211, S-215, S-047, S-113 |
+| [S-217](S-217-the-message-layout-editor-page-with-the-blocks-the-fields-and-the-templates-of-the-route-fe.md) | C-38 | The message layout editor page with the blocks, the fields and the Route's templates (FE) | fe | S-210, S-211, S-129, S-123 |
+| [S-218](S-218-the-preview-on-real-alert-groups-in-the-message-layout-editor-with-the-four-messengers-and-the-test-message-fe.md) | C-38 | The preview on real Alert Groups in the message layout editor, with the four messengers and the test message (FE) | fe | S-217, S-215, S-216, S-048 |
+| [S-219](S-219-documentation-the-message-layout-editor-the-blocks-that-always-show-templates-and-the-preview.md) | C-38 | Documentation: the message layout editor, the blocks that always show, templates and the preview | docs | S-217, S-218, S-213, S-214, S-130 |
+| [S-220](S-220-the-theme-of-a-person-in-the-profile-with-its-migration-and-api-be.md) | C-39 | The theme of a person in the profile, with its migration and API (BE) | be | S-010 |
+| [S-221](S-221-the-theme-switch-in-the-profile-and-the-user-menu-applied-before-the-first-paint-with-the-documentation-fe.md) | C-39 | The theme switch in the profile and the user menu, applied before the first paint, with the documentation (FE) | fe | S-220, S-014, S-072, S-010 |
+| [S-222](S-222-the-pages-record-whether-they-were-made-outside-working-hours-with-the-migration-be.md) | C-40 | The Pages record whether they were made outside Working hours, with the migration (BE) | be | S-154, S-155, S-157, S-169, S-177 |
+| [S-223](S-223-the-statistics-of-the-whole-selection-with-the-critical-split-and-of-noisy-alert-titles-be.md) | C-40 | The statistics of the whole selection with the critical split, and the statistics of noisy alert titles (BE) | be | S-029, S-174, S-206, S-111 |
+| [S-224](S-224-the-statistics-of-the-people-paged-the-load-test-data-of-the-dashboard-and-the-measured-indexes-be.md) | C-40 | The statistics of the people Paged, the load-test data of the dashboard and the measured indexes (BE) | be | S-222, S-223, S-178, S-157, S-174, S-004 |
+| [S-225](S-225-the-dashboard-section-of-the-home-page-with-the-period-the-filters-the-figures-and-the-chart-per-day-fe.md) | C-40 | The Dashboard section of the Home page with the period, the filters, the figures and the chart per day (FE) | fe | S-223, S-175, S-159, S-136, S-030 |
+| [S-226](S-226-who-was-paged-and-noisy-alerts-on-the-dashboard-with-the-empty-states-fe.md) | C-40 | The tables "Who was Paged" and "Noisy alerts" of the dashboard with their empty states (FE) | fe | S-225, S-223, S-224, S-158, S-159 |
+| [S-227](S-227-documentation-the-dashboard-on-the-home-page.md) | C-40 | Documentation: the dashboard on the Home page | docs | S-225, S-226, S-176 |
+| [S-228](S-228-the-editor-of-whole-notification-rule-sequences-in-the-profile-with-its-checks-warnings-and-preview-fe.md) | C-41 | The editor of whole Notification rule sequences in the profile, with its checks, warnings and preview (FE) | fe | S-153, S-152, S-157, S-150, S-167 |
+| [S-229](S-229-the-notification-rules-editor-on-a-users-page-and-on-organization-alert-handling-with-the-managed-by-warning-fe.md) | C-41 | The Notification rules editor on a User's page and on Organization → Alert handling, with the Managed by warning (FE) | fe | S-228, S-153, S-180, S-181, S-150 |
+| [S-230](S-230-documentation-the-editor-of-notification-rule-sequences.md) | C-41 | Documentation: the editor of Notification rule sequences, custom rules and the Organization's default rules | docs | S-228, S-229, S-161 |
+| [S-231](S-231-test-runs-of-a-destination-with-their-steps-the-people-a-step-would-mention-expiry-and-the-audit-log-for-mattermost-be.md) | C-42 | Test runs of a Destination with their steps, the people a step would mention, expiry and the Audit log, for Mattermost (BE) | be | S-047, S-061, S-114, S-125, S-140, S-049, S-068, S-198 |
+| [S-232](S-232-the-steps-of-a-test-run-for-telegram-and-slack-destinations-be.md) | C-42 | The steps of a test run for Telegram and Slack Destinations (BE) | be | S-231, S-042, S-066, S-099, S-171, S-177 |
+| [S-233](S-233-the-steps-of-a-test-run-for-bridge-and-outgoing-webhook-destinations-be.md) | C-42 | The steps of a test run for Bridge and outgoing webhook Destinations (BE) | be | S-231, S-074, S-081, S-126, S-044, S-045, S-177, S-212 |
+| [S-234](S-234-the-presses-on-the-test-message-of-a-run-in-every-messenger-and-text-commands-in-the-thread-of-a-bridges-test-message-be.md) | C-42 | The presses on the Test message of a run in every messenger, and Text commands in the Thread of a Bridge's Test message (BE) | be | S-231, S-232, S-233, S-067, S-075, S-100, S-061 |
+| [S-235](S-235-the-accelerated-run-of-an-escalation-chain-as-a-computation-over-schedules-notification-rules-and-account-links-be.md) | C-42 | The accelerated run of an Escalation chain as a computation over Schedules, Notification rules and Account links (BE) | be | S-169, S-155, S-157, S-156, S-131, S-152, S-154, S-047, S-164 |
+| [S-236](S-236-the-chains-a-destination-would-page-in-and-playing-them-all-on-one-timeline-from-a-severity-level-and-a-time-be.md) | C-42 | The chains a Destination would Page in, and playing them all on one timeline from a Severity level and a time (BE) | be | S-235, S-231, S-111, S-121, S-154, S-162 |
+| [S-237](S-237-the-step-by-step-test-on-the-destination-page-with-its-steps-requests-the-people-a-step-would-mention-and-the-presses-fe.md) | C-42 | The step-by-step test on the Destination page with its steps, requests, the people a step would mention and the presses (FE) | fe | S-231, S-232, S-233, S-234, S-048, S-090 |
+| [S-238](S-238-the-escalation-chains-timeline-of-the-destination-page-with-the-chains-offered-the-start-and-play-fe.md) | C-42 | The Escalation chains timeline of the Destination page with the chains offered, the start and "Play" (FE) | fe | S-236, S-235, S-237, S-158, S-135 |
+| [S-239](S-239-documentation-testing-a-destination.md) | C-42 | Documentation: testing a Destination — the Test message, the step-by-step test and the accelerated run of the chains | docs | S-237, S-238, S-234, S-233, S-232 |
+
+The stories of "L2 0.2.x" specify the items of [L2 §1.5](../prd/L2.md#15-specified-later-in-l2) that the maintainer
+settled after the core: C-34, C-36, C-37, C-38, C-39, C-40, C-41 and C-42, written in four batches. All of them start
+after the tag of 0.2.0, which `depends_on` cannot name, and ship in its patch releases; their `depends_on` name the
+stories of 0.2.0 whose code they build on. The contracts of C-40 to C-42 were written against the open pull request
+that adds their capability files (#673), before it merged, and cite those files at their final paths. Each capability is cut at the contract boundaries of its behaviour, so that no story passes
+about 30 to 40 hand-written files and each is checkable live when it merges: the backend in the order its parts depend
+on one another, then the frontend, which follows the backend story it shows, then a page of documentation with its
+documentation links, so that `docslinkcheck` finds the page; where a capability needs no API (C-41) it has no backend
+story. A fact that a story's contract rests on and that only a messenger can settle goes first as a spike, as S-116
+does for GitLab; and the pieces of a capability that belong to the bridge libraries are worked in their own
+repositories, as S-127 and S-128 are.
+
+S-190 to S-196 specify C-34, the first of them. The behaviour is cut at the contract boundaries of a window's life.
+S-190 is the object — the table, the Permissions, the limits, the API, the Audit
+log and the timer rows of the start and the end, whose handlers decide nothing yet. S-191 is the decision: which Alert
+Groups a window keeps back by the rules of the three objects, Urgent and the Internal alerts of an Integration, and the
+events `maintenance_started` and `maintenance_ended` that record it. S-192 builds delivery on that state — nothing new
+sent, the marks, Storms, events mode, and the publication at the end — and S-193 the chains, Notification rules,
+calls, ack timeout and Reminders, which stop and start over; the order keeps each story checkable live, with the
+interim on
+`edge` named in the Notes of S-191 to S-193. The frontend is two stories after the backend they show: S-194 the
+sections of the Integration, Route and Team pages and the list, S-195 the Alert Group page, list and Timeline, which
+follows S-192 for the delivery state. S-196 documents the capability and adds the documentation links of the web UI.
+
+S-197 to S-201 specify C-36 and S-202 to S-208 specify C-37. C-36 is cut where the behaviour changes its meaning.
+S-197 is the setting — two columns with the migration that gives every existing Route the loudness of L1, the profiles
+and the Route API. S-198 reads it: which of the rows of the
+lifecycle event tables a Route's Loud events govern, decided when an entry is recorded and read by delivery, Storms and
+events-mode webhooks from the entry; S-199 adds the removal of an acknowledgement by new Alerts with the starting
+over of chains and the ack timeout, which needs S-198's list of the rows about the Owner. S-200 is the section of the
+Route form
+and S-201 the page on Loud and Quiet, which follows the form so that its screenshot shows the finished section. C-37 is
+cut at the lives of an attachment. S-202 is the state with its Commands, Permission, ordered refusals, limit and Audit
+log, and S-203 the following of the main Alert Group, the end of an attachment on a resolve, the Quiet rule and the
+refusal of other Commands on an attached Alert Group, which builds on S-199 for the removal that it follows. S-204
+takes the chains, Notification rules, calls and timers that stop on Attach and start over on Detach, S-205 the line,
+the Thread replies, the bridges' `layout` and the answers to presses in every messenger, and S-206 the list filter,
+the bulk Attach, the Alerts of attached Alert Groups, the statistics and the webhook events. S-207 is the frontend
+after the backend it shows and S-208 the documentation, with the documentation links of the dialog and the notice, so
+that `docslinkcheck` finds the page. C-37 depends on C-36 through S-198 and S-199.
+
+S-209 to S-219 specify C-38 and S-220 and S-221 specify C-39. C-38 is cut at the contract boundaries of the layout's
+life. S-209 is the spike on the two messenger facts that P-94 and the Mattermost hint rely on, which the capability's
+split puts first, as S-116 does for GitLab. S-210 is the setting — the column, the Route API with Muster's default
+read back resolved, the
+checks, the Audit log and the re-render row — and S-211 the renderer: the fields, the order, the shortening and the
+templates in Mattermost, Slack and Telegram, the two together being too big for one pull request. S-212 adds `order` to
+the Bridge `layout`, the Bridge adapter, the check and the fake bridge, and S-213 and S-214 the types in the Go and the
+Python library, worked in their own repositories as S-127 and S-128 are. S-215 is the preview of an unsaved layout on
+any Alert Group with each messenger's payload, which exports the adapters' payload builders so that it cannot drift from
+delivery, and S-216 the Destination test with the Route's or an unsaved layout. The frontend is two stories after the
+backend they show: S-217 the editor's blocks, fields and templates, which already saves and resets, S-218 the preview
+with the four tabs and the test message, which follows S-215 and S-216; S-219 documents the capability, extends the
+guide for bridge authors with `order` and adds the editor's documentation link so that `docslinkcheck` finds its page.
+C-39 is a small backend part, S-220, with the migration and the `theme` of `Me`, and S-221, the frontend with its
+documentation: the switch, the script of the SPA's own origin that applies the theme before the first paint under the
+Content Security Policy, the dark variants on every page and screenshots that stay light.
+
+S-222 to S-227 specify C-40, S-228 to S-230 C-41 and S-231 to S-239 C-42. C-40 is cut at what each part of the
+dashboard reads. S-222 is the recording on each Page of whether it was made outside Working hours, which must exist
+before the first Page that the dashboard counts and so comes first and alone; S-223 is the statistics of the whole
+selection with the critical split and of the noisy titles, which extend the reads of the statistics page; S-224 the
+people Paged, with the load-test data of P-96 and the measurement of all four reads against their budgets, which needs
+every read to exist and so follows them. The frontend is two stories after the backend it shows: S-225 the section
+with the period, the filters in the URL, the figures and the chart, which sets up the one-request-per-part behaviour,
+and S-226 the two tables that mount into it; S-227 documents the dashboard in the statistics section and adds its
+documentation link. C-41 adds no API — the API takes any sequence from 0.2.0 — so it is frontend and documentation
+only, and its frontend does not depend on a backend story of its own: S-228 is the editor in the profile with its
+checks, warnings and preview, the part the other places reuse, S-229 mounts it on a User's page and on Organization →
+Alert handling with the `managed_by` warning of S-181 and corrects the one description in the spec that says the
+Organization's rules change only through the API, and S-230 documents it and adds the revision marker that C-31.FR-5
+asks for. C-42 is two features that share a page and nothing else. The step-by-step test is cut by what each Destination
+type sends: S-231 is the run — its table, four operations, the eight steps' order, expiry, "Would mention:" and the
+Audit log — carried end to end for Mattermost, so that the shape of a stepper is fixed once; S-232 adds Telegram and
+Slack and S-233 a Bridge and an outgoing webhook in both modes, and S-234 the presses on the Test message of a run in
+every messenger and the Text commands of a Bridge, with its own table. The accelerated run is a computation: S-235 is
+the computation of one chain over Schedules, Notification rules and Account links, with the decisions of a step shared
+with the running engine, proved through the operation for named chains, and S-236 the offers of the chains a Destination
+would Page in and the one timeline of all of them. S-237 is the step-by-step panel, which follows the four backend
+stories that make its steps, and S-238 the timeline of the chains, after S-236; S-239 is the new page on testing a
+Destination, linked from the messengers' and the webhooks' pages.
+
+Migrations are ten, and an eleventh if the measurements of S-224 call for indexes; each takes the number the
+orchestrator assigns at dispatch, with each replaced CHECK re-versioned in the order the stories merge: C-34's three, in
+S-190 to S-192; S-197's, with no CHECK to re-version; S-202's, which replaces the event CHECKs of `timeline_entries`,
+`webhook_events` and `thread_replies` as C-34's do; S-210's `routes.message_layout`, which reuses the kind
+`route_message_settings` of `open_group_updates` and so replaces no CHECK; S-220's `users.theme`; S-222's nullable
+`pages.outside_working_hours`; and C-42's two, `destination_test_runs` in S-231 and `destination_test_presses` in S-234.
+Each story adds its spec parts, settings and log events in its own pull request, as every story does.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

@@ -16,6 +16,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/outbound"
 )
@@ -42,6 +43,8 @@ type OutboundPolicyResource struct {
 	// AlwaysBlocked are the rules no allowed entry opens, outbound.AlwaysBlocked.
 	AlwaysBlocked []string
 	Version       int64
+	// ManagedBy is the tool that keeps the policy as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 }
 
 // OutboundPolicyInput is an update of the outbound address policy.
@@ -49,6 +52,8 @@ type OutboundPolicyInput struct {
 	Mode    OutboundMode
 	Allowed []string
 	Denied  []string
+	// ManagedBy is the mark of the tool that keeps the policy as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // OutboundPolicy reads the outbound address policy with the rules that always apply.
@@ -62,7 +67,8 @@ func (s *Service) outboundPolicy(ctx context.Context, q SettingsQueries) (Outbou
 		return OutboundPolicyResource{}, fmt.Errorf("read the outbound address policy: %w", err)
 	}
 	return OutboundPolicyResource{Mode: OutboundMode(row.Policy), Allowed: nonNil(row.Allowed),
-		Denied: nonNil(row.Denied), AlwaysBlocked: outbound.AlwaysBlocked(), Version: row.Version}, nil
+		Denied: nonNil(row.Denied), AlwaysBlocked: outbound.AlwaysBlocked(), Version: row.Version,
+		ManagedBy: managedby.Of(row.ManagedBy)}, nil
 }
 
 // UpdateOutboundPolicy replaces the outbound address policy and its lists (C-20.FR-3, C-02.FR-21). version is the
@@ -70,7 +76,9 @@ func (s *Service) outboundPolicy(ctx context.Context, q SettingsQueries) (Outbou
 // with invalid_format, a repeated one with duplicate, at /allowed/<i> or /denied/<i>. A change is recorded as
 // outbound_policy.updated with its diff, and sends NOTIFY on OutboundPolicyChannel and the organization hint in its
 // transaction, so that every replica applies it at once; after the commit the hook of WithOutboundPolicyChanged
-// applies it on this replica. An update that changes nothing writes nothing.
+// applies it on this replica. An update that changes nothing writes nothing. A change of the mark managed_by alone
+// (C-33.FR-11) is recorded with the organization hint and leaves the policy every replica applies as it is: no NOTIFY,
+// no hook, no outbound_policy_updated.
 func (s *Service) UpdateOutboundPolicy(ctx context.Context, r audit.Actor, t audit.Transport, addr netip.Addr,
 	version *int64, in OutboundPolicyInput) (OutboundPolicyResource, error) {
 	after, fe := validateOutbound(in)
@@ -91,15 +99,16 @@ func (s *Service) UpdateOutboundPolicy(ctx context.Context, r audit.Actor, t aud
 		if err != nil {
 			return err
 		}
-		diff = audit.Diff(policyViewOf(before.Mode, before.Allowed, before.Denied),
-			policyViewOf(after.Mode, after.Allowed, after.Denied))
+		mark := in.ManagedBy.Apply(before.ManagedBy)
+		diff = audit.Diff(policyViewOf(before.Mode, before.Allowed, before.Denied, before.ManagedBy),
+			policyViewOf(after.Mode, after.Allowed, after.Denied, mark))
 		if len(diff) == 0 {
 			out = before
 			return nil
 		}
 		if _, err := q.UpdateOutboundPolicy(ctx, dbgen.UpdateOutboundPolicyParams{
 			OrgID: s.orgID, Policy: string(after.Mode), Allowed: after.Allowed, Denied: after.Denied,
-			UpdatedAt: s.clock.Now().UTC(),
+			ManagedBy: managedby.Text(mark), UpdatedAt: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("change the outbound address policy: %w", err)
 		}
@@ -114,16 +123,18 @@ func (s *Service) UpdateOutboundPolicy(ctx context.Context, r audit.Actor, t aud
 			return err
 		}
 		// The policy goes first: a replica handles its notifications in order, so once its live-updates streams have
-		// the hint, it already applies the new policy.
-		if err := q.NotifyOutboundPolicy(ctx, s.orgID); err != nil {
-			return err
+		// the hint, it already applies the new policy. A change of the mark alone changes no policy.
+		if !managedby.Only(diff) {
+			if err := q.NotifyOutboundPolicy(ctx, s.orgID); err != nil {
+				return err
+			}
 		}
 		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: HintOrganization})
 	})
 	if err != nil {
 		return OutboundPolicyResource{}, err
 	}
-	if len(diff) > 0 {
+	if len(diff) > 0 && !managedby.Only(diff) {
 		if s.policyChanged != nil {
 			s.policyChanged()
 		}
@@ -136,13 +147,14 @@ func (s *Service) UpdateOutboundPolicy(ctx context.Context, r audit.Actor, t aud
 
 // policyView is what the Audit log diff of the outbound address policy shows.
 type policyView struct {
-	Policy  string   `json:"policy"`
-	Allowed []string `json:"allowed"`
-	Denied  []string `json:"denied"`
+	Policy    string   `json:"policy"`
+	Allowed   []string `json:"allowed"`
+	Denied    []string `json:"denied"`
+	ManagedBy *string  `json:"managed_by"`
 }
 
-func policyViewOf(mode OutboundMode, allowed, denied []string) policyView {
-	return policyView{Policy: string(mode), Allowed: nonNil(allowed), Denied: nonNil(denied)}
+func policyViewOf(mode OutboundMode, allowed, denied []string, mark *string) policyView {
+	return policyView{Policy: string(mode), Allowed: nonNil(allowed), Denied: nonNil(denied), ManagedBy: mark}
 }
 
 // validateOutbound returns the update with its entries trimmed, or the first field that is not valid: an entry must
@@ -152,7 +164,11 @@ func validateOutbound(in OutboundPolicyInput) (OutboundPolicyInput, *FieldError)
 		return OutboundPolicyInput{}, &FieldError{Pointer: "/policy", Code: CodeInvalidFormat,
 			Detail: "The policy is not standard or strict."}
 	}
-	out := OutboundPolicyInput{Mode: in.Mode}
+	if in.ManagedBy.Check() != nil {
+		return OutboundPolicyInput{}, &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat,
+			Detail: managedby.Detail}
+	}
+	out := OutboundPolicyInput{Mode: in.Mode, ManagedBy: in.ManagedBy}
 	for _, list := range []struct {
 		name    string
 		entries []string

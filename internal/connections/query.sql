@@ -22,7 +22,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
-       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read,
+       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read, c.managed_by,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -52,7 +52,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
-       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read,
+       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read, c.managed_by,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -77,7 +77,7 @@ WHERE org_id = @org_id AND name = @name AND deleted_at IS NULL;
 -- InsertConnection creates a Connection: a Mattermost one with its server URL, a Telegram one with its Bot API base
 -- URL, its update mode and, in the webhook mode, its webhook secret token, a Bridge with its base URL, its event
 -- delivery mode and, in the push mode, its push secret, or a Slack Connection with its event mode, its app-level token
--- and its Slack signing secret.
+-- and its Slack signing secret; with the mark of the tool that keeps it as code, or none (C-33.FR-11).
 -- name: InsertConnection :one
 INSERT INTO connections (
     org_id, public_id, type, name, mattermost_server_url, telegram_bot_api_base_url, telegram_update_mode,
@@ -87,7 +87,7 @@ INSERT INTO connections (
     slack_app_token_updated_at, slack_signing_secret_ciphertext, slack_signing_secret_key_id,
     slack_signing_secret_updated_at, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, proxy,
     proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at, limiter_limit, limiter_per_seconds,
-    created_at, updated_at
+    managed_by, created_at, updated_at
 )
 VALUES (
     @org_id, @public_id, @type, @name, sqlc.narg('server_url'), sqlc.narg('bot_api_base_url'),
@@ -99,7 +99,7 @@ VALUES (
     sqlc.narg('slack_signing_secret_key_id'), sqlc.narg('slack_signing_secret_updated_at'), @bot_token_ciphertext,
     @bot_token_key_id, @bot_token_updated_at::timestamptz, @proxy,
     sqlc.narg('proxy_password_ciphertext'), sqlc.narg('proxy_password_key_id'), sqlc.narg('proxy_password_updated_at'),
-    @limiter_limit, @limiter_per_seconds, @now::timestamptz, @now::timestamptz
+    @limiter_limit, @limiter_per_seconds, sqlc.narg('managed_by')::text, @now::timestamptz, @now::timestamptz
 )
 RETURNING id;
 
@@ -146,7 +146,8 @@ SET name = @name, mattermost_server_url = sqlc.narg('server_url'),
     proxy = @proxy, proxy_password_ciphertext = sqlc.narg('proxy_password_ciphertext'),
     proxy_password_key_id = sqlc.narg('proxy_password_key_id'),
     proxy_password_updated_at = sqlc.narg('proxy_password_updated_at'), limiter_limit = @limiter_limit,
-    limiter_per_seconds = @limiter_per_seconds, updated_at = @now::timestamptz, version = version + 1
+    limiter_per_seconds = @limiter_per_seconds, managed_by = sqlc.narg('managed_by')::text,
+    updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- RenameConnection gives a Connection a new name and changes nothing else: `muster dev` renames its demo Connection

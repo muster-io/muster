@@ -33,4 +33,11 @@ export interface WebhookDestinationBase {
   /** The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`. */
   owning_team_id?: NullablePublicId | null;
   limiter: Limiter;
+  /**
+     * The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+     * @maxLength 32
+     * @nullable
+     * @pattern ^[a-z0-9][a-z0-9._-]{0,31}$
+     */
+  managed_by?: string | null;
 }

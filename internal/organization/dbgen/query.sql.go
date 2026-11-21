@@ -238,19 +238,21 @@ func (q *Queries) GetOutboundPolicy(ctx context.Context, orgID int64) (GetOutbou
 }
 
 const getOutboundPolicySettings = `-- name: GetOutboundPolicySettings :one
-SELECT policy, allowed, denied, version
+SELECT policy, allowed, denied, version, managed_by
 FROM outbound_policies
 WHERE org_id = $1
 `
 
 type GetOutboundPolicySettingsRow struct {
-	Policy  string
-	Allowed []string
-	Denied  []string
-	Version int64
+	Policy    string
+	Allowed   []string
+	Denied    []string
+	Version   int64
+	ManagedBy pgtype.Text
 }
 
-// GetOutboundPolicySettings reads the outbound address policy as the API shows it, with its version, the ETag.
+// GetOutboundPolicySettings reads the outbound address policy as the API shows it, with its version, the ETag, and the
+// mark of the tool that keeps it as code (C-33.FR-11).
 func (q *Queries) GetOutboundPolicySettings(ctx context.Context, orgID int64) (GetOutboundPolicySettingsRow, error) {
 	row := q.db.QueryRow(ctx, getOutboundPolicySettings, orgID)
 	var i GetOutboundPolicySettingsRow
@@ -259,6 +261,7 @@ func (q *Queries) GetOutboundPolicySettings(ctx context.Context, orgID int64) (G
 		&i.Allowed,
 		&i.Denied,
 		&i.Version,
+		&i.ManagedBy,
 	)
 	return i, err
 }
@@ -303,7 +306,7 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
        outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons, team_label,
-       notification_rules
+       notification_rules, managed_by
 FROM organizations
 WHERE id = $1
 `
@@ -336,6 +339,7 @@ type GetSettingsRow struct {
 	Buttons                                 []byte
 	TeamLabel                               string
 	NotificationRules                       []byte
+	ManagedBy                               pgtype.Text
 }
 
 // GetSettings reads the organization resource, with the state of its Secrets but not their values. critical_is_urgent
@@ -371,6 +375,7 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 		&i.Buttons,
 		&i.TeamLabel,
 		&i.NotificationRules,
+		&i.ManagedBy,
 	)
 	return i, err
 }
@@ -575,24 +580,27 @@ func (q *Queries) RecordOutgoingHeartbeat(ctx context.Context, arg RecordOutgoin
 
 const updateOutboundPolicy = `-- name: UpdateOutboundPolicy :execrows
 UPDATE outbound_policies
-SET policy = $1, allowed = $2, denied = $3, version = version + 1, updated_at = $4
-WHERE org_id = $5
+SET policy = $1, allowed = $2, denied = $3, managed_by = $4::text,
+    version = version + 1, updated_at = $5
+WHERE org_id = $6
 `
 
 type UpdateOutboundPolicyParams struct {
 	Policy    string
 	Allowed   []string
 	Denied    []string
+	ManagedBy pgtype.Text
 	UpdatedAt time.Time
 	OrgID     int64
 }
 
-// UpdateOutboundPolicy replaces the outbound address policy and its lists and moves its version.
+// UpdateOutboundPolicy replaces the outbound address policy, its lists and its mark managed_by, and moves its version.
 func (q *Queries) UpdateOutboundPolicy(ctx context.Context, arg UpdateOutboundPolicyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateOutboundPolicy,
 		arg.Policy,
 		arg.Allowed,
 		arg.Denied,
+		arg.ManagedBy,
 		arg.UpdatedAt,
 		arg.OrgID,
 	)
@@ -630,16 +638,17 @@ SET name                                         = $1,
     buttons                                      = coalesce($24::jsonb, buttons),
     team_label                                   = coalesce($25::text, team_label),
     notification_rules = coalesce($26::jsonb, notification_rules),
+    managed_by = $27::text,
     teams_version = teams_version + CASE WHEN team_label <> coalesce($25::text, team_label)
                                          THEN 1 ELSE 0 END,
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $27::boolean THEN NULL
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $28::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $27::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $27::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $28::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $28::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $28,
+    updated_at = $29,
     version = version + 1
-WHERE id = $29
+WHERE id = $30
 `
 
 type UpdateSettingsParams struct {
@@ -669,6 +678,7 @@ type UpdateSettingsParams struct {
 	Buttons                          []byte
 	TeamLabel                        pgtype.Text
 	NotificationRules                []byte
+	ManagedBy                        pgtype.Text
 	UrlChanged                       bool
 	Now                              time.Time
 	OrgID                            int64
@@ -706,6 +716,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.Buttons,
 		arg.TeamLabel,
 		arg.NotificationRules,
+		arg.ManagedBy,
 		arg.UrlChanged,
 		arg.Now,
 		arg.OrgID,

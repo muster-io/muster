@@ -13,6 +13,10 @@ export const getOidcSettingsResponseOneGroupMappingsItemClaimMax = 200;
 
 export const getOidcSettingsResponseOneGroupMappingsItemGroupMax = 200;
 
+export const getOidcSettingsResponseOneManagedByMax = 32;
+
+
+export const getOidcSettingsResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getOidcSettingsResponseTwoWarningsItemUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -31,7 +35,8 @@ export const GetOidcSettingsResponse = zod.object({
 }).describe('An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.')).describe('The Role mapping, at most 500 entries, each with the claim it reads.'),
   "unmatched_role": zod.enum(['none', 'viewer', 'responder']).describe('Role for users without a matching group; `none` refuses the sign-in.'),
   "sync_role": zod.boolean().describe('On: the identity provider decides the Role at every sign-in. Off: the mapping applies only when the user is created.'),
-  "skip_totp_with_idp_mfa": zod.boolean()
+  "skip_totp_with_idp_mfa": zod.boolean(),
+  "managed_by": zod.string().max(getOidcSettingsResponseOneManagedByMax).regex(getOidcSettingsResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The OIDC settings exist once and read null until a write sets it.')
 }).and(zod.object({
   "client_secret_status": zod.object({
   "set": zod.boolean(),
@@ -76,6 +81,10 @@ export const updateOidcSettingsBodyOneGroupMappingsItemClaimMax = 200;
 
 export const updateOidcSettingsBodyOneGroupMappingsItemGroupMax = 200;
 
+export const updateOidcSettingsBodyOneManagedByMax = 32;
+
+
+export const updateOidcSettingsBodyOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateOidcSettingsBody = zod.object({
@@ -93,7 +102,8 @@ export const UpdateOidcSettingsBody = zod.object({
 }).describe('An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.')).describe('The Role mapping, at most 500 entries, each with the claim it reads.'),
   "unmatched_role": zod.enum(['none', 'viewer', 'responder']).describe('Role for users without a matching group; `none` refuses the sign-in.'),
   "sync_role": zod.boolean().describe('On: the identity provider decides the Role at every sign-in. Off: the mapping applies only when the user is created.'),
-  "skip_totp_with_idp_mfa": zod.boolean()
+  "skip_totp_with_idp_mfa": zod.boolean(),
+  "managed_by": zod.string().max(updateOidcSettingsBodyOneManagedByMax).regex(updateOidcSettingsBodyOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The OIDC settings exist once and read null until a write sets it.')
 }).and(zod.object({
   "client_secret": zod.string().optional().describe('Write-only Secret. Omit to keep the stored one.'),
   "proxy": zod.object({
@@ -109,6 +119,10 @@ export const updateOidcSettingsResponseOneGroupMappingsItemClaimMax = 200;
 
 export const updateOidcSettingsResponseOneGroupMappingsItemGroupMax = 200;
 
+export const updateOidcSettingsResponseOneManagedByMax = 32;
+
+
+export const updateOidcSettingsResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateOidcSettingsResponseTwoWarningsItemUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -127,7 +141,8 @@ export const UpdateOidcSettingsResponse = zod.object({
 }).describe('An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.')).describe('The Role mapping, at most 500 entries, each with the claim it reads.'),
   "unmatched_role": zod.enum(['none', 'viewer', 'responder']).describe('Role for users without a matching group; `none` refuses the sign-in.'),
   "sync_role": zod.boolean().describe('On: the identity provider decides the Role at every sign-in. Off: the mapping applies only when the user is created.'),
-  "skip_totp_with_idp_mfa": zod.boolean()
+  "skip_totp_with_idp_mfa": zod.boolean(),
+  "managed_by": zod.string().max(updateOidcSettingsResponseOneManagedByMax).regex(updateOidcSettingsResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The OIDC settings exist once and read null until a write sets it.')
 }).and(zod.object({
   "client_secret_status": zod.object({
   "set": zod.boolean(),

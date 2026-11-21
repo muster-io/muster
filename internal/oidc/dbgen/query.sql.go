@@ -560,14 +560,14 @@ INSERT INTO oidc_settings (
     org_id, enabled, display_name, issuer_url, client_id, client_secret_ciphertext, client_secret_key_id,
     client_secret_updated_at, client_secret_expires_on, scopes, groups_claim, group_mappings, role_mappings,
     unmatched_role, sync_role, skip_totp_with_idp_mfa, proxy, proxy_password_ciphertext, proxy_password_key_id,
-    proxy_password_updated_at, version, updated_at
+    proxy_password_updated_at, managed_by, version, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12, $13, $14, $15, $16,
     $17, $18, $19,
-    $20, 1, $21
+    $20, $21::text, 1, $22
 )
 ON CONFLICT (org_id) DO NOTHING
 `
@@ -593,6 +593,7 @@ type InsertSettingsParams struct {
 	ProxyPasswordCiphertext []byte
 	ProxyPasswordKeyID      pgtype.Text
 	ProxyPasswordUpdatedAt  pgtype.Timestamptz
+	ManagedBy               pgtype.Text
 	UpdatedAt               time.Time
 }
 
@@ -621,6 +622,7 @@ func (q *Queries) InsertSettings(ctx context.Context, arg InsertSettingsParams) 
 		arg.ProxyPasswordCiphertext,
 		arg.ProxyPasswordKeyID,
 		arg.ProxyPasswordUpdatedAt,
+		arg.ManagedBy,
 		arg.UpdatedAt,
 	)
 	if err != nil {
@@ -1263,7 +1265,7 @@ SET enabled = $1, display_name = $2, issuer_url = $3, client_id = $4,
     sync_role = $14, skip_totp_with_idp_mfa = $15, proxy = $16,
     proxy_password_ciphertext = $17,
     proxy_password_key_id = $18,
-    proxy_password_updated_at = $19,
+    proxy_password_updated_at = $19, managed_by = $20::text,
     groups_claim_missing_since = CASE
         WHEN groups_claim = $10 AND issuer_url = $3 AND client_id = $4
             AND scopes = $9 THEN groups_claim_missing_since
@@ -1283,8 +1285,8 @@ SET enabled = $1, display_name = $2, issuer_url = $3, client_id = $4,
         ELSE '{}'::text[]
     END,
     claims_supported = CASE WHEN issuer_url = $3 THEN claims_supported ELSE '{}'::text[] END,
-    version = version + 1, updated_at = $20
-WHERE org_id = $21 AND version = $22
+    version = version + 1, updated_at = $21
+WHERE org_id = $22 AND version = $23
 `
 
 type UpdateSettingsParams struct {
@@ -1307,6 +1309,7 @@ type UpdateSettingsParams struct {
 	ProxyPasswordCiphertext []byte
 	ProxyPasswordKeyID      pgtype.Text
 	ProxyPasswordUpdatedAt  pgtype.Timestamptz
+	ManagedBy               pgtype.Text
 	UpdatedAt               time.Time
 	OrgID                   int64
 	Version                 int64
@@ -1336,6 +1339,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.ProxyPasswordCiphertext,
 		arg.ProxyPasswordKeyID,
 		arg.ProxyPasswordUpdatedAt,
+		arg.ManagedBy,
 		arg.UpdatedAt,
 		arg.OrgID,
 		arg.Version,

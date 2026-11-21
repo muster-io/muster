@@ -32,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/proxyconf"
 )
@@ -159,6 +160,8 @@ type Settings struct {
 	Warnings        []Warning
 	Version         int64
 	UpdatedAt       *time.Time
+	// ManagedBy is the tool that keeps the settings as code, nil for none and before they are saved (C-33.FR-11).
+	ManagedBy *string
 }
 
 // ButtonName is the provider name of the sign-in button: the display name, or the host of the issuer URL.
@@ -189,6 +192,8 @@ type Input struct {
 	SyncRole              bool
 	SkipTOTPWithIDPMFA    bool
 	Proxy                 proxyconf.Input
+	// ManagedBy is the mark of the tool that keeps the settings as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // Requester is who asks for a change and how.
@@ -356,6 +361,7 @@ func settingsOf(row dbgen.OidcSetting) (Settings, error) {
 		GroupsClaimMissing: row.GroupsClaimMissingSince.Valid && !row.GroupsClaimSeenAt.Valid,
 		GroupsClaimSeen:    row.GroupsClaimSeenAt.Valid,
 		Version:            row.Version,
+		ManagedBy:          managedby.Of(row.ManagedBy),
 	}
 	if row.ClientSecretExpiresOn.Valid {
 		d := row.ClientSecretExpiresOn.Time.UTC()
@@ -499,12 +505,13 @@ type view struct {
 	SyncRole              bool             `json:"sync_role"`
 	SkipTOTPWithIDPMFA    bool             `json:"skip_totp_with_idp_mfa"`
 	Proxy                 proxyconf.Config `json:"proxy"`
+	ManagedBy             *string          `json:"managed_by"`
 }
 
 func viewOf(st Settings) view {
 	v := view{Enabled: st.Enabled, DisplayName: st.DisplayName, IssuerURL: st.IssuerURL, ClientID: st.ClientID,
 		Scopes: st.Scopes, GroupsClaim: st.GroupsClaim, GroupMappings: st.GroupMappings, UnmatchedRole: st.UnmatchedRole,
-		SyncRole: st.SyncRole, SkipTOTPWithIDPMFA: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy}
+		SyncRole: st.SyncRole, SkipTOTPWithIDPMFA: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy, ManagedBy: st.ManagedBy}
 	if st.ClientSecretExpiresOn != nil {
 		d := st.ClientSecretExpiresOn.Format(time.DateOnly)
 		v.ClientSecretExpiresOn = &d
@@ -610,7 +617,8 @@ func (s *Service) store(ctx context.Context, q Queries, exists bool, version int
 			GroupsClaim: st.GroupsClaim, GroupMappings: mappings, RoleMappings: roles, UnmatchedRole: st.UnmatchedRole,
 			SyncRole: st.SyncRole, SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy.JSON(),
 			ProxyPasswordCiphertext: password.Ciphertext, ProxyPasswordKeyID: optText(password.KeyID),
-			ProxyPasswordUpdatedAt: optTime(password.UpdatedAt), UpdatedAt: now.UTC(),
+			ProxyPasswordUpdatedAt: optTime(password.UpdatedAt), ManagedBy: managedby.Text(st.ManagedBy),
+			UpdatedAt: now.UTC(),
 		})
 		if err != nil {
 			return fmt.Errorf("store the OIDC settings: %w", err)
@@ -628,7 +636,7 @@ func (s *Service) store(ctx context.Context, q Queries, exists bool, version int
 		SyncRole: st.SyncRole, SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy.JSON(),
 		ProxyPasswordCiphertext: password.Ciphertext,
 		ProxyPasswordKeyID:      optText(password.KeyID), ProxyPasswordUpdatedAt: optTime(password.UpdatedAt),
-		UpdatedAt: now.UTC(),
+		ManagedBy: managedby.Text(st.ManagedBy), UpdatedAt: now.UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("update the OIDC settings: %w", err)
@@ -641,7 +649,11 @@ func (s *Service) store(ctx context.Context, q Queries, exists bool, version int
 
 // apply validates in and returns the settings after it.
 func apply(before Settings, in Input) (Settings, error) {
+	if in.ManagedBy.Check() != nil {
+		return Settings{}, &FieldError{Pointer: managedby.Pointer, Code: "invalid_format", Detail: managedby.Detail}
+	}
 	after := before
+	after.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 	after.Enabled, after.SyncRole, after.SkipTOTPWithIDPMFA = in.Enabled, in.SyncRole, in.SkipTOTPWithIDPMFA
 	if in.DisplayName != nil {
 		after.DisplayName = strings.TrimSpace(*in.DisplayName)

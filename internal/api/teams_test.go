@@ -14,16 +14,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/escalation"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/managedby"
+	"github.com/muster-io/muster/internal/oidc"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/teams"
@@ -534,8 +538,10 @@ func TestManagedByAPI(t *testing.T) {
 	}
 }
 
-// TestManagedByOperations: exactly the creates and updates of the seven kinds of S-179 carry managed_by marked
-// x-unprocessable, so that a value outside its format answers the domain's 422 on each of them.
+// TestManagedByOperations: exactly the creates and updates of the twelve kinds of C-33.FR-11 carry managed_by marked
+// x-unprocessable — those of S-179, the Connections and Destinations of every type through the variants of their
+// bodies, and the updates of the Organization's settings, the Outbound address policy and the OIDC settings — so that
+// a value outside its format answers the domain's 422 on each of them.
 func TestManagedByOperations(t *testing.T) {
 	doc, err := LoadSpec()
 	if err != nil {
@@ -548,11 +554,211 @@ func TestManagedByOperations(t *testing.T) {
 		}
 	}
 	slices.Sort(got)
-	want := []string{"createEscalationChain", "createIntegration", "createLinkRule", "createLookupTable", "createRoute",
-		"createSchedule", "createTeam", "updateEscalationChain", "updateIntegration", "updateLinkRule",
-		"updateLookupTable", "updateRoute", "updateSchedule", "updateTeam"}
+	want := []string{"createConnection", "createDestination", "createEscalationChain", "createIntegration",
+		"createLinkRule", "createLookupTable", "createRoute", "createSchedule", "createTeam", "updateConnection",
+		"updateDestination", "updateEscalationChain", "updateIntegration", "updateLinkRule", "updateLookupTable",
+		"updateOidcSettings", "updateOrganization", "updateOutboundPolicy", "updateRoute", "updateSchedule",
+		"updateTeam"}
 	if !slices.Equal(got, want) {
 		t.Errorf("operations with managed_by x-unprocessable = %v, want %v", got, want)
+	}
+}
+
+// TestUnprocessableVariantsAgree: the variants of a oneOf request body that share a top-level property agree on whether
+// it is x-unprocessable, so that the set unprocessableFields merges by pointer is that of every variant; managed_by is
+// x-unprocessable in every variant of the bodies of Connections and Destinations.
+func TestUnprocessableVariantsAgree(t *testing.T) {
+	doc, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// flags are the top-level properties of a variant, through allOf, and whether each is x-unprocessable.
+	var flags func(s *openapi3.Schema, out map[string]bool)
+	flags = func(s *openapi3.Schema, out map[string]bool) {
+		for name, prop := range s.Properties {
+			if prop.Value != nil {
+				out[name] = out[name] || prop.Value.Extensions[xUnprocessable] == true
+			}
+		}
+		for _, sub := range s.AllOf {
+			if sub.Value != nil {
+				flags(sub.Value, out)
+			}
+		}
+	}
+	checked := map[string]bool{}
+	var walk func(op string, s *openapi3.Schema)
+	walk = func(op string, s *openapi3.Schema) {
+		if len(s.OneOf) > 0 {
+			seen := map[string]bool{}
+			for i, sub := range s.OneOf {
+				if sub.Value == nil {
+					continue
+				}
+				variant := map[string]bool{}
+				flags(sub.Value, variant)
+				for name, unprocessable := range variant {
+					if before, ok := seen[name]; ok && before != unprocessable {
+						t.Errorf("%s: the variants disagree on whether %s is x-unprocessable (variant %d)", op, name, i)
+					}
+					seen[name] = unprocessable
+				}
+			}
+			checked[op] = seen["managed_by"]
+		}
+		for _, sub := range append(slices.Clone(s.AllOf), s.OneOf...) {
+			if sub.Value != nil {
+				walk(op, sub.Value)
+			}
+		}
+	}
+	for _, item := range doc.Paths.Map() {
+		for _, op := range item.Operations() {
+			if op.RequestBody == nil || op.RequestBody.Value == nil {
+				continue
+			}
+			if media := op.RequestBody.Value.Content.Get("application/json"); media != nil && media.Schema != nil &&
+				media.Schema.Value != nil {
+				walk(op.OperationID, media.Schema.Value)
+			}
+		}
+	}
+	for _, op := range []string{"createConnection", "updateConnection", "createDestination", "updateDestination"} {
+		if !checked[op] {
+			t.Errorf("%s: no oneOf body whose variants mark managed_by x-unprocessable", op)
+		}
+	}
+}
+
+// TestManagedByBodies is C-33.FR-11 on the bodies of S-180: a value outside the format of managed_by in a
+// Connection's or a Destination's body of each type, which validation reads through the variant of its type, or in
+// the Organization's settings, the Outbound address policy or the OIDC settings, is the 422 invalid_format at
+// /managed_by that the domain answers, and reaches no domain; null and a value reach it as given.
+func TestManagedByBodies(t *testing.T) {
+	with := func(body, mark string) string {
+		return strings.TrimSuffix(body, "}") + `,"managed_by":` + mark + `}`
+	}
+	refused := func(what string, a answer) {
+		t.Helper()
+		status, _, ptr, code := firstProblemError(t, a)
+		if status != http.StatusUnprocessableEntity || ptr != "/managed_by" || code != fieldInvalidFormat {
+			t.Errorf("%s = %d %s %s: %s", what, status, ptr, code, a.body)
+		}
+	}
+	bad := []string{`"Terraform"`, `"` + strings.Repeat("a", 33) + `"`, `""`}
+
+	x, fc := newConnectionsAPI(t)
+	connBodies := map[string]string{
+		"mattermost": connectionBody,
+		"telegram": `{"type":"telegram","name":"tg","bot_api_base_url":"https://api.telegram.org","update_mode":` +
+			`"long_polling","bot_token":"1:x","proxy":{"enabled":false},"limiter":{"limit":15,"per_seconds":1}}`,
+		"bridge": `{"type":"bridge","name":"br","base_url":"http://127.0.0.1:18094","event_delivery":"poll",` +
+			`"bot_token":"t","proxy":{"enabled":false},"limiter":{"limit":5,"per_seconds":1}}`,
+		"slack": `{"type":"slack","name":"sl","event_mode":"socket","bot_token":"xoxb-1","app_token":"xapp-1",` +
+			`"proxy":{"enabled":false},"limiter":{"limit":5,"per_seconds":1}}`,
+	}
+	for kind, body := range connBodies {
+		for _, v := range bad {
+			refused("connection "+kind+" "+v, x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections",
+				with(body, v)))
+			refused("update of a connection "+kind+" "+v, x.as(t, connectionsWriter, http.MethodPut,
+				"/api/v1/connections/"+connectionID, with(body, v), "If-Match", "*"))
+		}
+	}
+	if len(fc.inputs) != 0 {
+		t.Fatalf("a refused managed_by reached the Connections: %+v", fc.inputs)
+	}
+	for kind, body := range connBodies {
+		a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", with(body, `"terraform"`))
+		if in := fc.inputs[len(fc.inputs)-1]; a.status != http.StatusCreated || !in.ManagedBy.Given ||
+			in.ManagedBy.Value == nil || *in.ManagedBy.Value != "terraform" {
+			t.Errorf("connection %s with terraform = %d %s", kind, a.status, a.body)
+		}
+	}
+
+	xd, fd, _ := newDestinationsAPI(t)
+	destBodies := map[string]string{
+		"mattermost": mattermostBody,
+		"webhook":    webhookBody,
+		"telegram": `{"type":"telegram","name":"tg","connection_id":"CNAAAAAAAAAAA2","channel_id":"@alerts",` +
+			`"limiter":{"limit":5,"per_seconds":1}}`,
+		"bridge": `{"type":"bridge","name":"br","connection_id":"CNAAAAAAAAAAA3","channel_id":"ch-alerts",` +
+			`"limiter":{"limit":5,"per_seconds":1}}`,
+		"slack": `{"type":"slack","name":"sl","connection_id":"CNAAAAAAAAAAA8","channel_id":"C0FAKEALERTS",` +
+			`"limiter":{"limit":5,"per_seconds":1}}`,
+	}
+	for kind, body := range destBodies {
+		for _, v := range bad {
+			refused("destination "+kind+" "+v, xd.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+				with(body, v)))
+			refused("update of a destination "+kind+" "+v, xd.as(t, destinationsWriter, http.MethodPut,
+				"/api/v1/destinations/"+mattermostID, with(body, v), "If-Match", "*"))
+		}
+	}
+	if len(fd.saved) != 0 {
+		t.Fatalf("a refused managed_by reached the Destinations: %+v", fd.saved)
+	}
+	for kind, body := range destBodies {
+		xd.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", with(body, `null`))
+		if in := fd.saved[len(fd.saved)-1]; !in.ManagedBy.Given || in.ManagedBy.Value != nil {
+			t.Errorf("destination %s with null = %+v", kind, in.ManagedBy)
+		}
+	}
+
+	xo, fo := newOrganizationAPI(t)
+	read := xo.call(t, http.MethodGet, "/api/v1/organization", "", "Cookie", adminCookie).body
+	if !strings.Contains(string(read), `"managed_by":null`) {
+		t.Errorf("the organization reads without managed_by: %s", read)
+	}
+	for _, v := range bad {
+		refused("organization "+v, xo.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization",
+			updateBody(t, read, func(m map[string]any) { m["managed_by"] = json.RawMessage(v) }), "If-Match", "*"))
+		refused("outbound policy "+v, xo.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization/outbound-policy",
+			`{"policy":"standard","allowed":[],"denied":[],"managed_by":`+v+`}`, "If-Match", "*"))
+	}
+	// A value of another type is no format failure: the 400 of the request validation, also from the JSON Schema
+	// 2020-12 validator that checks the policy's body, and also when another field of the body breaks a pattern.
+	for _, body := range []string{`{"policy":"standard","allowed":[],"denied":[],"managed_by":5}`,
+		`{"policy":"standard","allowed":[],"denied":[],"managed_by":["terraform"]}`,
+		`{"policy":"standard","allowed":5,"denied":[],"managed_by":"Terraform"}`} {
+		if a := xo.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization/outbound-policy", body,
+			"If-Match", "*"); a.status != http.StatusBadRequest {
+			t.Errorf("outbound policy %s = %d %s", body, a.status, a.body)
+		}
+	}
+	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections",
+		with(connBodies["mattermost"], `5`)); a.status != http.StatusBadRequest {
+		t.Errorf("connection with managed_by 5 = %d %s", a.status, a.body)
+	}
+	if len(fo.inputs) != 0 || len(fo.policyInputs) != 0 {
+		t.Fatal("a refused managed_by reached the Organization")
+	}
+	a := xo.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization/outbound-policy",
+		`{"policy":"standard","allowed":[],"denied":[],"managed_by":"terraform"}`, "If-Match", "*")
+	if in := fo.policyInputs[0]; a.status != http.StatusOK || in.ManagedBy.Value == nil ||
+		*in.ManagedBy.Value != "terraform" || !strings.Contains(string(a.body), `"managed_by":null`) {
+		t.Errorf("outbound policy with terraform = %d %s", a.status, a.body)
+	}
+
+	xi, fi := newOIDCAPI(t)
+	var m map[string]any
+	oidcRead := xi.call(t, http.MethodGet, "/api/v1/oidc-settings", "", "Cookie", adminCookie).body
+	_ = json.Unmarshal(oidcRead, &m)
+	if v, ok := m["managed_by"]; !ok || v != nil {
+		t.Errorf("the OIDC settings read managed_by %v", v)
+	}
+	for _, k := range []string{"etag", "client_secret_status", "warnings", "updated_at", "claims_supported"} {
+		delete(m, k)
+	}
+	m["proxy"] = map[string]any{"enabled": false}
+	for _, v := range bad {
+		m["managed_by"] = json.RawMessage(v)
+		body, _ := json.Marshal(m)
+		refused("oidc "+v, xi.mutate(t, adminCookie, http.MethodPut, "/api/v1/oidc-settings", string(body),
+			"If-Match", "*"))
+	}
+	if len(fi.inputs) != 0 {
+		t.Fatal("a refused managed_by reached the OIDC settings")
 	}
 }
 
@@ -568,6 +774,70 @@ func TestManagedByMappers(t *testing.T) {
 		"escalation chain": escalationInputOf(gen.EscalationChainInput{ManagedBy: set}).ManagedBy,
 		"lookup table":     tableInputOf(gen.LookupTableBase{ManagedBy: set}).ManagedBy,
 		"link rule":        ruleInputOf(gen.LinkRuleBase{ManagedBy: set}).ManagedBy,
+		"organization":     inputOf(gen.UpdateOrganizationJSONRequestBody{ManagedBy: set}).ManagedBy,
+		"outbound policy":  outboundPolicyInputOf(gen.OutboundPolicy{ManagedBy: set}).ManagedBy,
+		"oidc settings":    oidcInputOf(gen.OidcSettingsInput{ManagedBy: set}).ManagedBy,
+	}
+	var conn gen.ConnectionInput
+	for kind, from := range map[string]func() error{
+		"mattermost connection": func() error {
+			return conn.FromMattermostConnectionInput(gen.MattermostConnectionInput{
+				Type: gen.MattermostConnectionInputTypeMattermost, ManagedBy: set})
+		},
+		"telegram connection": func() error {
+			return conn.FromTelegramConnectionInput(gen.TelegramConnectionInput{
+				Type: gen.TelegramConnectionInputTypeTelegram, ManagedBy: set})
+		},
+		"bridge connection": func() error {
+			return conn.FromBridgeConnectionInput(gen.BridgeConnectionInput{
+				Type: gen.BridgeConnectionInputTypeBridge, ManagedBy: set})
+		},
+		"slack connection": func() error {
+			return conn.FromSlackConnectionInput(gen.SlackConnectionInput{
+				Type: gen.SlackConnectionInputTypeSlack, ManagedBy: set})
+		},
+	} {
+		if err := from(); err != nil {
+			t.Fatal(err)
+		}
+		in, err := connectionInputOf(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs[kind] = in.ManagedBy
+	}
+	var dest gen.DestinationInput
+	for kind, from := range map[string]func() error{
+		"mattermost destination": func() error {
+			return dest.FromMattermostDestinationInput(gen.MattermostDestinationInput{
+				Type: gen.MattermostDestinationInputTypeMattermost, ManagedBy: set})
+		},
+		"telegram destination": func() error {
+			return dest.FromTelegramDestinationInput(gen.TelegramDestinationInput{
+				Type: gen.TelegramDestinationInputTypeTelegram, ManagedBy: set})
+		},
+		"bridge destination": func() error {
+			return dest.FromBridgeDestinationInput(gen.BridgeDestinationInput{
+				Type: gen.BridgeDestinationInputTypeBridge, ManagedBy: set})
+		},
+		"slack destination": func() error {
+			return dest.FromSlackDestinationInput(gen.SlackDestinationInput{
+				Type: gen.SlackDestinationInputTypeSlack, ManagedBy: set})
+		},
+		"webhook destination": func() error {
+			return dest.FromWebhookDestinationInput(gen.WebhookDestinationInput{
+				Type: gen.WebhookDestinationInputTypeWebhook, Mode: gen.WebhookDestinationInputModeEvents,
+				ManagedBy: set})
+		},
+	} {
+		if err := from(); err != nil {
+			t.Fatal(err)
+		}
+		in, err := destinationInputOf(dest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs[kind] = in.ManagedBy
 	}
 	for kind, in := range inputs {
 		if !in.Given || in.Value == nil || *in.Value != "terraform" {
@@ -592,6 +862,53 @@ func TestManagedByMappers(t *testing.T) {
 			case mark == nil && !got.IsNull():
 				t.Errorf("%s read of none = %v", kind, got)
 			case mark != nil && (got.IsNull() || got.MustGet() != *mark):
+				t.Errorf("%s read of %s = %v", kind, *mark, got)
+			}
+		}
+	}
+
+	// The kinds of S-180, whose reads are variants of a union or carry the field on the object that exists once.
+	xc, _ := newConnectionsAPI(t)
+	for _, mark := range []*string{nil, new("terraform")} {
+		reads := map[string]any{
+			"organization":    organizationOf(organization.Organization{ManagedBy: mark}),
+			"outbound policy": outboundPolicyOf(organization.OutboundPolicyResource{ManagedBy: mark}),
+			"oidc settings":   oidcSettingsOf(oidc.Settings{ManagedBy: mark}),
+		}
+		for _, typ := range []string{connections.TypeMattermost, connections.TypeTelegram, connections.TypeBridge,
+			connections.TypeSlack} {
+			c, err := xc.srv.connectionOf(connections.Connection{PublicID: connectionID, Type: typ, ManagedBy: mark})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reads[typ+" connection"] = c
+		}
+		mode := "events"
+		for _, typ := range []string{destinations.TypeMattermost, destinations.TypeTelegram, destinations.TypeBridge,
+			destinations.TypeSlack, destinations.TypeWebhook} {
+			d, err := destinationOf(destinations.Destination{PublicID: mattermostID, Type: typ, WebhookMode: &mode,
+				ManagedBy: mark})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reads[typ+" destination"] = d
+		}
+		for kind, read := range reads {
+			raw, err := json.Marshal(read)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := m["managed_by"]
+			switch {
+			case !ok:
+				t.Errorf("%s read leaves managed_by out", kind)
+			case mark == nil && got != nil:
+				t.Errorf("%s read of none = %v", kind, got)
+			case mark != nil && got != *mark:
 				t.Errorf("%s read of %s = %v", kind, *mark, got)
 			}
 		}

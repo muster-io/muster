@@ -756,13 +756,20 @@ func keywordItem(se *openapi3.SchemaError) gen.ProblemError {
 	return item(pointer, fieldInvalidFormat)
 }
 
+// pointerMessage reads the reason of an error of the JSON Schema 2020-12 validator, `[error at "<pointer>": ]at
+// '<pointer>': <message>`: the pointer and the message. The pointer is the first one, before the message, which may
+// quote the value.
+func pointerMessage(reason string) (pointer, msg string, ok bool) {
+	_, rest, ok := strings.Cut(reason, "at '")
+	if !ok {
+		return "", "", false
+	}
+	return strings.Cut(rest, "': ")
+}
+
 // messageItems are the items of an error of the JSON Schema validator, read from its message.
 func messageItems(reason string) []gen.ProblemError {
-	i := strings.LastIndex(reason, "at '")
-	if i < 0 {
-		return []gen.ProblemError{item("", fieldInvalidFormat)}
-	}
-	pointer, msg, ok := strings.Cut(reason[i+len("at '"):], "': ")
+	pointer, msg, ok := pointerMessage(reason)
 	if !ok {
 		return []gen.ProblemError{item("", fieldInvalidFormat)}
 	}
