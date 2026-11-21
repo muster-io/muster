@@ -1087,6 +1087,9 @@ Before the stories of L2, these spikes check what the core of L2 relies on:
   rings an admin who is not anonymous or not the creator, and the anonymous creator on a phone; whether the automatic
   copy rings an ordinary member who muted the group; the clients' notification exceptions for a chat; and a comment with
   `disable_notification`.
+- **Message layout** (C-38). How many `fields` Slack takes in one `section` block, which F-076 does not list and P-94
+  assumes to be 10, with the error past it; and that a Mattermost attachment draws its `fields` under its `text`
+  whatever their order in the request (C-38.FR-6). To check on the test stands before the story of C-38.
 
 Earlier pending checks:
 
