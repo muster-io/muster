@@ -143,8 +143,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE gateway_calls c
 SET lease_owner = $1::text, lease_until = $2::timestamptz
-FROM due
-WHERE c.org_id = $3 AND c.id = due.id
+WHERE c.org_id = $3 AND c.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING c.id, c.public_id, c.connection_id, c.user_id, c.critical,
           c.next_attempt_at::timestamptz AS next_attempt_at
 `
@@ -218,8 +217,7 @@ WITH due AS MATERIALIZED (
 UPDATE connections c
 SET gateway_probe_lease_owner = $1::text, gateway_probe_lease_until = $2::timestamptz,
     gateway_next_probe_at = $3::timestamptz
-FROM due
-WHERE c.org_id = $4 AND c.id = due.id
+WHERE c.org_id = $4 AND c.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING c.id, c.public_id, c.name
 `
 

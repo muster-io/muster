@@ -1116,6 +1116,8 @@ func (f *fakeDB) ClaimDueReplies(_ context.Context, arg dbgen.ClaimDueRepliesPar
 		r.owner, r.until, r.state = arg.Owner, arg.LeaseUntil, "pending"
 		out = append(out, dbgen.ClaimDueRepliesRow{ID: r.id, NextAttemptAt: r.next})
 	}
+	// The order of RETURNING is not guaranteed; the worker sorts.
+	slices.Reverse(out)
 	return out, nil
 }
 
@@ -2384,6 +2386,37 @@ func repliesBeforeConfigurationEdits(t *testing.T, batch int32) {
 		if d.state != "delivered" || d.configOnly {
 			t.Errorf("delivery of #%d: %s, configuration only %v", 10+i, d.state, d.configOnly)
 		}
+	}
+}
+
+// TestRepliesEarliestFirst: a round sends the due Thread replies of one claimed batch earliest first, whatever order the
+// claim returns them in; here the replies queued later are due first.
+func TestRepliesEarliestFirst(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit = 600
+	for i := range 3 {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	for i := range 3 {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, alertsAdded(2, groups.StatusFiring, fmt.Sprintf("fp%d", i)))
+	}
+	rs := e.db.replies
+	if len(rs) != 3 || rs[0].id >= rs[1].id || rs[1].id >= rs[2].id {
+		t.Fatalf("replies %+v", rs)
+	}
+	now := e.business.Now()
+	rs[0].next, rs[1].next, rs[2].next = now, now.Add(-2*time.Minute), now.Add(-time.Minute)
+	e.rec.Reset()
+	e.round(t)
+	var sent []string
+	for _, c := range e.rec.Calls() {
+		if c.Method == deliverytest.MethodReply {
+			sent = append(sent, strings.Fields(textOf(c))[0])
+		}
+	}
+	if want := []string{"#1001", "#1002", "#1000"}; !slices.Equal(sent, want) {
+		t.Errorf("replies sent %q, want %q", sent, want)
 	}
 }
 
