@@ -9,6 +9,7 @@
 package timers
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -87,7 +88,7 @@ func NewStore(pool *pgxpool.Pool) Store {
 	return pgStore{begin: pool, db: pool, queries: func(d dbgen.DBTX) queries { return dbgen.New(d) }}
 }
 
-// Claim leases at most limit due timers of the Organization in a short transaction.
+// Claim leases at most limit due timers of the Organization in a short transaction, the earliest first.
 func (s pgStore) Claim(ctx context.Context, l db.Lease, orgID int64, kinds []string, limit int32) ([]Timer, error) {
 	return db.Claim(ctx, s.begin, l, limit, func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]Timer, error) {
 		rows, err := s.queries(tx).ClaimDueTimers(ctx, dbgen.ClaimDueTimersParams{OrgID: orgID, Owner: p.Owner,
@@ -95,6 +96,9 @@ func (s pgStore) Claim(ctx context.Context, l db.Lease, orgID int64, kinds []str
 		if err != nil {
 			return nil, err
 		}
+		slices.SortFunc(rows, func(a, b dbgen.ClaimDueTimersRow) int {
+			return cmp.Or(a.Deadline.Compare(b.Deadline), cmp.Compare(a.ID, b.ID))
+		})
 		out := make([]Timer, len(rows))
 		for i, r := range rows {
 			out[i] = Timer{ID: r.ID, AlertGroupID: int8Of(r.AlertGroupID), StormID: int8Of(r.StormID),

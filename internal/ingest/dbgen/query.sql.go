@@ -83,7 +83,7 @@ UPDATE ingest_claims c
 SET lease_owner = $1, lease_until = $2
 FROM integrations i
 WHERE c.org_id = $3 AND i.org_id = $3 AND i.id = c.integration_id
-  AND c.integration_id IN (SELECT free.integration_id FROM free)
+  AND c.integration_id = ANY (ARRAY(SELECT free.integration_id FROM free))
 RETURNING c.integration_id, i.public_id
 `
 

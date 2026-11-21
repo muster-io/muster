@@ -301,8 +301,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE destinations ds
 SET next_probe_at = $1::timestamptz
-FROM due
-WHERE ds.org_id = $2 AND ds.id = due.id
+WHERE ds.org_id = $2 AND ds.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING ds.id, ds.public_id, ds.name, ds.type, ds.connection_id
 `
 
@@ -377,8 +376,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE deliveries d
 SET lease_owner = $1::text, lease_until = $2::timestamptz
-FROM due
-WHERE d.org_id = $3 AND d.id = due.id
+WHERE d.org_id = $3 AND d.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING d.id, d.next_attempt_at, d.last_delivered_at
 `
 
@@ -435,7 +433,12 @@ type ClaimDueDeliveriesRow struct {
 // meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as
 // the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
 // deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would be a filter over every pending delivery.
-// The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape,
+// The update finds the chosen rows by their primary key, as one array of ids the choice yields once: joined to the
+// CTE, a plan that expects many chosen rows, as a generic plan does, which cannot know @lim and expects a tenth of the
+// due rows, may hash the choice against a sequential scan of the whole table. The rows come back in no particular
+// order, not that of the choice; the worker sorts them. The claims of ClaimDueReplies, ClaimDueWebhookEvents and
+// ClaimBrokenProbes here, of ClaimDueTimers (internal/timers), ClaimDueCalls and ClaimGatewayProbes
+// (internal/gateways), ClaimOpenGroupUpdate (internal/groups) and ClaimIntegrations (internal/ingest) copy this shape,
 // without the ranks, which only Root messages have; a fix of it applies to them too.
 func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveriesParams) ([]ClaimDueDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueDeliveries,
@@ -490,8 +493,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE thread_replies r
 SET lease_owner = $1::text, lease_until = $2::timestamptz, state = 'pending'
-FROM due
-WHERE r.org_id = $3 AND r.id = due.id
+WHERE r.org_id = $3 AND r.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING r.id, r.next_attempt_at
 `
 
@@ -567,8 +569,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE webhook_events e
 SET lease_owner = $1::text, lease_until = $2::timestamptz
-FROM due
-WHERE e.org_id = $3 AND e.id = due.id
+WHERE e.org_id = $3 AND e.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING e.id, e.next_attempt_at
 `
 

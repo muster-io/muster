@@ -5,6 +5,7 @@ package timers
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -65,6 +66,8 @@ func (q *fakeQueries) ClaimDueTimers(_ context.Context, arg dbgen.ClaimDueTimers
 			out = append(out, r.ClaimDueTimersRow)
 		}
 	}
+	// The order of RETURNING is not guaranteed, here not that of the choice; the Store sorts.
+	slices.SortFunc(out, func(a, b dbgen.ClaimDueTimersRow) int { return cmp.Compare(a.ID, b.ID) })
 	return out, nil
 }
 
@@ -189,6 +192,9 @@ func TestRound(t *testing.T) {
 	for i := range int64(5) {
 		q.add(i+1, "reopen_window_end", business0.Add(-time.Duration(i)*time.Hour))
 	}
+	// Two due at the same time, claimed in one batch: the lower id first.
+	q.add(8, "reopen_window_end", business0.Add(-10*time.Hour))
+	q.add(7, "reopen_window_end", business0.Add(-10*time.Hour))
 	q.add(9, "reopen_window_end", business0.Add(time.Minute))
 	e := newEnv(q, "r1")
 	e.w.MaxWait = time.Hour
@@ -196,8 +202,12 @@ func TestRound(t *testing.T) {
 	if err != nil || next != time.Minute {
 		t.Fatalf("round = %v, %v", next, err)
 	}
-	if len(e.fired) != 5 || !slices.Equal(e.fired, e.after) || len(q.rows) != 1 || len(q.claims) != 3 {
+	if len(e.fired) != 7 || !slices.Equal(e.fired, e.after) || len(q.rows) != 1 || len(q.claims) != 4 {
 		t.Errorf("fired %v, after %v, left %d, claims %d", e.fired, e.after, len(q.rows), len(q.claims))
+	}
+	// Earliest first, within a claimed batch too, whatever order the claim returned them in.
+	if want := []int64{7, 8, 5, 4, 3, 2, 1}; !slices.Equal(e.fired, want) {
+		t.Errorf("fired %v, want %v", e.fired, want)
 	}
 	if c := q.claims[0]; c.Owner != "r1" || !c.Due.Equal(business0) || !c.Now.Equal(real0) ||
 		!c.LeaseUntil.Equal(real0.Add(Lease)) || c.Lim != 2 || c.OrgID != 1 {

@@ -131,7 +131,7 @@ UPDATE ingest_claims c
 SET lease_owner = @owner, lease_until = @lease_until
 FROM integrations i
 WHERE c.org_id = @org_id AND i.org_id = @org_id AND i.id = c.integration_id
-  AND c.integration_id IN (SELECT free.integration_id FROM free)
+  AND c.integration_id = ANY (ARRAY(SELECT free.integration_id FROM free))
 RETURNING c.integration_id, i.public_id;
 
 -- RenewIngestLease extends the lease this replica holds and returns what processing needs of the Integration; the
