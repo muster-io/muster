@@ -28,14 +28,18 @@ System stays the default, so nobody who chooses nothing sees a change.
   whose Audit log action `user.profile_updated` records it. A change applies at once, without a reload, in the tab that
   made it; other open tabs and other browsers apply it the next time they read the profile.
 - **C-39.FR-3** The browser keeps a copy of the last theme it applied, so that a page load applies the theme before the
-  first paint — without a frame in the other theme — under the Content Security Policy of C-03.FR-16, whose
-  `script-src 'self'` and `style-src 'self'` allow no inline script or style. Once the profile is read, its theme wins
-  and replaces the copy. The sign-in, TOTP, password setup and error pages, which have no profile to read, use the copy
-  and otherwise follow the system. Signing out keeps the copy; it holds only the theme, nothing that identifies the
-  person.
+  first paint — without a frame in the other theme — under the Content Security Policy of the app listener
+  (C-03.FR-16, S-010), whose `script-src 'self'` and `style-src 'self'` allow no inline script or style: the copy is
+  in the browser's `localStorage`, and a small script of the SPA's own origin, loaded before its bundle, reads it and
+  sets the theme on the document; the server does not rewrite `index.html` per person. Once the profile is read, its
+  theme wins and replaces the copy. The sign-in, TOTP, password setup and error pages, which have no profile to read,
+  use the copy and otherwise follow the system. Signing out keeps the copy; it holds only the theme, nothing that
+  identifies the person.
 - **C-39.FR-4** Both themes cover every page, dialog, menu, chart and native control (through `color-scheme`), and the
-  status colours of Alert Groups and Severity levels keep their meaning in both. The text contrast both themes keep is
-  Open question 4.
+  status colours of Alert Groups and Severity levels keep their meaning in both. The switch works on the current colour
+  tokens and sets no new contrast bar: the dark theme keeps the contrast its tokens were chosen for. The UI design of
+  the later layers (journal D315) changes the tokens, not the switch, and brings an automated contrast check — for
+  example axe-core, MPL-2.0, as a test dependency with its licence statement — together with an NFR row.
 - **C-39.FR-5** The theme changes only the web UI: messenger messages, the documentation site, which keeps its own
   look, and the API are unaffected.
 - **C-39.FR-6** A Service account has no profile and no theme; its API answers are unaffected.
@@ -48,7 +52,7 @@ System stays the default, so nobody who chooses nothing sees a change.
 Profile, section "Theme": the hint "Applies at once, on this device and in your profile.", three buttons side by side
 — "System", "Light", "Dark" — with the chosen one pressed (`aria-pressed`), and under them "As in the system: now
 light." (or "now dark."), "Always light." or "Always dark.". The user menu also has "Theme" with the same three
-choices, one click from any page (Open question 1); it re-reads the profile before saving, so that it never overwrites
+choices, one click from any page, as issue #370 asks; it re-reads the profile before saving, so that it never overwrites
 a newer name, time zone or language. Every text in English and Russian. At 360 px the three buttons fit on one line
 without horizontal scrolling.
 
@@ -66,7 +70,8 @@ request validation with `400` `invalid_format`. No new Permission, metric, log e
 - **C-39.AC-2** In a real browser emulating `prefers-color-scheme: light`, a User with `dark` sees the Alert Group list
   dark after sign-in; a reload with the SPA's bundle held back (Playwright delaying `/assets/*.js`) shows the document
   dark — its computed `color-scheme` and background — before the bundle runs; choosing Light in the profile turns the
-  page light at once.
+  page light at once, and choosing Dark in the user menu turns it dark again; the answer to `index.html` is the same
+  for every person.
 - **C-39.AC-3** With `system`, switching the emulated `prefers-color-scheme` from light to dark turns the open page dark
   without a reload.
 - **C-39.AC-4** After sign-out, the sign-in page keeps the theme last applied in that browser; in a fresh browser
@@ -75,25 +80,6 @@ request validation with `400` `invalid_format`. No new Permission, metric, log e
   in both themes at 1280 px and 360 px, in English and in Russian, with no horizontal scrolling at 360 px.
 - **C-39.AC-6** With the screenshot User's theme set to `dark`, `make docs-screenshots` still produces light
   screenshots.
-
-## Open questions
-
-Settled by the maintainer before the stories that depend on them. Each has a recommended answer.
-
-1. **Where the switch is.** Journal D462 says the user menu or the profile; the approved mockup puts it in the profile.
-   — _Recommended:_ both, as the UI section says: the profile section of the mockup, and "Theme" in the user menu,
-   which issue #370 asks to be one click away.
-2. **How the theme reaches the first paint.** — _Recommended:_ a small same-origin script loaded before the SPA's
-   bundle reads the browser's copy (`localStorage`) and sets the theme on the document; it satisfies `script-src
-   'self'` and needs no server-side rendering. A cookie read by the server to rewrite `index.html` would work without
-   script but makes the cached, embedded page vary per person.
-3. **Where Muster's design work lands.** Journal D462 plans the switch together with the UI design of the later layers
-   (D315). — _Recommended:_ ship the switch on the current colour tokens in 0.2.x, as journal D486 orders it among the
-   first 0.2.x items; the design work changes the tokens, not the switch.
-4. **A contrast bar.** No NFR states one, and the light theme has not been measured against one. — _Recommended:_ no
-   new bar with the switch; the dark theme keeps the contrast its tokens were chosen for, and an automated contrast
-   check (for example axe-core, MPL-2.0, as a test dependency with its licence statement) comes with the design work
-   of Open question 3, together with an NFR row.
 
 ## Related ADRs
 
