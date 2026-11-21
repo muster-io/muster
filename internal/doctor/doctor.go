@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package doctor is `muster doctor` (C-02.FR-14, FR-15): it checks the database, its connections, the Keyring and the
-// clock, prints one line per check as `OK|WARN|FAIL <check>: <detail>` and reports whether any check failed. It only
-// reads: both connections it opens run every statement in a read-only transaction, and it takes no --actor. It checks
-// every Mattermost Connection and Destination as their checks do, in the background client class (C-13.FR-10), every
-// Telegram Connection with the steps of its check — the dry probe, getMe, getWebhookInfo — and every Telegram
-// Destination with its Destination check — getChat and getChatMember in the channel and its discussion group —
-// printing the failing step with its message (C-14.FR-11, FR-14), and every Bridge and Slack Connection and Destination
-// with theirs (C-22.FR-2, FR-3, C-24.FR-2, FR-3). `muster dev doctor` sends a Slack Connection's requests where `muster
-// dev` sends them, so that the published tokens of the fake Slack server never reach slack.com.
+// Package doctor is `muster doctor` (C-02.FR-14, FR-15): it checks the database, its schema version, its connections,
+// the Keyring and the clock, prints one line per check as `OK|WARN|FAIL <check>: <detail>` and reports whether any
+// check failed. It only reads: both connections it opens run every statement in a read-only transaction, and it takes
+// no --actor. It checks every Mattermost Connection and Destination as their checks do, in the background client class
+// (C-13.FR-10), every Telegram Connection with the steps of its check — the dry probe, getMe, getWebhookInfo — and
+// every Telegram Destination with its Destination check — getChat and getChatMember in the channel and its discussion
+// group — printing the failing step with its message (C-14.FR-11, FR-14), and every Bridge and Slack Connection and
+// Destination with theirs (C-22.FR-2, FR-3, C-24.FR-2, FR-3). `muster dev doctor` sends a Slack Connection's requests
+// where `muster dev` sends them, so that the published tokens of the fake Slack server never reach slack.com.
 package doctor
 
 import (
@@ -55,6 +55,7 @@ const (
 const (
 	CheckDatabase          = "database"
 	CheckPostgreSQLVersion = "postgresql_version"
+	CheckSchema            = "schema"
 	CheckSessionConnection = "session_connection"
 	CheckTLSMain           = "tls_main"
 	CheckTLSSession        = "tls_session"
@@ -165,6 +166,7 @@ func Run(ctx context.Context, opts Options) (bool, error) {
 	c.conns = conns
 	c.print(OK, CheckDatabase, "main and session connections reachable")
 	c.version(ctx)
+	c.schema(ctx)
 	c.session(ctx)
 	c.tls(ctx, CheckTLSMain, conns.Main, cfg.Database.SSLMode)
 	c.tls(ctx, CheckTLSSession, conns.Session, cfg.Session.SSLMode)
@@ -285,6 +287,36 @@ func (c *checks) version(ctx context.Context) {
 		return
 	}
 	c.print(OK, CheckPostgreSQLVersion, strings.Fields(v + " ")[0])
+}
+
+// schema reads the schema version and judges it as the server does at start: a dirty schema and one newer than the
+// binary knows fail, one older warns, since muster migrate or MUSTER_MIGRATE_ON_START applies the rest. The line names
+// the event the server logs for a schema it refuses; the doctor logs nothing.
+func (c *checks) schema(ctx context.Context) {
+	known, err := db.KnownVersion()
+	if err != nil {
+		c.print(Fail, CheckSchema, err.Error())
+		return
+	}
+	version, dirty, err := db.SchemaVersion(ctx, c.conns.Main)
+	switch {
+	case err != nil:
+		c.print(Fail, CheckSchema, err.Error())
+	case dirty:
+		c.print(Fail, CheckSchema, fmt.Sprintf("dirty at version %d (%s): a migration failed halfway; see Upgrade notes "+
+			"in Requirements and tested versions", version, logging.SchemaDirty.Name()))
+	case version > known:
+		c.print(Fail, CheckSchema, fmt.Sprintf("version %d is newer than this binary knows (%d) (%s)", version, known,
+			logging.SchemaTooNew.Name()))
+	case version == 0:
+		c.print(Warn, CheckSchema, fmt.Sprintf("no migration has run yet, this binary knows version %d; muster "+
+			"migrate applies them", known))
+	case version < known:
+		c.print(Warn, CheckSchema, fmt.Sprintf("version %d, older than this binary's %d; muster migrate applies the "+
+			"rest", version, known))
+	default:
+		c.print(OK, CheckSchema, fmt.Sprintf("version %d, as this binary knows", version))
+	}
 }
 
 func (c *checks) session(ctx context.Context) {

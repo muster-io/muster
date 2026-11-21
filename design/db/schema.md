@@ -145,10 +145,13 @@
   [`0054_deliveries_alert_group_pending_index`](../../internal/db/migrations/0054_deliveries_alert_group_pending_index.up.sql)
   (`deliveries_alert_group_pending_idx`, the pending deliveries of Alert Groups by Alert Group, from which each batch of
   the walks of a change of configuration lists the resolved Alert Groups whose final edit waits, C-12.FR-12,
-  C-26.FR-9) and
+  C-26.FR-9),
   [`0055_deliveries_retention_index`](../../internal/db/migrations/0055_deliveries_retention_index.up.sql)
   (`deliveries_retention_idx`, the deliveries of Alert Groups that are not pending by their last change, which the
-  retention of deliveries walks, C-09.FR-16), in
+  retention of deliveries walks, C-09.FR-16) and
+  [`0056_managed_by`](../../internal/db/migrations/0056_managed_by.up.sql)
+  (`managed_by`, the tool that keeps an object as code, on the twelve kinds of configuration of C-33.FR-11,
+  [4.19](#419-managed-by)), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -2179,6 +2182,21 @@ Serves C-31 (from 0.2.0, migration 0037) and C-32 (migration 0046); [ADR-0018](.
 
 The Permissions `escalation-chains:read`, for every Role, and `escalation-chains:write`, for Admins, and their
 allocation are reference data of migration 0046, as in 0025.
+
+### 4.19 Managed by
+
+Serves C-33.FR-11 (migration 0056); [ADR-0001](../adr/0001-agpl-license-cla-and-dependency-policy.md) for the
+specification the tools are built from.
+
+- **`managed_by`** — a nullable `text` on `integrations`, `routes`, `teams`, `schedules`, `escalation_chains`,
+  `lookup_tables`, `link_rules`, `connections`, `destinations`, `organizations`, `outbound_policies` and
+  `oidc_settings`: the name of the tool that keeps the object as code, such as `terraform`, null when none does. It has
+  no default, no CHECK and no index: the domain packages check its format (`internal/managedby`, 1 to 32 characters of
+  `[a-z0-9._-]` starting with a letter or a digit), so that a later change of the format needs no migration, and no
+  query looks a row up by it. It is a mark only: the reads and writes of the object carry it, a change of it bumps the
+  object's `version` and is in the Audit log diff like any field, and nothing else reads it — routing, delivery, the
+  order of the Routes and the evaluation of the Teams ignore it. A create without it stores null; an update without it
+  keeps it, and null clears it. The Default route takes it like any Route.
 
 ## 5. Queues and claims
 

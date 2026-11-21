@@ -432,6 +432,7 @@ func routeOf(rt routing.Route) gen.Route {
 		DeliverToTeams:     rt.DeliverToTeams, RunTeamChains: rt.RunTeamChains,
 		StormActive: rt.Storm != nil, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(),
 		Etag: &tag, OwnMessageLabels: rt.OwnMessageLabels, MessageLabels: rt.MessageLabels,
+		ManagedBy: managedByOf(rt.ManagedBy),
 	}
 	if out.MessageLabels == nil {
 		out.MessageLabels = []string{}
@@ -500,7 +501,8 @@ func routeInputOf(in gen.RouteInput) routing.Input {
 		GroupKey: in.GroupKey, DeliverToTeams: in.DeliverToTeams, RunTeamChains: in.RunTeamChains,
 		Policy: routingPolicyOf(in.Policy), OwningTeamID: owningTeamOf(in.OwningTeamId),
 		Keep: routing.KeepTemplates{RootMessage: !t.RootMessage.IsSpecified(), Line: !t.Line.IsSpecified(),
-			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}, OwnMessageLabels: in.OwnMessageLabels}
+			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}, OwnMessageLabels: in.OwnMessageLabels,
+		ManagedBy: managedByIn(in.ManagedBy)}
 	if in.MessageLabels != nil {
 		out.MessageLabels = append([]string{}, *in.MessageLabels...)
 	}

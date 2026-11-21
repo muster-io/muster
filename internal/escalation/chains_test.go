@@ -17,6 +17,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/escalation/dbgen"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/metrics"
 )
 
@@ -165,6 +166,7 @@ func TestChains(t *testing.T) {
 		"long description": {Input{Name: "x", Description: ptr(strings.Repeat("x", MaxDescriptionLength+1))}, "/description", CodeTooLong},
 		"deleted owner":    {Input{Name: "x", OwningTeamID: ptr(teamGone)}, "/owning_team_id", CodeUnknownID},
 		"malformed owner":  {Input{Name: "x", OwningTeamID: ptr("nope")}, "/owning_team_id", CodeUnknownID},
+		"managed by -tf":   {Input{Name: "x", ManagedBy: managedby.Set("-tf")}, "/managed_by", CodeInvalidFormat},
 	} {
 		if f := fieldError(t, func() error { _, err := svc.Create(ctx, by, c.in); return err }()); f.Pointer != c.pointer ||
 			f.Code != c.code {
@@ -176,6 +178,55 @@ func TestChains(t *testing.T) {
 		}()); f.Pointer != c.pointer || f.Code != c.code {
 			t.Errorf("update %s: %+v", name, f)
 		}
+	}
+}
+
+// TestManagedBy is C-33.FR-11: a creation stores the mark or none, an update that leaves it out keeps it, null clears
+// it, and each change is in the Audit log diff.
+func TestManagedBy(t *testing.T) {
+	svc, store := newService(t)
+	ctx := t.Context()
+	steps := paymentsSteps()[:2]
+	marked, err := svc.Create(ctx, by, Input{Name: "tf", Steps: steps, ManagedBy: managedby.Set("terraform")})
+	if err != nil || marked.ManagedBy == nil || *marked.ManagedBy != "terraform" {
+		t.Fatalf("create marked = %v, %v", marked.ManagedBy, err)
+	}
+	plain, err := svc.Create(ctx, by, Input{Name: "plain", Steps: steps})
+	if err != nil || plain.ManagedBy != nil {
+		t.Errorf("create without = %v, %v", plain.ManagedBy, err)
+	}
+	kept, err := svc.Update(ctx, by, marked.PublicID, nil, Input{Name: "tf-2", Steps: steps})
+	if err != nil || kept.ManagedBy == nil || *kept.ManagedBy != "terraform" {
+		t.Errorf("update without = %v, %v", kept.ManagedBy, err)
+	}
+	page, err := svc.List(ctx, ListFilter{Limit: 10})
+	if err != nil || len(page.Chains) != 2 {
+		t.Fatalf("list = %+v, %v", page, err)
+	}
+	for _, c := range page.Chains {
+		if want := c.PublicID == marked.PublicID; (c.ManagedBy != nil) != want ||
+			want && *c.ManagedBy != "terraform" {
+			t.Errorf("listed %s with the mark %v", c.Name, c.ManagedBy)
+		}
+	}
+	audits := len(store.audit)
+	if f := fieldError(t, func() error {
+		_, err := svc.Update(ctx, by, marked.PublicID, nil, Input{Name: "tf-3", Steps: steps,
+			ManagedBy: managedby.Set("Terraform")})
+		return err
+	}()); f.Pointer != "/managed_by" || f.Code != CodeInvalidFormat {
+		t.Errorf("Terraform = %+v", f)
+	}
+	if got, err := svc.Get(ctx, marked.PublicID); err != nil || got.Version != kept.Version || got.Name != "tf-2" ||
+		got.ManagedBy == nil || *got.ManagedBy != "terraform" || len(store.audit) != audits {
+		t.Errorf("a refused update changed the chain: %+v, %v", got, err)
+	}
+	if cleared, err := svc.Update(ctx, by, marked.PublicID, nil, Input{Name: "tf-2", Steps: steps,
+		ManagedBy: managedby.Clear}); err != nil || cleared.ManagedBy != nil {
+		t.Errorf("update with null = %v, %v", cleared.ManagedBy, err)
+	}
+	if d := string(store.audit[len(store.audit)-1].Diff); d != `[{"pointer":"/managed_by","before":"terraform"}]` {
+		t.Errorf("clearing diff %s", d)
 	}
 }
 

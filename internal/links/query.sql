@@ -6,7 +6,7 @@
 
 -- ListLookupTables lists a page of the Lookup tables in the order they were created, after the id after_id.
 -- name: ListLookupTables :many
-SELECT id, public_id, name, description, column_names, created_at, version
+SELECT id, public_id, name, description, column_names, created_at, version, managed_by
 FROM lookup_tables
 WHERE org_id = @org_id AND (sqlc.narg('after_id')::bigint IS NULL OR id > sqlc.narg('after_id')::bigint)
 ORDER BY id
@@ -14,7 +14,7 @@ LIMIT @page_size;
 
 -- GetLookupTable reads a Lookup table by public_id.
 -- name: GetLookupTable :one
-SELECT id, public_id, name, description, column_names, created_at, version
+SELECT id, public_id, name, description, column_names, created_at, version, managed_by
 FROM lookup_tables
 WHERE org_id = @org_id AND public_id = @public_id;
 
@@ -39,15 +39,15 @@ ORDER BY lookup_table_id, key;
 
 -- InsertLookupTable creates a Lookup table; the unique name is checked by its constraint.
 -- name: InsertLookupTable :one
-INSERT INTO lookup_tables (org_id, public_id, name, description, column_names, created_at, updated_at)
-VALUES (@org_id, @public_id, @name, @description, @column_names::text[], @now, @now)
+INSERT INTO lookup_tables (org_id, public_id, name, description, column_names, managed_by, created_at, updated_at)
+VALUES (@org_id, @public_id, @name, @description, @column_names::text[], sqlc.narg('managed_by')::text, @now, @now)
 RETURNING id;
 
 -- UpdateLookupTable replaces the fields of a Lookup table and bumps its version.
 -- name: UpdateLookupTable :exec
 UPDATE lookup_tables
-SET name = @name, description = @description, column_names = @column_names::text[], updated_at = @now,
-    version = version + 1
+SET name = @name, description = @description, column_names = @column_names::text[],
+    managed_by = sqlc.narg('managed_by')::text, updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- DeleteLookupEntries deletes every row of a Lookup table, which the rows of an update replace.
@@ -74,7 +74,7 @@ WHERE t.org_id = @org_id AND t.name = @name AND e.key = @key;
 
 -- ListLinkRules lists a page of the Link rules in the order they were created, after the id after_id.
 -- name: ListLinkRules :many
-SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version
+SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version, managed_by
 FROM link_rules
 WHERE org_id = @org_id AND (sqlc.narg('after_id')::bigint IS NULL OR id > sqlc.narg('after_id')::bigint)
 ORDER BY id
@@ -82,7 +82,7 @@ LIMIT @page_size;
 
 -- GetLinkRule reads a Link rule by public_id.
 -- name: GetLinkRule :one
-SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version
+SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version, managed_by
 FROM link_rules
 WHERE org_id = @org_id AND public_id = @public_id;
 
@@ -109,15 +109,20 @@ ORDER BY id;
 
 -- InsertLinkRule creates a Link rule; the unique name is checked by its constraint.
 -- name: InsertLinkRule :one
-INSERT INTO link_rules (org_id, public_id, name, scope_type, scope_label, url_template, created_at, updated_at)
-VALUES (@org_id, @public_id, @name, @scope_type, sqlc.narg('scope_label'), @url_template, @now, @now)
+INSERT INTO link_rules (
+    org_id, public_id, name, scope_type, scope_label, url_template, managed_by, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, @name, @scope_type, sqlc.narg('scope_label'), @url_template, sqlc.narg('managed_by')::text,
+    @now, @now
+)
 RETURNING id;
 
 -- UpdateLinkRule replaces the fields of a Link rule and bumps its version.
 -- name: UpdateLinkRule :exec
 UPDATE link_rules
 SET name = @name, scope_type = @scope_type, scope_label = sqlc.narg('scope_label'), url_template = @url_template,
-    updated_at = @now, version = version + 1
+    managed_by = sqlc.narg('managed_by')::text, updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- DeleteLinkRuleMatchers deletes the Matchers of a Link rule, which an update writes again.

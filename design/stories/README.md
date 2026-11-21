@@ -734,7 +734,7 @@ item of [L2 §1.5](../prd/L2.md#15-specified-later-in-l2) to be specified. Three
 MIT and the mark `managed_by` on the configuration objects, split into S-179 and S-180 at the boundary between two
 groups of domains because together they touched about 45 files, and the mark with its warnings on the pages, S-181,
 which follows S-158 because it changes the Escalation chain page that S-158 rebuilds. S-179 adds the one migration for
-all twelve tables, 0055. The three ship in 0.2.0, as the maintainer decided, which makes 0.2.0 the provider's minimum
+all twelve tables, 0056. The three ship in 0.2.0, as the maintainer decided, which makes 0.2.0 the provider's minimum
 version. S-182 to S-188 are worked in `muster-io/terraform-provider-muster` and start after the
 tag of 0.2.0, which `depends_on` cannot name: S-182 builds the repository, the client, the provider's configuration,
 CI with the acceptance tests against `muster dev` from Muster's image, and the release pipeline; S-183 to S-187 add the

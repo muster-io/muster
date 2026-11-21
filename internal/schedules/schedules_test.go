@@ -24,6 +24,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/schedules/dbgen"
 )
@@ -64,6 +65,7 @@ type scheduleRec struct {
 	publicID, name, tz, gapAlert string
 	main                         bool
 	created                      time.Time
+	managedBy                    pgtype.Text
 }
 
 type rotationLayerRec struct {
@@ -208,8 +210,9 @@ func (s *fakeStore) ListSchedules(_ context.Context, arg dbgen.ListSchedulesPara
 			break
 		}
 		out = append(out, dbgen.ListSchedulesRow{ID: sc.id, PublicID: sc.publicID, Name: sc.name, TimeZone: sc.tz,
-			Main: sc.main, GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created, TeamID: t.id,
-			TeamPublicID: t.publicID, TeamName: t.name, TeamSlug: t.slug, SortName: strings.ToLower(sc.name)})
+			Main: sc.main, GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created, ManagedBy: sc.managedBy,
+			TeamID: t.id, TeamPublicID: t.publicID, TeamName: t.name, TeamSlug: t.slug,
+			SortName: strings.ToLower(sc.name)})
 	}
 	return out, nil
 }
@@ -224,8 +227,8 @@ func (s *fakeStore) GetSchedule(_ context.Context, arg dbgen.GetScheduleParams) 
 	}
 	t := s.team(sc.team)
 	return dbgen.GetScheduleRow{ID: sc.id, PublicID: sc.publicID, Name: sc.name, TimeZone: sc.tz, Main: sc.main,
-		GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created, TeamID: t.id, TeamPublicID: t.publicID,
-		TeamName: t.name, TeamSlug: t.slug}, nil
+		GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created, ManagedBy: sc.managedBy, TeamID: t.id,
+		TeamPublicID: t.publicID, TeamName: t.name, TeamSlug: t.slug}, nil
 }
 
 func (s *fakeStore) GetTeamMainSchedule(_ context.Context, arg dbgen.GetTeamMainScheduleParams) (
@@ -273,7 +276,8 @@ func (s *fakeStore) InsertSchedule(_ context.Context, arg dbgen.InsertSchedulePa
 	}
 	id := s.id()
 	s.schedules = append(s.schedules, &scheduleRec{id: id, team: arg.TeamID, version: 1, publicID: arg.PublicID,
-		name: arg.Name, tz: arg.TimeZone, main: arg.Main, gapAlert: arg.GapAlert, created: arg.Now})
+		name: arg.Name, tz: arg.TimeZone, main: arg.Main, gapAlert: arg.GapAlert, created: arg.Now,
+		managedBy: arg.ManagedBy})
 	return id, nil
 }
 
@@ -298,6 +302,7 @@ func (s *fakeStore) UpdateSchedule(_ context.Context, arg dbgen.UpdateSchedulePa
 			}
 			sc.name, sc.tz, sc.main, sc.gapAlert, sc.version = arg.Name, arg.TimeZone, arg.Main, arg.GapAlert,
 				sc.version+1
+			sc.managedBy = arg.ManagedBy
 		}
 	}
 	return nil
@@ -1424,6 +1429,55 @@ func TestInfo(t *testing.T) {
 	svc.unexportInfo("SC0000000INFO1")
 	svc.unexportInfo("SC0000000INFO3")
 	svc.unexportInfo("SC000000000NONE")
+}
+
+// TestManagedBy is C-33.FR-11: a creation stores the mark or none, an update that leaves it out keeps it, null clears
+// it, a value outside the format is refused at /managed_by, and each change is in the Audit log diff.
+func TestManagedBy(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	in := mainInput()
+	in.ManagedBy = managedby.Set("terraform")
+	marked, err := svc.Create(ctx, admin, in)
+	if err != nil || marked.ManagedBy == nil || *marked.ManagedBy != "terraform" {
+		t.Fatalf("create marked = %v, %v", marked.ManagedBy, err)
+	}
+	plain, err := svc.Create(ctx, admin, Input{TeamID: teamPay, Name: "Second line"})
+	if err != nil || plain.ManagedBy != nil {
+		t.Errorf("create without = %v, %v", plain.ManagedBy, err)
+	}
+	keep := inputOf(marked)
+	keep.Name = "Renamed"
+	kept, err := svc.Update(ctx, admin, marked.PublicID, nil, keep)
+	if err != nil || kept.ManagedBy == nil || *kept.ManagedBy != "terraform" {
+		t.Errorf("update without = %v, %v", kept.ManagedBy, err)
+	}
+	page, err := svc.List(ctx, ListFilter{Limit: 10})
+	if err != nil || len(page.Schedules) != 2 {
+		t.Fatalf("list = %+v, %v", page, err)
+	}
+	for _, sc := range page.Schedules {
+		if want := sc.PublicID == marked.PublicID; (sc.ManagedBy != nil) != want ||
+			want && *sc.ManagedBy != "terraform" {
+			t.Errorf("listed %s with the mark %v", sc.Name, sc.ManagedBy)
+		}
+	}
+	bad := inputOf(kept)
+	bad.ManagedBy = managedby.Set(strings.Repeat("a", 33))
+	if f := fieldError(t, func() error {
+		_, err := svc.Update(ctx, admin, marked.PublicID, nil, bad)
+		return err
+	}()); f.Pointer != "/managed_by" || f.Code != CodeInvalidFormat {
+		t.Errorf("33 characters = %+v", f)
+	}
+	null := inputOf(kept)
+	null.ManagedBy = managedby.Clear
+	if cleared, err := svc.Update(ctx, admin, marked.PublicID, nil, null); err != nil || cleared.ManagedBy != nil {
+		t.Errorf("update with null = %v, %v", cleared.ManagedBy, err)
+	}
+	if d := string(store.audit[len(store.audit)-1].Diff); d != `[{"pointer":"/managed_by","before":"terraform"}]` {
+		t.Errorf("clearing diff %s", d)
+	}
 }
 
 // TestGapAlert is C-27.FR-7 on the setting: a new Schedule has gap_alert by_default unless the input names another,

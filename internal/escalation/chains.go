@@ -38,6 +38,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/escalation/dbgen"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -66,6 +67,7 @@ const (
 // The codes of FieldError, as the API names them.
 const (
 	CodeRequired              = "required"
+	CodeInvalidFormat         = "invalid_format"
 	CodeTooLong               = "too_long"
 	CodeOutOfRange            = "out_of_range"
 	CodeDuplicate             = "duplicate"
@@ -155,6 +157,8 @@ type Chain struct {
 	Warnings     []Warning
 	CreatedAt    time.Time
 	Version      int64
+	// ManagedBy is the tool that keeps the chain as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 }
 
 // Referrers are the Routes and the Teams that are not deleted and name a chain, by name.
@@ -196,6 +200,8 @@ type Input struct {
 	Description  *string
 	OwningTeamID *string
 	Steps        []StepInput
+	// ManagedBy is the mark of the tool that keeps the chain as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // ListFilter selects a page of chains by name: matching Query when it is set, owned by Team (a public_id) or by the
@@ -342,6 +348,7 @@ type chainRow struct {
 	Description  string
 	CreatedAt    time.Time
 	Version      int64
+	ManagedBy    pgtype.Text
 	OwningTeamID pgtype.Int8
 	TeamPublicID pgtype.Text
 	TeamName     pgtype.Text
@@ -351,8 +358,8 @@ type chainRow struct {
 
 func chainOf(r chainRow) Chain {
 	c := Chain{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, CreatedAt: r.CreatedAt.UTC(),
-		Version: r.Version, Steps: []Step{}, Destinations: []DestinationRef{}, Warnings: []Warning{},
-		Referrers: Referrers{Routes: []RouteReferrer{}, Teams: []TeamReferrer{}}}
+		Version: r.Version, ManagedBy: managedby.Of(r.ManagedBy), Steps: []Step{}, Destinations: []DestinationRef{},
+		Warnings: []Warning{}, Referrers: Referrers{Routes: []RouteReferrer{}, Teams: []TeamReferrer{}}}
 	if r.OwningTeamID.Valid {
 		c.OwningTeam = &TeamRef{ID: r.OwningTeamID.Int64, PublicID: r.TeamPublicID.String, Name: r.TeamName.String,
 			Slug: r.TeamSlug.String, Deleted: r.TeamDeleted}
@@ -402,8 +409,9 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 			break
 		}
 		page.Chains = append(page.Chains, chainOf(chainRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name,
-			Description: r.Description, CreatedAt: r.CreatedAt, Version: r.Version, OwningTeamID: r.OwningTeamID,
-			TeamPublicID: r.TeamPublicID, TeamName: r.TeamName, TeamSlug: r.TeamSlug, TeamDeleted: r.TeamDeleted}))
+			Description: r.Description, CreatedAt: r.CreatedAt, Version: r.Version, ManagedBy: r.ManagedBy,
+			OwningTeamID: r.OwningTeamID, TeamPublicID: r.TeamPublicID, TeamName: r.TeamName, TeamSlug: r.TeamSlug,
+			TeamDeleted: r.TeamDeleted}))
 	}
 	if err := s.complete(ctx, s.store, page.Chains); err != nil {
 		return Page{}, err
@@ -545,6 +553,8 @@ func check(in Input) (Input, error) {
 	case in.Description != nil && utf8.RuneCountInString(*in.Description) > MaxDescriptionLength:
 		return in, &FieldError{Pointer: "/description", Code: CodeTooLong,
 			Detail: fmt.Sprintf("The description is longer than %d characters.", MaxDescriptionLength)}
+	case in.ManagedBy.Check() != nil:
+		return in, &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
 	}
 	return in, nil
 }
@@ -603,7 +613,8 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Chain, err
 		now := s.clock.Now().UTC()
 		publicID := publicid.New(publicid.EscalationChain)
 		id, err := q.InsertChain(ctx, dbgen.InsertChainParams{OrgID: s.orgID, PublicID: publicID, Name: in.Name,
-			Description: description, OwningTeamID: ownerID(owner), Now: now})
+			Description: description, OwningTeamID: ownerID(owner),
+			ManagedBy: managedby.Text(in.ManagedBy.Apply(nil)), Now: now})
 		if err != nil {
 			return fmt.Errorf("create the escalation chain: %w", taken(err))
 		}
@@ -657,6 +668,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		next := before
 		next.Name, next.OwningTeam, next.Steps = in.Name, owner, stepsOf(steps)
+		next.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -668,7 +680,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		if err := q.UpdateChain(ctx, dbgen.UpdateChainParams{OrgID: s.orgID, ID: before.ID, Name: next.Name,
 			Description: next.Description, OwningTeamID: ownerID(next.OwningTeam),
-			Now: s.clock.Now().UTC()}); err != nil {
+			ManagedBy: managedby.Text(next.ManagedBy), Now: s.clock.Now().UTC()}); err != nil {
 			return fmt.Errorf("update the escalation chain %s: %w", before.PublicID, taken(err))
 		}
 		// The steps are written again only when they changed, so that a rename keeps their rows.
@@ -795,16 +807,17 @@ func resourceOf(c Chain) audit.Resource {
 	return audit.Resource{Type: ResourceChain, PublicID: c.PublicID, Name: c.Name}
 }
 
-// view is a chain as its Audit log diff shows it: its name, description, owning Team and steps.
+// view is a chain as its Audit log diff shows it: its name, description, owning Team, steps and mark.
 type view struct {
 	Name         string     `json:"name"`
 	Description  string     `json:"description"`
 	OwningTeamID *string    `json:"owning_team_id"`
 	Steps        []stepView `json:"steps"`
+	ManagedBy    *string    `json:"managed_by"`
 }
 
 func viewOf(c Chain) view {
-	v := view{Name: c.Name, Description: c.Description, Steps: make([]stepView, len(c.Steps))}
+	v := view{Name: c.Name, Description: c.Description, Steps: make([]stepView, len(c.Steps)), ManagedBy: c.ManagedBy}
 	if c.OwningTeam != nil {
 		id := c.OwningTeam.PublicID
 		v.OwningTeamID = &id

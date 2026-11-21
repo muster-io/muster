@@ -34,7 +34,7 @@ WHERE org_id = @org_id AND team_id = @team_id;
 -- ListSchedules reads a page of the Schedules by name, after a cursor, with their Team: of the Team @team, or of the
 -- Teams of the User @member_id ("My Teams"), when one is set; @q matches the name, ignoring case.
 -- name: ListSchedules :many
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.managed_by, s.team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted, lower(s.name)::text AS sort_name
 FROM schedules s
@@ -53,7 +53,7 @@ LIMIT @page_size;
 
 -- GetSchedule reads a Schedule with its Team.
 -- name: GetSchedule :one
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.managed_by, s.team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted
 FROM schedules s
@@ -84,15 +84,19 @@ FOR UPDATE;
 
 -- InsertSchedule creates a Schedule.
 -- name: InsertSchedule :one
-INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, gap_alert, created_at, updated_at)
-VALUES (@org_id, @public_id, @team_id, @name, @time_zone, @main, @gap_alert, @now, @now)
+INSERT INTO schedules (
+    org_id, public_id, team_id, name, time_zone, main, gap_alert, managed_by, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, @team_id, @name, @time_zone, @main, @gap_alert, sqlc.narg('managed_by')::text, @now, @now
+)
 RETURNING id;
 
 -- UpdateSchedule replaces the configured fields of a Schedule and bumps its version.
 -- name: UpdateSchedule :exec
 UPDATE schedules
-SET name = @name, time_zone = @time_zone, main = @main, gap_alert = @gap_alert, updated_at = @now,
-    version = version + 1
+SET name = @name, time_zone = @time_zone, main = @main, gap_alert = @gap_alert,
+    managed_by = sqlc.narg('managed_by')::text, updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- ClearMainSchedule takes the mark main off the Team's main Schedule other than @keep_id, with a new version, and
