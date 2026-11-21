@@ -758,7 +758,7 @@ func TestSchemaVersion(t *testing.T) {
 			for k, v := range tt.rows {
 				pool.rows[k] = v
 			}
-			v, dirty, err := schemaVersion(t.Context(), d.pool)
+			v, dirty, err := SchemaVersion(t.Context(), d.pool)
 			if tt.wantErr != "" {
 				if err == nil || err.Error() != tt.wantErr {
 					t.Errorf("got %v, want %q", err, tt.wantErr)
