@@ -3295,6 +3295,9 @@ channel. CI runs against a fake. See <a href="../../messengers/slack/">Slack</a>
   you upgrade. See <a href="../../operations/upgrades/">Upgrades</a> for how to upgrade.</li>
 </ul>
 <h2 id="upgrade-notes">Upgrade notes<a class="headerlink" href="#upgrade-notes" title="Permanent link">&para;</a></h2>
+<p>After a recovery from a failed migration below, run <a href="../../operations/cli/#muster-doctor"><code>muster doctor</code></a>: its <code>schema</code>
+line is <code>WARN</code> while migrations remain, <code>OK</code> once <code>muster migrate</code> or a replica's start has applied them, and <code>FAIL</code>
+while the schema is still dirty.</p>
 <dl>
 <dt>0.2.0</dt>
 <dd>

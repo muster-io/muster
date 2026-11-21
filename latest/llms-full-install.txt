@@ -610,6 +610,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
 ## Upgrade notes
 
+After a recovery from a failed migration below, run [`muster doctor`](https://muster-io.github.io/muster/latest/operations/cli.md#muster-doctor): its `schema`
+line is `WARN` while migrations remain, `OK` once `muster migrate` or a replica's start has applied them, and `FAIL`
+while the schema is still dirty.
+
 0.2.0
 :   The `route.urgent` setting of a Route and the Organization's "critical is Urgent"
     (`organization.critical_is_urgent`) no longer act: an Alert Group is Urgent exactly when its Severity level is

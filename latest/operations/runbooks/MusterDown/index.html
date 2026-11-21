@@ -3226,9 +3226,10 @@ that Muster does not manage. While Muster is down it cannot deliver anything, th
 </li>
 <li>When the process runs but the scrape fails, check the scrape configuration against <code>MUSTER_LISTEN_INTERNAL</code>: the
    port, the path <code>/metrics</code> and the network policy between Prometheus and the replica.</li>
-<li>Run <code>muster doctor</code> with the replica's settings. The lines <code>database</code>, <code>session_connection</code> and <code>key_canary</code> name
-   a database that cannot be reached, a session connection whose advisory locks or <code>LISTEN</code> do not work, and master
-   keys that do not decrypt the stored data.</li>
+<li>Run <code>muster doctor</code> with the replica's settings. The lines <code>database</code>, <code>schema</code>, <code>session_connection</code> and
+   <code>key_canary</code> name a database that cannot be reached, a schema this binary refuses (dirty, or newer than it knows),
+   a session connection whose advisory locks or <code>LISTEN</code> do not work, and master keys that do not decrypt the stored
+   data.</li>
 </ol>
 <h2 id="fix">Fix<a class="headerlink" href="#fix" title="Permanent link">&para;</a></h2>
 <ul>

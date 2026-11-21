@@ -3373,6 +3373,9 @@ exits 1 when a check fails. A warning does not fail it.</p>
 <dd>Looks at: the main connection works.</dd>
 <dt><code>postgresql_version</code></dt>
 <dd>Looks at: PostgreSQL 14 or newer.</dd>
+<dt><code>schema</code></dt>
+<dd>Looks at: the schema version against the newest migration of this binary; <code>WARN</code> when older (<code>muster migrate</code>
+applies the rest), <code>FAIL</code> when dirty (see <a href="../../install/versions/#upgrade-notes">Upgrade notes</a>) or newer.</dd>
 <dt><code>session_connection</code></dt>
 <dd>Looks at: the session connection supports advisory locks and <code>LISTEN</code>, and the mode of each pooler.</dd>
 <dt><code>tls_main</code>, <code>tls_session</code></dt>
