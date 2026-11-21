@@ -266,6 +266,11 @@ SELECT pg_notify(@channel::text, '');
 -- meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as
 -- the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
 -- deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would be a filter over every pending delivery.
+-- The skip lists are each a CASE on NULL, not a coalesce: a generic plan, which sees neither array, takes `<> ALL` of
+-- an array for ten values it does not know, each kept by 1 − 1/n of a column with n distinct values, so with one
+-- Connection it expected no Destination to pass, looped over every Destination through its pending deliveries and
+-- sorted them all to keep a batch; it takes the CASE for half the rows and reads deliveries_due_v2_idx in order, while
+-- a custom plan folds it to true or to the `<> ALL` of its array, estimated as before.
 -- The update finds the chosen rows by their primary key, as one array of ids the choice yields once: joined to the
 -- CTE, a plan that expects many chosen rows, as a generic plan does, which cannot know @lim and expects a tenth of the
 -- due rows, may hash the choice against a sequential scan of the whole table. The rows come back in no particular
@@ -283,9 +288,11 @@ WITH due AS MATERIALIZED (
       AND x.held_by_storm_id IS NULL
       AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
       AND x.urgent = @urgent::boolean AND x.configuration_only = @configuration_only::boolean
-      AND x.destination_id <> ALL (coalesce(sqlc.narg('skip_destinations')::bigint[], '{}'))
+      AND CASE WHEN sqlc.narg('skip_destinations')::bigint[] IS NULL THEN true
+               ELSE x.destination_id <> ALL (sqlc.narg('skip_destinations')::bigint[]) END
       AND (ds.connection_id IS NULL
-           OR ds.connection_id <> ALL (coalesce(sqlc.narg('skip_connections')::bigint[], '{}')))
+           OR CASE WHEN sqlc.narg('skip_connections')::bigint[] IS NULL THEN true
+                   ELSE ds.connection_id <> ALL (sqlc.narg('skip_connections')::bigint[]) END)
     ORDER BY x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
     LIMIT @lim
     FOR UPDATE OF x SKIP LOCKED
@@ -804,7 +811,8 @@ WHERE org_id = @org_id AND subject_kind = @subject_kind AND subject_id = @subjec
 -- webhook events and the other configuration edits, with one batch due now between two batches of those, and skips the
 -- Destinations of @skip_destinations and of the Connections of @skip_connections as ClaimDueDeliveries does
 -- (ClaimDueDeliveries, Round). The choice is a materialized CTE, run once, as in ClaimDueDeliveries: planned as the
--- inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up.
+-- inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up. The
+-- skip lists are CASEs on NULL, as there.
 -- name: ClaimDueReplies :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -814,9 +822,11 @@ WITH due AS MATERIALIZED (
     WHERE x.org_id = @org_id AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= @due::timestamptz
       AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND d.published_at IS NOT NULL
       AND ds.health = 'healthy'
-      AND x.destination_id <> ALL (coalesce(sqlc.narg('skip_destinations')::bigint[], '{}'))
+      AND CASE WHEN sqlc.narg('skip_destinations')::bigint[] IS NULL THEN true
+               ELSE x.destination_id <> ALL (sqlc.narg('skip_destinations')::bigint[]) END
       AND (ds.connection_id IS NULL
-           OR ds.connection_id <> ALL (coalesce(sqlc.narg('skip_connections')::bigint[], '{}')))
+           OR CASE WHEN sqlc.narg('skip_connections')::bigint[] IS NULL THEN true
+                   ELSE ds.connection_id <> ALL (sqlc.narg('skip_connections')::bigint[]) END)
       AND NOT EXISTS (SELECT 1
                       FROM thread_replies p
                       WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'
@@ -2139,7 +2149,9 @@ ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING;
 -- configuration edits that are not Urgent, with one batch due now between two batches of those, skipping the
 -- Destinations of @skip_destinations as ClaimDueDeliveries does (Round): a Destination in the mode both shares its
 -- bucket with its Root requests, which a change of configuration can re-render. The choice is a materialized CTE, run
--- once, as in ClaimDueDeliveries.
+-- once, as in ClaimDueDeliveries, and the skip list a CASE on NULL as there: with one webhook Destination, a generic
+-- plan expected `<> ALL` of the array it cannot see to keep no event, and probed the head of every due event before
+-- sorting them.
 -- name: ClaimDueWebhookEvents :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -2148,7 +2160,8 @@ WITH due AS MATERIALIZED (
     WHERE x.org_id = @org_id AND x.state = 'pending' AND x.next_attempt_at <= @due::timestamptz
       AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND ds.health = 'healthy'
       AND ds.deleted_at IS NULL
-      AND x.destination_id <> ALL (coalesce(sqlc.narg('skip_destinations')::bigint[], '{}'))
+      AND CASE WHEN sqlc.narg('skip_destinations')::bigint[] IS NULL THEN true
+               ELSE x.destination_id <> ALL (sqlc.narg('skip_destinations')::bigint[]) END
       AND NOT EXISTS (SELECT 1
                       FROM webhook_events p
                       WHERE p.org_id = x.org_id AND p.destination_id = x.destination_id
