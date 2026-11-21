@@ -217,6 +217,10 @@ Then remove the key from `MUSTER_SECRET_KEYS` and roll the change out. Removing 
 what still depends on it; the start of a replica that lacks the *active* key fails with "master key does not match the
 database".
 
+Wait at least the lifetime of a contact code (`gateway.contact_code`, 10 minutes) after the rotation before you remove
+the old key: a code sent to a Notification gateway contact before the rotation is checked with the old key, and once
+the key is gone that code is refused as a wrong one, so the person has to request a new code.
+
 Keep the old key in your records until the backups that need it are gone: a [backup](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md) taken before
 the rotation restores only with the key that was active then.
 

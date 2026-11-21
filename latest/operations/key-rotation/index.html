@@ -3254,6 +3254,9 @@ open Root messages that still need each key. Only a key that was active before i
 <p>Then remove the key from <code>MUSTER_SECRET_KEYS</code> and roll the change out. Removing the key before Muster says so breaks
 what still depends on it; the start of a replica that lacks the <em>active</em> key fails with "master key does not match the
 database".</p>
+<p>Wait at least the lifetime of a contact code (<code>gateway.contact_code</code>, 10 minutes) after the rotation before you remove
+the old key: a code sent to a Notification gateway contact before the rotation is checked with the old key, and once
+the key is gone that code is refused as a wrong one, so the person has to request a new code.</p>
 <p>Keep the old key in your records until the backups that need it are gone: a <a href="../backup-and-restore/">backup</a> taken before
 the rotation restores only with the key that was active then.</p>
 <h2 id="what-stops-working-when-the-old-key-goes">What stops working when the old key goes<a class="headerlink" href="#what-stops-working-when-the-old-key-goes" title="Permanent link">&para;</a></h2>
