@@ -3210,7 +3210,9 @@
 <h1 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h1>
 <p>Run Muster with Docker Compose on one machine, sign in, connect Alertmanager and send a test alert. You need Docker with
 the Compose plugin, <code>curl</code> and <code>openssl</code>, and it takes about five minutes. The compose example runs one replica of
-Muster beside its own PostgreSQL; for a production installation, <a href="../install/helm/">install with Helm</a>.</p>
+Muster beside its own PostgreSQL, whose memory limit suits evaluation and small installations
+(<a href="../install/database/#the-compose-example">the compose example's PostgreSQL</a> says how far and how to raise it); for a
+production installation, <a href="../install/helm/">install with Helm</a>.</p>
 <pre class="mermaid"><code>flowchart LR
   am["Alertmanager or curl"] -- "Snapshots, port 8080" --&gt; muster["Muster"]
   browser["Browser"] -- "web UI, port 8080" --&gt; muster

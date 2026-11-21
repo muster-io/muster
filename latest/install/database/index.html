@@ -434,6 +434,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-compose-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The compose example
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cloudnativepg" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3146,6 +3157,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-compose-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The compose example
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cloudnativepg" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3250,6 +3272,27 @@ indexes and partitions itself:</p>
 </code></pre></div>
 <p>Muster applies its migrations at the first start: the compose example sets <code>MUSTER_MIGRATE_ON_START</code>, and the chart runs
 <code>muster migrate</code> in an init container.</p>
+<h2 id="the-compose-example">The compose example<a class="headerlink" href="#the-compose-example" title="Permanent link">&para;</a></h2>
+<p>The <a href="../../quick-start/">compose example</a> runs its own PostgreSQL 17, for evaluation and small installations. It limits
+the container to 768 MiB of memory and sets PostgreSQL to fit inside the limit:</p>
+<ul>
+<li><code>shared_buffers=32MB</code></li>
+<li><code>work_mem=2MB</code></li>
+<li><code>maintenance_work_mem=32MB</code></li>
+<li><code>max_connections=30</code></li>
+</ul>
+<p>They were checked with 50,000 to 100,000 Alert Groups under a light load of alerts and API reads, and through an
+upgrade of Muster with migrations at about 65,000: PostgreSQL lost no process to the kernel's out-of-memory killer,
+which ends a process that would take the container past its limit. Once the database outgrows the limit, <code>docker stats</code>
+shows the container close to it: that is the page cache of the database files, which the kernel frees before it kills
+anything.</p>
+<p>For a larger installation, edit the <code>postgres</code> service in <code>docker-compose.yml</code>: raise <code>mem_limit</code> and the settings
+under <code>command</code> together, so that the settings still fit inside the limit. Count <code>shared_buffers</code> and about 20 MiB more
+of shared memory, about 16 MiB for each of the <code>max_connections</code>, about 35 MiB for each of the three autovacuum
+workers, and about 35 MiB for the rest. One replica of Muster opens up to <code>max(10, CPUs)</code> connections and about three
+more. On a machine with more than 27 CPUs, raise <code>max_connections</code>, at about 16 MiB of the limit for each connection
+you add, or cap the pool with <code>pool_max_conns</code> in <code>MUSTER_DATABASE_URL</code> (<a href="#as-a-url-or-as-fields">above</a>). Run
+<code>docker compose up -d --wait</code> to restart PostgreSQL with the new values.</p>
 <h2 id="cloudnativepg">CloudNativePG<a class="headerlink" href="#cloudnativepg" title="Permanent link">&para;</a></h2>
 <p><a href="https://cloudnative-pg.io">CloudNativePG</a> runs PostgreSQL clusters on Kubernetes. A <code>Cluster</code> for Muster creates the
 database and its owner:</p>

@@ -90,7 +90,9 @@ Markdown version of every page and the full text in one file per section.
 
 Run Muster with Docker Compose on one machine, sign in, connect Alertmanager and send a test alert. You need Docker with
 the Compose plugin, `curl` and `openssl`, and it takes about five minutes. The compose example runs one replica of
-Muster beside its own PostgreSQL; for a production installation, [install with Helm](https://muster-io.github.io/muster/latest/install/helm.md).
+Muster beside its own PostgreSQL, whose memory limit suits evaluation and small installations
+([the compose example's PostgreSQL](https://muster-io.github.io/muster/latest/install/database.md#the-compose-example) says how far and how to raise it); for a
+production installation, [install with Helm](https://muster-io.github.io/muster/latest/install/helm.md).
 
 ```mermaid
 flowchart LR

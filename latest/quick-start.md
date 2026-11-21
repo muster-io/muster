@@ -2,7 +2,9 @@
 
 Run Muster with Docker Compose on one machine, sign in, connect Alertmanager and send a test alert. You need Docker with
 the Compose plugin, `curl` and `openssl`, and it takes about five minutes. The compose example runs one replica of
-Muster beside its own PostgreSQL; for a production installation, [install with Helm](install/helm.md).
+Muster beside its own PostgreSQL, whose memory limit suits evaluation and small installations
+([the compose example's PostgreSQL](install/database.md#the-compose-example) says how far and how to raise it); for a
+production installation, [install with Helm](install/helm.md).
 
 ```mermaid
 flowchart LR
