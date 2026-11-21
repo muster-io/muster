@@ -4836,7 +4836,7 @@ type AlertGroup struct {
 	// DeliveryProblem Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.
 	DeliveryProblem bool `json:"delivery_problem"`
 
-	// DetailsRemoved Alerts and Timeline were removed by retention; only the summary row and its Notes remain.
+	// DetailsRemoved Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.
 	DetailsRemoved *bool `json:"details_removed,omitempty"`
 
 	// EscalationChains The runs of the Escalation chains of the Alert Group since they last started (C-32.FR-18): one per chain, in the order they started, empty before its chains first started or where none applies. A run stays here, `ran_out` or `stopped`, until the chains start over. Changes arrive as the `alert-group` hint.

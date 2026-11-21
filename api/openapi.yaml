@@ -4966,6 +4966,9 @@ paths:
       tags:
       - Alert groups
       summary: Read delivery state per Destination
+      description: The delivery state of the Alert Group in each Destination. The retention removes it with the
+        details once `retention.alert_details` has passed since the Alert Group resolved (`details_removed`), and
+        it is no longer listed.
       x-permission: alert-groups:read
       x-listener: app
       security:
@@ -14923,7 +14926,8 @@ components:
             a Thread not attached.
         details_removed:
           type: boolean
-          description: Alerts and Timeline were removed by retention; only the summary row and its Notes remain.
+          description: Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes
+            remain.
         group_labels:
           $ref: '#/components/schemas/Labels'
         common_labels:

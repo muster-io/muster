@@ -153,7 +153,7 @@ commands of Bridges, the UI and the API keep every action.
 | Integration | waiting for the first Heartbeat | "Waiting for the first Heartbeat signal. Stale resolution is off until it arrives." | C-07 |
 | Integration | Heartbeat lost | "No contact with Alertmanager since HH:MM. Nothing is resolved as Stale until contact returns." | C-07 |
 | Alert Group page | a Replacement happened | "Alerts were replaced because `<label>` changed. Consider removing Instance labels from the rule, for example `without(pod, instance)`." | C-09 |
-| Alert Group page | its details were removed by retention | "Alerts and Timeline of this Alert Group were removed after {period}; only its summary and Notes are kept." | C-09 |
+| Alert Group page | its details were removed by retention | "Alerts, Timeline and delivery state of this Alert Group were removed after {period}; only its summary and Notes are kept." | C-09 |
 | Root message and Alert Group page | resolved by a person with Alerts still firing | "⚠ N alerts still firing in Alertmanager" | C-09, C-12 |
 | Root message and Alert Group page | Reopen count > 0 | "🔁 Reopened ×N" | C-09, C-12 |
 | Snooze dialog | no end chosen | "This Alert Group stays snoozed until someone unsnoozes it." | C-10 |

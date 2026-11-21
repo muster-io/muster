@@ -48,7 +48,7 @@ An Alert Group changed status: group is its #N, route the public_id of its Route
 
 INFO · fields: `details`, `summaries` · C-09
 
-The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago and the steps of the runs of the Escalation chains of Alert Groups resolved then (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).
+The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago, and the steps of the runs of the Escalation chains and the deliveries of Alert Groups resolved then (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).
 
 ### `alerts_stale`
 

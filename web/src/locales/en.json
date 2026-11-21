@@ -249,7 +249,7 @@
     "notices": {
       "days_one": "{{count}} day",
       "days_other": "{{count}} days",
-      "detailsRemoved": "Alerts and Timeline of this Alert Group were removed after {{period}}; only its summary and Notes are kept.",
+      "detailsRemoved": "Alerts, Timeline and delivery state of this Alert Group were removed after {{period}}; only its summary and Notes are kept.",
       "firingAgain": "Firing again after a manual resolve of <link>#{{number}}</link>",
       "replacement": "Alerts were replaced because <label></label> changed. Consider removing Instance labels from the rule, for example <code>without(pod, instance)</code>.",
       "stillFiring_one": "⚠ {{count}} alert still firing in Alertmanager",

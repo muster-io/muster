@@ -4838,7 +4838,7 @@ type AlertGroup struct {
 	// DeliveryProblem Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.
 	DeliveryProblem bool `json:"delivery_problem"`
 
-	// DetailsRemoved Alerts and Timeline were removed by retention; only the summary row and its Notes remain.
+	// DetailsRemoved Alerts, Timeline and delivery state were removed by retention; only the summary row and its Notes remain.
 	DetailsRemoved *bool `json:"details_removed,omitempty"`
 
 	// EscalationChains The runs of the Escalation chains of the Alert Group since they last started (C-32.FR-18): one per chain, in the order they started, empty before its chains first started or where none applies. A run stays here, `ran_out` or `stopped`, until the chains start over. Changes arrive as the `alert-group` hint.
@@ -14724,6 +14724,8 @@ type ClientInterface interface {
 
 	// ListAlertGroupDeliveries Read delivery state per Destination
 	//
+	// The delivery state of the Alert Group in each Destination. The retention removes it with the details once `retention.alert_details` has passed since the Alert Group resolved (`details_removed`), and it is no longer listed.
+	//
 	// Corresponds with GET /alert-groups/{alert_group_id}/deliveries (the `ListAlertGroupDeliveries` operationId).
 	ListAlertGroupDeliveries(ctx context.Context, alertGroupId AlertGroupId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -16957,6 +16959,8 @@ func (c *Client) ListAlertGroupAlerts(ctx context.Context, alertGroupId AlertGro
 }
 
 // ListAlertGroupDeliveries Read delivery state per Destination
+//
+// The delivery state of the Alert Group in each Destination. The retention removes it with the details once `retention.alert_details` has passed since the Alert Group resolved (`details_removed`), and it is no longer listed.
 //
 // Corresponds with GET /alert-groups/{alert_group_id}/deliveries (the `ListAlertGroupDeliveries` operationId).
 func (c *Client) ListAlertGroupDeliveries(ctx context.Context, alertGroupId AlertGroupId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -32038,6 +32042,8 @@ type ClientWithResponsesInterface interface {
 	ListAlertGroupAlertsWithResponse(ctx context.Context, alertGroupId AlertGroupId, params *ListAlertGroupAlertsParams, reqEditors ...RequestEditorFn) (*ListAlertGroupAlertsResponse, error)
 
 	// ListAlertGroupDeliveriesWithResponse Read delivery state per Destination
+	//
+	// The delivery state of the Alert Group in each Destination. The retention removes it with the details once `retention.alert_details` has passed since the Alert Group resolved (`details_removed`), and it is no longer listed.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -51631,6 +51637,8 @@ func (c *ClientWithResponses) ListAlertGroupAlertsWithResponse(ctx context.Conte
 }
 
 // ListAlertGroupDeliveriesWithResponse Read delivery state per Destination
+//
+// The delivery state of the Alert Group in each Destination. The retention removes it with the details once `retention.alert_details` has passed since the Alert Group resolved (`details_removed`), and it is no longer listed.
 //
 // Returns a wrapper object for the known response body format(s).
 //
