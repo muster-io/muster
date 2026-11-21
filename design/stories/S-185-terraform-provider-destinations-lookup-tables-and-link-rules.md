@@ -48,7 +48,7 @@ acceptance:
   - "[C-33.FR-9, C-33.AC-7] Each resource of this story imported by `public_id` plans without changes but the Secrets that the configuration holds (`TestAcc*_import`)."
 verify: "make ci testacc"
 operator_attention: false
-issue: null
+issue: 703
 ---
 
 # S-185. The Terraform resources of the Destinations of each type with the Secrets of outgoing webhooks, Lookup tables and Link rules (BE)

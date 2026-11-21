@@ -24,7 +24,7 @@ acceptance:
   - "[C-33.FR-20, C-33.AC-16] `test/registry-install.sh 0.1.0` runs, in empty directories, `terraform init` with `source = \"muster-io/muster\"` and `tofu init` with the same source, each installing 0.1.0 and reporting it as signed with the project's key ID; the Terraform Registry and the OpenTofu Registry show the provider with its documentation."
 verify: "make ci"
 operator_attention: true
-issue: null
+issue: 706
 ---
 
 # S-188. The Terraform provider's guides, its signing key, and its first release in the Terraform Registry and the OpenTofu Registry
