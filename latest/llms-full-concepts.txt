@@ -312,7 +312,8 @@ when it has no Alert Groups, nor when **Acknowledged first by** is set.
 `retention.alert_details`
 :   kept for: 90 days
 
-    Alerts in Alert Groups, Timeline entries, delivery events, the steps of the runs of Escalation chains.
+    Alerts in Alert Groups, Timeline entries, delivery events, the steps of the runs of Escalation chains, and the
+    delivery state of each Destination with its link to the Root message.
 
 `retention.alert_group_summaries`
 :   kept for: 2 years
@@ -322,7 +323,10 @@ when it has no Alert Groups, nor when **Acknowledged first by** is set.
     a call was about is removed. The text of a call, which names its Alert Groups, is cleared when the call ends.
 
 After the details are removed, search still finds the Alert Group by its title and number, and its page shows the
-summary with the notice that the Alerts and the Timeline were removed. The list shows Alert Groups whose lifetime
+summary with the notice that the Alerts, the Timeline and the delivery state were removed, and no longer shows
+**Delivery**. Muster then no longer knows the Root messages it posted for the Alert Group: an **Unresolve** after that
+publishes a new Root message in each Destination that its Route and Teams name at that time, instead of editing the
+old one, which stays as it was. The list shows Alert Groups whose lifetime
 overlaps the chosen time range, 7 days by default (`alert_group.list_range`), so an Alert Group that has been firing for
 weeks is always in the default view. Searching by number ignores the range.
 

@@ -3455,8 +3455,9 @@ addresses. A chat server on the loopback address, for one, needs <code>127.0.0.0
 <dt><strong>Stored Snapshots (days)</strong> (<code>retention.stored_snapshots</code>, 14)</dt>
 <dd>Snapshots kept as received, for debugging, previews and replay.</dd>
 <dt><strong>Alert details (days)</strong> (<code>retention.alert_details</code>, 90)</dt>
-<dd>Alerts inside Alert Groups, Timeline entries, delivery events and the steps of the runs of
-<a href="../../concepts/escalation-chains/#when-chains-run">Escalation chains</a>. Never Notes.</dd>
+<dd>Alerts inside Alert Groups, Timeline entries, delivery events, the steps of the runs of
+<a href="../../concepts/escalation-chains/#when-chains-run">Escalation chains</a> and the delivery state of each Destination.
+Never Notes.</dd>
 <dt><strong>Alert Group summaries (days)</strong> (<code>retention.alert_group_summaries</code>, 730)</dt>
 <dd>The summary row of an Alert Group, with its Notes, and the calls through Notification gateways about it.</dd>
 <dt><strong>Audit log (days)</strong> (<code>retention.audit_log</code>, 365)</dt>
