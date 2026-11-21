@@ -301,6 +301,21 @@ func (e BridgeConnectionType) Valid() bool {
 	}
 }
 
+// Defines values for BridgeConnectionWarnings.
+const (
+	PushSecretTooShort BridgeConnectionWarnings = "push_secret_too_short"
+)
+
+// Valid indicates whether the value is a known member of the BridgeConnectionWarnings enum.
+func (e BridgeConnectionWarnings) Valid() bool {
+	switch e {
+	case PushSecretTooShort:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BridgeConnectionBaseType.
 const (
 	BridgeConnectionBaseTypeBridge BridgeConnectionBaseType = "bridge"
@@ -5381,10 +5396,16 @@ type BridgeConnection struct {
 	// Roles The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.
 	Roles *[]BridgeInfoRole    `json:"roles,omitempty"`
 	Type  BridgeConnectionType `json:"type"`
+
+	// Warnings Problems of the saved settings that do not stop the Connection. `push_secret_too_short` (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more ends the warning.
+	Warnings []BridgeConnectionWarnings `json:"warnings"`
 }
 
 // BridgeConnectionType defines model for BridgeConnection.Type.
 type BridgeConnectionType string
+
+// BridgeConnectionWarnings defines model for BridgeConnection.Warnings.
+type BridgeConnectionWarnings string
 
 // BridgeConnectionBase defines model for BridgeConnectionBase.
 type BridgeConnectionBase struct {
@@ -5443,7 +5464,7 @@ type BridgeConnectionInput struct {
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy ProxyConfigInput `json:"proxy"`
 
-	// PushSecret Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.
+	// PushSecret Write-only Secret in the Standard Webhooks form, `whsec_` and the base64 of a key of at least 24 bytes, such as 32 random bytes; a shorter key is `invalid_format`. Required with `event_delivery` `push`. Omit on update to keep the stored one, even one shorter than 24 bytes saved before that minimum, which `warnings` reports; a save in `poll` clears it.
 	PushSecret *string                   `json:"push_secret,omitempty"`
 	Type       BridgeConnectionInputType `json:"type"`
 }

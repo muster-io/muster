@@ -16717,6 +16717,7 @@ components:
         - gateway
         - proxy
         - destination_count
+        - warnings
         - created_at
         - etag
         properties:
@@ -16726,6 +16727,16 @@ components:
             $ref: '#/components/schemas/SecretStatus'
           push_secret_status:
             $ref: '#/components/schemas/SecretStatus'
+          warnings:
+            type: array
+            description: 'Problems of the saved settings that do not stop the Connection. `push_secret_too_short`
+              (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the
+              push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more
+              ends the warning.'
+            items:
+              type: string
+              enum:
+              - push_secret_too_short
           callback_url:
             type: string
             format: uri
@@ -16827,8 +16838,10 @@ components:
             type: string
             format: password
             writeOnly: true
-            description: Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with
-              `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.
+            description: Write-only Secret in the Standard Webhooks form, `whsec_` and the base64 of a key of at least
+              24 bytes, such as 32 random bytes; a shorter key is `invalid_format`. Required with `event_delivery`
+              `push`. Omit on update to keep the stored one, even one shorter than 24 bytes saved before that minimum,
+              which `warnings` reports; a save in `poll` clears it.
           proxy:
             $ref: '#/components/schemas/ProxyConfigInput'
     SlackEventMode:

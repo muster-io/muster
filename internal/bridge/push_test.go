@@ -219,6 +219,28 @@ func TestPushHandlesASignedEvent(t *testing.T) {
 	}
 }
 
+// TestPushShortStoredSecret: a push secret stored before the minimum of MinPushSecretBytes still verifies the events
+// signed with it, so that a Connection saved with one keeps working until its push secret is replaced.
+func TestPushShortStoredSecret(t *testing.T) {
+	const short = logging.Secret("whsec_c2hvcnQtcHVzaC1zZWNyZXQ=") // 17 bytes
+	if ValidPushSecret(short) {
+		t.Fatal("the stored secret of the test is not short")
+	}
+	e := newPushEnv(t)
+	e.source.conn.Client = newClient(t, network(t, nil), Settings{BaseURL: "http://127.0.0.1:9", Token: testToken,
+		PushSecret: short})
+	body := eventJSON(t, eventFixture(TypePress))
+	sig, err := webhooks.Sign([]logging.Secret{short}, "ev-1", e.now, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := e.send(pushed{publicID: pushID, id: "ev-1", timestamp: strconv.FormatInt(e.now.Unix(), 10),
+		signature: sig, body: body})
+	if w.Code != http.StatusNoContent || !e.store.recorded(e.conn.ID, "ev-1") {
+		t.Fatalf("answered %d %s", w.Code, w.Body.String())
+	}
+}
+
 // TestPushRefusals covers C-22.FR-11, AC-3 and AC-14: a wrong signature, a missing header, a webhook-timestamp 6
 // minutes from the real clock either way or not in seconds, an unknown, deleted or other Connection, a malformed id
 // and a Connection in poll mode are each answered 401 with the same body, change nothing and log bridge_event_rejected

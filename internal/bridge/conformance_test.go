@@ -6,6 +6,7 @@ package bridge
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -780,10 +781,19 @@ func TestPushListener(t *testing.T) {
 	}
 }
 
+// TestValidPushSecret: a push secret is whsec_ followed by the base64 of a key of at least MinPushSecretBytes, as
+// Standard Webhooks recommends; a shorter key is refused, a longer one accepted.
 func TestValidPushSecret(t *testing.T) {
+	key := func(n int) logging.Secret {
+		return logging.Secret("whsec_" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xa5}, n)))
+	}
 	for s, want := range map[logging.Secret]bool{
 		webhooks.NewSigningSecret(): true,
-		"whsec_YQ==":                true,
+		key(24):                     true,
+		key(64):                     true,
+		key(65):                     true,
+		key(23):                     false,
+		"whsec_YQ==":                false,
 		"whsec_":                    false,
 		"whsec_not base64":          false,
 		"YQ==":                      false,
