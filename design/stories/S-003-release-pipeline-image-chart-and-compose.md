@@ -103,7 +103,7 @@ issue: 3
   `existingSecret`, and with every `ci/*-values.yaml`, and validates the output with kubeconform (including the
   Gateway API and ServiceMonitor schemas); CI runs it on every pull request.
 - **Compose example** (`deploy/compose/`): services `postgres` (PostgreSQL 17) and `muster` (the released image).
-  PostgreSQL gets a container memory limit and its settings on the command line — `mem_limit: 640m`,
+  PostgreSQL gets a container memory limit and its settings on the command line — `mem_limit: 768m`,
   `shared_buffers=96MB`, `work_mem=2MB`, `maintenance_work_mem=32MB`, `max_connections=30` — sized for evaluation and
   small installations and checked with 100,000 Alert Groups (the starting values, `160m` with `shared_buffers=32MB`,
   lost PostgreSQL processes to the OOM killer at 50,000); the nightly load test reports the footprint of NFR-3 with
@@ -145,7 +145,7 @@ docker compose -f deploy/compose/docker-compose.yml exec postgres \
 # 32MB
 # 30
 docker inspect -f '{{.HostConfig.Memory}}' "$(docker compose -f deploy/compose/docker-compose.yml ps -q postgres)"
-# 671088640
+# 805306368
 
 goreleaser release --snapshot --clean
 docker run --rm ghcr.io/muster-io/muster:v<snapshot version>-amd64 version

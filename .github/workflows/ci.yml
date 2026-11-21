@@ -502,7 +502,7 @@ jobs:
             compare "$name" "$got" "${setting#*=}"
           done
           id=$(docker compose -f deploy/compose/docker-compose.yml ps -q postgres)
-          compare "memory limit" "$(docker inspect -f '{{.HostConfig.Memory}}' "$id")" 671088640
+          compare "memory limit" "$(docker inspect -f '{{.HostConfig.Memory}}' "$id")" 805306368
           exit "$failed"
       - if: always()
         run: docker compose -f deploy/compose/docker-compose.yml down -v
