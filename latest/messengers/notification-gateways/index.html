@@ -3492,11 +3492,21 @@ profile, what happened: "Acknowledged: #12, #13", "Already taken by Alice" or "A
 person, and data that does not verify or belongs to another Connection change nothing and are answered so; the log
 records the latter as <code>gateway_acknowledge_refused</code>. An event is handled once, however often the gateway reports it.</p>
 <p>An acknowledgement that the gateway reports more than an hour after it happened (<code>bridge.event_max_age</code>) is dropped,
-unanswered, and logged as <code>bridge_acknowledgement_dropped</code>. An acknowledgement through a gateway counts in
+unanswered, and logged as <code>bridge_acknowledgement_dropped</code>. Because the action data of a call is the same for each of
+its retries and carries no time, an acknowledgement also acts only for the notification that the gateway accepted the
+call as — its <code>notification_id</code> — and only for two hours after the gateway accepted it: an acknowledgement of a call
+the gateway never accepted — still waiting, not delivered or dropped — one with another <code>notification_id</code>, and one
+that comes more than two hours after the call was accepted, whatever time the gateway reports, change nothing; the log
+records them as <code>gateway_acknowledge_refused</code> with the reason <code>not_accepted</code>, <code>notification_mismatch</code> or
+<code>stale_call</code>. A call that is still being sent — its answer not back yet, or retried after a temporary error or a
+timeout — may already have rung: an acknowledgement of it acts, with no <code>notification_id</code> to compare, as a call is
+sent only within <code>delivery.transient_budget</code>. That budget is checked as the call's attempts are made, so while no
+replica sends calls, a call stays being sent, and acknowledgeable, until one does. An acknowledgement through a gateway counts in
 <code>muster_commands_total{transport="gateway"}</code>. The key that signed a call's action data stays needed in the Keyring
-while the call is being sent, and for two hours after it ended — accepted, or not delivered after an attempt — while
+while the call is being sent, so that such an acknowledgement can act, and for two hours after it was accepted while
 any of its Alert Groups is open: the hour in which an acknowledgement is acted on, and as long again for the call to
-ring or be retried by the gateway after it was accepted.</p>
+ring or be retried by the gateway after it was accepted. The Keyring also keeps the key of a call not delivered after
+an attempt for those two hours, though an acknowledgement of it changes nothing.</p>
 <h2 id="broken-gateways">Broken gateways<a class="headerlink" href="#broken-gateways" title="Permanent link">&para;</a></h2>
 <p>A gateway becomes <strong>Broken</strong> when a call through it ends with a Fatal error — the bridge, or the provider behind it,
 refuses the token or the credentials (<code>forbidden</code>), or the outbound address policy blocks the bridge's address — or
