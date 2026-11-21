@@ -1360,8 +1360,7 @@ S-208. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
 ## C-38
 
 [Message layout editor](../prd/l2/C-38-message-layout-editor.md) · L2 0.2.x · stories: S-209, S-210, S-211, S-212,
-S-213, S-214, S-215, S-216, S-217, S-218, S-219. They start after the tag of 0.2.0 and ship in 0.2.x patch releases;
-their contracts were written against the open pull request that adds the capability file, before it merged.
+S-213, S-214, S-215, S-216, S-217, S-218, S-219. They start after the tag of 0.2.0 and ship in 0.2.x patch releases.
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -1398,8 +1397,7 @@ their contracts were written against the open pull request that adds the capabil
 ## C-39
 
 [Theme switch](../prd/l2/C-39-theme-switch.md) · L2 0.2.x · stories: S-220, S-221. They start after the tag of 0.2.0
-and ship in 0.2.x patch releases; their contracts were written against the open pull request that adds the capability
-file, before it merged.
+and ship in 0.2.x patch releases.
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|

@@ -807,9 +807,8 @@ Registries resolve.
 The stories of "L2 0.2.x" specify the items of [L2 §1.5](../prd/L2.md#15-specified-later-in-l2) that the maintainer
 settled after the core: C-34, C-36, C-37, C-38, C-39, C-40, C-41 and C-42, written in four batches. All of them start
 after the tag of 0.2.0, which `depends_on` cannot name, and ship in its patch releases; their `depends_on` name the
-stories of 0.2.0 whose code they build on. The contracts of C-38 to C-42 were written against the open pull requests
-that add their capability files (#672 for C-38 and C-39, #673 for C-40 to C-42), before they merged, and cite those
-files at their final paths. Each capability is cut at the contract boundaries of its behaviour, so that no story passes
+stories of 0.2.0 whose code they build on. The contracts of C-40 to C-42 were written against the open pull request
+that adds their capability files (#673), before it merged, and cite those files at their final paths. Each capability is cut at the contract boundaries of its behaviour, so that no story passes
 about 30 to 40 hand-written files and each is checkable live when it merges: the backend in the order its parts depend
 on one another, then the frontend, which follows the backend story it shows, then a page of documentation with its
 documentation links, so that `docslinkcheck` finds the page; where a capability needs no API (C-41) it has no backend
