@@ -129,8 +129,9 @@ jobs:
 
   # The load test runs its full profile against muster dev, delivering to the fake Mattermost server, then without a
   # Destination against the compose example started with the build under test, whose internal listener is published on
-  # loopback for /metrics. Either run fails on a breach of its thresholds. The job summary shows both reports and the
-  # peak memory working set of the example's Muster and PostgreSQL containers; the memory is reported, never checked.
+  # loopback for /metrics. Either run fails on a breach of its thresholds, and the job fails when the kernel killed a
+  # process of the example's PostgreSQL for memory. The job summary shows both reports and the peak memory working set
+  # of the example's Muster and PostgreSQL containers; the working set is reported, never checked.
   load-test:
     name: load-test
     runs-on: ubuntu-latest
@@ -216,6 +217,7 @@ jobs:
       # pulls only a missing image. A bootstrap Admin is written into .env for the load test to sign in with, and an
       # override publishes the internal listener on loopback for the load test's /metrics.
       - name: start the compose example with the build under test
+        id: compose
         run: |
           set -euo pipefail
           key=$(openssl rand -base64 32)
@@ -262,6 +264,22 @@ jobs:
             make load-test LOAD_TEST_FLAGS=-destination=none 2>&1 | tee "$RUNNER_TEMP/load-compose.txt"
           kill "$sampler" 2>/dev/null || true
           sample
+      # Runs after a failed load test too. The example's memory limit and settings must hold: a PostgreSQL process
+      # that the OOM killer ended, which PostgreSQL logs as terminated by signal 9 and the container's memory cgroup
+      # counts as oom_kill, fails the job.
+      - name: check that PostgreSQL lost no process to the OOM killer
+        if: always() && steps.compose.outcome != 'skipped'
+        run: |
+          set -euo pipefail
+          compose=(docker compose -f deploy/compose/docker-compose.yml)
+          killed=$("${compose[@]}" logs --no-color postgres | grep -F -A 1 'terminated by signal 9' || true)
+          oom=$("${compose[@]}" exec -T postgres sed -n 's/^oom_kill //p' /sys/fs/cgroup/memory.events || true)
+          echo "oom_kill of the PostgreSQL container's memory cgroup: ${oom:-unknown}"
+          if [ -n "$killed" ] || [ "${oom:-0}" != 0 ]; then
+            echo "The OOM killer ended a PostgreSQL process:"
+            printf '%s\n' "$killed"
+            exit 1
+          fi
       - name: write the job summary
         if: always()
         run: |
