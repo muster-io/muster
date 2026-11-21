@@ -3243,7 +3243,8 @@ until the replica that lacks the key stops being live, and run the command again
 <li>records <code>keyring.key_activated</code> in the Audit log.</li>
 </ul>
 <p>The replicas switch to the key without a restart. Then the Leader recomputes the message of every open Alert Group whose
-buttons the old key signed, so that the delivery worker edits each Root message and signs its buttons with the new key.
+buttons the old key signed, so that the delivery worker edits each Root message and signs its buttons with the new key;
+the callback secrets of Mattermost buttons change with them.
 The edits go through the usual limits of the messengers, so a large backlog takes a while.</p>
 <h2 id="remove-the-old-key">Remove the old key<a class="headerlink" href="#remove-the-old-key" title="Permanent link">&para;</a></h2>
 <p>The old key is still needed while a Secret or an open Root message depends on it. The Keyring page shows each older

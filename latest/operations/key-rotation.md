@@ -42,7 +42,8 @@ When every live replica holds the key, one transaction:
 - records `keyring.key_activated` in the Audit log.
 
 The replicas switch to the key without a restart. Then the Leader recomputes the message of every open Alert Group whose
-buttons the old key signed, so that the delivery worker edits each Root message and signs its buttons with the new key.
+buttons the old key signed, so that the delivery worker edits each Root message and signs its buttons with the new key;
+the callback secrets of Mattermost buttons change with them.
 The edits go through the usual limits of the messengers, so a large backlog takes a while.
 
 ## Remove the old key
