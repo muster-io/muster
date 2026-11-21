@@ -4,14 +4,14 @@
 - Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34, C-36, C-37 and the later ones of the 0.2.x patch releases among them). A
+[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34, C-36, C-37, C-38, C-39 and the later ones of the 0.2.x patch releases among them). A
 capability is done when its stories together cover every ID
 of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID
 fully or in part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
-  Every ID of L1, of the core of L2, of C-33, of C-34, of C-36 and of C-37 is complete. The sections of L2 follow the non-functional requirements
+  Every ID of L1, of the core of L2, of C-33, of C-34, of C-36, of C-37, of C-38 and of C-39 is complete. The sections of L2 follow the non-functional requirements
   of L1, and the requirements of L1 that L2 revises have a section of their own at the end.
   [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 has a
   row here.
@@ -22,7 +22,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) ·
 [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) ·
 [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) ·
-[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [C-36](#c-36) · [C-37](#c-37) · [L1
+[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [C-36](#c-36) · [C-37](#c-37) · [C-38](#c-38) · [C-39](#c-39) · [L1
 requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
@@ -65,6 +65,8 @@ requirements revised for L2](#l1-requirements-revised-for-l2)
 | C-34 Maintenance windows | L2 0.2.x | 41 | S-190, S-191, S-192, S-193, S-194, S-195, S-196 | yes | 41 of 41 |
 | C-36 Loud and Quiet settings of a Route | L2 0.2.x | 21 | S-197, S-198, S-199, S-200, S-201 | yes | 21 of 21 |
 | C-37 Attach and Detach | L2 0.2.x | 29 | S-202, S-203, S-204, S-205, S-206, S-207, S-208 | yes | 29 of 29 |
+| C-38 Message layout editor | L2 0.2.x | 29 | S-209, S-210, S-211, S-212, S-213, S-214, S-215, S-216, S-217, S-218, S-219 | yes | 29 of 29 |
+| C-39 Theme switch | L2 0.2.x | 13 | S-220, S-221 | yes | 13 of 13 |
 
 ## C-01
 
@@ -1350,6 +1352,66 @@ S-208. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
 | C-37.AC-11 | S-202 (part), S-206 (part) | complete | the limit (S-202); the bulk Attach (S-206) |
 | C-37.AC-12 | S-207 | complete |  |
 
+## C-38
+
+[Message layout editor](../prd/l2/C-38-message-layout-editor.md) · L2 0.2.x · stories: S-209, S-210, S-211, S-212,
+S-213, S-214, S-215, S-216, S-217, S-218, S-219. They start after the tag of 0.2.0 and ship in 0.2.x patch releases;
+their contracts were written against the open pull request that adds the capability file, before it merged.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-38.FR-1 | S-210 (part), S-211 (part) | complete | the setting, its default and the read (S-210); every Destination of the Route renders it, and the default renders as before (S-211) |
+| C-38.FR-2 | S-209 (part), S-210 (part), S-211 (part), S-217 (part) | complete | the limit of fields that the Slack fact settles (S-209); what a layout holds and its checks (S-210); the rendering (S-211); the editor (S-217) |
+| C-38.FR-3 | S-211 | complete |  |
+| C-38.FR-4 | S-210 | complete |  |
+| C-38.FR-5 | S-210 (part), S-217 (part) | complete | the reset and the Audit log (S-210); the reset button and the dropped draft (S-217) |
+| C-38.FR-6 | S-209 (part), S-211 (part), S-212 (part), S-213 (part), S-214 (part) | complete | the two facts (S-209); Mattermost, Slack, Telegram and the bridge's body (S-211); the bridge's `layout` with `order` (S-212); the types in the two libraries (S-213, S-214) |
+| C-38.FR-7 | S-211 (part), S-216 (part) | complete | Thread replies, Storm summaries and Mentions unchanged (S-211); the test message (S-216) |
+| C-38.FR-8 | S-211 | complete | the preview's own `layout` null for a template is S-215's, under AC-6 |
+| C-38.FR-9 | S-210 (part), S-217 (part) | complete | the save with the template removed (S-210); the hint and "Remove the template" (S-217) |
+| C-38.FR-10 | S-215 | complete |  |
+| C-38.FR-11 | S-215 (part), S-218 (part) | complete | the example and an Alert Group of any Route (S-215); the offered list and "Find by number" (S-218) |
+| C-38.FR-12 | S-215 (part), S-218 (part) | complete | the payload, the length and the cut blocks (S-215); the tabs (S-218) |
+| C-38.FR-13 | S-215 | complete | the Redaction clause waits for the capability that specifies the rules (S-215, Open questions) |
+| C-38.FR-14 | S-210 (part), S-211 (part) | complete | the re-render row (S-210); the edits, Quietly and once (S-211) |
+| C-38.FR-15 | S-210 (part), S-217 (part) | complete | the API and the Permissions (S-210); the read-only editor (S-217) |
+| C-38.FR-16 | S-219 | complete |  |
+| C-38.FR-17 | S-216 (part), S-218 (part) | complete | the operation (S-216); the editor's button (S-218) |
+| C-38.AC-1 | S-210 (part), S-211 (part) | complete | the read-back (S-210); the Root message byte for byte (S-211) |
+| C-38.AC-2 | S-211 (part), S-212 (part) | complete | Mattermost, Slack and Telegram (S-211); the fake bridge (S-212) |
+| C-38.AC-3 | S-211 | complete |  |
+| C-38.AC-4 | S-210 | complete |  |
+| C-38.AC-5 | S-211 | complete |  |
+| C-38.AC-6 | S-211 (part), S-215 (part) | complete | the rendering (S-211); the preview's `layout` null (S-215) |
+| C-38.AC-7 | S-210 (part), S-215 (part), S-218 (part) | complete | the Viewer's read (S-210); the other Route's Alert Group, the example and the `403` (S-215); the offered order (S-218) |
+| C-38.AC-8 | S-215, S-218 (part) | complete | the reports (S-215); the length and cut lines in the UI (S-218) |
+| C-38.AC-9 | S-216 | complete |  |
+| C-38.AC-10 | S-217 (part), S-218 (part) | complete | the blocks, fields, keyboard move, apply and reset (S-217); the preview, its tabs and the apply (S-218) |
+| C-38.AC-11 | S-210 (part), S-211 (part), S-212 (part) | complete | the refusals of 0 and 21 (S-210); three values and "…and 9 more" (S-211); the `order` and `muster bridge check` (S-212) |
+| C-38.AC-12 | S-210 (part), S-216 (part), S-218 (part) | complete | the one save of the layout and the template's removal (S-210); the test message and the `403` (S-216); the editor's test message (S-218) |
+
+## C-39
+
+[Theme switch](../prd/l2/C-39-theme-switch.md) · L2 0.2.x · stories: S-220, S-221. They start after the tag of 0.2.0
+and ship in 0.2.x patch releases; their contracts were written against the open pull request that adds the capability
+file, before it merged.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-39.FR-1 | S-220 (part), S-221 (part) | complete | the value, its default and the existing Users (S-220); `system` following the media query (S-221) |
+| C-39.FR-2 | S-220 (part), S-221 (part) | complete | the profile setting, the web-session rule and the Audit log (S-220); the switch, the immediate application and other tabs (S-221) |
+| C-39.FR-3 | S-221 | complete |  |
+| C-39.FR-4 | S-221 | complete |  |
+| C-39.FR-5 | S-221 | complete |  |
+| C-39.FR-6 | S-220 | complete |  |
+| C-39.FR-7 | S-221 | complete |  |
+| C-39.AC-1 | S-220 | complete |  |
+| C-39.AC-2 | S-221 | complete |  |
+| C-39.AC-3 | S-221 | complete |  |
+| C-39.AC-4 | S-221 | complete |  |
+| C-39.AC-5 | S-221 | complete |  |
+| C-39.AC-6 | S-221 | complete |  |
+
 ## L1 requirements revised for L2
 
 The requirements of L1 that [L2 §6](../prd/L2.md#6-revisions-to-l1) revises, and those it adds to L1 files, with the
@@ -1413,6 +1475,7 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-12.FR-1 | S-125 (part), S-126 (part) | complete |  |
 | C-12.FR-2 | S-125 | complete |  |
 | C-12.FR-3 | S-125 (part), S-143 (part), S-148 (part), S-173 (part), S-155 (part), S-168 (part) | complete | the layout (S-125), undelivered Mentions (S-143), calls (S-148), their answers (S-173), Pages (S-155), Assignees (S-168) |
+| C-12.FR-5 | S-215 | complete | added for L2: a preview of a Root message takes an unsaved message layout and a Destination and returns the messenger payload, the number of Slack blocks and the blocks shortening cut |
 | C-12.FR-8 | S-140 (part), S-143 (part) | complete | the Mention entries in delivery and on the form |
 | C-12.FR-11 | S-125, S-171 (part) | complete | the shortening of the compact layout (S-125); the Mention line of a Bridge message within half of the body limit (S-171) |
 | C-12.FR-12 | S-140 (part), S-165 (part), S-168 (part) | complete | an unlinked person left out and recorded (S-140, S-165); the Assignees named like the footer's people (S-168) |
@@ -1423,6 +1486,7 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-14.FR-16 | S-125 | complete |  |
 | C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-177 (part), S-168 (part), S-156 (part), S-198 (part), S-206 (part) | complete | the L2 events in events mode (S-118, S-121, S-148, S-169, S-155), the people of `paged` (S-177), the `webhook_events` CHECK extended by S-118, S-121 and S-148; the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156); `notify` from the loudness a Route gives the event (S-198); the five events of Attach and Detach and `attached_to` in `alert_group` (S-206) |
 | C-15.FR-11 | S-140 (part), S-177 | complete | Teams and the On-call as targets (S-140); the people that `paged` names (S-177) |
+| C-16.FR-1 | S-216 (part), S-218 (part) | complete | added for L2: a test message with an unsaved message layout, built from any Alert Group the preview shows (S-216), sent from the editor (S-218) |
 | C-16.FR-4 | S-113 (part), S-125 (part) | complete |  |
 | C-17.FR-1 | S-169, S-199 (part), S-204 (part) | complete | the first chain stops the ack timeout (S-169); the ack timeout and chains start over when new Alerts remove an acknowledgement (S-199); they stop on Attach and start over on Detach (S-204) |
 | C-17.FR-2 | S-140, S-198 (part) | complete | the Mentions of the entries for `ack_timeout` (S-140); the notice Quiet where the Route does not list `ack_timeout` (S-198) |

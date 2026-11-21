@@ -13,7 +13,7 @@ the review checks the code against.
 Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24` and the [core of
 L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`, with the statistics by people and by Team that L2 adds to
 `C-09`, and the capabilities of L2 specified after its core, from `C-33`, among them those of the 0.2.x patch
-releases: `C-34`, `C-36` and `C-37`. Every functional requirement (`C-NN.FR-n`)
+releases: `C-34`, `C-36`, `C-37`, `C-38` and `C-39`. Every functional requirement (`C-NN.FR-n`)
 and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the [coverage table](coverage.md)
 shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices
 are in the [ADRs](../adr/README.md).
@@ -143,7 +143,7 @@ under `docs/assets/screenshots/` — are generated and checked in too, and never
   C-28 and C-29), "L2 On call" (C-27, Team mentions and the Mention entries) and "L2 Paging" (C-30 – C-32); beside
   them, "L2 Statistics" (S-174 to S-176, for C-09) needs only the Teams of Alert Groups and runs in parallel. The
   capabilities specified after the core follow, the Terraform provider and then those of "L2 0.2.x", which start after
-  the tag of 0.2.0 and ship in its patch releases (C-34 from S-190, C-36 from S-197, C-37 from S-202). The
+  the tag of 0.2.0 and ship in its patch releases (C-34 from S-190, C-36 from S-197, C-37 from S-202, C-38 from S-209, C-39 from S-220). The
   architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
@@ -281,8 +281,8 @@ deployment, `docs` documentation. A story for another repository names it after 
 | L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
 | **L2 core** | 8 | | **68** |
 | L2 Terraform provider | C-33 | S-179 – S-189 | 11 |
-| L2 0.2.x | C-34, C-36, C-37 | S-190 – S-208 | 19 |
-| **L2** | 12 | | **98** |
+| L2 0.2.x | C-34, C-36, C-37, C-38, C-39 | S-190 – S-221 | 32 |
+| **L2** | 14 | | **111** |
 
 ### Foundation
 
@@ -771,6 +771,19 @@ Registries resolve.
 | [S-206](S-206-the-attached-filter-bulk-attach-the-alerts-of-attached-alert-groups-statistics-and-webhook-events-be.md) | C-37 | The attached filter and counts of the Alert Group list, bulk Attach, the Alerts of attached Alert Groups, statistics and webhook events (BE) | be | S-203, S-174, S-168, S-044 |
 | [S-207](S-207-the-attach-dialog-the-notice-and-section-on-the-alert-group-page-and-the-mark-filter-and-bulk-attach-of-the-list-fe.md) | C-37 | The Attach dialog, the notice and the section on the Alert Group page, and the mark, filter and bulk Attach of the list (FE) | fe | S-202, S-203, S-204, S-206, S-159, S-158 |
 | [S-208](S-208-documentation-attach-and-detach.md) | C-37 | Documentation: Attach and Detach | docs | S-204, S-205, S-206, S-207, S-201 |
+| [S-209](S-209-spike-slack-fields-in-one-section-and-where-a-mattermost-attachment-draws-its-fields.md) | C-38 | Spike: how many fields Slack takes in one section, and where a Mattermost attachment draws its fields | docs | — |
+| [S-210](S-210-the-message-layout-of-a-route-with-its-checks-migration-api-audit-log-and-the-rerender-be.md) | C-38 | The message layout of a Route with its checks, migration, API, Audit log and the re-render row (BE) | be | S-209, S-125, S-162, S-123 |
+| [S-211](S-211-the-root-message-follows-the-message-layout-in-mattermost-slack-and-telegram-with-the-shortening-and-templates-be.md) | C-38 | The Root message follows the message layout in Mattermost, Slack and Telegram, with the shortening and the templates (BE) | be | S-210, S-209, S-125, S-168, S-113 |
+| [S-212](S-212-the-order-of-the-blocks-in-the-bridge-layout-the-bridge-adapter-muster-bridge-check-and-the-fake-bridge-be.md) | C-38 | The order of the blocks in the Bridge layout, the Bridge adapter, muster bridge check and the fake bridge (BE) | be | S-211, S-126, S-171 |
+| [S-213](S-213-the-order-of-the-message-blocks-in-the-go-bridge-library-be.md) | C-38 | The order of the message blocks in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-212, S-127 |
+| [S-214](S-214-the-order-of-the-message-blocks-in-the-python-bridge-library-be.md) | C-38 | The order of the message blocks in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-212, S-128 |
+| [S-215](S-215-the-preview-of-an-unsaved-message-layout-on-an-alert-group-that-arrived-with-the-payload-of-each-messenger-be.md) | C-38 | The preview of an unsaved message layout on an Alert Group that arrived, with the payload of each messenger (BE) | be | S-211, S-212, S-129, S-113, S-036 |
+| [S-216](S-216-the-test-message-with-the-routes-layout-or-an-unsaved-one-built-from-any-alert-group-the-preview-shows-be.md) | C-38 | The test message with the Route's layout or an unsaved one, built from any Alert Group the preview shows (BE) | be | S-211, S-215, S-047, S-113 |
+| [S-217](S-217-the-message-layout-editor-page-with-the-blocks-the-fields-and-the-templates-of-the-route-fe.md) | C-38 | The message layout editor page with the blocks, the fields and the Route's templates (FE) | fe | S-210, S-211, S-129, S-123 |
+| [S-218](S-218-the-preview-on-real-alert-groups-in-the-message-layout-editor-with-the-four-messengers-and-the-test-message-fe.md) | C-38 | The preview on real Alert Groups in the message layout editor, with the four messengers and the test message (FE) | fe | S-217, S-215, S-216, S-048 |
+| [S-219](S-219-documentation-the-message-layout-editor-the-blocks-that-always-show-templates-and-the-preview.md) | C-38 | Documentation: the message layout editor, the blocks that always show, templates and the preview | docs | S-217, S-218, S-213, S-214, S-130 |
+| [S-220](S-220-the-theme-of-a-person-in-the-profile-with-its-migration-and-api-be.md) | C-39 | The theme of a person in the profile, with its migration and API (BE) | be | S-010, S-014 |
+| [S-221](S-221-the-theme-switch-in-the-profile-and-the-user-menu-applied-before-the-first-paint-with-the-documentation-fe.md) | C-39 | The theme switch in the profile and the user menu, applied before the first paint, with the documentation (FE) | fe | S-220, S-014, S-072, S-010 |
 
 S-190 to S-196 specify C-34, the first capability of the 0.2.x patch releases (L2 §1.5). The behaviour is cut at the
 contract boundaries of a window's life. S-190 is the object — the table, the Permissions, the limits, the API, the Audit
@@ -803,8 +816,28 @@ shows and S-208 the documentation, with the documentation links of the dialog an
 finds the page. C-37 depends on C-36 through S-198 and S-199. Implementation of all twelve starts after the tag of
 0.2.0. Migrations are two: S-197's, with no CHECK to re-version, and S-202's, which replaces the event CHECKs of
 `timeline_entries`, `webhook_events` and `thread_replies` as C-34's do; their numbers are assigned by the orchestrator at
-dispatch, with each replaced CHECK re-versioned in the order the stories merge. The stories of the later capabilities of
-0.2.x add their sections here.
+dispatch, with each replaced CHECK re-versioned in the order the stories merge.
+
+S-209 to S-219 specify C-38 and S-220 and S-221 specify C-39, the next two capabilities of the 0.2.x patch releases; the
+contracts of both were written against the open pull request that adds their capability files (#672), before it
+merged, and cite them at their final paths. C-38 is cut at the contract boundaries of the layout's life. S-209 is the
+spike on the two messenger facts that P-94 and the Mattermost hint rely on, which the capability's split puts first, as
+S-116 does for GitLab. S-210 is the setting — the column, the Route API with Muster's default read back resolved, the
+checks, the Audit log and the re-render row — and S-211 the renderer: the fields, the order, the shortening and the
+templates in Mattermost, Slack and Telegram, the two together being too big for one pull request. S-212 adds `order` to
+the Bridge `layout`, the Bridge adapter, the check and the fake bridge, and S-213 and S-214 the types in the Go and the
+Python library, worked in their own repositories as S-127 and S-128 are. S-215 is the preview of an unsaved layout on
+any Alert Group with each messenger's payload, which exports the adapters' payload builders so that it cannot drift from
+delivery, and S-216 the Destination test with the Route's or an unsaved layout. The frontend is two stories after the
+backend they show: S-217 the editor's blocks, fields and templates, which already saves and resets, S-218 the preview
+with the four tabs and the test message, which follows S-215 and S-216; S-219 documents the capability, extends the
+guide for bridge authors with `order` and adds the editor's documentation link so that `docslinkcheck` finds its page.
+C-39 is a small backend part, S-220, with the migration and the `theme` of `Me`, and S-221, the frontend with its
+documentation: the switch, the script of the SPA's own origin that applies the theme before the first paint under the
+Content Security Policy, the dark variants on every page and screenshots that stay light. Implementation of all thirteen
+starts after the tag of 0.2.0. Migrations are two: S-210's `routes.message_layout`, which reuses the kind
+`route_message_settings` of `open_group_updates` and so replaces no CHECK, and S-220's `users.theme`; their numbers are
+assigned by the orchestrator at dispatch. The stories of the later capabilities of 0.2.x add their sections here.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
