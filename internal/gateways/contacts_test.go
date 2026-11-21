@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -286,8 +287,8 @@ func TestNewCodeVoidsEarlier(t *testing.T) {
 	}
 }
 
-// TestLimits are gateway.contact_code_requests: five codes per User within an hour across contacts, three per contact
-// text whoever asks, with the wait until the oldest counted is an hour old; removing a contact keeps its codes counted.
+// TestLimits are gateway.contact_code_requests: five codes per User within an hour across contacts, three per User
+// and contact text, with the wait until the oldest counted is an hour old; removing a contact keeps its codes counted.
 func TestLimits(t *testing.T) {
 	e := newEnv(t)
 	r := person(1, 7)
@@ -304,8 +305,8 @@ func TestLimits(t *testing.T) {
 	if !ok || l.RetryAfter != 57*time.Minute || l.Seconds() != 57*60 {
 		t.Fatalf("the fourth code for one contact: %v", err)
 	}
-	// The same contact text by another User counts too.
-	if _, err := e.svc.Create(t.Context(), person(2, 8), gwID, "+10000000001"); !isLimited(err) {
+	// The same contact text by another User is no request of this User.
+	if _, err := e.svc.Create(t.Context(), person(2, 8), gwID, "+10000000001"); err != nil {
 		t.Errorf("another User for the same contact: %v", err)
 	}
 	if err := e.svc.Delete(t.Context(), r, a.PublicID); err != nil {
@@ -318,7 +319,7 @@ func TestLimits(t *testing.T) {
 	if !isLimited(err) {
 		t.Errorf("the sixth code of the User: %v", err)
 	}
-	if n := len(e.gw.sent); n != 5 {
+	if n := len(e.gw.sent); n != 6 {
 		t.Errorf("%d codes sent", n)
 	}
 	e.clock.Advance(time.Hour)
@@ -333,6 +334,138 @@ func TestLimits(t *testing.T) {
 func isLimited(err error) bool {
 	_, ok := errors.AsType[*RateLimitedError](err)
 	return ok
+}
+
+// member is the requester User user, added to the Organization, in the web session 100+user.
+func (e *env) member(user int64) Requester {
+	pub := "SR0000000000Q" + strconv.FormatInt(user, 10)
+	e.store.users[user] = fakeUser{publicID: pub, status: "active"}
+	return Requester{UserID: user, UserPublicID: pub, SessionID: 100 + user, Actor: audit.User(user, pub),
+		Transport: audit.TransportUI}
+}
+
+// asked has r ask for n codes for the contact: the first by creating it, each a minute after the last.
+func (e *env) asked(r Requester, n int) Contact {
+	e.t.Helper()
+	c := e.create(r, contact)
+	for range n - 1 {
+		e.clock.Advance(time.Minute)
+		if _, err := e.svc.SendCode(e.t.Context(), r, c.PublicID); err != nil {
+			e.t.Fatalf("SendCode: %v", err)
+		}
+	}
+	return c
+}
+
+// shape is a contact without what differs between two contacts created alike.
+func shape(c Contact) Contact {
+	c.PublicID, c.CreatedAt = "", time.Time{}
+	return c
+}
+
+// TestContactLimitPerUser: the per-contact limit of gateway.contact_code_requests counts the codes one User asked for
+// to the contact text, so that the codes a colleague asked for to it neither refuse the person whose contact it is nor
+// change the answer they get; one User still gets 429 beyond three codes for one contact text.
+func TestContactLimitPerUser(t *testing.T) {
+	alone := newEnv(t)
+	want := alone.create(person(2, 8), contact)
+
+	e := newEnv(t)
+	a, b := person(1, 7), person(2, 8)
+	mine := e.asked(a, 3)
+	e.clock.Advance(time.Minute)
+	_, err := e.svc.SendCode(t.Context(), a, mine.PublicID)
+	if l, ok := errors.AsType[*RateLimitedError](err); !ok || l.RetryAfter != 57*time.Minute {
+		t.Errorf("the fourth code of one User for one contact text: %v", err)
+	}
+	got, err := e.svc.Create(t.Context(), b, gwID, contact)
+	if err != nil {
+		t.Fatalf("the person whose contact it is, after a colleague asked three times: %v", err)
+	}
+	if !reflect.DeepEqual(shape(got), shape(want)) || !got.CreatedAt.Equal(e.clock.Now()) {
+		t.Errorf("answered %+v, alone %+v", got, want)
+	}
+	if n := len(e.gw.sent); n != 4 || e.gw.last().Contact != contact || e.gw.last().Language != "ru" {
+		t.Fatalf("%d codes sent, the last %+v", n, e.gw.last())
+	}
+	code := regexp.MustCompile(`[0-9]{6}`).FindString(e.gw.last().Text)
+	if c, err := e.svc.Confirm(t.Context(), b, got.PublicID, code); err != nil || !c.Confirmed() {
+		t.Errorf("the person confirms: %+v, %v", c, err)
+	}
+	e.noLeak()
+}
+
+// TestContactCap: across Users, a contact text receives at most ten codes within an hour. A request beyond them is
+// answered as if its code were sent, with nothing sent and no code that confirms the contact; it still counts toward
+// the requester's own limits, which answer 429 as before. An hour later the contact receives codes again.
+func TestContactCap(t *testing.T) {
+	e := newEnv(t)
+	for u := int64(1); u <= 3; u++ {
+		e.asked(e.member(u), 3)
+	}
+	d := e.member(4)
+	c := e.asked(d, 1)
+	if n := len(e.gw.sent); n != 10 {
+		t.Fatalf("%d codes sent", n)
+	}
+	tenth := e.sentCode()
+	e.clock.Advance(time.Minute)
+	got, err := e.svc.SendCode(t.Context(), d, c.PublicID)
+	if err != nil || !reflect.DeepEqual(got, c) {
+		t.Fatalf("the eleventh code: %+v, %v", got, err)
+	}
+	if n := len(e.gw.sent); n != 10 {
+		t.Errorf("%d codes sent after the eleventh", n)
+	}
+	if !strings.Contains(e.log.String(), `"outcome":"withheld"`) {
+		t.Errorf("no withheld code in the log: %s", e.log.String())
+	}
+	// The code sent before is replaced, as by a code that was sent, and the withheld one is no code anyone knows.
+	if _, err := e.svc.Confirm(t.Context(), d, c.PublicID, tenth); left(err) != 4 {
+		t.Errorf("the code sent before the withheld one: %v", err)
+	}
+	e.clock.Advance(time.Minute)
+	if _, err := e.svc.SendCode(t.Context(), d, c.PublicID); err != nil {
+		t.Errorf("the requester's third code: %v", err)
+	}
+	e.clock.Advance(time.Minute)
+	if _, err := e.svc.SendCode(t.Context(), d, c.PublicID); !isLimited(err) {
+		t.Errorf("the requester's fourth code for the contact text: %v", err)
+	}
+	f := e.member(5)
+	alone := newEnv(t)
+	want := alone.create(alone.member(5), contact)
+	// The code drawn is 012345; the 32 bytes after it are the hash the withheld code is stored with.
+	random := bytes.Repeat([]byte{0xab}, 32)
+	e.svc.cfg.Random = bytes.NewReader(append([]byte{0x00, 0x00, 0x30, 0x39}, random...))
+	g, err := e.svc.Create(t.Context(), f, gwID, contact)
+	e.svc.cfg.Random = randReader
+	if err != nil || !reflect.DeepEqual(shape(g), shape(want)) {
+		t.Fatalf("a first request beyond the cap: %+v, %v", g, err)
+	}
+	if n := len(e.gw.sent); n != 10 {
+		t.Errorf("%d codes sent", n)
+	}
+	for _, k := range e.store.codes {
+		if k.userID == 5 && (!k.sentAt.Valid || k.voidedAt.Valid || !k.expiresAt.Equal(e.clock.Now().Add(CodeTTL)) ||
+			bytes.Equal(k.codeHash, codeHash(g.PublicID, "012345")) || !bytes.Equal(k.codeHash, random)) {
+			t.Errorf("the withheld code does not look sent, or is the code drawn: %+v", k)
+		}
+	}
+	if _, err := e.svc.Confirm(t.Context(), f, g.PublicID, "012345"); left(err) != 4 {
+		t.Errorf("the code drawn for the withheld request: %v", err)
+	}
+	e.clock.Advance(time.Hour)
+	if _, err := e.svc.SendCode(t.Context(), f, g.PublicID); err != nil {
+		t.Fatalf("an hour later: %v", err)
+	}
+	if n := len(e.gw.sent); n != 11 {
+		t.Errorf("%d codes sent an hour later", n)
+	}
+	if k, err := e.svc.Confirm(t.Context(), e.member(5), g.PublicID, e.sentCode()); err != nil || !k.Confirmed() {
+		t.Errorf("the code sent an hour later: %+v, %v", k, err)
+	}
+	e.noLeak()
 }
 
 // TestValidation: the contact, the gateway, the contact's owner and the session.
@@ -619,8 +752,8 @@ func TestQueryFailures(t *testing.T) {
 			return err
 		},
 	}
-	queries := []string{"GetGateway", "LockContactUser", "LockContactText", "CountUserCodes", "CountContactCodes",
-		"DeleteUnconfirmedContacts", "InsertContact", "LockContactOfUser", "InsertAuditEntry", "InsertCode",
+	queries := []string{"GetGateway", "LockContactUser", "LockContactText", "CountUserCodes", "CountUserContactCodes",
+		"CountContactCodes", "DeleteUnconfirmedContacts", "InsertContact", "LockContactOfUser", "InsertAuditEntry", "InsertCode",
 		"MarkCodeSent", "VoidEarlierCodes", "LockNewestCode", "RecordWrongCode", "UseCode", "DeleteReplacedContacts", "ConfirmContact",
 		"DeleteContact", "ListContactsOfUser", "GetUserByPublicID"}
 	failed := map[string]bool{}
@@ -671,6 +804,15 @@ func TestNewCode(t *testing.T) {
 	}
 	if New(Config{}).cfg.Random == nil {
 		t.Error("no default randomness")
+	}
+	// A withheld code takes 32 bytes more than its code, which a reader that ends after the code lacks.
+	w := newEnv(t)
+	for u := int64(1); u <= 4; u++ {
+		w.asked(w.member(u), 3)
+	}
+	w.svc.cfg.Random = bytes.NewReader([]byte{0, 0, 0, 1})
+	if _, err := w.svc.Create(t.Context(), w.member(5), gwID, contact); err == nil || len(w.store.contacts) != 4 {
+		t.Errorf("a withheld code without randomness: %v, %d contacts", err, len(w.store.contacts))
 	}
 }
 

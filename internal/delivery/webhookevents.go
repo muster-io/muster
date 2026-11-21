@@ -4,11 +4,13 @@
 package delivery
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -269,8 +271,8 @@ func (s *Service) PruneWebhookEvents(ctx context.Context, now time.Time) (int64,
 	return total, nil
 }
 
-// claimEvents is the claim of the due head events of an Organization; a non-zero until claims only the events due by
-// then.
+// claimEvents is the claim of the due head events of an Organization, in the order of ClaimDueWebhookEvents: the
+// earliest first. A non-zero until claims only the events due by then.
 func (w *Worker) claimEvents(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
 	return func(ctx context.Context, org int64) ([]int64, error) {
 		skip, _ := refusedOf(ctx)
@@ -283,6 +285,9 @@ func (w *Worker) claimEvents(until time.Time) func(ctx context.Context, org int6
 		if err != nil {
 			return nil, fmt.Errorf("claim the due webhook events: %w", err)
 		}
+		slices.SortFunc(rows, func(a, b dbgen.ClaimDueWebhookEventsRow) int {
+			return cmp.Or(a.NextAttemptAt.Compare(b.NextAttemptAt), cmp.Compare(a.ID, b.ID))
+		})
 		ids := make([]int64, len(rows))
 		for i, r := range rows {
 			ids[i] = r.ID

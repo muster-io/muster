@@ -299,6 +299,21 @@ func (e BridgeConnectionType) Valid() bool {
 	}
 }
 
+// Defines values for BridgeConnectionWarnings.
+const (
+	PushSecretTooShort BridgeConnectionWarnings = "push_secret_too_short"
+)
+
+// Valid indicates whether the value is a known member of the BridgeConnectionWarnings enum.
+func (e BridgeConnectionWarnings) Valid() bool {
+	switch e {
+	case PushSecretTooShort:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BridgeConnectionBaseType.
 const (
 	BridgeConnectionBaseTypeBridge BridgeConnectionBaseType = "bridge"
@@ -5379,10 +5394,16 @@ type BridgeConnection struct {
 	// Roles The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.
 	Roles *[]BridgeInfoRole    `json:"roles,omitempty"`
 	Type  BridgeConnectionType `json:"type"`
+
+	// Warnings Problems of the saved settings that do not stop the Connection. `push_secret_too_short` (`push`): the stored push secret has a key shorter than 24 bytes, saved before Muster refused one; the push callback still accepts events signed with it, and saving a new `push_secret` of 24 bytes or more ends the warning.
+	Warnings []BridgeConnectionWarnings `json:"warnings"`
 }
 
 // BridgeConnectionType defines model for BridgeConnection.Type.
 type BridgeConnectionType string
+
+// BridgeConnectionWarnings defines model for BridgeConnection.Warnings.
+type BridgeConnectionWarnings string
 
 // BridgeConnectionBase defines model for BridgeConnectionBase.
 type BridgeConnectionBase struct {
@@ -5441,7 +5462,7 @@ type BridgeConnectionInput struct {
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy ProxyConfigInput `json:"proxy"`
 
-	// PushSecret Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.
+	// PushSecret Write-only Secret in the Standard Webhooks form, `whsec_` and the base64 of a key of at least 24 bytes, such as 32 random bytes; a shorter key is `invalid_format`. Required with `event_delivery` `push`. Omit on update to keep the stored one, even one shorter than 24 bytes saved before that minimum, which `warnings` reports; a save in `poll` clears it.
 	PushSecret *string                   `json:"push_secret,omitempty"`
 	Type       BridgeConnectionInputType `json:"type"`
 }
@@ -7125,20 +7146,23 @@ type MattermostActionAnswer struct {
 	SkipSlackParsing *bool `json:"skip_slack_parsing,omitempty"`
 }
 
-// MattermostActionContext The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
+// MattermostActionContext The integration data Muster put on the button, which the Mattermost server strips from the posts it sends to clients. Mattermost does not sign the request, so authenticity rests on the callback secret, which only the Mattermost server knows, and on the signed action id.
 type MattermostActionContext struct {
 	// Action Opaque action id signed with the button-signature key.
 	Action string `json:"action"`
 
 	// KeyId Id of the key that signed the action id.
 	KeyId string `json:"key_id"`
+
+	// Secret The button's callback secret, derived with the key `key_id` from the Connection and the action id. A press without it, or with another one, changes nothing and is not verified; a press without it on a Root message posted before buttons carried one also has that Root message edited again, so that its buttons carry it.
+	Secret *string `json:"secret,omitempty"`
 }
 
 // MattermostActionRequest Button press sent by the Mattermost server.
 type MattermostActionRequest struct {
 	ChannelId string `json:"channel_id"`
 
-	// Context The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
+	// Context The integration data Muster put on the button, which the Mattermost server strips from the posts it sends to clients. Mattermost does not sign the request, so authenticity rests on the callback secret, which only the Mattermost server knows, and on the signed action id.
 	Context              MattermostActionContext `json:"context"`
 	DataSource           *string                 `json:"data_source,omitempty"`
 	PostId               string                  `json:"post_id"`

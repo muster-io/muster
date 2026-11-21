@@ -13,6 +13,9 @@ Notification gateway, and the call actions of the Notification rules, call the p
 ([Calls through a Notification gateway](#calls-through-a-notification-gateway)). Where no chain runs, the ack timeout
 of a Route keeps working as before.
 
+[How an alert reaches people](how-an-alert-reaches-people.md) walks one Alert through the chains, and [Notification
+rules](notification-rules.md) says how a Page reaches one person.
+
 ## What an Escalation chain is
 
 An Escalation chain has:
@@ -85,6 +88,25 @@ field of another kind is refused with `422` `unsupported` at it, and a missing o
 A gateway or a webhook Destination that a stored step names may be deleted; the chain warns about it and can still be
 saved.
 
+### The chain of payments
+
+The Team `payments` names a chain with seven steps, which the examples of these pages use:
+
+1. Page the On-call of its Schedule "Main", normally.
+2. Wait 10 minutes.
+3. For critical Alert Groups only, Page the On-call of "Main" importantly.
+4. Wait 15 minutes.
+5. For critical Alert Groups only, Page the On-call of its Schedule "Second line" importantly.
+6. During the Working hours of `payments`, Page the whole Team.
+7. Repeat from step 3, up to 2 times.
+
+A warning Alert Group Pages the On-call once, skips steps 3 and 5 as "only for critical", and in Working hours Pages the
+whole Team at step 6, in each of the three passes. A critical one Pages the On-call importantly 10 minutes later, the
+second line 15 minutes after that, and the whole Team in Working hours, and does so three times in all before the chain
+runs out.
+
+![The steps of the chain payments on its page: the seven steps numbered, each with its limits as chips such as Severity = critical and only in the working hours of payments](../assets/screenshots/concepts/escalation-chains/01-chain-steps.png){ .screenshot }
+
 ### Webhook steps
 
 A step "Send to an outgoing webhook" (`webhook`) sends the event `escalation_webhook` to the outgoing webhook
@@ -116,10 +138,38 @@ entries and the chains by name, `chains`, and the Audit log of the Route or the 
 {"chain_entries": [{"chain_id": "ECK7M3QX9P2RTA", "severity_condition": "critical"}]}
 ```
 
-Naming a chain on a Route needs `routes:write`, and on a Team `teams:write`. A chain Pages only in the Threads of its
-own Destinations: a chain of a Route in those of the Route's Destinations that have the Alert Group's Root message; a
-chain of a Team in those of the Team's Destinations that have it, and, where none has, in those of the Route's
-Destinations. So a step that Pages everyone in the chat never rings another team's chat.
+Naming a chain on a Route needs `routes:write`, and on a Team `teams:write`. Where the chain then Pages is the rule of
+[Where chains Page](#where-chains-page).
+
+## In the web UI
+
+The button **Escalation chains** on the Teams page opens the list of the chains with the Routes and Teams that name
+each, which filters them by Team. **New chain**, also on the Team page under "Escalation chain of the Team", opens the
+chain page, where an Admin builds the steps; everyone else reads them ("Only Admins change Escalation chains."). "Add
+step" offers the seven kinds — "Page the On-call of a Schedule", "Page people", "Page the whole Team", "Wait", "Send to
+an outgoing webhook", "Repeat from step" and "Call through the Notification gateway", which is greyed with "Unavailable:
+a Notification gateway is needed (a bridge for calls and SMS)" while there is none. Each step shows in words, numbered,
+with its limits as chips: "Severity: any", "always", "only in the working hours of payments" with the days and hours,
+or "Severity = critical". "Whom 'Page the whole Team' calls" offers the Team mention, `@channel`, `@here`, `@all` and
+`@everyone`, and greys the ones that the chain's Destinations cannot mention with their reason. The warnings of the
+chain are listed under "Warnings", a section that shows only when the chain has any.
+
+The page also says what the chain does:
+
+![The chain page of payments: where it writes, when it stops and starts over, and the Routes and Teams it runs for](../assets/screenshots/concepts/escalation-chains/02-chain-behaviour.png){ .screenshot }
+
+"Writes only in the Threads of" names the Destinations that the chain Pages in, "Stops when the Alert Group is
+acknowledged, snoozed or resolved; starts over on Unacknowledge, the end of a Snooze, a Reopen, and a rise to critical
+that ends an acknowledgement or a Snooze." gives its lifecycle, and "Run for" lists the Routes and Teams that name the
+chain, each with the Severity condition it meets. The Route form has "Escalation chains" with the conditions of its
+chains, and the Team page names a Team's chains. Under "Normal and important" the page reminds that each person's
+Notification rules decide what exactly a Page does, and that Muster sends no direct messages: a Page is a Mention in the
+Thread of the Root message.
+
+"How it went" lists the recent Alert Groups the chain ran on, with their Pages, the steps it skipped and what stopped
+it. The screenshot is of a run that a person acknowledged:
+
+![How it went on the chain page of payments: the Alert Group, step 1 with its Page not delivered, and Stopped: acknowledged](../assets/screenshots/concepts/escalation-chains/03-how-it-went.png){ .screenshot }
 
 ## When chains run
 
@@ -139,7 +189,7 @@ A chain runs only while the Alert Group is firing, and only Alerts and Commands 
 | It becomes firing again: a Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to critical that ends an acknowledgement or a Snooze, an auto-unacknowledge, its Owner disabled or deleted | The chains that apply start over at their first step |
 | Its Severity level rises by its Alerts while it is firing and nobody owns it | The chains whose condition it now meets start; running chains go on |
 | A Team joins it by a new Alert while it is firing and nobody owns it | That Team's chains start, where the Route runs the chains of Teams |
-| A change of configuration: saving a Team, turning on "Also to the Teams from the label" or "Run the Teams' Escalation chains", naming a chain on a Route or a Team or changing its condition, changing the Minimum severity | No chain starts, and the running chains go on |
+| A change of configuration: saving a Team, turning on "Also to the Teams from the label" or "Run the Teams' Escalation chains", naming a chain on a Route or a Team or changing its condition, changing the Severity condition of a Destination, changing the Minimum severity | No chain starts, and the running chains go on |
 | Acknowledge, Snooze, Resolve | Every chain stops |
 
 A chain whose condition the Alert Group no longer meets after its Severity level falls goes on. A chain that a change of
@@ -269,8 +319,11 @@ One whose "reply in thread" request was removed after the Page was queued sends 
 delivered.
 
 !!! warning "At night, only a Notification gateway is reliable"
-    Whether a Mention in a Thread pushes a notification to a phone is still to be verified for Mattermost and Slack.
-    Until it is, rely on a call through a Notification gateway for Pages at night.
+    A Mention in a Thread may or may not reach a person's phone as a push notification: it depends on the messenger,
+    on its app, on the settings of the person's phone and on the push mode of the messenger. Muster cannot see whether a
+    push arrived. For Pages that must wake someone at night, rely on a call through a Notification gateway, and treat a
+    Mention as the record in the Thread that the person was named, not as a promise that a phone rang. See
+    [At night](../messengers/notification-gateways.md#at-night).
 
 ## Calls through a Notification gateway
 
@@ -353,6 +406,19 @@ each as a Mention where their account is linked in the Destination's Identity sp
 acknowledgement that stopped running chains it reads "Acknowledged by @ivan · Escalation chains stopped": the Owner is
 named without a Team. The `layout` that a bridge receives names the Assignees in `assignees` with the Team in `team`,
 and with the `ref` of their Mention entry in a new message to a bridge with `native_mentions`.
+
+The Alert Group page names the Assignees under its title as "Assignees: @ivan (devops), @petr (payments)", each with the
+owning Team of their chain, and below it lists "Escalation chains": each running chain with its state — "step 2 · next
+step at" with a date and time, "ran out" or "stopped" — and a link to the chain.
+
+![The header of an Alert Group page, which names the Assignees: @ivan with the Team devops and @petr with the Team payments](../assets/screenshots/concepts/escalation-chains/04-alert-group-assignees.png){ .screenshot }
+
+![The Escalation chains of an Alert Group: the chains devops and payments, each at step 2 with the time of its next step](../assets/screenshots/concepts/escalation-chains/05-alert-group-chains.png){ .screenshot }
+
+The Alert Group list has the column "Assignees" and the filter "Assignee", a person or "me". The Home page lists, under
+"I am an Assignee", the open Alert Groups that an Escalation chain Paged the signed-in person about — "Alert Groups that
+an Escalation chain Paged you about. They leave this list once acknowledged." — with their Assignees, the chain and its
+step, and the buttons to acknowledge and snooze.
 
 The API reads them in `assignees` of an Alert Group (`user`, `team`, `chain`, `since`), and
 `GET /api/v1/alert-groups?assignee=me` lists the open Alert Groups where the calling User is an Assignee, by a User's

@@ -62,8 +62,10 @@ of each Alert Group there up to date until the Alert Group is resolved.
   [Snapshots](concepts/snapshot-semantics.md), [Loud and Quiet](concepts/loud-and-quiet.md) messages, the
   [statuses and commands](concepts/statuses-and-commands.md), [Broken Destinations](concepts/broken-destinations.md),
   [Teams](concepts/teams.md), [Schedules](concepts/schedules.md) and
-  [Routing to Teams](concepts/routing-to-teams.md), [whom a message mentions](concepts/mentions.md), and
-  [what critical changes](concepts/what-critical-changes.md).
+  [Routing to Teams](concepts/routing-to-teams.md), [how an alert reaches people](concepts/how-an-alert-reaches-people.md)
+  from its Route to the people it Pages, [what critical changes](concepts/what-critical-changes.md),
+  [Notification rules](concepts/notification-rules.md), [Escalation chains](concepts/escalation-chains.md) that Page more
+  and more people while an Alert Group stays firing, and [whom a message mentions](concepts/mentions.md).
 - [Operations](operations/backup-and-restore.md): [back up and restore](operations/backup-and-restore.md),
   [upgrade](operations/upgrades.md), [rotate the master keys](operations/key-rotation.md), run
   [more than one replica](operations/high-availability.md), [monitor Muster](operations/monitoring.md), set an

@@ -62,15 +62,18 @@ var name = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 const zeroWidthSpace = "\u200b"
 
 // look is how messages are laid out for one Destination: the markup, the identity space whose Account links the
-// footer mentions a user by, the callback address of the buttons, the attachment's footer and icon, and the length
-// limit.
+// footer mentions a user by, the callback address of the buttons and their callback secret, the attachment's footer
+// and icon, and the length limit.
 type look struct {
 	markup   messages.Markup
 	space    string
 	callback string
-	footer   string
-	icon     string
-	limit    int
+	// secret is the callback secret of a button by its action id and the key that signed it, empty when it cannot be
+	// derived; nil derives none.
+	secret func(action, keyID string) string
+	footer string
+	icon   string
+	limit  int
 }
 
 // rootPost lays out a Root message, or a Storm summary, which has no heading and so no title: an empty message and
@@ -86,7 +89,7 @@ func rootPost(m messages.Message, l look, mentions []string) post {
 	}
 	m, _ = messages.Shorten(m, max(limit, 1), l.markup)
 	att := attachment{Fallback: cutEnd(fallback(m), l.limit), Color: messages.StatusColour(m.Colour),
-		Text: text(m, l, mentions), Actions: actions(m.Buttons, l.callback)}
+		Text: text(m, l, mentions), Actions: actions(m.Buttons, l)}
 	if h := m.Heading; h != nil {
 		att.Title = "#" + strconv.FormatInt(h.Number, 10) + " " + templates.StripTokens(h.Title)
 		if m.StatusWord != "" {
@@ -125,7 +128,7 @@ func replyPost(m messages.Message, l look, mentions []string) post {
 		return post{Message: cutEnd(joinLines(line, text(m, l, nil)), l.limit)}
 	}
 	return post{Message: cutEnd(line, l.limit), Props: &props{Attachments: []attachment{{
-		Color: messages.StatusColour(m.Colour), Text: text(m, l, nil), Actions: actions(m.Buttons, l.callback)}}}}
+		Color: messages.StatusColour(m.Colour), Text: text(m, l, nil), Actions: actions(m.Buttons, l)}}}}
 }
 
 // text is the text of m without its heading, fields and buttons, as messages.Layout lays it out for the markup, after
@@ -281,17 +284,21 @@ var actionStyles = map[buttons.Style]string{
 	buttons.StyleSuccess: "success",
 }
 
-// actions are the buttons as attachment actions, each with the style of its hint and calling the callback with its
-// signed action id.
-func actions(bs []messages.Button, callback string) []action {
+// actions are the buttons as attachment actions, each with the style of its hint and calling the callback of l with its
+// signed action id, the key that signed it and its callback secret.
+func actions(bs []messages.Button, l look) []action {
 	out := make([]action, 0, len(bs))
 	for _, b := range bs {
 		id := actionIDs[b.Command]
 		if b.Command == buttons.CommandSnooze {
 			id += cmp.Or(presetActionIDs[b.Argument], strconv.Itoa(b.Argument))
 		}
+		c := actionContext{Action: b.ActionID, KeyID: b.KeyID}
+		if l.secret != nil {
+			c.Secret = l.secret(b.ActionID, b.KeyID)
+		}
 		out = append(out, action{ID: id, Name: b.Label, Type: "button", Style: actionStyles[b.Style()],
-			Integration: integration{URL: callback, Context: actionContext{Action: b.ActionID, KeyID: b.KeyID}}})
+			Integration: integration{URL: l.callback, Context: c}})
 	}
 	return out
 }

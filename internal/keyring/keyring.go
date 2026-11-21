@@ -32,9 +32,12 @@ const (
 	PurposeEncryption      Purpose = "encryption"
 	PurposeButtonSignature Purpose = "button-signature"
 	PurposeCSRF            Purpose = "csrf"
+	// PurposeMattermostCallback derives the callback secret of a Mattermost button, which only the Mattermost server
+	// learns and sends back with a press.
+	PurposeMattermostCallback Purpose = "mattermost-callback"
 )
 
-var purposes = []Purpose{PurposeEncryption, PurposeButtonSignature, PurposeCSRF}
+var purposes = []Purpose{PurposeEncryption, PurposeButtonSignature, PurposeCSRF, PurposeMattermostCallback}
 
 const (
 	keyIDPrefix = "k-"
@@ -227,6 +230,17 @@ func (k *Keyring) Sign(p Purpose, msg []byte) (mac []byte, keyID string, err err
 	}
 	mac, err = a.mac(p, msg)
 	return mac, a.id, err
+}
+
+// SignWith returns an HMAC-SHA256 of msg with the sub-key for p, which is a signature purpose, of the key keyID, which
+// may be any key of the Keyring: a value bound to what another key signed, such as the callback secret of a button
+// whose action id that key signed.
+func (k *Keyring) SignWith(p Purpose, keyID string, msg []byte) ([]byte, error) {
+	kk, ok := k.byID[keyID]
+	if !ok {
+		return nil, fmt.Errorf("sign for %s: %w: %s", p, ErrKeyNotHeld, keyID)
+	}
+	return kk.mac(p, msg)
 }
 
 // Verify checks a signature made by Sign with the key keyID, which may be any key of the Keyring.

@@ -2,7 +2,9 @@
 
 A **Schedule** says who in a Team is On-call and when. It is made of Rotation layers, in which people take Shifts in
 turn, with Overrides on top. Schedules are managed through the API under `/api/v1/schedules`; nothing about a Schedule
-sends a message.
+sends a message. The On-call of a Schedule is whom a Mention of the Team's On-call names and whom a step of an
+[Escalation chain](escalation-chains.md) Pages; [How an alert reaches people](how-an-alert-reaches-people.md) shows
+where that happens on the way of an Alert.
 
 ## What a Schedule is
 

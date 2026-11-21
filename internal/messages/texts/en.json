@@ -118,6 +118,7 @@
   "press.forbidden": "You are not permitted to do this",
   "press.notLinked": "Your Mattermost account is not linked to Muster. Link it in your profile: {link}",
   "press.notVerified": "This button could not be verified; nothing was changed.",
+  "press.outdated": "These buttons are out of date and are being updated; nothing was changed. Press again in a moment.",
   "press.slackNotLinked": "Your Slack account is not linked to Muster. Link it in your profile: {link}",
   "press.telegramNotLinked": "Your Telegram account is not linked to Muster. Link it in your profile: {link}",
   "press.test": "This is a test message; nothing was changed",

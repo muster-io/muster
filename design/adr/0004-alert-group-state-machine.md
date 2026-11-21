@@ -11,6 +11,11 @@
   acknowledgement through a Notification gateway applies only while nobody owns the Alert Group; a Route may let new
   Alerts remove the acknowledgement; an Alert Group attached to another follows its status; Urgent means critical
   (ADR-0003)
+- Amended: 2026-11-21 — with the L2 PRD of Maintenance windows (C-34): a Maintenance window that starts to keep back an
+  Alert Group stops its running Escalation chains, its ack timeout and the Notification rule runs its chains started,
+  instead of keeping them waiting; when it stops keeping back an Alert Group that is firing and that nobody owns, they
+  start over at their first step; Reminders that fall due meanwhile are skipped and do not count as unanswered for
+  auto-unacknowledge
 
 ## Context
 
@@ -117,9 +122,11 @@ timeout's points: it starts at the Alert Group's Publication — or when the Ale
 publish it because there is none or all are Broken — starts over whenever the Alert Group becomes firing again, on the
 same events as the ack timeout, and stops on Acknowledge, Snooze and Resolve; so when a Snooze ends on a firing Alert
 Group that nobody owns, its chains start again (journal D487, D507, D528). In a Storm, a chain waits for its Alert
-Group's own Publication, and a Maintenance window keeps it waiting. A rise in Severity level of a firing Alert Group
-that nobody owns restarts no running chain; it only starts the chains whose Severity condition it now meets, such as
-those for critical only (journal D555), and a Team that joins starts its own where the Route runs the chains of Teams.
+Group's own Publication; a Maintenance window that keeps the Alert Group back stops its chains and its ack timeout, and
+they start over at their first step once it stops keeping back the Alert Group while it is firing and nobody owns it
+(C-34). A rise in Severity level of a firing Alert Group that nobody owns restarts no running chain; it only starts the
+chains whose Severity condition it now meets, such as those for critical only (journal D555), and a Team that joins
+starts its own where the Route runs the chains of Teams.
 When the first chain starts, a running ack timeout stops and sends no more notices; an Alert Group without a chain keeps
 the ack timeout. The Alert Group is Unclaimed once every chain started on it has run out without an acknowledgement
 (journal D535). Steps are timer rows like the ack timeout. The **Assignees** — the people the running chains Paged last

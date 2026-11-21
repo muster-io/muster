@@ -255,6 +255,8 @@ func TestDoctorBridge(t *testing.T) {
 	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
 	before, audits, txs, infos := background.Get(), len(e.store.audit), e.store.tx, len(e.store.infos)
 	f.ResetRequests()
+	// The reads of info after the creations.
+	e.path.subjects = nil
 
 	got := findings(t, e.svc, e.store)
 	notOffered := "event_delivery: The bridge does not offer push event delivery."
@@ -300,6 +302,20 @@ func TestDoctorBridge(t *testing.T) {
 	if got := findings(t, noKeys, e.store); !strings.HasPrefix(got,
 		"connection br: the bot token cannot be opened: the master keys could not be loaded\n") {
 		t.Errorf("without a keyring:\n%s", got)
+	}
+}
+
+// TestDoctorBridgeShortPushSecret: muster doctor passes a Bridge Connection in push mode whose stored push secret is
+// shorter than bridge.MinPushSecretBytes with a hint to replace it, and one of 24 bytes or more without one.
+func TestDoctorBridgeShortPushSecret(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	e.createFakeBridge(t, f, "push", fakebridge.Token, connections.EventDeliveryPush)
+	short := e.createFakeBridge(t, f, "short", fakebridge.Token, connections.EventDeliveryPush)
+	e.storeShortPushSecret(t, short)
+	want := "connection push: ok\nconnection short: warning: " + connections.HintPushSecretTooShort
+	if got := findings(t, e.svc, e.store); got != want {
+		t.Errorf("findings:\n%s\nwant:\n%s", got, want)
 	}
 }
 

@@ -932,8 +932,9 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   `destinations`, `oidc_settings` and the outgoing heartbeat. `telegram_update_offset` lets a new Leader resume
   `getUpdates` where the old one stopped. A Bridge in push mode has a push secret until it is deleted
   (`connections_type_fields_check`), kept with its key id by `connections_bridge_push_secret_check`; a Bridge in poll
-  mode has none. `bridge_info` is the last `info` a Connection check read, as the bridge sent it — at most 64 KiB,
-  fields Muster does not know yet included — with `bridge_info_read_at` on the business clock; `bridge_events_cursor`
+  mode has none. `bridge_info` is the last `info` Muster read — on a Connection check, right after a save that created
+  the Connection or gave it a new base URL or bot token, or before a call that depends on it — as the bridge sent it,
+  at most 64 KiB, fields Muster does not know yet included, with `bridge_info_read_at` on the business clock; `bridge_events_cursor`
   is where the poller of the Bridge's events goes on, written by the Leader task `bridge_polling` after each batch it
   handled, and only for the version of the Connection the poller read, so that a poller of an earlier version or of a
   frozen old Leader writes nothing; it is not a change of the configuration. A new base URL or bot token forgets all
@@ -1968,12 +1969,12 @@ stored `info` declares the role `gateway`; it has no table of its own.
   its notification — only the newest sent code of a contact is checked, so that a code still being sent, or one whose
   sending failed, never hides an earlier valid one — `used_at` once it confirmed its contact and `voided_at` once the
   last attempt was wrong, a newer code of the contact was sent or its own sending failed. `user_id` and `contact_hash`,
-  the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User
-  (`gateway_contact_codes_user_idx`) and per contact whoever asked (`gateway_contact_codes_hash_idx`), each on `(org_id,
-  …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that removing and
-  adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id, contact_id,
-  created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since `created_at` comes
-  from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
+  the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User and per User
+  and contact (`gateway_contact_codes_user_idx`) and per contact whoever asked (`gateway_contact_codes_hash_idx`), each
+  on `(org_id, …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that
+  removing and adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id,
+  contact_id, created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since
+  `created_at` comes from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
   `gateway_contact_codes_contact_fk_idx` on `(contact_id)` serve the foreign key actions: the pruning of sessions
   deletes their codes, and removing a contact sets the contact of its codes to null. The Leader's short-lived pruning
   deletes the codes that expired a day ago (`gateway_contact_codes_expires_idx` on `(org_id, expires_at)`) with the

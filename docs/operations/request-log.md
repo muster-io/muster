@@ -109,7 +109,8 @@ Every masked value reads `[redacted]`.
 - **The URL** keeps no user information, and the path of a Connection's base URL, which may be a secret — such as the
   path of a bridge behind a reverse proxy — is shown as `[redacted]`, as in errors.
 - **Values that authenticate a person**: the signed action ids of buttons, which authenticate a Mattermost or a Slack
-  press, and the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an
+  press, the `key_id` and the callback `secret` in the integration data of a Mattermost button, in the posts Muster
+  sends and in the presses it receives, and the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an
   `account_link` event, the code in a direct message.
 - **What a Notification gateway is sent**: the `contact` and the `text` of every request to `sendNotification`, in the
   request and in its answer, since a contact is personal data and the text names Alert Groups or carries the code that
