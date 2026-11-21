@@ -19,7 +19,7 @@ acceptance:
   - "[C-33.AC-17] The mark \"Managed by {tool}\" of S-181 links to `configure/terraform.md#the-managed-by-mark` through the entry `field.managed_by` of `docs-links.json`, which `docslinkcheck` checks against the built site; in a real browser the link opens that section of the documentation of the running version (`managed-by.test.tsx`, `managed-by.spec.ts`)."
 verify: "make docs-check && make e2e-web"
 operator_attention: false
-issue: null
+issue: 707
 ---
 
 # S-189. Documentation: configuration as code with the Terraform provider, and the link from the "Managed by" mark

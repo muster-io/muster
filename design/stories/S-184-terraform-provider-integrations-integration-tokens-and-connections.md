@@ -48,7 +48,7 @@ acceptance:
   - "[C-33.FR-17, C-33.AC-13] Deleting through the API the Integration of a `muster_integration` makes the next plan create it again; a Connection used by a Destination made through the API refuses `terraform destroy` with a diagnostic carrying the code `in_use` (`TestAccMattermostConnection_inUse`)."
 verify: "make ci testacc"
 operator_attention: false
-issue: null
+issue: 702
 ---
 
 # S-184. The Terraform resources of Integrations, Integration tokens and the Connections of each type, and the data source muster_connection (BE)
