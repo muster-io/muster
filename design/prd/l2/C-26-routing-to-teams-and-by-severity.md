@@ -69,6 +69,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Alert Group reaches it again keeps that Root message: the final edit is cancelled and the message is edited Quietly
   back to the current state, without `destination_joined` and without Mentions, because a Loud join would need a second
   Root message next to one about to say "No longer updated here", and messengers do not notify on edits.
+  _Revised for L2 (2026-11-21):_ `destination_joined` of a firing Alert Group is Loud only where its Route lists
+  `new_alert_group` among its Loud events (C-36.FR-2), and Quiet for an attached Alert Group (C-37.FR-7).
 - **C-26.FR-6** Configuration changes add Destinations Quietly and remove none by a condition: naming a Destination on a
   Route or a Team, turning "Also to the Teams from the label" on, or changing a condition so that open Alert Groups now
   meet it publishes them there Quietly, within its limits, as a Destination added to a Route (C-11.FR-14). A condition

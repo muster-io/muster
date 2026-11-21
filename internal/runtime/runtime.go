@@ -1128,7 +1128,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.messengerAdapters()
 	// The contacts at Notification gateways are kept in the main pool, as the Account links are (C-30.FR-3).
 	p.gatewayContacts = gateways.New(gateways.Config{OrgID: orgID, Store: gateways.NewStore(p.db.AccountLinksDB()),
-		Audit: w, Business: p.clocks.Business, Log: p.log, Gateway: p.bridge, Path: interactive})
+		Keys: p.keyring, Audit: w, Business: p.clocks.Business, Log: p.log, Gateway: p.bridge, Path: interactive})
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
 		_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload)
@@ -1155,7 +1155,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Clocks: p.clocks, Log: p.log,
 		Acknowledgements: &gateways.Acknowledgements{OrgID: orgID,
 			Queries: gateways.NewAckQueries(p.db.AccountLinksDB()), Commands: p.groups, Roles: roles,
-			Keys: p.keyring, Log: p.log}}
+			Keys: p.keyring, Business: p.clocks.Business, Log: p.log}}
 	p.bridgePoller = &bridge.Poller{Source: conns, Events: p.bridgeEvents, Log: p.log}
 	// The presses of Slack Connections reach one handler, which runs their Commands as the linked Users through the
 	// dispatcher and answers the people who pressed on the interactive path (C-24.FR-10, FR-11).
@@ -1286,11 +1286,20 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 }
 
 // alertGroupRetention is the Leader task alert_group_retention: the Alert Group retention of the Organization orgID at
-// now, then the ended calls through Notification gateways whose Alert Groups it deleted (C-09.FR-16, C-30.FR-4). It returns what the Alert Group retention deleted; the calls follow it, unlogged.
+// now, then the deliveries of the Alert Groups resolved retention.alert_details ago, counted with the details, then
+// the ended calls through Notification gateways whose Alert Groups it deleted (C-09.FR-16, C-30.FR-4). It returns
+// what the Alert Group retention and the retention of deliveries deleted; the calls follow it, unlogged.
 func (p *process) alertGroupRetention(ctx context.Context, orgID int64, now time.Time) (int64, int64, error) {
 	details, summaries, err := groups.RetentionTask(p.db.GroupsStore())(ctx, orgID, now)
 	if err != nil {
 		return details, summaries, err
+	}
+	if orgID == p.orgID {
+		n, err := p.delivery.PruneDeliveries(ctx, now)
+		details += n
+		if err != nil {
+			return details, summaries, err
+		}
 	}
 	_, err = gateways.NewCallPruner(p.db.AccountLinksDB()).Calls(ctx, orgID, now)
 	return details, summaries, err

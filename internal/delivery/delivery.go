@@ -68,8 +68,8 @@ const TelegramPressEditDelay = 500 * time.Millisecond
 // claim takes, few, so that Urgent work that comes due meanwhile waits behind few calls; the margin after the time its
 // tokens are due that a delivery without a token, or after a RetryAfter, waits, so that the interactive path takes the
 // next token first; the longest wait between rounds, which bounds what a missed notification costs; the
-// shortest one; the first wait after a failed round; the most Thread replies one delete of their retention
-// removes; and the most batches of Pages whose replies all ended that one round settles, so that a backlog of them,
+// shortest one; the first wait after a failed round; the most Thread replies or deliveries one delete of their
+// retention removes; and the most batches of Pages whose replies all ended that one round settles, so that a backlog of them,
 // such as the replies a Broken Destination dropped at its recovery, does not hold back the deliveries and replies of
 // the next round.
 const (
@@ -441,6 +441,7 @@ type queries interface {
 		error)
 	GetRetentionDetailsDays(ctx context.Context, orgID int64) (int64, error)
 	DeleteExpiredReplies(ctx context.Context, arg dbgen.DeleteExpiredRepliesParams) (int64, error)
+	DeleteExpiredDeliveries(ctx context.Context, arg dbgen.DeleteExpiredDeliveriesParams) (int64, error)
 	GetPressBinding(ctx context.Context, arg dbgen.GetPressBindingParams) (dbgen.GetPressBindingRow, error)
 	GetPostDestination(ctx context.Context, arg dbgen.GetPostDestinationParams) (dbgen.GetPostDestinationRow, error)
 	GetTelegramPressBinding(ctx context.Context, arg dbgen.GetTelegramPressBindingParams) (
@@ -799,6 +800,31 @@ func (s *Service) PruneReplies(ctx context.Context, now time.Time) (int64, error
 		total += n
 		if err != nil {
 			return total, fmt.Errorf("delete the expired thread replies: %w", err)
+		}
+		if n < RetentionBatch {
+			return total, nil
+		}
+	}
+}
+
+// PruneDeliveries deletes, in batches of at most RetentionBatch, the deliveries of the Alert Groups of the
+// Organization resolved retention.alert_details before now, with their Thread replies (C-09.FR-16, schema.md §6),
+// until a batch comes back short, and returns how many it deleted. A delivery that is pending, under a lease that has
+// not run out on the real clock, or has a Thread reply still to send stays. Running it twice deletes nothing more.
+func (s *Service) PruneDeliveries(ctx context.Context, now time.Time) (int64, error) {
+	q := s.store.q()
+	days, err := q.GetRetentionDetailsDays(ctx, s.orgID)
+	if err != nil {
+		return 0, fmt.Errorf("read retention.alert_details: %w", err)
+	}
+	cutoff := now.UTC().Add(-time.Duration(days) * 24 * time.Hour)
+	var total int64
+	for {
+		n, err := q.DeleteExpiredDeliveries(ctx, dbgen.DeleteExpiredDeliveriesParams{OrgID: s.orgID, Cutoff: cutoff,
+			RealNow: s.real.Now().UTC(), BatchSize: RetentionBatch})
+		total += n
+		if err != nil {
+			return total, fmt.Errorf("delete the expired deliveries: %w", err)
 		}
 		if n < RetentionBatch {
 			return total, nil

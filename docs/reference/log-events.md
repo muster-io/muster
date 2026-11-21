@@ -54,7 +54,7 @@ An Alert Group changed status: group is its #N, route the public_id of its Route
 
 INFO · fields: `details`, `summaries` · C-09
 
-The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago and the steps of the runs of the Escalation chains of Alert Groups resolved then (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).
+The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago, and the steps of the runs of the Escalation chains and the deliveries of Alert Groups resolved then (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).
 
 ### `alerts_stale`
 
@@ -282,7 +282,7 @@ A template of a Route failed while rendering a message, so the message used the 
 
 INFO · fields: `call`, `connection`, `reason` · C-30
 
-A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the public_id of the call its action data names, empty when the data names none, connection the public_id of the Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.
+A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the public_id of the call its action data names, empty when the data names none, connection the public_id of the Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this Connection, not_accepted for a call the gateway never accepted, notification_mismatch for an event whose notification_id is not the one the gateway accepted the call under, stale_call for a call that ended more than twice bridge.event_max_age ago by the business clock, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.
 
 ### `gateway_broken`
 
