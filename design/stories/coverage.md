@@ -4,14 +4,14 @@
 - Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33. A
+[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34 and the later ones of the 0.2.x patch releases among them). A
 capability is done when its stories together cover every ID
 of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID
 fully or in part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
-  Every ID of L1, of the core of L2 and of C-33 is complete. The sections of L2 follow the non-functional requirements
+  Every ID of L1, of the core of L2, of C-33 and of C-34 is complete. The sections of L2 follow the non-functional requirements
   of L1, and the requirements of L1 that L2 revises have a section of their own at the end.
   [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 has a
   row here.
@@ -22,7 +22,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) ·
 [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) ·
 [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) ·
-[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [L1
+[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [L1
 requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
@@ -62,6 +62,7 @@ requirements revised for L2](#l1-requirements-revised-for-l2)
 | C-31 Notification rules | L2 Paging | 12 | S-152, S-153, S-155, S-157, S-161 | yes | 12 of 12 |
 | C-32 Escalation chains and Assignees | L2 Paging | 38 | S-148, S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-161 | yes | 38 of 38 |
 | C-33 Terraform provider | L2 Terraform provider | 37 | S-179, S-180, S-181, S-182, S-183, S-184, S-185, S-186, S-187, S-188, S-189 | yes | 37 of 37 |
+| C-34 Maintenance windows | L2 0.2.x | 41 | S-190, S-191, S-192, S-193, S-194, S-195, S-196 | yes | 41 of 41 |
 
 ## C-01
 
@@ -990,7 +991,7 @@ S-162, S-112, S-121, S-170, S-122, S-119, S-123, S-124, S-140, S-169
 | C-26.FR-2 | S-121 (part), S-123 (part), S-169 (part) | complete | "Run the Teams' Escalation chains" acts on chains with C-32.FR-4 (S-169) |
 | C-26.FR-3 | S-121 | complete |  |
 | C-26.FR-4 | S-121 | complete |  |
-| C-26.FR-5 | S-121 (part), S-123 (part), S-140 (part) | complete | the Mentions of the Destination's entries for `new_alert_group` (S-140); the delay by Maintenance windows is specified later |
+| C-26.FR-5 | S-121 (part), S-123 (part), S-140 (part), S-192 (part) | complete | the Mentions of the Destination's entries for `new_alert_group` (S-140); `destination_joined` waits for the end of a Maintenance window (S-192) |
 | C-26.FR-6 | S-170 | complete |  |
 | C-26.FR-7 | S-121 (part), S-119 (part) | complete |  |
 | C-26.FR-8 | S-111 (part), S-112 (part) | complete |  |
@@ -1151,7 +1152,7 @@ S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-1
 | C-32.FR-2 | S-154 (part), S-158 (part) | complete |  |
 | C-32.FR-3 | S-154 (part), S-169 (part), S-155 (part), S-156 (part), S-157 (part), S-158 (part) | complete |  |
 | C-32.FR-4 | S-169 | complete | P-70 confirmed with S-169 |
-| C-32.FR-5 | S-169 | complete | new Alerts that remove an acknowledgement and Maintenance windows are specified later in L2 |
+| C-32.FR-5 | S-169, S-193 (part) | complete | the rows of a Maintenance window: becoming kept back stops the chains, the end starts them over (S-193); new Alerts that remove an acknowledgement are specified later in L2 |
 | C-32.FR-6 | S-169 | complete |  |
 | C-32.FR-7 | S-169 | complete |  |
 | C-32.FR-8 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram, Bridges and outgoing webhooks (S-177) |
@@ -1231,6 +1232,55 @@ S-182, S-183, S-184, S-185, S-186, S-187, S-188, S-189. S-182 to S-188 are worke
 | C-33.AC-15 | S-182 | complete |  |
 | C-33.AC-16 | S-188 | complete |  |
 | C-33.AC-17 | S-188 (part), S-189 (part) | complete |  |
+
+## C-34
+
+[Maintenance windows](../prd/l2/C-34-maintenance-windows.md) · L2 0.2.x · stories: S-190, S-191, S-192, S-193, S-194,
+S-195, S-196. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-34.FR-1 | S-190 | complete |  |
+| C-34.FR-2 | S-190 | complete |  |
+| C-34.FR-3 | S-190 | complete |  |
+| C-34.FR-4 | S-190 (part), S-194 (part) | complete | the API's times (S-190); the profile's time zone in the form (S-194) |
+| C-34.FR-5 | S-190 (part), S-191 (part) | complete | the Audit log of windows (S-190); the start and end as events of the Alert Groups (S-191) |
+| C-34.FR-6 | S-191 | complete |  |
+| C-34.FR-7 | S-191 (part), S-193 (part) | complete | the rule (S-191); a joining Team leaves running chains alone (S-193) |
+| C-34.FR-8 | S-191 | complete |  |
+| C-34.FR-9 | S-191 | complete |  |
+| C-34.FR-10 | S-191 (part), S-192 (part) | complete | ingestion, status and Commands (S-191); the buttons of Root messages (S-192) |
+| C-34.FR-11 | S-192 | complete |  |
+| C-34.FR-12 | S-192 | complete |  |
+| C-34.FR-13 | S-191 (part), S-192 (part), S-195 (part) | complete | the events and the Timeline (S-191); their messenger and webhook effects (S-192); the texts (S-195) |
+| C-34.FR-14 | S-193 | complete |  |
+| C-34.FR-15 | S-193 | complete |  |
+| C-34.FR-16 | S-191 | complete |  |
+| C-34.FR-17 | S-192 (part), S-195 (part) | complete | the rule (S-192); the delivery state's text (S-195) |
+| C-34.FR-18 | S-192 (part), S-193 (part) | complete | the publication with the mark (S-192); the chains and the ack timeout (S-193) |
+| C-34.FR-19 | S-192 (part), S-193 (part) | complete | the Thread reply and `destination_joined` (S-192); the chains starting over (S-193) |
+| C-34.FR-20 | S-194 (part), S-195 (part) | complete | the sections, banner and list (S-194); the Alert Group page and list (S-195) |
+| C-34.FR-21 | S-190 (part), S-191 (part), S-192 (part) | complete | the resource (S-190); `kept_back` on Alert Groups (S-191); in webhook events (S-192) |
+| C-34.FR-22 | S-190 (part), S-191 (part), S-192 (part) | complete | log events (S-190), `muster_maintenance_kept_back_total` (S-191), `muster_maintenance_released_total` (S-192); the Features category of the opt-in telemetry waits for a telemetry capability |
+| C-34.FR-23 | S-196 | complete | the statistics count kept-back Alert Groups as any other, with no code of their own |
+| C-34.AC-1 | S-190 | complete |  |
+| C-34.AC-2 | S-190 | complete |  |
+| C-34.AC-3 | S-191 (part), S-192 (part), S-193 (part) | complete | the state and Timeline (S-191); nothing delivered, no Storm (S-192); no chain step (S-193) |
+| C-34.AC-4 | S-191 (part), S-192 (part) | complete | the Quiet `maintenance_ended` (S-191); "Not posted" (S-192) |
+| C-34.AC-5 | S-192 (part), S-193 (part) | complete | the publications and the Storm (S-192); the chain and the ack timeout notice (S-193) |
+| C-34.AC-6 | S-193 | complete |  |
+| C-34.AC-7 | S-191 | complete |  |
+| C-34.AC-8 | S-191 (part), S-193 (part) | complete | the rule and the event (S-191); the chains left running (S-193) |
+| C-34.AC-9 | S-190 (part), S-191 (part), S-192 (part), S-193 (part) | complete | the times (S-190); the decision (S-191); the Root message and Thread reply (S-192); the chain (S-193) |
+| C-34.AC-10 | S-193 | complete |  |
+| C-34.AC-11 | S-191 (part), S-192 (part) | complete | the Snooze and the Command from the API (S-191); the button of a Root message (S-192) |
+| C-34.AC-12 | S-191 (part), S-192 (part) | complete | the release (S-191); the Loud publication (S-192) |
+| C-34.AC-13 | S-192 | complete |  |
+| C-34.AC-14 | S-192 (part), S-193 (part) | complete | the events (S-192); no chain until the end (S-193) |
+| C-34.AC-15 | S-191 | complete |  |
+| C-34.AC-16 | S-194 (part), S-195 (part) | complete | the Team, Integration and list pages (S-194); the Alert Group page and list (S-195) |
+| C-34.AC-17 | S-191 (part), S-192 (part) | complete | `muster_maintenance_kept_back_total` (S-191); `muster_maintenance_released_total` (S-192); the log events (S-190, S-191) |
+| C-34.AC-18 | S-191 | complete |  |
 
 ## L1 requirements revised for L2
 

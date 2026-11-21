@@ -12,7 +12,8 @@ the review checks the code against.
 
 Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24` and the [core of
 L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`, with the statistics by people and by Team that L2 adds to
-`C-09`, and the capabilities of L2 specified after its core, from `C-33`. Every functional requirement (`C-NN.FR-n`)
+`C-09`, and the capabilities of L2 specified after its core, from `C-33`, among them those of the 0.2.x patch
+releases, from `C-34`. Every functional requirement (`C-NN.FR-n`)
 and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the [coverage table](coverage.md)
 shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices
 are in the [ADRs](../adr/README.md).
@@ -141,6 +142,8 @@ under `docs/assets/screenshots/` — are generated and checked in too, and never
   in the three stages of its adoption ([L2 §1.3](../prd/L2.md#13-adoption)): "L2 Teams" (C-25, C-26, the buttons of
   C-28 and C-29), "L2 On call" (C-27, Team mentions and the Mention entries) and "L2 Paging" (C-30 – C-32); beside
   them, "L2 Statistics" (S-174 to S-176, for C-09) needs only the Teams of Alert Groups and runs in parallel. The
+  capabilities specified after the core follow, the Terraform provider and then those of "L2 0.2.x", which start after
+  the tag of 0.2.0 and ship in its patch releases (C-34 from S-190). The
   architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
@@ -278,7 +281,8 @@ deployment, `docs` documentation. A story for another repository names it after 
 | L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
 | **L2 core** | 8 | | **68** |
 | L2 Terraform provider | C-33 | S-179 – S-189 | 11 |
-| **L2** | 9 | | **79** |
+| L2 0.2.x | C-34 | S-190 – S-196 | 7 |
+| **L2** | 10 | | **86** |
 
 ### Foundation
 
@@ -743,6 +747,32 @@ then Integrations and Connections, Destinations, Teams and Schedules, and last E
 complete example; S-188 writes the guides and publishes the first release in both Registries, with the maintainer's
 signing key and accounts. S-189, Muster's page on configuration as code, follows the release so that its links to the
 Registries resolve.
+
+### L2 0.2.x
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-190](S-190-maintenance-windows-their-permissions-limits-api-audit-log-and-the-timer-rows-of-start-and-end-be.md) | C-34 | Maintenance windows with their Permissions, limits, API, Audit log and the timer rows of their start and end (BE) | be | S-115, S-118, S-169 |
+| [S-191](S-191-which-alert-groups-a-window-keeps-back-the-rules-the-state-and-maintenance-started-and-ended-be.md) | C-34 | Which Alert Groups a window keeps back — the rules of the three objects, Urgent, the Internal alerts of an Integration, and maintenance_started and maintenance_ended (BE) | be | S-190, S-111, S-118, S-121, S-169 |
+| [S-192](S-192-nothing-new-delivered-for-a-kept-back-alert-group-and-its-publication-with-the-mark-at-the-end-be.md) | C-34 | Nothing new delivered for a kept-back Alert Group, and its publication with the mark when the window ends (BE) | be | S-191, S-121, S-140, S-169, S-155 |
+| [S-193](S-193-chains-notification-rules-calls-the-ack-timeout-and-reminders-while-an-alert-group-is-kept-back-be.md) | C-34 | Escalation chains, Notification rules, calls, the ack timeout and Reminders while an Alert Group is kept back (BE) | be | S-192, S-169, S-155, S-156, S-157, S-168 |
+| [S-194](S-194-the-maintenance-windows-sections-of-the-integration-route-and-team-pages-and-the-list-of-windows-fe.md) | C-34 | The Maintenance windows sections of the Integration, Route and Team pages, and the list of windows (FE) | fe | S-190, S-191, S-123, S-120, S-158 |
+| [S-195](S-195-the-kept-back-banner-badge-and-filter-on-the-alert-group-page-and-list-and-the-marks-in-the-timeline-fe.md) | C-34 | The "Kept back" banner, badge and filter on the Alert Group page and list, and the marks in the Timeline and delivery states (FE) | fe | S-194, S-192, S-159 |
+| [S-196](S-196-documentation-maintenance-windows.md) | C-34 | Documentation: Maintenance windows | docs | S-193, S-194, S-195 |
+
+S-190 to S-196 specify C-34, the first capability of the 0.2.x patch releases (L2 §1.5). The behaviour is cut at the
+contract boundaries of a window's life. S-190 is the object — the table, the Permissions, the limits, the API, the Audit
+log and the timer rows of the start and the end, whose handlers decide nothing yet. S-191 is the decision: which Alert
+Groups a window keeps back by the rules of the three objects, Urgent and the Internal alerts of an Integration, and the
+events `maintenance_started` and `maintenance_ended` that record it. S-192 builds delivery on that state — nothing new
+sent, the marks, Storms, events mode, and the publication at the end — and S-193 the chains, Notification rules, calls,
+ack timeout and Reminders, which stop and start over; the order keeps each story checkable live, with the interim on
+`edge` named in the Notes of S-191 to S-193. The frontend is two stories after the backend they show: S-194 the
+sections of the Integration, Route and Team pages and the list, S-195 the Alert Group page, list and Timeline, which
+follows S-192 for the delivery state. S-196 documents the capability and adds the documentation links of the web UI, so
+that `docslinkcheck` finds its page. Implementation of all seven starts after the tag of 0.2.0, and their migrations —
+one in each of S-190 to S-192 — take the numbers the orchestrator assigns at dispatch, with each replaced CHECK
+re-versioned in the order the stories merge. The stories of the later capabilities of 0.2.x add their sections here.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
