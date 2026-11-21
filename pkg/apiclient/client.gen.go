@@ -7467,6 +7467,12 @@ type MentionName string
 // MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11). `message_too_long` is also the reason of a group, a Team mention or everyone in the chat that such a line left out, the only reason a Mention that names no one person is not delivered.
 type MentionNotDeliveredReason string
 
+// MentionPage A Page as a "Mention not delivered" names it in place of an entry, which a Page does not have (C-32.FR-9, C-12.FR-11): the number of its Escalation step and the name of its Escalation chain when the chain's run started, as the `paged` entry of the Timeline names them.
+type MentionPage struct {
+	ChainName string `json:"chain_name"`
+	Step      int    `json:"step"`
+}
+
 // MentionResolution What an entry mentions now for one Team, or for no Team.
 type MentionResolution struct {
 	// Mentions Empty when the entry mentions nobody now for it — a Team without a Team mention for the Connection, a Team without a main Schedule or in a gap of it, a deleted User or Team, or a target the Connection cannot mention now.
@@ -10605,7 +10611,7 @@ type TimelineDeliveryEntry struct {
 	Kind     TimelineDeliveryEntryKind `json:"kind"`
 	Loudness Loudness                  `json:"loudness"`
 
-	// Mention For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11); nothing was written in the Thread for it.
+	// Mention For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11), that of a Page's Thread reply included; nothing was written in the Thread for it.
 	Mention *UndeliveredMention `json:"mention,omitempty"`
 
 	// Mentions Mentions the delivery event carried (see the Loud and Quiet table of delivery events).
@@ -10871,16 +10877,19 @@ type TotpStatus struct {
 // Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
-// UndeliveredMention A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); or a group, a Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11), with `mention` in place of `user`. A Mention of a template's token (`{{ mention "here" }}`, a group's token), which no entry named, has neither `entry` nor `event`.
+// UndeliveredMention A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); or a group, a Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11), with `mention` in place of `user`. A Mention of a template's token (`{{ mention "here" }}`, a group's token), which no entry named, has neither `entry` nor `event`; nor has the Team mention or everyone in the chat that a Page named (C-32.FR-9), which has `page` in place of `entry`.
 type UndeliveredMention struct {
-	// Entry The entry that named the person or the Mention; absent for a template's token.
+	// Entry The entry that named the person or the Mention; absent for a template's token and for the Team mention or everyone of a Page.
 	Entry *MentionEntryRef `json:"entry,omitempty"`
 
-	// Event The Loud event the entry applied to; absent for a template's token.
+	// Event The Loud event the entry applied to; absent for a template's token and for the Team mention or everyone of a Page.
 	Event *MentionEvent `json:"event,omitempty"`
 
 	// Mention The group or everyone in the chat; absent for a person.
 	Mention *NamedMention `json:"mention,omitempty"`
+
+	// Page The Page whose Thread reply left out the Team mention or everyone in the chat that it named; absent for any other Mention.
+	Page *MentionPage `json:"page,omitempty"`
 
 	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11). `message_too_long` is also the reason of a group, a Team mention or everyone in the chat that such a line left out, the only reason a Mention that names no one person is not delivered.
 	Reason MentionNotDeliveredReason `json:"reason"`

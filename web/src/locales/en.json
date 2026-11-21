@@ -3623,6 +3623,8 @@
       "mentionEvent": "Event",
       "mentionFromTemplate": "the message template",
       "mentionNamed": "Mention",
+      "mentionPage": "Page",
+      "mentionPageStep": "Step {{number}} · {{chain}}",
       "mentionPerson": "Person",
       "mentionReason": "Reason",
       "owner": "Owner",

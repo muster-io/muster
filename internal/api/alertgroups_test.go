@@ -1109,6 +1109,17 @@ func TestTimelineMentionNotDeliveredAPI(t *testing.T) {
 		`"mention":{"mention":{"kind":"everyone","name":"channel"},"reason":"message_too_long"}`) {
 		t.Errorf("token %s, %v", raw, err)
 	}
+	// The Team mention a Page's reply left out names the Page in place of an entry (#690).
+	paged, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA7", At: t0, Kind: groups.KindDelivery,
+		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
+			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "bridge"},
+			Mention: &groups.MentionView{Mention: &groups.MentionName{Kind: "group", Name: "payments_team"},
+				Page: &groups.MentionPage{Step: 2, ChainName: "Primary"}, Reason: "message_too_long"}}})
+	raw, _ = json.Marshal(paged)
+	if err != nil || !strings.Contains(string(raw), `"mention":{"mention":{"kind":"group","name":"payments_team"},`+
+		`"page":{"chain_name":"Primary","step":2},"reason":"message_too_long"}`) {
+		t.Errorf("page %s, %v", raw, err)
+	}
 	publication, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA3", At: t0,
 		Kind: groups.KindDelivery, Loudness: groups.Loud, Mentions: []string{}, Actor: system,
 		Delivery: &groups.DeliveryView{Event: "publication", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA",

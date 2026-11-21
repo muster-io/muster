@@ -22,6 +22,6 @@ export type TimelineDeliveryEntry = TimelineEntryBase & ({
   loudness: Loudness;
   /** Mentions the delivery event carried (see the Loud and Quiet table of delivery events). */
   mentions: MentionName[];
-  /** For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11); nothing was written in the Thread for it. */
+  /** For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11), that of a Page's Thread reply included; nothing was written in the Thread for it. */
   mention?: UndeliveredMention;
 });

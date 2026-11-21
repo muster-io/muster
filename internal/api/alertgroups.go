@@ -533,7 +533,7 @@ func (s *Server) CreateAlertGroupNote(ctx context.Context, req gen.CreateAlertGr
 
 // undeliveredMentionOf is the API form of the undelivered Mention of a mention_not_delivered, nil for another delivery
 // event (C-28.FR-3): a person, or the group or everyone in the chat that a bridge's Mention line left out (C-12.FR-11);
-// a template's token has neither an entry nor an event.
+// a template's token has neither an entry nor an event, and the Team mention or everyone of a Page has its Page instead.
 func undeliveredMentionOf(m *groups.MentionView) *gen.UndeliveredMention {
 	if m == nil {
 		return nil
@@ -541,6 +541,9 @@ func undeliveredMentionOf(m *groups.MentionView) *gen.UndeliveredMention {
 	out := &gen.UndeliveredMention{User: userRefOf(m.User), Reason: gen.MentionNotDeliveredReason(m.Reason)}
 	if n := m.Mention; n != nil {
 		out.Mention = &gen.NamedMention{Kind: gen.NamedMentionKind(n.Kind), Name: n.Name}
+	}
+	if p := m.Page; p != nil {
+		out.Page = &gen.MentionPage{Step: p.Step, ChainName: p.ChainName}
 	}
 	if m.Event != "" {
 		event := gen.MentionEvent(m.Event)

@@ -36,21 +36,29 @@ type PageSettler interface {
 	SettlePage(ctx context.Context, tx groups.DBTX, groupID int64, o groups.PageOutcome) (func(context.Context), error)
 }
 
-// pageReply is what the reply of a Page says and whom it mentions in the Destination d: its PageInput, and its
-// targets — the people it mentions by their Account links, or the Team mention or the token of a page_team step; in
-// an outgoing webhook, whose "reply in thread" request carries them as data, every person and the Team itself; and
-// the public ids of the Page's people by users.id.
+// pageOfReply is what the reply of a Page says and whom it mentions in a Destination: its PageInput; its targets —
+// the people it mentions by their Account links, or the Team mention or the token of a page_team step; in an outgoing
+// webhook, whose "reply in thread" request carries them as data, every person and the Team itself; the public ids of
+// the Page's people by users.id; and the Page as an undelivered Mention of its reply names it (MentionPage).
+type pageOfReply struct {
+	input   *messages.PageInput
+	targets []mentions.Target
+	paged   map[int64]string
+	page    MentionPage
+}
+
+// pageReply is what the reply of a Page says and whom it mentions in the Destination d.
 func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org int64, row dbgen.GetLeasedReplyRow,
-	d Destination) (*messages.PageInput, []mentions.Target, map[int64]string, error) {
+	d Destination) (pageOfReply, error) {
 	p, err := q.GetPageReply(ctx, dbgen.GetPageReplyParams{OrgID: org, ID: row.PageID.Int64})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("read the page of the thread reply: %w", err)
+		return pageOfReply{}, fmt.Errorf("read the page of the thread reply: %w", err)
 	}
 	space := mentions.IdentitySpace(d.Type, d.Connection)
 	users, err := q.ListPageReplyUsers(ctx, dbgen.ListPageReplyUsersParams{OrgID: org, PageID: row.PageID.Int64,
 		IdentitySpace: space})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("read the people of the page of the thread reply: %w", err)
+		return pageOfReply{}, fmt.Errorf("read the people of the page of the thread reply: %w", err)
 	}
 	ids := make(map[int64]string, len(users))
 	in := &messages.PageInput{Step: int(p.StepNumber), Messenger: d.Type, Source: row.PageSource.String,
@@ -90,14 +98,15 @@ func (w *Worker) pageReply(ctx context.Context, tx dbgen.DBTX, q queries, org in
 	case p.TeamID.Valid && w.TeamMentions != nil && d.Connection != nil:
 		m, ok, err := w.TeamMentions.ForConnection(ctx, tx, p.TeamID.Int64, *d.Connection)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("read the team mention of the page: %w", err)
+			return pageOfReply{}, fmt.Errorf("read the team mention of the page: %w", err)
 		}
 		if ok {
 			targets = append(targets, mentions.Target{Kind: mentions.TargetGroup, Group: m.Group, GroupID: m.GroupID})
 		}
 	}
 	in.Mentioned = len(targets) > 0
-	return in, targets, ids, nil
+	return pageOfReply{input: in, targets: targets, paged: ids,
+		page: MentionPage{Step: int(p.StepNumber), ChainName: p.ChainName}}, nil
 }
 
 // reached are the people a Page's reply that was sent with the outcome o mentions: its paged_user_ids without those

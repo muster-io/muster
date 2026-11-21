@@ -2414,18 +2414,21 @@ WHERE org_id = @org_id AND user_id = ANY(@user_ids::bigint[]) AND identity_space
 
 -- GetPageReply reads what the Thread reply of a Page says (C-32.FR-9): the step, the importance and the next Mention of
 -- the rule, a later Mention, the Team, with its slug for an outgoing webhook, or the token of a page_team step, the
--- Schedule of a page_on_call step with its Team, and the Team of "Chain of the Team".
+-- Schedule of a page_on_call step with its Team, and the Team of "Chain of the Team"; and the name of the chain when its
+-- run started, which names the Page of a Team mention or everyone that the reply leaves out (C-12.FR-11).
 -- name: GetPageReply :one
 SELECT p.step_number, coalesce(p.importance, '')::text AS importance, coalesce(p.again_seconds, 0)::integer AS again_seconds,
        p.again, coalesce(p.everyone, '')::text AS everyone, p.team_id, coalesce(t.name, '')::text AS team_name,
        coalesce(t.slug, '')::text AS team_slug,
        coalesce(s.name, '')::text AS schedule_name, coalesce(st.name, '')::text AS schedule_team_name,
-       coalesce(ct.name, '')::text AS chain_team_name, (p.schedule_id IS NOT NULL)::boolean AS on_call
+       coalesce(ct.name, '')::text AS chain_team_name, (p.schedule_id IS NOT NULL)::boolean AS on_call,
+       coalesce(er.chain_name, '')::text AS chain_name
 FROM pages p
 LEFT JOIN teams t ON t.org_id = p.org_id AND t.id = p.team_id
 LEFT JOIN schedules s ON s.org_id = p.org_id AND s.id = p.schedule_id
 LEFT JOIN teams st ON st.org_id = s.org_id AND st.id = s.team_id
 LEFT JOIN teams ct ON ct.org_id = p.org_id AND ct.id = p.chain_team_id
+LEFT JOIN escalation_runs er ON er.org_id = p.org_id AND er.id = p.escalation_run_id
 WHERE p.org_id = @org_id AND p.id = @id;
 
 -- ListPageReplyUsers lists the people of a Page by id, with the username, the messenger's user

@@ -526,7 +526,7 @@ type DeliveryView struct {
 // MentionView is an undelivered Mention as the Timeline shows it (C-28.FR-3): the person — or, through a bridge whose
 // Mention line left it out for length (C-12.FR-11), the group or everyone in the chat, with no person — the entry that
 // named them — its position and target then, no target for a template's token — the Loud event, empty for a token, and
-// the reason.
+// the reason. The Team mention or everyone of a Page has no entry and no event but its Page (C-32.FR-9).
 type MentionView struct {
 	User     *ActorRef
 	Mention  *MentionName
@@ -534,6 +534,14 @@ type MentionView struct {
 	Target   *MentionTarget
 	Event    string
 	Reason   string
+	Page     *MentionPage
+}
+
+// MentionPage is the Page whose Thread reply left out the Team mention or everyone in the chat that it named: the
+// number of its step and the name of its chain when the chain's run started.
+type MentionPage struct {
+	Step      int    `json:"step"`
+	ChainName string `json:"chain_name"`
 }
 
 // MentionName is a group — a group entry or a Team mention — or everyone in the chat as a Mention names it: its kind,
@@ -558,7 +566,8 @@ type MentionTarget struct {
 }
 
 // mentionDetail is the detail of a mention_not_delivered delivery event, as delivery writes it: user_id for a person
-// and mention for a group or everyone, and no entry for a template's token.
+// and mention for a group or everyone, no entry for a template's token, and the Page in place of the entry for the
+// Team mention or everyone of a Page.
 type mentionDetail struct {
 	UserID   int64          `json:"user_id"`
 	Mention  *MentionName   `json:"mention"`
@@ -566,6 +575,7 @@ type mentionDetail struct {
 	Target   *MentionTarget `json:"target"`
 	Event    string         `json:"event"`
 	Reason   string         `json:"reason"`
+	Page     *MentionPage   `json:"page"`
 }
 
 // TimelineEntry is one entry of the Timeline (TimelineEntry): a lifecycle event or a system entry, a Note or a
@@ -865,7 +875,8 @@ func mentionOf(r dbgen.ListTimelineDeliveryEventsRow) (*MentionView, error) {
 	if err := json.Unmarshal(r.Detail, &d); err != nil {
 		return nil, fmt.Errorf("read the undelivered mention of delivery event %s: %w", r.PublicID, err)
 	}
-	m := &MentionView{Mention: d.Mention, Position: d.Position, Target: d.Target, Event: d.Event, Reason: d.Reason}
+	m := &MentionView{Mention: d.Mention, Position: d.Position, Target: d.Target, Event: d.Event, Reason: d.Reason,
+		Page: d.Page}
 	if d.Mention == nil {
 		m.User = &ActorRef{Kind: "user", id: d.UserID}
 	}
