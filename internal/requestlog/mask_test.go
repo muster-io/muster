@@ -42,6 +42,9 @@ func signed(t *testing.T, subject buttons.Subject, command string) string {
 	return id
 }
 
+// callbackSecret stands for the callback secret of a Mattermost button: an HMAC-SHA256 in base64url.
+var callbackSecret = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 32))
+
 // linkToken is an Account link token: 32 bytes in base64url, 43 characters.
 func linkToken(b byte) string {
 	return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{b}, 32))
@@ -71,9 +74,18 @@ func TestMaskShape(t *testing.T) {
 		contains []string
 	}{
 		{name: "a Mattermost post", in: `{"channel_id":"c1","props":{"attachments":[{"actions":[{"id":"ack",` +
-			`"integration":{"url":"http://muster/cb","context":{"action":"` + ack + `","key_id":"k-01"}}},` +
-			`{"id":"res","integration":{"context":{"action":"` + resolve + `"}}}]}]}}`,
-			gone: []string{ack, resolve}, contains: []string{`"action":"[redacted]","key_id":"k-01"`, `"channel_id":"c1"`}},
+			`"integration":{"url":"http://muster/cb","context":{"action":"` + ack + `","key_id":"k-0123456789abcdef",` +
+			`"secret":"` + callbackSecret + `"}}},` +
+			`{"id":"res","integration":{"context":{"action":"` + resolve + `", "key_id" : "k-fedcba9876543210"}}}]}]}}`,
+			gone: []string{ack, resolve, "k-0123456789abcdef", "k-fedcba9876543210", callbackSecret},
+			contains: []string{`"action":"[redacted]","key_id":"[redacted]","secret":"[redacted]"`,
+				`"channel_id":"c1"`}},
+		{name: "a Mattermost post echoed in a JSON string", in: `{"message":"echo {\"context\":{\"action\":\"` + ack +
+			`\",\"key_id\":\"k-0123456789abcdef\",\"secret\":\"` + callbackSecret + `\"}}"}`,
+			gone:     []string{ack, "k-0123456789abcdef", callbackSecret},
+			contains: []string{`\"key_id\":\"[redacted]\",\"secret\":\"[redacted]\"`}},
+		{name: "a press in a form", in: "payload=" + url.QueryEscape(`{"context":{"key_id":"k-0123456789abcdef",`+
+			`"secret":"`+callbackSecret+`"}}`), gone: []string{"k-0123456789abcdef", callbackSecret}},
 		{name: "a Telegram keyboard", in: `{"chat_id":-100,"reply_markup":{"inline_keyboard":[[{"text":"Ack",` +
 			`"callback_data":"` + ack + `"},{"text":"Snooze","callback_data":"` + test + `"}]]}}`,
 			gone: []string{ack, test}, contains: []string{`"callback_data":"[redacted]"`, `"text":"Snooze"`}},

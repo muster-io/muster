@@ -62,6 +62,12 @@ var (
 	// a JSON string, as a bridge's problem may quote the request.
 	notificationRes     = slices.Concat(memberRes("contact"), memberRes("text"))
 	notificationMembers = outbound.NewMemberMasker("contact", "text")
+	// callbackContextRes and callbackContextMembers find the values of the members key_id and secret of the context of
+	// a Mattermost button, in the posts Muster sends, in the answers that echo them and in the presses it receives:
+	// the id of the key that signed the action id and the button's callback secret, which only the Mattermost server
+	// may know. They are found in JSON and in a form, and in JSON inside a JSON string.
+	callbackContextRes     = slices.Concat(memberRes("key_id"), memberRes("secret"))
+	callbackContextMembers = outbound.NewMemberMasker("key_id", "secret")
 	// ticketRe finds the single-use ticket of a Socket Mode address (F-100): the value of the query parameter ticket of
 	// a ws or wss address whose scheme follows no letter — plain, with JSON-escaped or percent-encoded slashes, its ?
 	// and = percent-encoded too, the & before it JSON-escaped or percent-encoded too. The first group ends right before
@@ -84,11 +90,15 @@ func memberRes(name string) []*regexp.Regexp {
 
 // maskShape replaces with [redacted], in s, what the shape of a value tells is a secret, whichever Secrets its request
 // had (C-23.FR-3): every maximal run of base64url characters that buttons.LooksSigned recognizes as a signed action
-// id, alone or right after a percent-encoded character; Slack's secrets (maskSlack); every token of a `/start` deep
-// link; and, in JSON, every token member of an object whose type is account_link and every string that holds one of
-// these behind escapes.
+// id, alone or right after a percent-encoded character; the values of the members key_id and secret, which the
+// context of a Mattermost button carries; Slack's secrets (maskSlack); every token of a `/start` deep link; and, in
+// JSON, every token member of an object whose type is account_link and every string that holds one of these behind
+// escapes.
 func maskShape(s string) string {
 	s = maskActionIDs(s)
+	if strings.Contains(s, "key_id") || strings.Contains(s, "secret") {
+		s = callbackContextMembers.Mask(maskMembers(s, callbackContextRes))
+	}
 	s = maskSlack(s)
 	if strings.Contains(s, "/start") {
 		s = maskStart(s)

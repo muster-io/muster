@@ -33,6 +33,8 @@ import (
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/requestlog"
 )
 
@@ -83,10 +85,14 @@ func openKeyring(t *testing.T) *keyring.Keyring {
 	return openKeyringOf(t, 'b')
 }
 
-// openKeyringOf is an opened Keyring of one key of the material m.
-func openKeyringOf(t *testing.T, m byte) *keyring.Keyring {
+// openKeyringOf is an opened Keyring of one key of each material of ms, the first active.
+func openKeyringOf(t *testing.T, ms ...byte) *keyring.Keyring {
 	t.Helper()
-	k, err := keyring.New([][]byte{bytes.Repeat([]byte{m}, keyring.KeySize)}, false)
+	keys := make([][]byte, 0, len(ms))
+	for _, m := range ms {
+		keys = append(keys, bytes.Repeat([]byte{m}, keyring.KeySize))
+	}
+	k, err := keyring.New(keys, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +263,7 @@ func newCallback(t *testing.T) *callbackEnv {
 		bindings: &fakeBindings{
 			bound: map[bindingKey]delivery.Binding{
 				{connID, groupA, postA}: {Destination: destA, ChannelID: fakemattermost.ChannelAlerts, Language: "en",
-					SnoozeSeconds: []int64{3600, 14400}},
+					SnoozeSeconds: []int64{3600, 14400}, AlertGroup: 101},
 				{connID, groupB, postB}: {Destination: destA, ChannelID: fakemattermost.ChannelAlerts, Language: "ru",
 					SnoozeSeconds: []int64{3600}},
 			},
@@ -320,12 +326,11 @@ func (e *callbackEnv) action(t *testing.T, s buttons.Subject, group, command str
 	return id, kid
 }
 
-// body is a MattermostActionRequest.
-func body(user, channel, post, action, keyID string) string {
-	b, _ := json.Marshal(map[string]any{"user_id": user, "user_name": "someone", "channel_id": channel,
-		"team_id": fakemattermost.TeamID, "post_id": post, "trigger_id": "tr", "type": "button",
-		"context": map[string]string{"action": action, "key_id": keyID}})
-	return string(b)
+// body is a MattermostActionRequest as the Mattermost server sends it, with the callback secret of the button action
+// that the key keyID signed in a post of the Connection, none when that key is not in the Keyring.
+func (e *callbackEnv) body(user, channel, post, action, keyID string) string {
+	secret, _ := mattermost.CallbackSecret(e.keys, keyID, connectionPublicID, action)
+	return bodyWith(user, channel, post, action, keyID, secret)
 }
 
 // press sends a request to the callback of connection, as mounted on the callback mux, checks the answer that every
@@ -363,7 +368,7 @@ func (e *callbackEnv) press(t *testing.T, method, connection, payload string) st
 func (e *callbackEnv) pressAs(t *testing.T, user, channel, post, group, command string, arg int) string {
 	t.Helper()
 	id, kid := e.action(t, buttons.SubjectRoot, group, command, arg)
-	return e.press(t, http.MethodPost, connectionPublicID, body(user, channel, post, id, kid))
+	return e.press(t, http.MethodPost, connectionPublicID, e.body(user, channel, post, id, kid))
 }
 
 // last is the last mattermost_press line.
@@ -536,7 +541,7 @@ func TestPressSnoozePresets(t *testing.T) {
 		}
 		e.bindings.tests = map[postKey]delivery.Destination{{destA.PublicID, alerts}: destA}
 		id, kid := e.action(t, buttons.SubjectTest, destA.PublicID, buttons.CommandSnooze, buttons.ArgumentWeekStart)
-		text := e.press(t, http.MethodPost, connectionPublicID, testBody(fakemattermost.BobUserID, alerts, id, kid, ""))
+		text := e.press(t, http.MethodPost, connectionPublicID, e.testBody(fakemattermost.BobUserID, alerts, id, kid, ""))
 		want := "This is a test message; nothing was changed"
 		if eph := e.fake.Ephemeral(); e.admin && (text != "" || eph[len(eph)-1].Message != want) ||
 			!e.admin && text != want {
@@ -626,24 +631,24 @@ func TestPressNotVerified(t *testing.T) {
 			})
 		}
 		alerts := fakemattermost.ChannelAlerts
-		check("tampered", e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts,
+		check("tampered", e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID, alerts,
 			postA, tampered, kid)), alerts, "", "")
-		check("another key id", e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID,
+		check("another key id", e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID,
 			alerts, postA, id, "k-ffffffffffffffff")), alerts, "", "")
 		check("another post", e.pressAs(t, fakemattermost.BobUserID, alerts, postB, groupA,
 			buttons.CommandAcknowledge, 0), alerts, groupA, buttons.CommandAcknowledge)
 		reply, rkid := e.action(t, buttons.SubjectReply, groupA, buttons.CommandStillOnIt, 0)
 		check("a Reminder's button on a Root message", e.press(t, http.MethodPost, connectionPublicID,
-			body(fakemattermost.BobUserID, alerts, postA, reply, rkid)), alerts, groupA, buttons.CommandStillOnIt)
+			e.body(fakemattermost.BobUserID, alerts, postA, reply, rkid)), alerts, groupA, buttons.CommandStillOnIt)
 		check("a Snooze duration out of range", e.pressAs(t, fakemattermost.BobUserID, alerts, postA, groupA,
 			buttons.CommandSnooze, 2), alerts, groupA, buttons.CommandSnooze)
 		check("a Command of Thread replies", e.pressAs(t, fakemattermost.BobUserID, alerts, postA, groupA,
 			buttons.CommandStillOnIt, 0), alerts, groupA, buttons.CommandStillOnIt)
-		check("another Destination", e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID,
+		check("another Destination", e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID,
 			fakemattermost.ChannelAlertsProd, postC, tampered, kid)), fakemattermost.ChannelAlertsProd, "", "")
 
 		n := len(e.ephemeralCalls())
-		e.expectUnanswered(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID,
+		e.expectUnanswered(t, e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID,
 			"ch-foreign", postA, tampered, kid)), n)
 		e.expectUnanswered(t, e.pressAs(t, fakemattermost.BobUserID, "ch-foreign", postA, groupA,
 			buttons.CommandAcknowledge, 0), n)
@@ -654,7 +659,7 @@ func TestPressNotVerified(t *testing.T) {
 			t.Fatalf("an unverified press ran %+v", e.commands.calls)
 		}
 		e.bindings.postErr = errors.New("post read failed")
-		e.expectUnanswered(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts,
+		e.expectUnanswered(t, e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID, alerts,
 			postA, tampered, kid)), n)
 		if m := e.expectLine(t, "", "", "not_verified"); m["error"] != "post read failed" {
 			t.Errorf("line %v", m)
@@ -667,18 +672,239 @@ func TestPressNotVerified(t *testing.T) {
 	})
 }
 
+// bodyWith is a MattermostActionRequest whose context carries secret as the callback secret, none when it is empty.
+func bodyWith(user, channel, post, action, keyID, secret string) string {
+	c := map[string]string{"action": action, "key_id": keyID}
+	if secret != "" {
+		c["secret"] = secret
+	}
+	b, _ := json.Marshal(map[string]any{"user_id": user, "user_name": "someone", "channel_id": channel,
+		"team_id": fakemattermost.TeamID, "post_id": post, "trigger_id": "tr", "type": "button", "context": c})
+	return string(b)
+}
+
+// TestPressWithoutCallbackSecret is #669: a press with a valid action id and key id for a bound post — as anyone who
+// reads the same button in Telegram, Slack or a bridge, and the key id in the Request log, could forge it — but
+// without the callback secret of the Connection's button is not verified, runs no Command and is logged not_verified:
+// with none, a made-up one, the secret of another Connection, of another button, or of the button under another key.
+func TestPressWithoutCallbackSecret(t *testing.T) {
+	bots(t, func(t *testing.T, e *callbackEnv) {
+		id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandResolve, 0)
+		ack, _ := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandAcknowledge, 0)
+		secret := func(k mattermost.SecretKeys, keyID, connection, action string) string {
+			s, err := mattermost.CallbackSecret(k, keyID, connection, action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return s
+		}
+		other := openKeyringOf(t, 'c')
+		alerts := fakemattermost.ChannelAlerts
+		for _, c := range []struct{ name, secret string }{
+			{"none", ""},
+			{"made up", strings.Repeat("A", 43)},
+			{"not base64url", "!!"},
+			{"another Connection's", secret(e.keys, kid, "CN0000000000C2", id)},
+			{"another button's", secret(e.keys, kid, connectionPublicID, ack)},
+			{"of another key", secret(other, other.ActiveKeyID(), connectionPublicID, id)},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				got := e.press(t, http.MethodPost, connectionPublicID, bodyWith(fakemattermost.BobUserID, alerts,
+					postA, id, kid, c.secret))
+				e.expectAnswered(t, got, fakemattermost.BobUserID, alerts, textNotVerified)
+				e.expectLine(t, "", "", "not_verified")
+			})
+		}
+		if len(e.commands.calls) != 0 {
+			t.Fatalf("a press without the callback secret ran %+v", e.commands.calls)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(e.log.String()), "\n") {
+			if strings.Contains(line, secret(e.keys, kid, connectionPublicID, id)) {
+				t.Errorf("a callback secret reached the log: %s", line)
+			}
+		}
+	})
+}
+
+// fakeRefresher records the Root messages the callback had edited again.
+type fakeRefresher struct {
+	calls [][2]int64
+	err   error
+}
+
+func (f *fakeRefresher) RefreshButtons(_ context.Context, group, destination int64) (bool, error) {
+	f.calls = append(f.calls, [2]int64{group, destination})
+	return f.err == nil, f.err
+}
+
+// TestPressOnARootMessageWithoutSecret is the rolling upgrade of #669: a press with no callback secret at all, as every
+// press on a Root message posted before buttons carried one arrives, on a Root message it is bound to, changes nothing,
+// has that Root message edited again so that its buttons carry the secret, and is answered that the buttons are being
+// updated; a failed refresh is logged and still answered. A wrong secret, a Reminder's button and a post the action id
+// is not bound to are refused as not verified without any refresh.
+func TestPressOnARootMessageWithoutSecret(t *testing.T) {
+	bots(t, func(t *testing.T, e *callbackEnv) {
+		r := &fakeRefresher{}
+		e.cfg.Refresh = r
+		alerts := fakemattermost.ChannelAlerts
+		id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandResolve, 0)
+		outdated := "These buttons are out of date and are being updated; nothing was changed. Press again in a moment."
+		got := e.press(t, http.MethodPost, connectionPublicID, bodyWith(fakemattermost.BobUserID, alerts, postA, id,
+			kid, ""))
+		e.expectAnswered(t, got, fakemattermost.BobUserID, alerts, outdated)
+		e.expectLine(t, "", "", "not_verified")
+		if len(r.calls) != 1 || r.calls[0] != [2]int64{101, destA.ID} {
+			t.Fatalf("refreshed %v, want alert group 101 in %d", r.calls, destA.ID)
+		}
+
+		r.err = errors.New("the database is down")
+		got = e.press(t, http.MethodPost, connectionPublicID, bodyWith(fakemattermost.BobUserID, alerts, postA, id,
+			kid, ""))
+		if m := e.last(t); m["outcome"] != "not_verified" ||
+			!strings.Contains(fmt.Sprint(m["error"]), "the database is down") {
+			t.Errorf("line %v", m)
+		}
+		if !e.admin {
+			expectAnswer(t, got, outdated)
+		}
+		r.err = nil
+
+		reply, rkid := e.action(t, buttons.SubjectReply, groupA, buttons.CommandStillOnIt, 0)
+		for _, c := range []struct{ name, body string }{
+			{"a wrong secret", bodyWith(fakemattermost.BobUserID, alerts, postA, id, kid, strings.Repeat("A", 43))},
+			{"a Reminder", bodyWith(fakemattermost.BobUserID, alerts, replyA, reply, rkid, "")},
+			{"another post", bodyWith(fakemattermost.BobUserID, alerts, postB, id, kid, "")},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				e.press(t, http.MethodPost, connectionPublicID, c.body)
+				e.expectLine(t, "", "", "not_verified")
+			})
+		}
+		if len(r.calls) != 2 || len(e.commands.calls) != 0 {
+			t.Errorf("refreshed %v, ran %+v", r.calls, e.commands.calls)
+		}
+	})
+}
+
+// TestPressWithoutSecretLimited: the refresh of a press without a secret takes a token of the Destination's limiter
+// first, so that a flood of such presses locks and renders the Alert Group no faster than the Destination may be
+// written to; with the limiter exhausted nothing is refreshed, the press is logged with why, and the person is still
+// answered in the answer's ephemeral_text.
+func TestPressWithoutSecretLimited(t *testing.T) {
+	e := newCallbackAs(t, true)
+	r := &fakeRefresher{}
+	e.cfg.Refresh = r
+	limited := &limitedPath{}
+	e.cfg.Path = limited
+	id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandResolve, 0)
+	got := e.press(t, http.MethodPost, connectionPublicID, bodyWith(fakemattermost.BobUserID,
+		fakemattermost.ChannelAlerts, postA, id, kid, ""))
+	expectAnswer(t, got, "These buttons are out of date and are being updated; nothing was changed. "+
+		"Press again in a moment.")
+	m := e.last(t)
+	if len(r.calls) != 0 || limited.calls != 2 || m["outcome"] != "not_verified" ||
+		!strings.Contains(fmt.Sprint(m["error"]), "the root message was not edited again: no limiter token") {
+		t.Errorf("refreshed %v with %d limiter calls, line %v", r.calls, limited.calls, m)
+	}
+}
+
+// TestPressAcrossRotation is C-20.FR-7 with the callback secret: after a rotation, a Root message whose buttons the old
+// key signed, with their secrets, keeps working while that key is in the Keyring, as do the buttons the new key signs;
+// a secret derived with another key than the one that signed the action id is refused; once the old key left the
+// Keyring its presses are not verified.
+func TestPressAcrossRotation(t *testing.T) {
+	e := newCallbackAs(t, true)
+	alerts := fakemattermost.ChannelAlerts
+	oldID, oldKey := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandResolve, 0)
+	oldBody := e.body(fakemattermost.BobUserID, alerts, postA, oldID, oldKey)
+	e.keys = openKeyringOf(t, 'c', 'b')
+	e.cfg.Keys = e.keys
+	expectAnswer(t, e.press(t, http.MethodPost, connectionPublicID, oldBody), "")
+	e.expectLine(t, groupA, buttons.CommandResolve, "done")
+	newID, newKey := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandAcknowledge, 0)
+	if newKey == oldKey || newKey != e.keys.ActiveKeyID() {
+		t.Fatalf("the new action id is signed by %s, the old one by %s", newKey, oldKey)
+	}
+	e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID, alerts, postA, newID, newKey))
+	e.expectLine(t, groupA, buttons.CommandAcknowledge, "done")
+	if len(e.commands.calls) != 2 {
+		t.Fatalf("ran %+v", e.commands.calls)
+	}
+	mixed, err := mattermost.CallbackSecret(e.keys, newKey, connectionPublicID, oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.press(t, http.MethodPost, connectionPublicID, bodyWith(fakemattermost.BobUserID, alerts, postA, oldID, oldKey,
+		mixed))
+	e.expectLine(t, "", "", "not_verified")
+	e.keys = openKeyringOf(t, 'c')
+	e.cfg.Keys = e.keys
+	e.press(t, http.MethodPost, connectionPublicID, oldBody)
+	e.expectLine(t, "", "", "not_verified")
+	if len(e.commands.calls) != 2 {
+		t.Fatalf("an unverified press ran %+v", e.commands.calls)
+	}
+}
+
+// TestPressThroughTheServer is C-13.FR-4 end to end against the fake server: the adapter posts a Root message whose
+// button carries its action id, the key id and the callback secret in its context; the server returns that context
+// with a person's press to the callback, which runs the Command as that person. A Root message posted by an adapter
+// without the Keyring carries no secret, and its press is refused.
+func TestPressThroughTheServer(t *testing.T) {
+	env := newTester(t)
+	e := env.callbackEnv
+	ctx := t.Context()
+	publish := func(a *mattermost.Adapter) string {
+		t.Helper()
+		id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandResolve, 0)
+		m := messages.Message{Kind: messages.KindRoot, Language: "en", Colour: messages.ColourFiring,
+			Heading: &messages.Heading{Number: 1, Title: "DiskFull", URL: "http://localhost:8080/alert-groups/" + groupA},
+			Buttons: []messages.Button{{Command: buttons.CommandResolve, Label: "Resolve", ActionID: id, KeyID: kid}}}
+		out := a.Publish(ctx, delivery.Call{Class: outbound.ClassDelivery, Destination: destA}, m)
+		if out.Kind != delivery.OutcomeOK {
+			t.Fatalf("publish = %+v", out)
+		}
+		e.bindings.bound[bindingKey{connID, groupA, out.MessageID}] = delivery.Binding{Destination: destA,
+			ChannelID: fakemattermost.ChannelAlerts, Language: "en"}
+		actions := attachmentOf(t, postByID(t, e.fake, out.MessageID))["actions"].([]any)
+		c := actions[0].(map[string]any)["integration"].(map[string]any)["context"].(map[string]any)
+		want, _ := mattermost.CallbackSecret(e.keys, kid, connectionPublicID, id)
+		if a.Keys != nil && (c["action"] != id || c["key_id"] != kid || c["secret"] != want) {
+			t.Errorf("context %v", c)
+		}
+		return out.MessageID
+	}
+	post := publish(env.tester.Adapter)
+	if _, err := e.fake.Press(ctx, post, "resolve", fakemattermost.BobUserID); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.commands.calls) != 1 || e.commands.calls[0].command != "resolve" ||
+		e.commands.calls[0].caller.Actor.PublicID != bobUser.PublicID {
+		t.Fatalf("ran %+v\n%s", e.commands.calls, e.log)
+	}
+	bare := *env.tester.Adapter
+	bare.Keys = nil
+	post = publish(&bare)
+	if _, err := e.fake.Press(ctx, post, "resolve", fakemattermost.BobUserID); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.commands.calls) != 1 {
+		t.Fatalf("a press without the secret ran %+v", e.commands.calls)
+	}
+}
+
 // TestPressBadRequests is C-13.AC-2: a callback for a Connection that does not exist, a body that is not JSON, does
 // not match MattermostActionRequest or is too long, and another method are answered 200 {} and change nothing.
 func TestPressBadRequests(t *testing.T) {
 	e := newCallbackAs(t, true)
 	id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandAcknowledge, 0)
-	good := body(fakemattermost.BobUserID, fakemattermost.ChannelAlerts, postA, id, kid)
+	good := e.body(fakemattermost.BobUserID, fakemattermost.ChannelAlerts, postA, id, kid)
 	e.expectUnanswered(t, e.press(t, http.MethodPost, "CN000000000000", good), 0)
 	if m := e.expectLine(t, "", "", "unknown_connection"); m["connection"] != "" {
 		t.Errorf("line %v", m)
 	}
 	for _, payload := range []string{"not json", `[]`, `{"user_id":"u-bob"}`, `{"user_id":1}`,
-		body(fakemattermost.BobUserID, fakemattermost.ChannelAlerts, postA, "", kid)} {
+		e.body(fakemattermost.BobUserID, fakemattermost.ChannelAlerts, postA, "", kid)} {
 		e.expectUnanswered(t, e.press(t, http.MethodPost, connectionPublicID, payload), 0)
 		e.expectLine(t, "", "", "invalid_request")
 	}
@@ -740,7 +966,7 @@ func TestPressAnswerFallsBack(t *testing.T) {
 		t.Errorf("line %v", m)
 	}
 	id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandAcknowledge, 0)
-	expectAnswer(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.AliceUserID,
+	expectAnswer(t, e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.AliceUserID,
 		fakemattermost.ChannelAlerts, postA, tamper(id), kid)), textNotVerified)
 	if m := e.expectLine(t, "", "", "not_verified"); !strings.Contains(fmt.Sprint(m["error"]), "interactive budget") {
 		t.Errorf("line %v", m)
@@ -757,13 +983,13 @@ func TestPressMadeUpPost(t *testing.T) {
 	bots(t, func(t *testing.T, e *callbackEnv) {
 		id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandAcknowledge, 0)
 		for _, action := range []string{tamper(id), id} {
-			e.expectUnanswered(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID,
+			e.expectUnanswered(t, e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID,
 				fakemattermost.ChannelAlerts, "garbage-post", action, kid)), 0)
 			if m := e.last(t); m["outcome"] != "not_verified" || m["error"] != nil {
 				t.Errorf("line %v", m)
 			}
 		}
-		e.expectAnswered(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID,
+		e.expectAnswered(t, e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID,
 			fakemattermost.ChannelAlerts, postA, tamper(id), kid)), fakemattermost.BobUserID,
 			fakemattermost.ChannelAlerts, textNotVerified)
 		if len(e.commands.calls) != 0 {
@@ -795,7 +1021,7 @@ func (e *callbackEnv) pressReply(t *testing.T, keys buttons.Keys, user, channel,
 	if err != nil {
 		t.Fatal(err)
 	}
-	return e.press(t, http.MethodPost, connectionPublicID, body(user, channel, post, id, kid))
+	return e.press(t, http.MethodPost, connectionPublicID, e.body(user, channel, post, id, kid))
 }
 
 const textExpired = "This button has expired; use the buttons on the Alert Group's message"
@@ -876,7 +1102,7 @@ func TestReplyPressBinding(t *testing.T) {
 		e.expectLine(t, groupA, buttons.CommandAcknowledge, "not_verified")
 		// Nor is a Snooze preset on a Reminder, though its Route has Snooze durations.
 		id, kid := e.action(t, buttons.SubjectReply, groupA, buttons.CommandSnooze, buttons.ArgumentTomorrow)
-		e.expectAnsweredIn(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts,
+		e.expectAnsweredIn(t, e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID, alerts,
 			replyA, id, kid)), fakemattermost.BobUserID, alerts, postA, textNotVerified)
 		e.expectLine(t, groupA, buttons.CommandSnooze, "not_verified")
 		if len(e.commands.calls) != 0 {
@@ -904,7 +1130,7 @@ func TestExpiredButton(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		e.expectAnswered(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts,
+		e.expectAnswered(t, e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID, alerts,
 			postA, id, kid)), fakemattermost.BobUserID, alerts, textNotVerified)
 		e.expectLine(t, "", "", "not_verified")
 
@@ -1053,18 +1279,18 @@ func TestPressRequestLog(t *testing.T) {
 		press                 func() string
 		links                 requestlog.Links
 	}{
-		{name: "a bound press", payload: body(fakemattermost.BobUserID, alerts, postA, id, kid), links: matched},
-		{name: "a bound press of a person not linked", payload: body(fakemattermost.AliceUserID, alerts, postA, id, kid),
+		{name: "a bound press", payload: e.body(fakemattermost.BobUserID, alerts, postA, id, kid), links: matched},
+		{name: "a bound press of a person not linked", payload: e.body(fakemattermost.AliceUserID, alerts, postA, id, kid),
 			links: matched},
 		{name: "a Reminder whose key left the Keyring", press: func() string {
 			return e.pressReply(t, openKeyringOf(t, 'z'), fakemattermost.BobUserID, alerts, replyA, groupA,
 				buttons.CommandStillOnIt)
 		}, links: matched},
-		{name: "not verified on a delivered post", payload: body(fakemattermost.BobUserID, alerts, postA, tamper(id),
+		{name: "not verified on a delivered post", payload: e.body(fakemattermost.BobUserID, alerts, postA, tamper(id),
 			kid), links: posted},
-		{name: "not verified on a made-up post", payload: body(fakemattermost.BobUserID, alerts, "garbage-post",
+		{name: "not verified on a made-up post", payload: e.body(fakemattermost.BobUserID, alerts, "garbage-post",
 			tamper(id), kid), links: known},
-		{name: "a person's press of a test message", payload: testBody(fakemattermost.BobUserID, alerts, testID,
+		{name: "a person's press of a test message", payload: e.testBody(fakemattermost.BobUserID, alerts, testID,
 			testKID, ""), links: posted},
 		{name: "a GET", method: http.MethodGet, links: known},
 		{name: "a body that is no press", payload: "not json", links: known},
@@ -1091,12 +1317,12 @@ func TestPressRequestLog(t *testing.T) {
 	}
 
 	before := len(rec.records)
-	e.press(t, http.MethodPost, "CN000000000000", body(fakemattermost.BobUserID, alerts, postA, id, kid))
+	e.press(t, http.MethodPost, "CN000000000000", e.body(fakemattermost.BobUserID, alerts, postA, id, kid))
 	if e.answered != "{}" || len(rec.records) != before {
 		t.Errorf("an unknown Connection: answered %s, %d records", e.answered, len(rec.records)-before)
 	}
 	e.conns.err = errors.New("connection read failed")
-	e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts, postA, id, kid))
+	e.press(t, http.MethodPost, connectionPublicID, e.body(fakemattermost.BobUserID, alerts, postA, id, kid))
 	if e.answered != "{}" || len(rec.records) != before {
 		t.Errorf("a Connection that could not be read: answered %s, %d records", e.answered,
 			len(rec.records)-before)

@@ -427,11 +427,13 @@ type integration struct {
 	Context actionContext `json:"context"`
 }
 
-// actionContext is what a button sends back: its signed action id and the id of the key that signed it, and on a
-// test message the nonce of its test, which the bot's own press of it reports (C-16.FR-3).
+// actionContext is what a button sends back: its signed action id, the id of the key that signed it and its callback
+// secret (secret.go), and on a test message the nonce of its test, which the bot's own press of it reports
+// (C-16.FR-3).
 type actionContext struct {
 	Action string `json:"action"`
 	KeyID  string `json:"key_id"`
+	Secret string `json:"secret,omitempty"`
 	Test   string `json:"test,omitempty"`
 }
 
