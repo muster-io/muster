@@ -305,7 +305,7 @@ func retryAfter(t *testing.T, a answer) int {
 // with no link row inserted by hand: the Telegram deep link, `/start` and the `account-links` hint of that User only
 // (C-18.FR-1, FR-2, FR-7, C-14.FR-8); a used, unknown, expired and another Connection's token refused with one answer
 // (C-18.AC-1); the Mattermost code and its five attempts (C-18.FR-3, AC-2, FR-11); the limits of code requests per
-// target account and per User; a new link replacing the User's earlier one and an account linked to another User
+// User and target account and per User; a new link replacing the User's earlier one and an account linked to another User
 // refused in both messengers (C-18.FR-4, FR-5); the Connections to link through, the demo Bridge Connection with its
 // link methods among them (C-18.FR-10, C-22.FR-15); tokens refused where only the web session may act, the Bridge
 // operations too, Admins listing and removing links, and 405 for a method a path does not have (C-18.FR-6,
@@ -433,7 +433,7 @@ func TestAccountLinks(t *testing.T) {
 		t.Errorf("%v interactive calls", d)
 	}
 
-	// C-18.FR-5: an account linked to another User; C-18.FR-3: the limits per target account and per User.
+	// C-18.FR-5: an account linked to another User; C-18.FR-3: the limits per User and target account and per User.
 	if a := e.startMattermost(alice, "bob"); a.status != http.StatusConflict || codeOf(t, a) != "account_linked_elsewhere" {
 		t.Errorf("bob's account for alice = %d %s", a.status, a.body)
 	}
@@ -1003,7 +1003,7 @@ func TestBridgeAccountLinks(t *testing.T) {
 	if d, _, transport := e.lastAudit("account_link.link"); d["external_id"] != fakebridge.BobID || transport != "ui" {
 		t.Errorf("the link entry %v through %s", d, transport)
 	}
-	// The refused direct message and the two codes sent count toward the three codes an hour for one account.
+	// The refused direct message and the two codes sent count toward bob's three codes an hour for one account.
 	if n := retryAfter(t, e.requestCode(bob, e.lab, "bob@example.org")); n < 1 || n > 3600 {
 		t.Errorf("the fourth request for bob's account: Retry-After %d", n)
 	}
@@ -1308,7 +1308,7 @@ func TestSlackAccountLinks(t *testing.T) {
 	}
 	e.wantRejection("conflict", "slack", fakeslack.UserBob)
 
-	// account_link.slack_code_requests: bob's two earlier codes and this one are the three an hour for his account.
+	// account_link.slack_code_requests: bob's two earlier codes and this one are his three an hour for his account.
 	e.slackCodeFor(bob, s.conn, "bob", fakeslack.AppB, fakeslack.UserBob)
 	if n := retryAfter(t, e.requestSlackCode(bob, s.conn, "bob")); n < 1 || n > 3600 {
 		t.Errorf("the fourth request for bob's account: Retry-After %d", n)

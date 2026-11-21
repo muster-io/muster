@@ -300,12 +300,14 @@ func TestLiveLinks(t *testing.T) {
 			}
 		}
 		var limited *accountlinks.RateLimitedError
-		if _, err := svc.StartMattermost(ctx, as("bob"), "CNAAAAAAAAAAM1", "dana"); err != nil {
-			t.Fatal(err)
+		for range 3 {
+			if _, err := svc.StartMattermost(ctx, as("bob"), "CNAAAAAAAAAAM1", "dana"); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if _, err := svc.StartMattermost(ctx, as("bob"), "CNAAAAAAAAAAM1", "dana"); !errors.As(err, &limited) ||
 			limited.Seconds() != 3600 {
-			t.Errorf("the fourth request for dana = %v", err)
+			t.Errorf("bob's fourth request for dana = %v", err)
 		}
 		if n := count(`SELECT count(*) FROM account_link_requests WHERE user_id = $1 AND voided_at IS NULL AND
 			consumed_at IS NULL`, users["alice"]); n != 1 {
@@ -502,9 +504,10 @@ func TestLivePruneBatches(t *testing.T) {
 }
 
 // TestLiveConcurrentCodeRequests is C-18.FR-3 under concurrency on PostgreSQL: of ten simultaneous code requests of
-// one User exactly five are stored and the rest refused, and of five simultaneous requests of five other Users for one account
-// exactly three, since both limits of account_link.mattermost_code_requests are counted in the transaction that stores
-// the request, under the lock of the User and of the target account.
+// one User exactly five are stored and the rest refused, and of twenty simultaneous requests of five other Users for one
+// account, four each, exactly three of each User are stored and the account receives exactly ten codes, since the limits
+// of account_link.mattermost_code_requests are counted in the transaction that stores the request, under the lock of
+// the User and of the target account.
 func TestLiveConcurrentCodeRequests(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		ctx := t.Context()
@@ -546,9 +549,9 @@ func TestLiveConcurrentCodeRequests(t *testing.T) {
 			users = append(users, id)
 		}
 		business := clock.NewManual(t0)
+		bot := &liveBot{all: true}
 		svc := accountlinks.New(accountlinks.Config{OrgID: org.ID, Store: accountlinks.NewStore(d.Pool),
-			Audit: audit.NewWriter(logger, business), Business: business, Log: logger,
-			Mattermost: &liveBot{all: true}})
+			Audit: audit.NewWriter(logger, business), Business: business, Log: logger, Mattermost: bot})
 		as := func(i int) accountlinks.Requester {
 			return accountlinks.Requester{UserID: users[i], UserPublicID: "SRAAAAAAAAAAD" + strconv.Itoa(i+1),
 				Actor: audit.User(users[i], "x"), Transport: audit.TransportUI, Address: netip.MustParseAddr("192.0.2.1")}
@@ -580,11 +583,13 @@ func TestLiveConcurrentCodeRequests(t *testing.T) {
 		}); stored != 5 || limited != 5 {
 			t.Errorf("one User's concurrent requests: %d stored, %d limited", stored, limited)
 		}
-		if stored, limited := race(5, func(i int) error {
-			_, err := svc.StartMattermost(ctx, as(i+1), "CNAAAAAAAAAAM1", "dana")
+		before := len(bot.sent)
+		if stored, limited := race(20, func(i int) error {
+			_, err := svc.StartMattermost(ctx, as(i%5+1), "CNAAAAAAAAAAM1", "dana")
 			return err
-		}); stored != 3 || limited != 2 {
-			t.Errorf("concurrent requests for one account: %d stored, %d limited", stored, limited)
+		}); stored != 15 || limited != 5 || len(bot.sent)-before != 10 {
+			t.Errorf("concurrent requests of five Users for one account: %d stored, %d limited, %d sent", stored,
+				limited, len(bot.sent)-before)
 		}
 	})
 }
@@ -1005,7 +1010,8 @@ func TestLiveBridgeLinks(t *testing.T) {
 			accountlinks.ErrNotLinked) {
 			t.Errorf("another Connection's space = %v", err)
 		}
-		// Ten code requests of one User at once store five; five Users' requests for one account store three.
+		// Ten code requests of one User at once store five; four requests each of five Users for one account store three
+		// each, and the account receives ten codes.
 		race := func(n int, start func(i int) error) (stored, limited int) {
 			t.Helper()
 			errs := make([]error, n)
@@ -1033,12 +1039,14 @@ func TestLiveBridgeLinks(t *testing.T) {
 		}); stored != 5 || limited != 5 {
 			t.Errorf("one User's concurrent requests: %d stored, %d limited", stored, limited)
 		}
-		if stored, limited := race(5, func(i int) error {
-			login := []string{"dave", "erin", "frank", "gina", "hank"}[i]
+		before := len(bot.sent)
+		if stored, limited := race(20, func(i int) error {
+			login := []string{"dave", "erin", "frank", "gina", "hank"}[i%5]
 			_, err := svc.StartBridgeCode(ctx, as(login), "CNAAAAAAAAAAB1", "dana@example.org")
 			return err
-		}); stored != 3 || limited != 2 {
-			t.Errorf("concurrent requests for one account: %d stored, %d limited", stored, limited)
+		}); stored != 15 || limited != 5 || len(bot.sent)-before != 10 {
+			t.Errorf("concurrent requests for one account: %d stored, %d limited, %d sent", stored, limited,
+				len(bot.sent)-before)
 		}
 		// Unlinking records the display name; Bridge requests are pruned as any other.
 		if err := svc.Unlink(ctx, as("bob"), l.PublicID); err != nil {
@@ -1050,7 +1058,7 @@ func TestLiveBridgeLinks(t *testing.T) {
 		}
 		bridgeReqs := count(`SELECT count(*) FROM account_link_requests WHERE messenger = 'bridge'`)
 		pruned, err := accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, t0.Add(48*time.Hour), 1000)
-		if err != nil || bridgeReqs != 11 || pruned != 12 || count(`SELECT count(*) FROM account_link_requests`) != 0 {
+		if err != nil || bridgeReqs != 23 || pruned != 24 || count(`SELECT count(*) FROM account_link_requests`) != 0 {
 			t.Errorf("pruned %d with %d Bridge requests and bob's Telegram one, %v", pruned, bridgeReqs, err)
 		}
 		if strings.Contains(log.String(), st.Token) || strings.Contains(log.String(), other.Token) {
@@ -1285,7 +1293,8 @@ func TestLiveSlackLinks(t *testing.T) {
 			footer[s1].ExternalID != "U0DANA" {
 			t.Errorf("footer users = %+v, %v", footer, err)
 		}
-		// Ten code requests of one User at once store five; five Users' requests for one account store three.
+		// Ten code requests of one User at once store five; four requests each of five Users for one account store three
+		// each, and the account receives ten codes.
 		race := func(n int, start func(i int) error) (stored, limited int) {
 			t.Helper()
 			errs := make([]error, n)
@@ -1313,17 +1322,19 @@ func TestLiveSlackLinks(t *testing.T) {
 		}); stored != 5 || limited != 5 {
 			t.Errorf("one User's concurrent requests: %d stored, %d limited", stored, limited)
 		}
-		if stored, limited := race(5, func(i int) error {
-			login := []string{"dave", "erin", "frank", "gina", "hank"}[i]
+		before := len(bot.sent)
+		if stored, limited := race(20, func(i int) error {
+			login := []string{"dave", "erin", "frank", "gina", "hank"}[i%5]
 			_, err := svc.StartSlack(ctx, as(login), "CNAAAAAAAAAAS1", "zed")
 			return err
-		}); stored != 3 || limited != 2 {
-			t.Errorf("concurrent requests for one account: %d stored, %d limited", stored, limited)
+		}); stored != 15 || limited != 5 || len(bot.sent)-before != 10 {
+			t.Errorf("concurrent requests for one account: %d stored, %d limited, %d sent", stored, limited,
+				len(bot.sent)-before)
 		}
 		// Slack requests are pruned as any other.
 		slackReqs := count(`SELECT count(*) FROM account_link_requests WHERE messenger = 'slack'`)
 		pruned, err := accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, t0.Add(48*time.Hour), 1000)
-		if err != nil || slackReqs != 12 || pruned != 12 || count(`SELECT count(*) FROM account_link_requests`) != 0 {
+		if err != nil || slackReqs != 24 || pruned != 24 || count(`SELECT count(*) FROM account_link_requests`) != 0 {
 			t.Errorf("pruned %d of %d Slack requests, %v", pruned, slackReqs, err)
 		}
 		for _, m := range bot.sent {

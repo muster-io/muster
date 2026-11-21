@@ -178,7 +178,7 @@ func TestMattermostLink(t *testing.T) {
 }
 
 // TestMattermostRequestLimits is C-18.FR-3 with account_link.mattermost_code_requests on a manual clock: the sixth
-// request of one User within an hour and the fourth for one target account are refused until the oldest counted
+// request of one User within an hour and their fourth for one target account are refused until the oldest counted
 // request is an hour old; a new request voids the User's earlier pending one.
 func TestMattermostRequestLimits(t *testing.T) {
 	e := newEnv(t)
@@ -198,24 +198,28 @@ func TestMattermostRequestLimits(t *testing.T) {
 	if _, err := e.s.StartMattermost(t.Context(), alice, mmPID, "carol-unknown"); err == nil || errors.As(err, &rl) {
 		t.Errorf("a request once the oldest is an hour old = %v", err)
 	}
-	// Three requests for dana by others; the fourth is refused for the hour.
+	// Three requests of a User for dana; their fourth is refused for the hour, another User's is not.
 	f := newEnv(t)
 	for range 3 {
 		f.startMM(t, bob, "dana")
 	}
-	if _, err := f.s.StartMattermost(t.Context(), alice, mmPID, "dana"); !errors.As(err, &rl) ||
+	if _, err := f.s.StartMattermost(t.Context(), bob, mmPID, "dana"); !errors.As(err, &rl) ||
 		rl.Seconds() != 3600 {
-		t.Fatalf("the fourth request for one account = %v", err)
+		t.Fatalf("the fourth request of a User for one account = %v", err)
+	}
+	if st := f.startMM(t, alice, "dana"); st.RequestPublicID == "" {
+		t.Error("another User's request for the account is limited")
 	}
 	if st := f.startMM(t, alice, "bob"); st.RequestPublicID == "" {
 		t.Error("another account is not limited")
 	}
 }
 
-// TestMattermostRequestLimitsInTransaction is C-18.FR-3 under concurrency: both limits of
+// TestMattermostRequestLimitsInTransaction is C-18.FR-3 under concurrency: the limits of
 // account_link.mattermost_code_requests are counted again in the transaction that stores the request, the User's
 // under the lock of their row and the target account's under its advisory lock, so that requests stored meanwhile by
-// concurrent ones refuse it and nothing is stored or sent.
+// concurrent ones refuse it and nothing is stored or sent, or, past the codes the account receives across Users,
+// withhold its code.
 func TestMattermostRequestLimitsInTransaction(t *testing.T) {
 	e := newEnv(t)
 	e.startMM(t, alice, "dana")
@@ -240,12 +244,19 @@ func TestMattermostRequestLimitsInTransaction(t *testing.T) {
 		t.Fatalf("a request past the User's limit reached meanwhile = %v", err)
 	}
 	f := newEnv(t)
-	f.startMM(t, bob, "dana")
-	f.mm.onFind = stored(f, carolID, "u-dana", 2)
+	f.startMM(t, alice, "dana")
+	f.mm.onFind = stored(f, aliceID, "u-dana", 2)
 	before, sent = len(f.store.reqs), len(f.mm.sent)
 	if _, err := f.s.StartMattermost(t.Context(), alice, mmPID, "dana"); !errors.As(err, &rl) ||
 		rl.Seconds() != 3600 || len(f.store.reqs) != before+2 || len(f.mm.sent) != sent {
-		t.Fatalf("a request past the account's limit reached meanwhile = %v", err)
+		t.Fatalf("a request past the User's limit for the account reached meanwhile = %v", err)
+	}
+	// The codes the account receives across Users, reached meanwhile, withhold the code.
+	f.mm.onFind = stored(f, carolID, "u-bob", CodesPerTarget)
+	before, sent = len(f.store.reqs), len(f.mm.sent)
+	if st, err := f.s.StartMattermost(t.Context(), alice, mmPID, "bob"); err != nil || st.RequestPublicID == "" ||
+		len(f.store.reqs) != before+CodesPerTarget+1 || len(f.mm.sent) != sent {
+		t.Fatalf("a request past the account's codes reached meanwhile = %+v, %v", st, err)
 	}
 	f.mm.onFind = nil
 	f.store.fail = map[string]error{"LockCodeTarget": errBoom}

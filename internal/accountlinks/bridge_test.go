@@ -71,10 +71,8 @@ func (s *fakeStore) CountTargetBridgeCodeRequests(_ context.Context, a dbgen.Cou
 		return dbgen.CountTargetBridgeCodeRequestsRow{}, err
 	}
 	s.mark("bridge target")
-	n, oldest := s.count(MessengerBridge, func(r fReq) bool {
-		return a.OrgID == org && r.connID == a.ConnectionID && r.target == a.TargetExternalID
-	}, a.Since)
-	return dbgen.CountTargetBridgeCodeRequestsRow{Requests: n, Oldest: oldest}, nil
+	return dbgen.CountTargetBridgeCodeRequestsRow(s.countTarget(MessengerBridge,
+		dbgen.CountTargetCodeRequestsParams(a))), nil
 }
 
 // brDM is a direct message the fake bridge bot sent.
@@ -516,7 +514,7 @@ func TestBridgeCode(t *testing.T) {
 }
 
 // TestBridgeCodeRequestLimits is C-22.FR-15 with account_link.bridge_code_requests on a manual clock: the sixth request
-// of one User within an hour and the fourth for one target account are refused until the oldest counted request is an
+// of one User within an hour and their fourth for one target account are refused until the oldest counted request is an
 // hour old, counted before the bridge looks the account up and again in the transaction; a Connection that offers no
 // code refuses that first, whatever the limits; a new request voids the User's earlier pending one, and a request
 // whose direct message failed still counts.
@@ -560,9 +558,12 @@ func TestBridgeCodeRequestLimits(t *testing.T) {
 	for range 3 {
 		f.startCode(t, bob, "dana@example.org")
 	}
-	if _, err := f.s.StartBridgeCode(t.Context(), alice, brPID, "dana@example.org"); !errors.As(err, &rl) ||
+	if _, err := f.s.StartBridgeCode(t.Context(), bob, brPID, "dana@example.org"); !errors.As(err, &rl) ||
 		rl.Seconds() != 3600 {
-		t.Fatalf("the fourth request for one account = %v", err)
+		t.Fatalf("the fourth request of a User for one account = %v", err)
+	}
+	if st := f.startCode(t, alice, "dana@example.org"); st.RequestPublicID == "" {
+		t.Error("another User's request for the account is limited")
 	}
 	if st := f.startCode(t, alice, "bob@example.org"); st.RequestPublicID == "" {
 		t.Error("another account is not limited")

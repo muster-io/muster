@@ -56,10 +56,8 @@ func (s *fakeStore) CountTargetSlackCodeRequests(_ context.Context, a dbgen.Coun
 		return dbgen.CountTargetSlackCodeRequestsRow{}, err
 	}
 	s.mark("slack target")
-	n, oldest := s.count(MessengerSlack, func(r fReq) bool {
-		return a.OrgID == org && r.connID == a.ConnectionID && r.target == a.TargetExternalID
-	}, a.Since)
-	return dbgen.CountTargetSlackCodeRequestsRow{Requests: n, Oldest: oldest}, nil
+	return dbgen.CountTargetSlackCodeRequestsRow(s.countTarget(MessengerSlack,
+		dbgen.CountTargetCodeRequestsParams(a))), nil
 }
 
 // slDM is a direct message the fake Slack bot sent, with the code it was given as a secret, if any.
@@ -261,7 +259,7 @@ func TestSlackLinkAttempts(t *testing.T) {
 }
 
 // TestSlackRequestLimits is C-24.FR-12 with account_link.slack_code_requests on a manual clock: the sixth request of
-// one User within an hour and the fourth for one target account are refused until the oldest counted request is an
+// one User within an hour and their fourth for one target account are refused until the oldest counted request is an
 // hour old, counted before the account is looked up and again in the transaction under the lock of the account; a new
 // request voids the User's earlier pending one through the Connection; a request whose direct message failed still
 // counts; requests of other messengers are counted apart.
@@ -299,8 +297,8 @@ func TestSlackRequestLimits(t *testing.T) {
 	for range 3 {
 		f.startSL(t, bob, "dana")
 	}
-	if _, err := f.s.StartSlack(t.Context(), alice, slPID, "dana"); !errors.As(err, &rl) || rl.Seconds() != 3600 {
-		t.Fatalf("the fourth request for one account = %v", err)
+	if _, err := f.s.StartSlack(t.Context(), bob, slPID, "dana"); !errors.As(err, &rl) || rl.Seconds() != 3600 {
+		t.Fatalf("the fourth request of a User for one account = %v", err)
 	}
 	if st := f.startSL(t, alice, "bob"); st.RequestPublicID == "" {
 		t.Error("another account is not limited")
