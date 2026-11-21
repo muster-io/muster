@@ -28,7 +28,7 @@ acceptance:
   - "[C-33.FR-11] The mark changes nothing else: a marked Mattermost Destination delivers, its Connection is checked, and a marked Organization re-renders the open Root messages on a change of its time zone as before; a write of a Secret alone (`setDestinationSecret`) keeps the mark (`TestManagedBy`)."
 verify: "make ci && make e2e-go"
 operator_attention: false
-issue: null
+issue: 698
 ---
 
 # S-180. The managed_by mark on Connections, Destinations, the Organization's settings, the Outbound address policy and the OIDC settings (BE)
