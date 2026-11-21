@@ -385,6 +385,10 @@ func (c MembershipChange) Added() []int64 {
 // Route's membership lock, which the save holds exclusively.
 type Membership func(ctx context.Context, tx dbgen.DBTX, c MembershipChange) error
 
+// StormSummaries is the hook that delivery runs, in the transaction tx of a save of the Route routeID that changed its
+// name or its language, which the Storm summary of its active Storm shows (C-11.FR-6, C-12.FR-10).
+type StormSummaries func(ctx context.Context, tx dbgen.DBTX, routeID int64) error
+
 // OpenAlertGroupsError is the refusal to delete a Route that still has open Alert Groups (C-09.FR-19); Count says
 // how many.
 type OpenAlertGroupsError struct {
@@ -581,6 +585,9 @@ type Service struct {
 
 	// membership is the hook of delivery for Destinations added to or removed from a Route; nil changes nothing.
 	membership Membership
+	// stormSummaries is the hook of delivery for a Route whose Storm summary shows a changed name or language; nil
+	// changes nothing.
+	stormSummaries StormSummaries
 	// templates are the template checks of messages; without them templates are saved without a dry run.
 	templates TemplateHooks
 
@@ -652,6 +659,12 @@ func (s *Service) DestinationDeleted(ctx context.Context, tx dbgen.DBTX, destina
 // changes.
 func (s *Service) SetMembership(m Membership) {
 	s.membership = m
+}
+
+// SetStormSummaries fills the hook of delivery for a Route whose Storm summary shows a changed name or language,
+// before any Route changes.
+func (s *Service) SetStormSummaries(h StormSummaries) {
+	s.stormSummaries = h
 }
 
 // SetTemplates fills the template checks of messages, before any Route is created or updated.
@@ -1378,7 +1391,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		// The field Route of every open Root message names the Route, so a rename re-renders them too (C-29.FR-1). Both
 		// kinds re-render with the Route as it is when the row runs, so a save that changes the labels and a setting
-		// the Root messages show writes one row.
+		// the Root messages show writes one row, and a later save reuses a row no worker has claimed yet.
 		switch {
 		case !slices.Equal(before.MessageLabels, next.MessageLabels) || before.Name != next.Name:
 			if err := s.requestOpenGroupUpdate(ctx, q, before, KindMessageLabels); err != nil {
@@ -1387,6 +1400,13 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		case messageSettingsChanged(before.Policy, p):
 			if err := s.requestOpenGroupUpdate(ctx, q, before, KindMessageSettings); err != nil {
 				return err
+			}
+		}
+		// The Storm summary names the Route in its language (C-12.FR-10), kept current during the Storm (C-11.FR-6),
+		// whether or not the Route still has open Alert Groups.
+		if s.stormSummaries != nil && (before.Name != next.Name || before.Policy.Language != p.Language) {
+			if err := s.stormSummaries(ctx, q.DB(), before.ID); err != nil {
+				return fmt.Errorf("bring the storm summary of the route %s current: %w", before.PublicID, err)
 			}
 		}
 		if updated, err = s.get(ctx, q, before.PublicID); err != nil {
@@ -1416,9 +1436,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 
 // requestOpenGroupUpdate, in the transaction of the change of the Route r's Minimum severity, of its effective
 // "Labels in the message" or of another setting its Root messages show, asks the workers of internal/groups to apply it
-// to the open Alert Groups of r (C-26.FR-9, C-29.FR-2): one open_group_updates row of the kind given, when r has any,
-// and a notification that wakes them once the transaction commits. The row is requested at the business time of the
-// change.
+// to the open Alert Groups of r (C-26.FR-9, C-29.FR-2): one open_group_updates row of the kind given, when r has any
+// and no row of r that no worker has claimed yet covers the change (InsertOpenGroupUpdate), and a notification that
+// wakes them once the transaction commits. The row is requested at the business time of the change.
 func (s *Service) requestOpenGroupUpdate(ctx context.Context, q Queries, r Route, kind string) error {
 	open, err := q.HasOpenAlertGroups(ctx, dbgen.HasOpenAlertGroupsParams{OrgID: s.orgID, RouteID: r.ID})
 	if err != nil {

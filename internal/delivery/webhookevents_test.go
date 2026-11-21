@@ -148,6 +148,8 @@ func (f *fakeDB) ClaimDueWebhookEvents(_ context.Context, arg dbgen.ClaimDueWebh
 		e.owner, e.until = arg.Owner, arg.LeaseUntil
 		out = append(out, dbgen.ClaimDueWebhookEventsRow{ID: e.id, NextAttemptAt: e.next})
 	}
+	// The order of RETURNING is not guaranteed; the worker sorts.
+	slices.Reverse(out)
 	return out, nil
 }
 
@@ -956,6 +958,34 @@ func TestWebhookEventsTransient(t *testing.T) {
 	e.drain(t)
 	if ds.health != "broken" || *ds.brokenReason != "still refused" {
 		t.Fatalf("dest %+v", ds)
+	}
+}
+
+// TestWebhookEventsEarliestFirst: a round sends the due head events of one claimed batch earliest first, whatever order
+// the claim returns them in; here the events queued later are due first.
+func TestWebhookEventsEarliestFirst(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	e.db.dests[destWH].limit = 600
+	e.enqueue(t, e.group(groups.StatusFiring, "t"), groups.System, created())
+	e.enqueue(t, e.addGroup(22), groups.System, created())
+	e.enqueue(t, e.addGroup(23), groups.System, created())
+	evs := e.db.webhookEvents
+	if len(evs) != 3 || evs[0].id >= evs[1].id || evs[1].id >= evs[2].id {
+		t.Fatalf("events %+v", evs)
+	}
+	now := e.business.Now()
+	evs[0].next, evs[1].next, evs[2].next = now, now.Add(-2*time.Minute), now.Add(-time.Minute)
+	e.round(t)
+	var sent []int64
+	for _, c := range e.sender.calls {
+		for _, ev := range evs {
+			if ev.webhookID == c.WebhookID {
+				sent = append(sent, ev.id)
+			}
+		}
+	}
+	if want := []int64{evs[1].id, evs[2].id, evs[0].id}; !slices.Equal(sent, want) {
+		t.Errorf("sent %v, want %v", sent, want)
 	}
 }
 

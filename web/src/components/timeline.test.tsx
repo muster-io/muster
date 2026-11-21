@@ -127,6 +127,24 @@ function delivery(event: DeliveryEventKind): TimelineEntry {
   return entry;
 }
 
+/** A "Mention not delivered" in the bridge with the undelivered Mention. */
+function mentionNotDelivered(
+  id: string,
+  mention: TimelineDeliveryEntry["mention"],
+): TimelineDeliveryEntry {
+  return {
+    id,
+    at: AT,
+    kind: "delivery",
+    actor: SYSTEM,
+    delivery_event: "mention_not_delivered",
+    destination: { id: "DS0000000000OP", name: "bridge" },
+    loudness: "quiet",
+    mentions: [],
+    mention,
+  };
+}
+
 const PETR = { id: "SR0000000PETR", name: "Petr", login: "petr", deactivated: false };
 const IVAN = { id: "SR0000000IVAN", name: "Ivan", login: "ivan", deactivated: false };
 const GATEWAY = { id: "CN0000000000GW", name: "Example Gateway" };
@@ -760,6 +778,41 @@ describe("Timeline", () => {
     await expect.element(reason).toHaveTextContent("the message had no room for their Mention");
     await i18n.changeLanguage("ru");
     await expect.element(reason).toHaveTextContent("в сообщении не хватило места для упоминания");
+  });
+
+  test("says a group and a template's mention of everyone a bridge message left out were not delivered", async () => {
+    entries = [
+      mentionNotDelivered("DE1", {
+        mention: { kind: "group", name: "payments_team" },
+        entry: { position: 1, target: { kind: "teams_from_label" } },
+        event: "new_alerts",
+        reason: "message_too_long",
+      }),
+      mentionNotDelivered("DE2", {
+        mention: { kind: "everyone", name: "here" },
+        reason: "message_too_long",
+      }),
+    ];
+    await renderTimeline();
+    const group = page.getByTestId("timeline-entry").nth(0);
+    const token = page.getByTestId("timeline-entry").nth(1);
+    await expect.element(group.getByTestId("mention-named")).toHaveTextContent("@payments_team");
+    await expect
+      .element(group.getByTestId("mention-entry"))
+      .toHaveTextContent("Team from the label");
+    await expect.element(group.getByTestId("mention-event")).toHaveTextContent("New Alerts");
+    expect(group.getByTestId("mention-person").elements()).toHaveLength(0);
+    await expect.element(token.getByTestId("mention-named")).toHaveTextContent("@here");
+    await expect
+      .element(token.getByTestId("mention-entry"))
+      .toHaveTextContent("the message template");
+    expect(token.getByTestId("mention-event").elements()).toHaveLength(0);
+    await expect
+      .element(token.getByTestId("mention-reason"))
+      .toHaveTextContent("the message had no room for their Mention");
+    await i18n.changeLanguage("ru");
+    await expect.element(group.getByTestId("mention-entry")).toHaveTextContent("Команда из метки");
+    await expect.element(token.getByTestId("mention-entry")).toHaveTextContent("шаблон сообщения");
   });
 
   test("names the gateway of the call an acknowledgement came from", async () => {

@@ -276,8 +276,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE open_group_updates u
 SET leased_by = $1::text, lease_until = $2::timestamptz
-FROM due
-WHERE u.org_id = $3 AND u.id = due.id
+WHERE u.org_id = $3 AND u.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
           coalesce((SELECT r.public_id
                     FROM routes r

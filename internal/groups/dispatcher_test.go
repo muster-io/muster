@@ -1657,6 +1657,49 @@ func TestTimelineMentionNotDelivered(t *testing.T) {
 	}
 }
 
+// TestTimelineMentionNotDeliveredGroups is C-28.FR-3 and C-12.FR-11 (#626): a mention_not_delivered of a Team mention
+// or a group entry that a bridge's Mention line left out names the group, no person, the entry with its Team or its
+// group, the Loud event and the reason; one of a template's token names the Mention and the reason, with no entry and
+// no event.
+func TestTimelineMentionNotDeliveredGroups(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	row := func(id int64, detail string) dbgen.ListTimelineDeliveryEventsRow {
+		return dbgen.ListTimelineDeliveryEventsRow{ID: id, PublicID: fmt.Sprintf("DEAAAAAAAAAAA%d", id),
+			OccurredAt: t0.Add(time.Duration(id) * time.Second), Kind: "mention_not_delivered", Loudness: "quiet",
+			DestinationPublicID: "DSAAAAAAAAAAAA", DestinationName: "bridge", Detail: []byte(detail)}
+	}
+	h.db.delivery = []dbgen.ListTimelineDeliveryEventsRow{
+		row(1, `{"mention":{"kind":"group","name":"payments_team"},"entry_id":74,"position":3,`+
+			`"target":{"kind":"team","team_id":"TMAAAAAAAAAAA1"},"event":"new_alert_group","reason":"message_too_long"}`),
+		row(2, `{"mention":{"kind":"group","name":"ops"},"entry_id":73,"position":2,`+
+			`"target":{"kind":"group","group":"ops"},"event":"new_alerts","reason":"message_too_long"}`),
+		row(3, `{"mention":{"kind":"everyone","name":"here"},"reason":"message_too_long"}`)}
+	h.db.delivery[0].MentionTeamPublicID, h.db.delivery[0].MentionTeamName = "TMAAAAAAAAAAA1", "Payments"
+	page, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 10, Kinds: []Kind{KindDelivery},
+		Ascending: true})
+	if err != nil || len(page.Entries) != 3 {
+		t.Fatalf("timeline = %+v, %v", page.Entries, err)
+	}
+	team, group, token := page.Entries[0].Delivery.Mention, page.Entries[1].Delivery.Mention,
+		page.Entries[2].Delivery.Mention
+	if team == nil || team.User != nil || *team.Mention != (MentionName{Kind: "group", Name: "payments_team"}) ||
+		team.Position != 3 || team.Target == nil || team.Target.Kind != "team" || team.Target.Team == nil ||
+		team.Target.Team.Name != "Payments" || team.Event != "new_alert_group" || team.Reason != "message_too_long" {
+		t.Errorf("team mention %+v", team)
+	}
+	if group == nil || group.User != nil || group.Target == nil || group.Target.Group != "ops" ||
+		group.Mention.Name != "ops" || group.Event != "new_alerts" {
+		t.Errorf("group %+v", group)
+	}
+	if token == nil || token.User != nil || token.Target != nil || token.Event != "" ||
+		*token.Mention != (MentionName{Kind: "everyone", Name: "here"}) || token.Reason != "message_too_long" {
+		t.Errorf("token %+v", token)
+	}
+}
+
 // TestTimeline is C-09.FR-11 and FR-14: the Timeline newest first or oldest first, by page, filtered by kind, with
 // the Notes and delivery events merged by time, each with its actor and Transport.
 func TestTimeline(t *testing.T) {

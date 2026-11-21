@@ -26,8 +26,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE timers t
 SET lease_owner = $1::text, lease_until = $2::timestamptz, attempts = t.attempts + 1
-FROM due
-WHERE t.org_id = $3 AND t.id = due.id
+WHERE t.org_id = $3 AND t.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING t.id, t.alert_group_id, t.storm_id, t.escalation_run_id, t.notification_rule_run_id, t.kind, t.deadline,
           t.attempts
 `
@@ -58,7 +57,9 @@ type ClaimDueTimersRow struct {
 // The claim of the timer rows (schema.md §5): due on the business clock, leased on the real clock.
 // ClaimDueTimers leases the due timers of the kinds this replica fires whose lease is free or ran out, earliest
 // first; another claimer skips the rows this one locked. The choice is a materialized CTE, run once: as a subquery in
-// FROM, PostgreSQL may plan it as the inner side of a nested loop over every timer, run once per row.
+// FROM, PostgreSQL may plan it as the inner side of a nested loop over every timer, run once per row. The update finds
+// the chosen timers by their primary key, as in ClaimDueDeliveries (internal/delivery), so they come back in no
+// particular order; the Store sorts them.
 func (q *Queries) ClaimDueTimers(ctx context.Context, arg ClaimDueTimersParams) ([]ClaimDueTimersRow, error) {
 	rows, err := q.db.Query(ctx, claimDueTimers,
 		arg.Owner,

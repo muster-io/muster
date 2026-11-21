@@ -209,9 +209,9 @@ func (a *Adapter) EditWindow(ctx context.Context, c delivery.Call) (time.Duratio
 // and their entries in `mentions` (C-22.FR-16) — and its footer in the Connection's identity space, whose people are
 // markers for a bridge with `native_mentions`; the Owner and the Assignees in the layout of a Root message have the
 // refs of their markers' entries while the body carries them (C-29.AC-6, C-32.AC-13). Its outcome names the message,
-// its link when the bridge sent a safe one, the Thread the answer named, whether the answer was replayed, the people
-// whose Mentions the line left out for the body's length and those it named by the plain name, without a marker; a
-// truncated body is delivered.
+// its link when the bridge sent a safe one, the Thread the answer named, whether the answer was replayed, the people,
+// groups and mentions of everyone whose Mentions the line left out for the body's length and the people it named by
+// the plain name, without a marker; a truncated body is delivered.
 func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
 	t, i, fail := a.prepare(ctx, c)
 	if fail != nil {
@@ -221,7 +221,8 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 	if m.Kind == messages.KindStorm {
 		kind = gen.StormSummary
 	}
-	head, list := mentionsOf(withTemplateTokens(c, m), i)
+	tokens := withTemplateTokens(c, m)
+	head, list := mentionsOf(tokens, i)
 	m, list, refs := withFooterMention(m, t.Conn.ID, i, list)
 	in := postInput(kind, t.ChannelID, content(m, i, head), c.Loudness == groups.Loud)
 	in.Mentions = marked(list, in.Body)
@@ -232,6 +233,7 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 		o.MessageID, o.MessageURL = out.MessageId, messages.SafeURL(out.Url.GetOrEmpty())
 		o.ThreadRef, o.Replayed = out.ThreadRef.GetOrEmpty(), out.Replayed
 		o.LeftOut, o.Plain = leftOut(c, in.Mentions), plainNamed(c)
+		o.LeftOutMentions = leftOutMentions(tokens, i, in.Mentions)
 	}
 	return o
 }
@@ -257,14 +259,15 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 
 // Reply posts m into the Thread of root under its last thread_ref, null without one, with the Mentions of a Loud call
 // as Publish sends them; its outcome names the reply, the thread_ref the answer returned, whether it was replayed, the
-// people whose Mentions the line left out and those it named without a marker. A Reminder carries its buttons when the
-// bridge has them.
+// people, groups and mentions of everyone whose Mentions the line left out and the people it named without a marker. A
+// Reminder carries its buttons when the bridge has them.
 func (a *Adapter) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	t, i, fail := a.prepare(ctx, c)
 	if fail != nil {
 		return *fail
 	}
-	head, list := mentionsOf(withTemplateTokens(c, m), i)
+	tokens := withTemplateTokens(c, m)
+	head, list := mentionsOf(tokens, i)
 	in := replyInput(root.ThreadAnchorID, withFooterIn(m, t.Conn.ID), i, head, list, c.Loudness == groups.Loud)
 	in.Mentions = marked(in.Mentions, in.Body)
 	out, r := t.Conn.Client.ReplyInThread(ctx, c.Class, root.MessageID, c.Key, in)
@@ -272,6 +275,7 @@ func (a *Adapter) Reply(ctx context.Context, c delivery.Call, root delivery.Root
 	if r.OK() {
 		o.MessageID, o.ThreadRef, o.Replayed = out.MessageId, out.ThreadRef, out.Replayed
 		o.LeftOut, o.Plain = leftOut(c, in.Mentions), plainNamed(c)
+		o.LeftOutMentions = leftOutMentions(tokens, i, in.Mentions)
 	}
 	return o
 }

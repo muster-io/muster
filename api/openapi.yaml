@@ -15925,8 +15925,9 @@ components:
               $ref: '#/components/schemas/MentionName'
           mention:
             description: For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud
-              message did not mention as their messenger mentions them (C-28.FR-3); nothing was written in the Thread
-              for it.
+              message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or
+              everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11); nothing was written
+              in the Thread for it.
             $ref: '#/components/schemas/UndeliveredMention'
     TimelineSystemEntry:
       allOf:
@@ -18333,15 +18334,32 @@ components:
         neither it nor the person having a display name, so the message named them by the plain name, which notifies
         nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps
         only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`,
-        C-12.FR-11).'
+        C-12.FR-11). `message_too_long` is also the reason of a group, a Team mention or everyone in the chat that such a
+        line left out, the only reason a Mention that names no one person is not delivered.'
       enum:
       - no_account_link
       - bridge_cannot_mention_people
       - message_too_long
+    NamedMention:
+      type: object
+      description: 'A Mention that names no one person, which a bridge''s Mention line left out for length (C-28.FR-3,
+        C-12.FR-11): `group`, a messenger group — a group entry or a Team mention — by its name, or `everyone`, everyone
+        in the chat, by its symbolic name (`here`, `channel` or `all`).'
+      required:
+      - kind
+      - name
+      properties:
+        kind:
+          type: string
+          enum:
+          - group
+          - everyone
+        name:
+          type: string
     MentionEntryRef:
       type: object
-      description: The Mention entry that named a person, as on the Destination — its position in the Destination's
-        `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
+      description: The Mention entry that named a person, a group or everyone, as on the Destination — its position in
+        the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
       required:
       - position
       - target
@@ -18353,19 +18371,25 @@ components:
           $ref: '#/components/schemas/MentionTarget'
     UndeliveredMention:
       type: object
-      description: A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not
-        mention as their messenger mentions them (C-28.FR-3).
+      description: 'A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not
+        mention as their messenger mentions them (C-28.FR-3); or a group, a Team mention or everyone in the chat that a
+        bridge''s Mention line left out for length (C-12.FR-11), with `mention` in place of `user`. A Mention of a
+        template''s token (`{{ mention "here" }}`, a group''s token), which no entry named, has neither `entry` nor
+        `event`.'
       required:
-      - user
-      - entry
-      - event
       - reason
       properties:
         user:
+          description: The person; absent for a group or everyone, which `mention` names.
           $ref: '#/components/schemas/UserRef'
+        mention:
+          description: The group or everyone in the chat; absent for a person.
+          $ref: '#/components/schemas/NamedMention'
         entry:
+          description: The entry that named the person or the Mention; absent for a template's token.
           $ref: '#/components/schemas/MentionEntryRef'
         event:
+          description: The Loud event the entry applied to; absent for a template's token.
           $ref: '#/components/schemas/MentionEvent'
         reason:
           $ref: '#/components/schemas/MentionNotDeliveredReason'
@@ -18375,16 +18399,21 @@ components:
         followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events
         kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person
         through the entry, or once retention removes the events. An entry removed from the Destination since, or a
-        deleted User, has none.'
+        deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the
+        chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and
+        clears once a later Loud message carries it.'
       required:
-      - user
       - entry
       - messenger
       - reason
       - since
       properties:
         user:
+          description: The person; absent for a group or everyone, which `mention` names.
           $ref: '#/components/schemas/UserRef'
+        mention:
+          description: The group or everyone in the chat; absent for a person.
+          $ref: '#/components/schemas/NamedMention'
         entry:
           description: The entry as it is on the Destination now.
           $ref: '#/components/schemas/MentionEntryRef'

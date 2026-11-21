@@ -5,6 +5,7 @@ package destinations
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -117,5 +118,48 @@ func TestMentionWarnings(t *testing.T) {
 	if d, err := s.Get(t.Context(), "DSAAAAAAAAAAA1"); err != nil || d.MentionWarnings == nil ||
 		len(store.warningReads) != 5 {
 		t.Errorf("without a clock = %+v, %v, %d reads", d.MentionWarnings, err, len(store.warningReads))
+	}
+}
+
+// TestMentionWarningsGroups is C-28.FR-3 and C-12.FR-11 (#626): a warning about a group, a Team mention or everyone in
+// the chat that a bridge's Mention line left out names its Mention and no person, by entry and then by the Mention's
+// name beside the people's; a Mention that is not JSON fails the read.
+func TestMentionWarningsGroups(t *testing.T) {
+	s, store, _, _, _ := newSaver(t)
+	fm := s.writer.Mentions.(*fakeMentions)
+	onCall := mentions.EntryInput{Target: mentions.EntryTarget{Kind: mentions.TargetOnCallOfTeamsFromLabel},
+		Events: mentions.Events}
+	fromLabel := mentions.EntryInput{Target: mentions.EntryTarget{Kind: mentions.TargetTeamsFromLabel},
+		Events: mentions.Events}
+	here := mentions.EntryInput{Target: mentions.EntryTarget{Kind: mentions.TargetEveryone,
+		Everyone: mentions.EveryoneHere}, Events: mentions.Events}
+	fm.entries[1] = []mentions.EntryInput{here, fromLabel, onCall}
+	row := func(mention, target string) dbgen.ListMentionWarningsRow {
+		return dbgen.ListMentionWarningsRow{DestinationID: 1, Mention: []byte(mention), Target: []byte(target),
+			Since: t0, Reason: mentions.ReasonMessageTooLong}
+	}
+	store.warnings = []dbgen.ListMentionWarningsRow{
+		row(`{"kind":"group","name":"payments"}`, `{"kind":"teams_from_label"}`),
+		row(`{"kind":"group","name":"Devops"}`, `{"kind":"teams_from_label"}`),
+		row(`{"kind":"everyone","name":"here"}`, `{"kind":"everyone","everyone":"here"}`),
+		{DestinationID: 1, UserID: 2, UserPublicID: "SRAAAAAAAAAAB1", UserName: "Bob", UserLogin: "bob",
+			Target: []byte(`{"kind":"on_call_of_teams_from_label"}`), Since: t0, Reason: mentions.ReasonMessageTooLong},
+	}
+	d, err := s.Get(t.Context(), "DSAAAAAAAAAAA1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, w := range d.MentionWarnings {
+		got = append(got, fmt.Sprintf("%d %s:%s %q %s", w.Entry.Position, w.Mention.Kind, w.Mention.Name,
+			w.User.PublicID, w.Reason))
+	}
+	if want := []string{`0 everyone:here "" message_too_long`, `1 group:Devops "" message_too_long`,
+		`1 group:payments "" message_too_long`, `2 : "SRAAAAAAAAAAB1" message_too_long`}; !slices.Equal(got, want) {
+		t.Errorf("warnings %q, want %q", got, want)
+	}
+	store.warnings = []dbgen.ListMentionWarningsRow{row(`{"kind":`, `{"kind":"teams_from_label"}`)}
+	if _, err := s.Get(t.Context(), "DSAAAAAAAAAAA1"); err == nil {
+		t.Error("a mention that is not JSON was read")
 	}
 }

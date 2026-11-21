@@ -5,7 +5,9 @@
 
 -- ClaimDueTimers leases the due timers of the kinds this replica fires whose lease is free or ran out, earliest
 -- first; another claimer skips the rows this one locked. The choice is a materialized CTE, run once: as a subquery in
--- FROM, PostgreSQL may plan it as the inner side of a nested loop over every timer, run once per row.
+-- FROM, PostgreSQL may plan it as the inner side of a nested loop over every timer, run once per row. The update finds
+-- the chosen timers by their primary key, as in ClaimDueDeliveries (internal/delivery), so they come back in no
+-- particular order; the Store sorts them.
 -- name: ClaimDueTimers :many
 WITH due AS MATERIALIZED (
     SELECT d.id
@@ -18,8 +20,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE timers t
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz, attempts = t.attempts + 1
-FROM due
-WHERE t.org_id = @org_id AND t.id = due.id
+WHERE t.org_id = @org_id AND t.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING t.id, t.alert_group_id, t.storm_id, t.escalation_run_id, t.notification_rule_run_id, t.kind, t.deadline,
           t.attempts;
 
