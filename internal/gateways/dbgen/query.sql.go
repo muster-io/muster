@@ -358,6 +358,37 @@ func (q *Queries) CountUserCodes(ctx context.Context, arg CountUserCodesParams) 
 	return i, err
 }
 
+const countUserContactCodes = `-- name: CountUserContactCodes :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM gateway_contact_codes
+WHERE org_id = $2 AND user_id = $3 AND contact_hash = $4 AND created_at > $1::timestamptz
+`
+
+type CountUserContactCodesParams struct {
+	Since       time.Time
+	OrgID       int64
+	UserID      int64
+	ContactHash []byte
+}
+
+type CountUserContactCodesRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountUserContactCodes counts the codes a User asked for to one contact text after since, with the oldest of them.
+func (q *Queries) CountUserContactCodes(ctx context.Context, arg CountUserContactCodesParams) (CountUserContactCodesRow, error) {
+	row := q.db.QueryRow(ctx, countUserContactCodes,
+		arg.Since,
+		arg.OrgID,
+		arg.UserID,
+		arg.ContactHash,
+	)
+	var i CountUserContactCodesRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
 const deleteCode = `-- name: DeleteCode :exec
 DELETE FROM gateway_contact_codes
 WHERE org_id = $1 AND id = $2

@@ -2756,6 +2756,11 @@ func (s *probeContactStore) CountUserCodes(_ context.Context, a gwdb.CountUserCo
 	return gwdb.CountUserCodesRow{Oldest: a.Since}, nil
 }
 
+func (s *probeContactStore) CountUserContactCodes(_ context.Context, a gwdb.CountUserContactCodesParams) (
+	gwdb.CountUserContactCodesRow, error) {
+	return gwdb.CountUserContactCodesRow{Oldest: a.Since}, nil
+}
+
 func (s *probeContactStore) CountContactCodes(_ context.Context, a gwdb.CountContactCodesParams) (
 	gwdb.CountContactCodesRow, error) {
 	return gwdb.CountContactCodesRow{Oldest: a.Since}, nil

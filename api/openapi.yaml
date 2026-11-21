@@ -7440,9 +7440,11 @@ paths:
         the web session that asked for it (`confirmMyGatewayContact`). An earlier unconfirmed contact of the caller for
         the gateway is replaced; a confirmed one stays the one called until this one is confirmed. Code requests —
         this operation and `sendMyGatewayContactCode` — are limited by `gateway.contact_code_requests` per User and
-        per contact text, whoever asked (`429` `contact_code_requests_exceeded` with `Retry-After`); a request whose
-        sending failed still counts. Runs on the interactive path: when no limiter token is free within
-        `delivery.interactive_budget`, the answer is `503` with `Retry-After`; a refusal of the gateway answers `502`
+        per User and contact text (`429` `contact_code_requests_exceeded` with `Retry-After`); a request whose
+        sending failed still counts. Beyond the codes one contact text receives within an hour across Users, a
+        request is answered as if its code were sent, but nothing is sent and no code confirms the contact, so that
+        the answer never tells of other Users'' requests. Runs on the interactive path: when no limiter token is free
+        within `delivery.interactive_budget`, the answer is `503` with `Retry-After`; a refusal of the gateway answers `502`
         `gateway_refused` with its `gateway_class`. In both cases the contact stays, unconfirmed, and
         `sendMyGatewayContactCode` sends a new code. A `connection_id` that names no Connection in the role
         `gateway` answers `422` `unknown_id` at `/connection_id`; a contact that is empty or longer than 200
@@ -10365,7 +10367,7 @@ components:
             `startSlackLink`); `retry_after_seconds` says when the next one is allowed.
         - code: contact_code_requests_exceeded
           description: Too many codes for contacts at Notification gateways were requested within an hour, by the User
-            or for the contact text (`gateway.contact_code_requests`, `createMyGatewayContact`,
+            or by the User for the contact text (`gateway.contact_code_requests`, `createMyGatewayContact`,
             `sendMyGatewayContactCode`); `retry_after_seconds` says when the next one is allowed.
       - type: gateway-refused
         in: code

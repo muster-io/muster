@@ -47,6 +47,8 @@ type Queries interface {
 	GetUserByPublicID(ctx context.Context, arg dbgen.GetUserByPublicIDParams) (dbgen.GetUserByPublicIDRow, error)
 	LockContactText(ctx context.Context, arg dbgen.LockContactTextParams) error
 	CountUserCodes(ctx context.Context, arg dbgen.CountUserCodesParams) (dbgen.CountUserCodesRow, error)
+	CountUserContactCodes(ctx context.Context, arg dbgen.CountUserContactCodesParams) (
+		dbgen.CountUserContactCodesRow, error)
 	CountContactCodes(ctx context.Context, arg dbgen.CountContactCodesParams) (dbgen.CountContactCodesRow, error)
 	ListContactsOfUser(ctx context.Context, arg dbgen.ListContactsOfUserParams) ([]dbgen.ListContactsOfUserRow, error)
 	LockContactOfUser(ctx context.Context, arg dbgen.LockContactOfUserParams) (dbgen.LockContactOfUserRow, error)

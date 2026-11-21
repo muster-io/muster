@@ -71,6 +71,12 @@ SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamp
 FROM gateway_contact_codes
 WHERE org_id = @org_id AND user_id = @user_id AND created_at > @since::timestamptz;
 
+-- CountUserContactCodes counts the codes a User asked for to one contact text after since, with the oldest of them.
+-- name: CountUserContactCodes :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+FROM gateway_contact_codes
+WHERE org_id = @org_id AND user_id = @user_id AND contact_hash = @contact_hash AND created_at > @since::timestamptz;
+
 -- CountContactCodes counts the codes for one contact text asked for after since, by any User, with the oldest of them.
 -- name: CountContactCodes :one
 SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest

@@ -257,7 +257,7 @@ Other lifecycle values:
 | `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | decided |
 | `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | decided |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
-| `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per contact | built in | C-30 | P-86 |
+| `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per User and contact text; 10 per hour per contact text across Users, beyond which a request is answered as sent and nothing is sent | built in | C-30 | P-86 |
 | `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the Pages that come due after it go together in the next call, no sooner than this after the previous call ended, accepted or Not delivered | built in | C-30 | P-87 |
 | Chart rules of L2 | as in [reference.md](reference.md#chart-rules-added-in-l2) | Helm chart | C-27, C-30 | decided |
 

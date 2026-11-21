@@ -324,7 +324,7 @@ A code typed for a contact at a Notification gateway was refused: user is the pu
 
 INFO · fields: `user`, `connection`, `contact`, `outcome` · C-30
 
-A person asked for the confirmation code of their contact at a Notification gateway: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and outcome ok when the gateway accepted the notification, limited when no limiter token was free within delivery.interactive_budget and nothing was sent, the error class of the Bridge protocol — transient, rate_limited, gone, forbidden or invalid — when the gateway refused it, or error when it failed otherwise. The contact text and the code are never logged.
+A person asked for the confirmation code of their contact at a Notification gateway: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and outcome ok when the gateway accepted the notification, limited when no limiter token was free within delivery.interactive_budget and nothing was sent, the error class of the Bridge protocol — transient, rate_limited, gone, forbidden or invalid — when the gateway refused it, error when it failed otherwise, or withheld when the contact text had received the codes gateway.contact_code_requests allows within the hour across Users, so that nothing was sent and the request was answered as if it had been. The contact text and the code are never logged.
 
 ### `gateway_notification_sent`
 
