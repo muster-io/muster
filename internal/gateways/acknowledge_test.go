@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -20,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/keyring"
@@ -48,8 +50,14 @@ func (k hmacKeys) KeyIDs() []string { return slices.Clone(k.ids) }
 
 var ackKeys = hmacKeys{ids: []string{"k-0123456789abcdef"}}
 
-// ackCall is the call CA0000000000P1 of the gateway 10 to petr, a Responder, as GetAcknowledgedCall reads it.
-var ackCall = dbgen.GetAcknowledgedCallRow{ID: 5, PublicID: "CA0000000000P1", State: CallAccepted, UserID: 7,
+// ackNow is the business time the tests acknowledge at.
+var ackNow = time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+// ackCall is the call CA0000000000P1 of the gateway 10 to petr, a Responder, as GetAcknowledgedCall reads it: the
+// gateway accepted it as the notification n1 a minute ago.
+var ackCall = dbgen.GetAcknowledgedCallRow{ID: 5, PublicID: "CA0000000000P1", State: CallAccepted,
+	NotificationID: pgtype.Text{String: "n1", Valid: true},
+	EndedAt:        pgtype.Timestamptz{Time: ackNow.Add(-time.Minute), Valid: true}, UserID: 7,
 	UserPublicID: "SR0000000000PE", UserRole: "responder", UserStatus: "active",
 	UserLanguage: pgtype.Text{String: "en", Valid: true}}
 
@@ -114,8 +122,8 @@ func newAck(groupNumbers ...int64) *ackEnv {
 		e.q.groups = append(e.q.groups, dbgen.ListCallGroupsRow{ID: n, PublicID: groupID(n), Number: n})
 	}
 	e.a = &Acknowledgements{OrgID: 1, Queries: e.q, Commands: e.cmd, Keys: ackKeys,
-		Roles: auth.Roles{"responder": {groups.PermissionAcknowledge}, "viewer": {"alert-groups:read"}},
-		Log:   logging.New(e.log, logging.LevelInfo)}
+		Roles:    auth.Roles{"responder": {groups.PermissionAcknowledge}, "viewer": {"alert-groups:read"}},
+		Business: clock.NewManual(ackNow), Log: logging.New(e.log, logging.LevelInfo)}
 	return e
 }
 
@@ -139,8 +147,14 @@ func callData(t *testing.T) string {
 
 func (e *ackEnv) run(t *testing.T, d string) string {
 	t.Helper()
+	return e.runAs(t, "n1", d)
+}
+
+// runAs reports the acknowledgement of the notification notification with the action data d.
+func (e *ackEnv) runAs(t *testing.T, notification, d string) string {
+	t.Helper()
 	answer, err := e.a.Acknowledged(t.Context(), bridge.Conn{ID: 10, PublicID: "CN00000000GW10"},
-		bridge.Event{ID: "e1", Type: bridge.TypeNotificationAcknowledged, NotificationID: "n1", Data: d})
+		bridge.Event{ID: "e1", Type: bridge.TypeNotificationAcknowledged, NotificationID: notification, Data: d})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +305,105 @@ func TestAcknowledgedRefused(t *testing.T) {
 	}
 }
 
+// TestAcknowledgedBinding is C-30.FR-6 against a replayed or misdirected acknowledgement: verified data acts only for
+// the notification the gateway accepted the call under, and only for AckWindow after the call ended, by the business
+// clock, whatever occurred_at the gateway reports. An event whose notification_id is not the call's, and a call the
+// gateway never accepted — waiting, Not delivered or dropped — run nothing, are logged as gateway_acknowledge_refused
+// with the call and answered in the person's language that the call could not be verified; a call that ended more than
+// AckWindow ago runs nothing and is answered that it expired. A call accepted a minute ago, or up to AckWindow ago, past
+// bridge.event_max_age included, is acknowledged as before.
+func TestAcknowledgedBinding(t *testing.T) {
+	ended := func(ago time.Duration) pgtype.Timestamptz {
+		return pgtype.Timestamptz{Time: ackNow.Add(-ago), Valid: true}
+	}
+	const unverified = "Не удалось проверить этот звонок; ничего не изменилось"
+	for _, c := range []struct {
+		name, notification, state string
+		callNotification          pgtype.Text
+		endedAt                   pgtype.Timestamptz
+		reason, want              string
+	}{
+		{"another notification", "n2", CallAccepted, ackCall.NotificationID, ackCall.EndedAt,
+			AckNotificationMismatch, unverified},
+		{"accepted without a notification", "n1", CallAccepted, pgtype.Text{}, ackCall.EndedAt,
+			AckNotificationMismatch, unverified},
+		{"waiting", "n1", CallWaiting, pgtype.Text{}, pgtype.Timestamptz{}, AckNotAccepted, unverified},
+		{"not delivered", "n1", CallNotDelivered, pgtype.Text{}, ended(time.Minute), AckNotAccepted, unverified},
+		{"dropped", "n1", CallDropped, pgtype.Text{}, ended(time.Minute), AckNotAccepted, unverified},
+		{"ended days ago", "n1", CallAccepted, ackCall.NotificationID, ended(72 * time.Hour), AckStaleCall,
+			"Срок действия этого звонка истёк; ничего не изменилось"},
+		{"ended just past the window", "n1", CallAccepted, ackCall.NotificationID, ended(AckWindow + time.Second),
+			AckStaleCall, "Срок действия этого звонка истёк; ничего не изменилось"},
+		{"ended a minute ago", "n1", CallAccepted, ackCall.NotificationID, ended(time.Minute), "",
+			"Подтверждена: #2"},
+		{"ended past bridge.event_max_age", "n1", CallAccepted, ackCall.NotificationID,
+			ended(bridge.EventMaxAge + 30*time.Minute), "", "Подтверждена: #2"},
+		{"ended at the end of the window", "n1", CallAccepted, ackCall.NotificationID, ended(AckWindow), "",
+			"Подтверждена: #2"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newAck(2)
+			e.q.call.State, e.q.call.NotificationID, e.q.call.EndedAt = c.state, c.callNotification, c.endedAt
+			e.q.call.UserLanguage = pgtype.Text{String: "ru", Valid: true}
+			if got := e.runAs(t, c.notification, callData(t)); got != c.want {
+				t.Errorf("answer %q, want %q", got, c.want)
+			}
+			if c.reason == "" {
+				if len(e.cmd.groups) != 1 || strings.Contains(e.log.String(), "gateway_acknowledge_refused") {
+					t.Errorf("ran %v, logged %s", e.cmd.groups, e.log)
+				}
+				return
+			}
+			want := `"event":"gateway_acknowledge_refused","call":"CA0000000000P1","connection":"CN00000000GW10",` +
+				`"reason":"` + c.reason + `"`
+			if len(e.cmd.groups) != 0 || !strings.Contains(e.log.String(), want) {
+				t.Errorf("ran %v, logged %s", e.cmd.groups, e.log)
+			}
+			for _, id := range []string{`"n1"`, `"n2"`} {
+				if strings.Contains(e.log.String(), id) {
+					t.Errorf("a notification_id was logged: %s", e.log)
+				}
+			}
+		})
+	}
+	// The window is the time the Keyring keeps the key of a call: twice bridge.event_max_age.
+	if AckWindow != 2*bridge.EventMaxAge {
+		t.Errorf("AckWindow %v", AckWindow)
+	}
+}
+
+// TestAcknowledgedWhileSending: a call being sent — its attempt under way, or retried after a Transient error or a
+// timeout, which the gateway may have taken and rung — acts without a notification_id to compare, whatever the event
+// names. Once the call is accepted as n1, an event about another notification is refused as notification_mismatch, and
+// the same acknowledgement again changes nothing: the Alert Group is the person's already. A call Not delivered after
+// its attempts is refused as not_accepted.
+func TestAcknowledgedWhileSending(t *testing.T) {
+	e := newAck(2)
+	e.q.call.State, e.q.call.NotificationID, e.q.call.EndedAt = CallSending, pgtype.Text{}, pgtype.Timestamptz{}
+	if got := e.runAs(t, "n1", callData(t)); got != "Acknowledged: #2" || len(e.cmd.groups) != 1 || e.log.Len() != 0 {
+		t.Fatalf("while sending: answer %q, ran %v, logged %s", got, e.cmd.groups, e.log)
+	}
+
+	// The call is accepted as n1, and the Alert Group is petr's.
+	e.q.call.State, e.q.call.NotificationID = CallAccepted, pgtype.Text{String: "n1", Valid: true}
+	e.q.call.EndedAt = pgtype.Timestamptz{Time: ackNow, Valid: true}
+	e.cmd.errs[groupID(2)] = &groups.RefusedError{Code: groups.CodeOwnedByOther, OwnerName: "Petr"}
+	if got := e.runAs(t, "n9", callData(t)); got != "This call could not be verified; nothing was changed" ||
+		len(e.cmd.groups) != 1 || !strings.Contains(e.log.String(), `"reason":"notification_mismatch"`) {
+		t.Errorf("another notification: answer %q, ran %v, logged %s", got, e.cmd.groups, e.log)
+	}
+	if got := e.runAs(t, "n1", callData(t)); got != "Already taken by Petr" || len(e.cmd.groups) != 2 {
+		t.Errorf("the same acknowledgement again: answer %q, ran %v", got, e.cmd.groups)
+	}
+
+	e = newAck(2)
+	e.q.call.State, e.q.call.NotificationID = CallNotDelivered, pgtype.Text{}
+	if got := e.run(t, callData(t)); got != "This call could not be verified; nothing was changed" ||
+		len(e.cmd.groups) != 0 || !strings.Contains(e.log.String(), `"reason":"not_accepted"`) {
+		t.Errorf("not delivered: answer %q, ran %v, logged %s", got, e.cmd.groups, e.log)
+	}
+}
+
 // TestAcknowledgedFailures: a read that fails, or a Command that fails otherwise than by a refusal, fails the event,
 // so that it comes again.
 func TestAcknowledgedFailures(t *testing.T) {
@@ -303,7 +416,7 @@ func TestAcknowledgedFailures(t *testing.T) {
 			e.q.fail[q] = boom
 		}
 		if _, err := e.a.Acknowledged(t.Context(), bridge.Conn{ID: 10, PublicID: "CN00000000GW10"},
-			bridge.Event{ID: "e1", Data: callData(t)}); !errors.Is(err, boom) {
+			bridge.Event{ID: "e1", NotificationID: "n1", Data: callData(t)}); !errors.Is(err, boom) {
 			t.Errorf("%s failing = %v", q, err)
 		}
 	}

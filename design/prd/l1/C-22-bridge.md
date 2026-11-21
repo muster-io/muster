@@ -212,9 +212,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
      handle in a field labelled by the lookup kind — Email, Login, Username or User id; Muster finds the account
      with `findUsers`, sends it a code with `sendDirectMessage` and the warning "You requested a link to Muster. Do
      not share this code.", and the user types the code into the profile. Codes follow
-     `account_link.bridge_code` and are limited by `account_link.bridge_code_requests`, per requesting User and per
-     target account. A handle the bridge does not find is refused with "No account with this {kind} was found." The
-     link-making messages are interactive calls (C-18.FR-11).
+     `account_link.bridge_code` and are limited by `account_link.bridge_code_requests`, per requesting User, per
+     requesting User and target account, and at most 10 codes per hour to one account across Users, beyond which a
+     request is answered as sent and nothing is sent. A handle the bridge does not find is refused with "No account
+     with this {kind} was found." The link-making messages are interactive calls (C-18.FR-11).
 
   A link stores the account's `external_id` and `display_name`, and its handle when the bridge reports one.
 - **C-22.FR-16** A Mention of a User with an Account link for the Destination's Connection is an entry of the

@@ -29,6 +29,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/gateways"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/organization"
@@ -857,8 +858,19 @@ func TestIntegrationGatewayContactsOfDeletedUsers(t *testing.T) {
 		}
 		gw := &codeGateway{}
 		w := audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), e.clock)
-		contacts := gateways.New(gateways.Config{OrgID: e.orgID, Store: gateways.NewStore(e.d.Pool), Audit: w,
-			Business: e.clock, Log: logging.New(&bytes.Buffer{}, logging.LevelInfo), Gateway: gw,
+		keys, err := keyring.New([][]byte{bytes.Repeat([]byte{'k'}, keyring.KeySize)}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := keys.Establish(ctx, keyring.NewStore(e.d.Pool), t0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := keys.Open(ctx, logging.New(&bytes.Buffer{}, logging.LevelInfo), state); err != nil {
+			t.Fatal(err)
+		}
+		contacts := gateways.New(gateways.Config{OrgID: e.orgID, Store: gateways.NewStore(e.d.Pool), Keys: keys,
+			Audit: w, Business: e.clock, Log: logging.New(&bytes.Buffer{}, logging.LevelInfo), Gateway: gw,
 			Path: deliverytest.Unlimited(e.orgID, clock.Clocks{Business: e.clock, Real: clock.Real{}})})
 		e.admin.SetContactRemover(contacts)
 		bob := e.create(t, "Bob", "bob", auth.RoleResponder, "bob-password-1")

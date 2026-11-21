@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
@@ -466,7 +467,10 @@ func (s *Service) confirm(ctx context.Context, q Queries, r Requester, contactPu
 	if out.reason != "" {
 		return nil
 	}
-	right := subtle.ConstantTimeCompare(codeHash(c.PublicID, normalizeCode(code)), k.CodeHash) == 1
+	right, err := s.rightCode(c.PublicID, normalizeCode(code), k.CodeHash)
+	if err != nil {
+		return err
+	}
 	if !right || k.SessionID != r.SessionID {
 		out.reason = ReasonWrongCode
 		if right {
@@ -613,13 +617,16 @@ func (s *Service) limits(ctx context.Context, q Queries, userID int64, hash []by
 	return m.Requests >= CodesPerContact, nil
 }
 
-// storeCode stores the code of the contact contactID, its SHA-256 bound to the contact only, tied to the web session
+// storeCode stores the code of the contact contactID, its HMAC bound to the contact only, tied to the web session
 // sessionID, expiring CodeTTL after now. A withheld code is stored instead as random bytes that no code hashes to and
 // marked sent at once, voiding the contact's earlier codes: it counts toward the limits and looks like a code the
 // gateway accepted, but confirms nothing.
 func (s *Service) storeCode(ctx context.Context, q Queries, userID, contactID int64, contactPublicID, text string,
 	sessionID int64, code string, now time.Time, withhold bool) (int64, error) {
-	hash := codeHash(contactPublicID, code)
+	hash, err := s.codeHash(contactPublicID, code)
+	if err != nil {
+		return 0, err
+	}
 	if withhold {
 		if _, err := io.ReadFull(s.cfg.Random, hash); err != nil {
 			return 0, fmt.Errorf("generate the withheld code: %w", err)
@@ -833,10 +840,32 @@ func hashText(text string) []byte {
 	return h[:]
 }
 
-// codeHash is the SHA-256 of a code bound to its contact, as it is stored.
-func codeHash(contactPublicID, code string) []byte {
-	h := sha256.Sum256([]byte(contactPublicID + ":" + code))
-	return h[:]
+// codeHash is a code bound to its contact as it is stored: its HMAC with the gateway-contact-code sub-key of the
+// active key, which checks nothing without a key of the Keyring.
+func (s *Service) codeHash(contactPublicID, code string) ([]byte, error) {
+	mac, _, err := s.cfg.Keys.Sign(keyring.PurposeGatewayContactCode, []byte(contactPublicID+":"+code))
+	if err != nil {
+		return nil, fmt.Errorf("sign the code: %w", err)
+	}
+	return mac, nil
+}
+
+// rightCode reports whether stored is code of its contact: its HMAC with any key of the Keyring, since the key that
+// stored it may have been retired since, or the plain SHA-256 that codes stored before they were signed have; those
+// expire within CodeTTL of the upgrade, and an HMAC never equals a SHA-256 but by collision. Every comparison runs in
+// constant time, whichever matches.
+func (s *Service) rightCode(contactPublicID, code string, stored []byte) (bool, error) {
+	msg := []byte(contactPublicID + ":" + code)
+	legacy := sha256.Sum256(msg)
+	right := subtle.ConstantTimeCompare(legacy[:], stored) == 1
+	for _, id := range s.cfg.Keys.KeyIDs() {
+		ok, err := s.cfg.Keys.Verify(keyring.PurposeGatewayContactCode, id, msg, stored)
+		if err != nil {
+			return false, fmt.Errorf("check the code: %w", err)
+		}
+		right = right || ok
+	}
+	return right, nil
 }
 
 // language is the language of the person's notifications: their profile's, else English.

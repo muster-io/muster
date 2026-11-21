@@ -1487,6 +1487,35 @@ func (f *fakeDB) DeleteExpiredReplies(_ context.Context, arg dbgen.DeleteExpired
 	return n, nil
 }
 
+func (f *fakeDB) DeleteExpiredDeliveries(_ context.Context, arg dbgen.DeleteExpiredDeliveriesParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("DeleteExpiredDeliveries"); err != nil {
+		return 0, err
+	}
+	waiting := map[int64]bool{}
+	for _, r := range f.replies {
+		if r.state == "collecting" || r.state == "pending" {
+			waiting[r.delivery] = true
+		}
+	}
+	gone := map[int64]bool{}
+	var n int64
+	f.deliveries = slices.DeleteFunc(f.deliveries, func(d *fakeDelivery) bool {
+		g := f.groups[d.group]
+		if n < int64(arg.BatchSize) && g != nil && g.status == "resolved" && g.resolvedAt != nil &&
+			g.resolvedAt.Before(arg.Cutoff) && d.updated.Before(arg.Cutoff) && d.state != "pending" &&
+			(d.owner == "" || !d.until.After(arg.RealNow)) && !waiting[d.id] {
+			n++
+			gone[d.id] = true
+			return true
+		}
+		return false
+	})
+	f.replies = slices.DeleteFunc(f.replies, func(r *fakeReply) bool { return gone[r.delivery] })
+	return n, nil
+}
+
 func (f *fakeDB) RecordNotDelivered(_ context.Context, arg dbgen.RecordNotDeliveredParams) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2941,6 +2970,55 @@ func TestStatesAndLeaderTasks(t *testing.T) {
 	}
 	e.db.fail["GetRetentionDetailsDays"] = errBoom
 	if _, err := e.svc.PruneReplies(t.Context(), business0); !errors.Is(err, errBoom) {
+		t.Errorf("days failed = %v", err)
+	}
+}
+
+// TestPruneDeliveries is the retention of deliveries (C-09.FR-16, #660): those of Alert Groups resolved
+// retention.alert_details ago and last changed before then go, in batches until one comes back short, with their
+// Thread replies, and so do those whose lease ran out on the real clock; pending ones, those under a running lease,
+// waiting and later changed ones, and those of Alert Groups resolved later or still open, stay.
+func TestPruneDeliveries(t *testing.T) {
+	e := newEnv(t)
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Real: e.real,
+		Renderer: stubRenderer{}})
+	old, recent := business0.Add(-91*24*time.Hour), business0.Add(-89*24*time.Hour)
+	e.db.groups[901] = &fakeGroup{id: 901, status: "resolved", resolvedAt: &old}
+	e.db.groups[902] = &fakeGroup{id: 902, status: "resolved", resolvedAt: &recent}
+	e.db.groups[groupID].created = old
+	for i := range delivery.RetentionBatch + 3 {
+		e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: int64(10_000 + i), group: 901, state: "delivered"})
+	}
+	e.db.deliveries = append(e.db.deliveries,
+		&fakeDelivery{id: 1, group: 901, state: "pending"},
+		&fakeDelivery{id: 2, group: 901, state: "delivered", owner: "r1", until: real0.Add(time.Minute)},
+		&fakeDelivery{id: 7, group: 901, state: "withheld", owner: "r9", until: real0.Add(-time.Minute)},
+		&fakeDelivery{id: 3, group: 901, state: "delivered"},
+		&fakeDelivery{id: 4, group: 902, state: "delivered"},
+		&fakeDelivery{id: 5, group: groupID, state: "delivered"},
+		&fakeDelivery{id: 6, group: 901, state: "retired", updated: recent})
+	e.db.replies = append(e.db.replies, &fakeReply{id: 1, delivery: 3, state: "pending"},
+		&fakeReply{id: 2, delivery: 10_000, state: "sent"})
+	n, err := e.svc.PruneDeliveries(t.Context(), business0)
+	if err != nil || n != delivery.RetentionBatch+4 || e.db.calls["DeleteExpiredDeliveries"] != 2 {
+		t.Fatalf("pruned %d in %d deletes, %v", n, e.db.calls["DeleteExpiredDeliveries"], err)
+	}
+	var left []int64
+	for _, d := range e.db.deliveries {
+		left = append(left, d.id)
+	}
+	if !slices.Equal(left, []int64{1, 2, 3, 4, 5, 6}) || len(e.db.replies) != 1 || e.db.replies[0].id != 1 {
+		t.Errorf("left deliveries %v, replies %d", left, len(e.db.replies))
+	}
+	if n, err := e.svc.PruneDeliveries(t.Context(), business0); err != nil || n != 0 {
+		t.Errorf("second run pruned %d, %v", n, err)
+	}
+	e.db.fail["DeleteExpiredDeliveries"] = errBoom
+	if _, err := e.svc.PruneDeliveries(t.Context(), business0); !errors.Is(err, errBoom) {
+		t.Errorf("delete failed = %v", err)
+	}
+	e.db.fail["GetRetentionDetailsDays"] = errBoom
+	if _, err := e.svc.PruneDeliveries(t.Context(), business0); !errors.Is(err, errBoom) {
 		t.Errorf("days failed = %v", err)
 	}
 }

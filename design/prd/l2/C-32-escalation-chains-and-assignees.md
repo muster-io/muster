@@ -90,6 +90,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   chains, and they start over at their first step when it stops keeping the Alert Group back (C-34.FR-15,
   C-34.FR-18, C-34.FR-19). Steps are timer rows that any replica claims (ADR-0007); every step is a
   system transition of the dispatcher with Muster as the actor (ADR-0016).
+  _Revised for L2 (2026-11-21):_ new Alerts that remove the acknowledgement, where the Route lets them, start the
+  chains that apply over at their first step (C-36.FR-7); Attach stops the chains of the attached Alert Group, which
+  start none while it follows its main Alert Group, and a Detach that leaves it firing starts them over (C-37.FR-4,
+  C-37.FR-8).
 - **C-32.FR-6** When the first chain of an Alert Group starts, its running ack timeout stops and sends no more notices.
   When the Alert Group becomes firing again, its ack timeout starts over only if none of its chains starts; an Alert
   Group on which no chain applies keeps the ack timeout of C-17.

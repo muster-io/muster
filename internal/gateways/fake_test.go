@@ -6,8 +6,13 @@ package gateways
 import (
 	"bytes"
 	"context"
+	"crypto/hkdf"
+	"crypto/hmac"
+	"crypto/sha256"
+	"io"
 	"slices"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,7 +21,68 @@ import (
 	adb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
+	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
+	"github.com/muster-io/muster/internal/logging"
 )
+
+// keyState is keyring_state in memory, all a Keyring reads and writes to open.
+type keyState struct {
+	keyring.Store
+	state *kdb.GetKeyringStateRow
+}
+
+func (s *keyState) GetKeyringState(context.Context) (kdb.GetKeyringStateRow, error) {
+	if s.state == nil {
+		return kdb.GetKeyringStateRow{}, pgx.ErrNoRows
+	}
+	return *s.state, nil
+}
+
+func (s *keyState) CreateKeyringState(_ context.Context, a kdb.CreateKeyringStateParams) (int64, error) {
+	s.state = &kdb.GetKeyringStateRow{ActiveKeyID: a.ActiveKeyID, CanaryKeyID: a.ActiveKeyID,
+		CanaryCiphertext: a.CanaryCiphertext, ActivatedAt: a.ActivatedAt}
+	return 1, nil
+}
+
+// masterKey is the master key of KeySize bytes fill.
+func masterKey(fill byte) []byte {
+	return bytes.Repeat([]byte{fill}, keyring.KeySize)
+}
+
+// openKeys is the Keyring of the master keys of fills, opened with the first one active and the others retired.
+func openKeys(t *testing.T, fills ...byte) *keyring.Keyring {
+	t.Helper()
+	var keys [][]byte
+	for _, f := range fills {
+		keys = append(keys, masterKey(f))
+	}
+	k, err := keyring.New(keys, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := k.Establish(t.Context(), &keyState{}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Open(t.Context(), logging.New(io.Discard, logging.LevelInfo), st); err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// signedCode is code as it is stored for the contact contactPublicID under the master key of fill, computed apart
+// from the Keyring: the HMAC-SHA256 of "public_id:code" with the HKDF sub-key of the purpose gateway-contact-code.
+func signedCode(t *testing.T, fill byte, contactPublicID, code string) []byte {
+	t.Helper()
+	sub, err := hkdf.Key(sha256.New, masterKey(fill), nil, "muster keyring v1 gateway-contact-code", keyring.KeySize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := hmac.New(sha256.New, sub)
+	h.Write([]byte(contactPublicID + ":" + code))
+	return h.Sum(nil)
+}
 
 // fakeStore is the contacts and codes of one Organization in memory, with the semantics of query.sql; a transaction
 // that fails is rolled back. fail makes the named query fail.

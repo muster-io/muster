@@ -5,6 +5,7 @@ package accountlinks
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -56,15 +57,17 @@ type MattermostStarted struct {
 
 // StartMattermost starts a Mattermost link of the requesting User to the account username of the Mattermost
 // Connection connectionPublicID (C-18.FR-3): a leading @ is dropped. Code requests beyond
-// account_link.mattermost_code_requests within the last hour — of the User, or for the target account — are a
-// *RateLimitedError until the oldest one counted is an hour old; the User's are counted before the account is looked
-// up, and both again in the transaction that stores the request, under the lock of the User and of the target
+// account_link.mattermost_code_requests within the last hour — of the User, or of the User for the target account —
+// are a *RateLimitedError until the oldest one counted is an hour old; the User's are counted before the account is
+// looked up, and both again in the transaction that stores the request, under the lock of the User and of the target
 // account, so that concurrent requests cannot pass the limits. With one limiter token of the interactive path, taken
 // before anything is stored: the account is found by its username (unknown: FieldError messenger_user_not_found); an
 // account linked to another User is ErrLinkedElsewhere, recorded as link_rejected with conflict; otherwise the User's
 // pending requests for the Connection are voided, a code of account_link.mattermost_code is stored as its SHA-256,
-// and the bot sends it in a direct message. A message that fails voids the request. A Connection that is missing,
-// deleted or not a Mattermost one is a FieldError unknown_id.
+// and the bot sends it in a direct message. A message that fails voids the request. A request beyond the codes the
+// account receives within the hour across Users is answered as if its code were sent: a request no code confirms is
+// stored, nothing is sent, and account_link_code_withheld is logged. A Connection that is missing, deleted or not a
+// Mattermost one is a FieldError unknown_id.
 func (s *Service) StartMattermost(ctx context.Context, r Requester, connectionPublicID, username string) (
 	MattermostStarted, error) {
 	conn, err := s.connection(ctx, connectionPublicID, MessengerMattermost)
@@ -113,6 +116,7 @@ func (s *Service) startMattermost(ctx context.Context, b MattermostBot, r Reques
 	}
 	var (
 		conflict bool
+		withhold bool
 		lang     string
 		reqID    int64
 		started  = MattermostStarted{RequestPublicID: publicid.New(publicid.AccountLinkRequest),
@@ -127,7 +131,7 @@ func (s *Service) startMattermost(ctx context.Context, b MattermostBot, r Reques
 		if err := s.userCodeLimit(ctx, q, u.ID, now); err != nil {
 			return err
 		}
-		if err := s.targetCodeLimit(ctx, q, conn.id, acct.ID, now); err != nil {
+		if withhold, err = s.targetCodeLimit(ctx, q, MessengerMattermost, conn.id, acct.ID, u.ID, now); err != nil {
 			return err
 		}
 		other, err := q.GetAccountLinkBySpace(ctx, dbgen.GetAccountLinkBySpaceParams{OrgID: s.cfg.OrgID,
@@ -143,9 +147,13 @@ func (s *Service) startMattermost(ctx context.Context, b MattermostBot, r Reques
 			OrgID: s.cfg.OrgID, UserID: u.ID, ConnectionID: conn.id}); err != nil {
 			return fmt.Errorf("void the earlier link requests: %w", err)
 		}
+		secret, err := s.secretHash(code, withhold)
+		if err != nil {
+			return err
+		}
 		reqID, err = q.InsertLinkRequest(ctx, dbgen.InsertLinkRequestParams{OrgID: s.cfg.OrgID,
 			PublicID: started.RequestPublicID, UserID: u.ID, Messenger: MessengerMattermost, ConnectionID: conn.id,
-			SecretHash: hash(code), TargetExternalID: optText(&acct.ID), TargetUsername: optText(&acct.Username),
+			SecretHash: secret, TargetExternalID: optText(&acct.ID), TargetUsername: optText(&acct.Username),
 			CreatedAt: now, ExpiresAt: started.ExpiresAt})
 		if err != nil {
 			return fmt.Errorf("store the link request: %w", err)
@@ -158,6 +166,10 @@ func (s *Service) startMattermost(ctx context.Context, b MattermostBot, r Reques
 	if conflict {
 		s.logRejected(ctx, MessengerMattermost, conn.publicID, ReasonConflict, nil)
 		return MattermostStarted{}, ErrLinkedElsewhere
+	}
+	if withhold {
+		s.logWithheld(ctx, MessengerMattermost, conn.publicID, r.UserPublicID)
+		return started, nil
 	}
 	// The code is masked in the Request log's record of the direct message (C-23.FR-3).
 	if err := b.SendDirect(outbound.WithSecrets(ctx, logging.Secret(code)), acct.ID,
@@ -187,22 +199,57 @@ func (s *Service) userCodeLimit(ctx context.Context, q Queries, userID int64, no
 }
 
 // targetCodeLimit takes the lock of the code requests for the account target of the Connection connID until the
-// transaction of q ends, then refuses a request beyond account_link.mattermost_code_requests within the hour before
-// now with a *RateLimitedError.
-func (s *Service) targetCodeLimit(ctx context.Context, q Queries, connID int64, target string, now time.Time) error {
+// transaction of q ends, then counts the code requests of messenger — mattermost, bridge or slack — for the account
+// within the hour before now under its account_link.*_code_requests: a request of the User userID beyond those the
+// User may ask for the account is refused with a *RateLimitedError until the oldest of them is an hour old. A request
+// beyond the codes the account receives, whoever asked, is not refused, which would tell of other Users' requests:
+// withhold says to answer it as sent and send nothing.
+func (s *Service) targetCodeLimit(ctx context.Context, q Queries, messenger string, connID int64, target string,
+	userID int64, now time.Time) (withhold bool, err error) {
 	if err := q.LockCodeTarget(ctx, dbgen.LockCodeTargetParams{LockClass: db.AccountLinkCodeTargetLockClass,
 		OrgID: s.cfg.OrgID, ConnectionID: connID, TargetExternalID: target}); err != nil {
-		return fmt.Errorf("lock the link code requests of the account: %w", err)
+		return false, fmt.Errorf("lock the link code requests of the account: %w", err)
 	}
-	n, err := q.CountTargetCodeRequests(ctx, dbgen.CountTargetCodeRequestsParams{Since: now.Add(-CodeRequestWindow),
-		OrgID: s.cfg.OrgID, ConnectionID: connID, TargetExternalID: optText(&target)})
+	p := dbgen.CountTargetCodeRequestsParams{UserID: userID, Since: now.Add(-CodeRequestWindow), OrgID: s.cfg.OrgID,
+		ConnectionID: connID, TargetExternalID: optText(&target)}
+	var (
+		n                 dbgen.CountTargetCodeRequestsRow
+		perUser, received int64
+	)
+	switch messenger {
+	case MessengerBridge:
+		var b dbgen.CountTargetBridgeCodeRequestsRow
+		b, err = q.CountTargetBridgeCodeRequests(ctx, dbgen.CountTargetBridgeCodeRequestsParams(p))
+		n, perUser, received = dbgen.CountTargetCodeRequestsRow(b), BridgeCodeRequestsPerTarget, BridgeCodesPerTarget
+	case MessengerSlack:
+		var sl dbgen.CountTargetSlackCodeRequestsRow
+		sl, err = q.CountTargetSlackCodeRequests(ctx, dbgen.CountTargetSlackCodeRequestsParams(p))
+		n, perUser, received = dbgen.CountTargetCodeRequestsRow(sl), SlackCodeRequestsPerTarget, SlackCodesPerTarget
+	default:
+		n, err = q.CountTargetCodeRequests(ctx, p)
+		perUser, received = CodeRequestsPerTarget, CodesPerTarget
+	}
 	if err != nil {
-		return fmt.Errorf("count the link code requests: %w", err)
+		return false, fmt.Errorf("count the link code requests: %w", err)
 	}
-	if n.Requests >= CodeRequestsPerTarget {
-		return &RateLimitedError{RetryAfter: n.Oldest.Add(CodeRequestWindow).Sub(now)}
+	if n.UserRequests >= perUser {
+		return false, &RateLimitedError{RetryAfter: n.UserOldest.Add(CodeRequestWindow).Sub(now)}
 	}
-	return nil
+	return n.Requests >= received, nil
+}
+
+// secretHash is the hash stored for the code of a link request: its SHA-256, or for a withheld code random bytes that
+// no code hashes to, so that the request counts toward the limits and voids the User's earlier ones as a sent code
+// does, but confirms nothing.
+func (s *Service) secretHash(code string, withhold bool) ([]byte, error) {
+	if !withhold {
+		return hash(code), nil
+	}
+	b := make([]byte, sha256.Size)
+	if _, err := io.ReadFull(s.cfg.Random, b); err != nil {
+		return nil, fmt.Errorf("generate the withheld link code: %w", err)
+	}
+	return b, nil
 }
 
 // ConfirmMattermost confirms the Mattermost link request requestPublicID of the requesting User with code

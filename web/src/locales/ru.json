@@ -271,7 +271,7 @@
       "days_few": "{{count}} дня",
       "days_many": "{{count}} дней",
       "days_other": "{{count}} дня",
-      "detailsRemoved": "Алерты и хронология этой группы удалены через {{period}}; остались только сводка и заметки.",
+      "detailsRemoved": "Алерты, хронология и состояние доставки этой группы удалены через {{period}}; остались только сводка и заметки.",
       "firingAgain": "Снова горит после ручного закрытия <link>#{{number}}</link>",
       "replacement": "Алерты заменились, потому что изменилась метка <label></label>. Стоит убрать метки экземпляра из правила, например <code>without(pod, instance)</code>.",
       "stillFiring_one": "⚠ В Alertmanager ещё горит {{count}} алерт",
