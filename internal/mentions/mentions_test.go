@@ -796,9 +796,10 @@ func resolveFake() *fakeQueries {
 // order — the On-call of the Teams from the label at the time of the event and nobody in a gap, everyone with its
 // word, a Team by its Team mention for the Connection and nobody without one, never its On-call, a group by its name, a
 // linked person by their Account link — and nobody that the Connection cannot mention; a person without an Account
-// link in the identity space and a deleted User are left out, and each person and group is mentioned once; the first
-// publication of a Storm summary takes the Teams of the Alert Groups the Storm counts. The Owner and the previous
-// Owner are named as L1 named them, at their places among the symbolic Mentions.
+// link in the identity space and a deleted User are left out, each person and group is mentioned once and each word of
+// everyone its entries name is mentioned; the first publication of a Storm summary takes the Teams of the Alert Groups
+// the Storm counts. The Owner and the previous Owner are named as L1 named them, at their places among the symbolic
+// Mentions.
 func TestResolve(t *testing.T) {
 	ctx := t.Context()
 	f := resolveFake()
@@ -812,6 +813,8 @@ func TestResolve(t *testing.T) {
 	later := mm
 	later.At = t0.Add(2 * time.Hour)
 	storm := Request{DestinationID: 10, DestinationType: TypeMattermost, ConnectionID: conn(3), StormID: 9, At: t0}
+	f.entries[11] = []EntryInput{everyone(EveryoneChannel, KindReopen), everyone(EveryoneHere, KindReopen),
+		everyone(EveryoneAll, KindReopen)}
 	for _, tc := range []struct {
 		name     string
 		r        Request
@@ -822,6 +825,8 @@ func TestResolve(t *testing.T) {
 		{"a new alert group", mm, 0, []string{KindNewAlertGroup},
 			"user:alice.mm,everyone:here,group:payments_team,group:oncall"},
 		{"its reopen", mm, 0, []string{KindReopen}, "user:alice.mm,group:payments_team"},
+		{"every word of everyone", Request{DestinationID: 11, DestinationType: TypeMattermost, ConnectionID: conn(3),
+			At: t0}, 0, []string{KindReopen}, "everyone:channel,everyone:here,everyone:all"},
 		{"new alerts: each person once, unlinked and deleted ones left out", mm, 0, []string{KindNewAlerts},
 			"user:alice.mm,group:payments_team"},
 		{"in a gap of the schedule", later, 0, []string{KindNewAlertGroup},
