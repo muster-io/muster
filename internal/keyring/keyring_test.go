@@ -157,6 +157,39 @@ func TestSubKeysAreSeparate(t *testing.T) {
 	}
 }
 
+// TestSignWith covers the signature with a named key: any key of the Keyring signs, not only the active one, with a
+// sub-key of its own purpose, which Verify accepts with that key only; an unknown key and the encryption purpose sign
+// nothing.
+func TestSignWith(t *testing.T) {
+	k := newKeyring(t, 'a', 'b')
+	ida, idb := k.keys[0].id, k.keys[1].id
+	active(t, k, idb)
+	msg := []byte("callback CN0000000000C1")
+	a, err := k.SignWith(PurposeMattermostCallback, ida, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := k.Verify(PurposeMattermostCallback, ida, msg, a); !ok || err != nil {
+		t.Errorf("Verify with the key that signed = %v, %v", ok, err)
+	}
+	if ok, _ := k.Verify(PurposeMattermostCallback, idb, msg, a); ok {
+		t.Error("a signature of one key verifies with another")
+	}
+	if ok, _ := k.Verify(PurposeButtonSignature, ida, msg, a); ok {
+		t.Error("a callback signature verifies as a button signature")
+	}
+	b, _ := k.SignWith(PurposeMattermostCallback, idb, msg)
+	if active, _, _ := k.Sign(PurposeMattermostCallback, msg); !bytes.Equal(active, b) || bytes.Equal(a, b) {
+		t.Error("SignWith of the active key differs from Sign, or two keys sign alike")
+	}
+	if _, err := k.SignWith(PurposeMattermostCallback, "k-unknown", msg); !errors.Is(err, ErrKeyNotHeld) {
+		t.Errorf("SignWith with an unknown key = %v", err)
+	}
+	if _, err := k.SignWith(PurposeEncryption, ida, msg); err == nil {
+		t.Error("the encryption sub-key signs")
+	}
+}
+
 func TestEncryptionBindsTheField(t *testing.T) {
 	k := active(t, newKeyring(t, 'a'), KeyID(material('a')))
 	ct, id, err := k.Encrypt("destinations.bot_token", []byte("secret-bot-token"))

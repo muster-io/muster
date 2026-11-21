@@ -594,7 +594,8 @@ func TestInboundMasking(t *testing.T) {
 		}))
 	bodies := []struct{ body, shows string }{
 		{`{"user_id":"u-bob","channel_id":"c","post_id":"p","trigger_id":"tr","context":{"action":"` + press +
-			`","key_id":"k-01"}}`, `"context":{"action":"[redacted]","key_id":"k-01"}`},
+			`","key_id":"k-0123456789abcdef","secret":"` + callbackSecret + `"}}`,
+			`"context":{"action":"[redacted]","key_id":"[redacted]","secret":"[redacted]"}`},
 		{`{"update_id":1,"message":{"message_id":1,"from":{"id":42,"is_bot":false,"first_name":"Bob"},` +
 			`"chat":{"id":42,"type":"private"},"date":1,"text":"/start ` + start + `"}}`, `"text":"/start [redacted]"`},
 		{`{"update_id":2,"callback_query":{"id":"q1","from":{"id":42,"is_bot":false,"first_name":"Bob"},"data":"` +
@@ -617,7 +618,8 @@ func TestInboundMasking(t *testing.T) {
 		}
 		p := q.inserts[i]
 		for _, text := range texts(p) {
-			for _, secret := range []string{press, data, query, start, link, "s3cret-"} {
+			for _, secret := range []string{press, data, query, start, link, "s3cret-", "k-0123456789abcdef",
+				callbackSecret} {
 				if strings.Contains(text, secret) {
 					t.Errorf("request %d stores %q in %q", i, secret, text)
 				}

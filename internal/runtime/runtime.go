@@ -852,7 +852,7 @@ func (p *process) serve(ctx context.Context) error {
 func (p *process) messengerAdapters() {
 	if p.mattermost == nil {
 		p.mattermost = &mattermost.Adapter{Targets: p.connections, PublicURL: p.cfg.PublicURL.String(),
-			IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version}
+			IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version, Keys: p.keyring}
 	}
 	if p.telegram == nil {
 		p.telegram = &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real}
@@ -891,8 +891,9 @@ func Callbacks(rec requestlog.InboundRecorder, realClock clock.Clock, mm matterm
 func (p *process) callbacks(presses context.Context) http.Handler {
 	return Callbacks(p.requestLog, p.clocks.Real, mattermost.CallbackConfig{
 		Connections: p.connections, Bindings: p.delivery, Links: p.links,
-		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
-		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, TestPresses: p.testPresses, Log: p.log},
+		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Refresh: p.delivery, Path: p.interactive,
+		Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit,
+		TestPresses: p.testPresses, Log: p.log},
 		telegram.WebhookConfig{Connections: p.connections, Router: p.updates, Outages: p.connections,
 			Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log},
 		bridge.PushConfig{Connections: p.connections, Events: p.bridgeEvents, Real: p.clocks.Real, Log: p.log},

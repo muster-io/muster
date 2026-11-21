@@ -56,6 +56,11 @@ type Bindings interface {
 		error)
 }
 
+// Refresher edits a Root message again as it is rendered now; *delivery.Service implements it.
+type Refresher interface {
+	RefreshButtons(ctx context.Context, groupID, destinationID int64) (bool, error)
+}
+
 // Links map a Mattermost account to its User; *accountlinks.Service implements it.
 type Links interface {
 	Lookup(ctx context.Context, identitySpace, externalID string) (accountlinks.User, error)
@@ -79,8 +84,11 @@ type CallbackConfig struct {
 	Commands    Commands
 	// Roles are the Permissions of each Role, which the linked User presses with.
 	Roles auth.Roles
-	// Keys verify the signed action ids: the Keyring.
-	Keys buttons.Keys
+	// Keys verify the signed action ids and the callback secrets of presses: the Keyring.
+	Keys Keys
+	// Refresh edits again a Root message whose buttons carry no callback secret, laid out before they did, so that
+	// they carry it; nil edits none.
+	Refresh Refresher
 	// Path is the interactive path the ephemeral posts of the answers go through.
 	Path Path
 	// Budget bounds the ephemeral post of an answer, its limiter tokens included: delivery.interactive_budget; zero
@@ -246,12 +254,20 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 		return press{outcome: outcomeFailed, err: connErr.Error()}
 	}
 	p := press{connection: conn.PublicID}
+	// Only the Mattermost server knows the callback secret of the button; a press without it is not one it made,
+	// whatever its action id says (secret.go).
+	genuine := verifySecret(h.cfg.Keys, req.Context.KeyID, conn.PublicID, req.Context.Action, req.Context.Secret)
 	a, err := buttons.Verify(h.cfg.Keys, req.Context.Action, req.Context.KeyID)
+	if errors.Is(err, buttons.ErrExpired) && a.Subject == buttons.SubjectReply {
+		// The key that signed the button left the Keyring, and with it what verifies its callback secret: the press
+		// changes nothing and is at most answered that the button has expired.
+		return h.expired(ctx, p, conn, req, a)
+	}
+	if err == nil && !genuine {
+		return h.withoutSecret(ctx, p, conn, req, a)
+	}
 	if err == nil && a.Subject == buttons.SubjectTest {
 		return h.testPress(ctx, p, conn, req, a)
-	}
-	if errors.Is(err, buttons.ErrExpired) && a.Subject == buttons.SubjectReply {
-		return h.expired(ctx, p, conn, req, a)
 	}
 	if err != nil || (a.Subject != buttons.SubjectRoot && a.Subject != buttons.SubjectReply) {
 		return h.notVerified(ctx, p, conn, req)
@@ -397,6 +413,46 @@ func (h *pressHandler) testPress(ctx context.Context, p press, conn Connection, 
 	requestlog.Annotate(ctx, requestlog.Links{Destination: d.ID})
 	p.outcome = outcomeTest
 	return h.answer(ctx, p, conn, d, req, "", messages.T(messages.LanguageEnglish, "press.test", nil), nil)
+}
+
+// withoutSecret refuses a press whose action id a is verified but whose callback secret is missing or wrong: the
+// Mattermost server did not send it, or the button was laid out before buttons carried the secret. It changes nothing
+// and is not verified. A press with no secret at all on a Root message it is bound to, as every press on a Root
+// message posted before the upgrade arrives, also has that Root message edited again, Quietly, so that its buttons
+// carry the secret, and is answered that the buttons are being updated; a second such press before the Alert Group
+// changes edits nothing more (delivery.Service.RefreshButtons). Any other is refused as notVerified refuses it.
+func (h *pressHandler) withoutSecret(ctx context.Context, p press, conn Connection, req pressRequest,
+	a buttons.Action) press {
+	if req.Context.Secret != "" || a.Subject != buttons.SubjectRoot || h.cfg.Refresh == nil {
+		return h.notVerified(ctx, p, conn, req)
+	}
+	b, err := h.cfg.Bindings.PressBinding(ctx, conn.ID, a.PublicID, req.PostID)
+	if err != nil || b.ChannelID != req.ChannelID {
+		return h.notVerified(ctx, p, conn, req)
+	}
+	requestlog.Annotate(ctx, requestlog.Links{Destination: b.Destination.ID, AlertGroup: b.AlertGroup})
+	p.outcome = outcomeNotVerified
+	return h.answer(ctx, p, conn, b.Destination, req, "", messages.T(b.Language, "press.outdated", nil),
+		h.refresh(ctx, b))
+}
+
+// refresh has the Root message of the binding b edited again once it took a token of its Destination's limiter
+// through the interactive path, within the budget, so that a flood of presses without a secret locks and renders the
+// Alert Group no faster than the Destination may be written to; without a token it refreshes nothing. It returns why
+// the Root message was not refreshed, nil when it was or needed nothing.
+func (h *pressHandler) refresh(ctx context.Context, b delivery.Binding) error {
+	ctx, cancel := context.WithTimeout(ctx, h.cfg.Budget)
+	defer cancel()
+	var err error
+	_, perr := h.cfg.Path.Do(ctx, delivery.Subject{Destination: &b.Destination}, delivery.ReadOp(
+		func(ctx context.Context, _ delivery.Call) delivery.Outcome {
+			_, err = h.cfg.Refresh.RefreshButtons(ctx, b.AlertGroup, b.Destination.ID)
+			return delivery.Outcome{Kind: delivery.OutcomeOK}
+		}))
+	if err = errors.Join(perr, err); err != nil {
+		return fmt.Errorf("the root message was not edited again: %w", err)
+	}
+	return nil
 }
 
 // notVerified refuses a press whose action id or binding does not hold. It is answered only on a post that Muster

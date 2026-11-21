@@ -7107,20 +7107,23 @@ type MattermostActionAnswer struct {
 	SkipSlackParsing *bool `json:"skip_slack_parsing,omitempty"`
 }
 
-// MattermostActionContext The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
+// MattermostActionContext The integration data Muster put on the button, which the Mattermost server strips from the posts it sends to clients. Mattermost does not sign the request, so authenticity rests on the callback secret, which only the Mattermost server knows, and on the signed action id.
 type MattermostActionContext struct {
 	// Action Opaque action id signed with the button-signature key.
 	Action string `json:"action"`
 
 	// KeyId Id of the key that signed the action id.
 	KeyId string `json:"key_id"`
+
+	// Secret The button's callback secret, derived with the key `key_id` from the Connection and the action id. A press without it, or with another one, changes nothing and is not verified; a press without it on a Root message posted before buttons carried one also has that Root message edited again, so that its buttons carry it.
+	Secret *string `json:"secret,omitempty"`
 }
 
 // MattermostActionRequest Button press sent by the Mattermost server.
 type MattermostActionRequest struct {
 	ChannelId string `json:"channel_id"`
 
-	// Context The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
+	// Context The integration data Muster put on the button, which the Mattermost server strips from the posts it sends to clients. Mattermost does not sign the request, so authenticity rests on the callback secret, which only the Mattermost server knows, and on the signed action id.
 	Context              MattermostActionContext `json:"context"`
 	DataSource           *string                 `json:"data_source,omitempty"`
 	PostId               string                  `json:"post_id"`
