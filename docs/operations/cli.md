@@ -71,6 +71,10 @@ exits 1 when a check fails. A warning does not fail it.
 `postgresql_version`
 :   Looks at: PostgreSQL 14 or newer.
 
+`schema`
+:   Looks at: the schema version against the newest migration of this binary; `WARN` when older (`muster migrate`
+    applies the rest), `FAIL` when dirty (see [Upgrade notes](../install/versions.md#upgrade-notes)) or newer.
+
 `session_connection`
 :   Looks at: the session connection supports advisory locks and `LISTEN`, and the mode of each pooler.
 
