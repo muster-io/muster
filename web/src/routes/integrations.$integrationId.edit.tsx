@@ -22,6 +22,7 @@ import type { Integration } from "../api/gen/model";
 import { RequirePermission } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
 import { IntegrationForm } from "../components/integration-form";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
@@ -45,6 +46,7 @@ function EditForm({ current }: { current: Integration }) {
   const page = { to: "/integrations/$integrationId", params: { integrationId: base.id } } as const;
   return (
     <>
+      <ManagedByWarning object="integration" tool={current.managed_by} />
       {reloadError !== null && (
         <Alert variant="destructive">
           <AlertDescription className="text-current">
@@ -98,7 +100,10 @@ function EditIntegration({ integrationId }: { integrationId: string }) {
           <ArrowLeftIcon aria-hidden="true" />
           <span className="truncate">{integration?.name ?? t("integrations.page.title")}</span>
         </Link>
-        <PageTitle docs="page.integrations">{t("integrations.edit.title")}</PageTitle>
+        <div className="flex min-w-0 flex-col items-start gap-1">
+          <PageTitle docs="page.integrations">{t("integrations.edit.title")}</PageTitle>
+          <ManagedByBadge tool={integration?.managed_by} />
+        </div>
       </div>
       {integration === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">

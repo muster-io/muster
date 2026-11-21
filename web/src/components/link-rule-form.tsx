@@ -38,6 +38,7 @@ import {
 import { DEFAULT_SAMPLE, type Sample, SamplePicker } from "./sample-picker";
 import { TemplateEditor } from "./template-editor";
 import { TemplatePreview, previewErrors, useTemplatePreview } from "./template-preview";
+import { ManagedByDeleteLine } from "./managed-by";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -570,6 +571,7 @@ export function LinkRuleDeleteDialog({ rule }: { rule: LinkRule }) {
               {t("linkRules.delete.title", { name: rule.name })}
             </DialogTitle>
             <DialogDescription>{t("linkRules.delete.description")}</DialogDescription>
+            <ManagedByDeleteLine tool={rule.managed_by} />
           </DialogHeader>
           {remove.isError && (
             <Alert variant="destructive">

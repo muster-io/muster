@@ -79,6 +79,7 @@ import {
   isBaseUrl,
   normalizeBaseUrl,
 } from "./telegram-connection-fields";
+import { ManagedByDeleteLine } from "./managed-by";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -1230,6 +1231,7 @@ export function ConnectionDeleteDialog({
               {t("connections.delete.title", { name: connection.name })}
             </DialogTitle>
             <DialogDescription>{t("connections.delete.description")}</DialogDescription>
+            <ManagedByDeleteLine tool={connection.managed_by} />
           </DialogHeader>
           {remove.isError && (
             <Alert variant="destructive">

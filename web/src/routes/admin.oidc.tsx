@@ -38,6 +38,7 @@ import {
   mappingRows,
   mappingsOf,
 } from "../components/group-mapping-editor";
+import { ManagedByBadge, ManagedByWarning } from "../components/managed-by";
 import { OidcWarnings } from "../components/oidc-warnings";
 import {
   CheckField,
@@ -637,10 +638,12 @@ function OidcView() {
   const settings = query.data;
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col items-start gap-1">
         <PageTitle docs="page.oidc">{t("oidc.title")}</PageTitle>
+        <ManagedByBadge tool={settings?.managed_by} />
         <p className="text-muted-foreground">{t("oidc.hint")}</p>
       </div>
+      <ManagedByWarning object="oidcSettings" tool={settings?.managed_by} />
       {settings === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}

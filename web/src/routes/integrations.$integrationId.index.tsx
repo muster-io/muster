@@ -25,6 +25,7 @@ import { HeartbeatBadge } from "../components/heartbeat-badge";
 import { BuiltinBadge, ConnectionMode } from "../components/integration-form";
 import { IntegrationTokens } from "../components/integration-tokens";
 import { HeartbeatBanner, IntegrationWarnings } from "../components/integration-warnings";
+import { ManagedByBadge } from "../components/managed-by";
 import { type SnapshotSearch, snapshotSearchSchema } from "../components/stored-snapshot-search";
 import { StoredSnapshots } from "../components/stored-snapshots";
 import { buttonVariants } from "../components/ui/button";
@@ -174,6 +175,7 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
               {integration?.name ?? t("integrations.page.title")}
             </PageTitle>
             {integration?.builtin === true && <BuiltinBadge />}
+            <ManagedByBadge tool={integration?.managed_by} />
             {integration?.builtin === false && (
               <HeartbeatBadge state={integration.heartbeat.state} labelled />
             )}

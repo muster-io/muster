@@ -32,6 +32,7 @@ import {
   newEntryKey,
 } from "../components/claim-entries-editor";
 import { DocsLink, PageTitle } from "../components/docs-link";
+import { ManagedByBadge, ManagedByDeleteLine, ManagedByWarning } from "../components/managed-by";
 import { TeamOnCallNow } from "../components/on-call-now";
 import { TeamAlertRules } from "../components/team-alert-rules";
 import { TeamChains } from "../components/team-chains";
@@ -614,6 +615,7 @@ function DeleteTeam({ team, onReload }: { team: Team; onReload: () => void }) {
               {t("teams.delete.title", { name: team.name })}
             </DialogTitle>
             <DialogDescription>{t("teams.delete.description")}</DialogDescription>
+            <ManagedByDeleteLine tool={team.managed_by} />
           </DialogHeader>
           {remove.isError && (
             <Alert variant="destructive">
@@ -761,12 +763,16 @@ export function TeamView({ teamId }: { teamId: string }) {
         <div className="flex min-w-0 flex-col gap-1">
           <PageTitle docs="page.teams">{team?.name ?? t("teams.page.title")}</PageTitle>
           {team !== undefined && (
-            <p className="text-sm text-muted-foreground">
-              {t("teams.page.slug")} <code className="font-mono text-xs">{team.slug}</code>
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p className="text-sm text-muted-foreground">
+                {t("teams.page.slug")} <code className="font-mono text-xs">{team.slug}</code>
+              </p>
+              <ManagedByBadge tool={team.managed_by} />
+            </div>
           )}
         </div>
       </div>
+      <ManagedByWarning object="team" tool={team?.managed_by} />
       {query.isError && team !== undefined && (
         <Alert variant="destructive" data-testid="team-read-error">
           <AlertDescription className="text-current">
