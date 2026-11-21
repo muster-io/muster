@@ -2433,9 +2433,10 @@ in order once it commits, and a run of many batches stalls them once per batch, 
 no worker claims it before the save commits, and its run classifies with every save before it. A row
 `organization_message_settings` is inserted the same way while one of the Organization is still unclaimed, and a row
 `team_name` while one of the same Team is, a row `organization_links` while one of the Organization is, a row
-`user_name` or `account_links` while one of either kind of the same User is, and a row `service_account_name` while
-one of the same Service account is: the run renders with the settings, the name, the rules, the tables and the links
-as they are then.
+`user_name` or `account_links` while one of either kind of the same User is, a row `service_account_name` while
+one of the same Service account is, a row `route_minimum_severity` while one of the same Route is, and a row
+`route_message_labels` or `route_message_settings` while one of either kind of the same Route is: the run renders with
+the settings, the name, the rules, the tables, the links and the Route as they are then.
 
 Every walk also takes the resolved Alert Groups of its scope whose final edit still waits, those with a `pending`
 delivery — in its Destination for `destination_buttons` and `destination_connection`, in a Destination that follows
