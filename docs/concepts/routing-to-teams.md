@@ -46,7 +46,11 @@ filters.
 
 ![The option Also to the Teams from the label on the Route form, switched on, with its hint](../assets/screenshots/concepts/teams/06-route-teams-option.png){ .screenshot }
 
-"Run the Teams' Escalation chains" (`run_team_chains`) is stored with the option; it acts once Escalation chains run.
+"Run the Teams' Escalation chains" (`run_team_chains`) decides whether the Escalation chains that each Team names start
+on the Alert Group. With it on, they do, each Paging in the Threads of its own Team's Destinations; with it off, the
+Teams' Destinations still receive the Alert Group, but no chain of a Team starts, and only the chains the Route names
+run ([When chains run](escalation-chains.md#when-chains-run)). [How an alert reaches people](how-an-alert-reaches-people.md)
+follows an Alert of `team="payments"` through the Route, the Teams' Destinations and both kinds of chain.
 
 ### Operations and team Destinations by Severity
 
