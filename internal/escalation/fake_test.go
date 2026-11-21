@@ -205,8 +205,9 @@ func (s *fakeStore) ListChains(_ context.Context, arg dbgen.ListChainsParams) ([
 			continue
 		}
 		out = append(out, dbgen.ListChainsRow{ID: c.ID, PublicID: c.PublicID, Name: c.Name, Description: c.Description,
-			CreatedAt: c.CreatedAt, Version: c.Version, OwningTeamID: c.OwningTeamID, TeamPublicID: c.TeamPublicID,
-			TeamName: c.TeamName, TeamSlug: c.TeamSlug, TeamDeleted: c.TeamDeleted, SortName: name})
+			CreatedAt: c.CreatedAt, Version: c.Version, ManagedBy: c.ManagedBy, OwningTeamID: c.OwningTeamID,
+			TeamPublicID: c.TeamPublicID, TeamName: c.TeamName, TeamSlug: c.TeamSlug, TeamDeleted: c.TeamDeleted,
+			SortName: name})
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListChainsRow) int {
 		return cmp.Or(cmp.Compare(a.SortName, b.SortName), cmp.Compare(a.ID, b.ID))
@@ -279,7 +280,8 @@ func (s *fakeStore) InsertChain(_ context.Context, arg dbgen.InsertChainParams) 
 	}
 	s.nextID++
 	s.chains = append(s.chains, dbgen.GetChainRow{ID: s.nextID, PublicID: arg.PublicID, Name: arg.Name,
-		Description: arg.Description, CreatedAt: arg.Now, Version: 1, OwningTeamID: arg.OwningTeamID})
+		Description: arg.Description, CreatedAt: arg.Now, Version: 1, OwningTeamID: arg.OwningTeamID,
+		ManagedBy: arg.ManagedBy})
 	return s.nextID, nil
 }
 
@@ -294,6 +296,7 @@ func (s *fakeStore) UpdateChain(_ context.Context, arg dbgen.UpdateChainParams) 
 		if c.ID == arg.ID {
 			s.chains[i].Name, s.chains[i].Description, s.chains[i].OwningTeamID = arg.Name, arg.Description,
 				arg.OwningTeamID
+			s.chains[i].ManagedBy = arg.ManagedBy
 			s.chains[i].Version++
 		}
 	}

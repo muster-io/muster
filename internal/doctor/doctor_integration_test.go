@@ -8,6 +8,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -105,6 +106,7 @@ func TestIntegrationDoctor(t *testing.T) {
 		for _, want := range []string{
 			"OK   database: main and session connections reachable\n",
 			"OK   postgresql_version: " + s.Version + ".",
+			fmt.Sprintf("OK   schema: version %d, as this binary knows\n", knownVersion(t)),
 			"OK   session_connection: advisory locks and LISTEN work\n",
 			"WARN tls_main: sslmode=prefer, the connection is not encrypted\n",
 			"WARN tls_session: sslmode=prefer, the connection is not encrypted\n",
@@ -116,7 +118,7 @@ func TestIntegrationDoctor(t *testing.T) {
 				t.Errorf("output lacks %q", want)
 			}
 		}
-		if !ok || strings.Count(out.String(), "\n") != 8 {
+		if !ok || strings.Count(out.String(), "\n") != 9 {
 			t.Errorf("ok %v with %d lines", ok, strings.Count(out.String(), "\n"))
 		}
 
@@ -208,7 +210,7 @@ func TestIntegrationDoctor(t *testing.T) {
 			"OK   destination alerts: ok\n" +
 			"FAIL destination no-bot: The bot is not a member of this channel.\n" +
 			"OK   destination tg-alerts: ok\n"
-		if ok || !strings.HasSuffix(out.String(), want) || strings.Count(out.String(), "\n") != 13 {
+		if ok || !strings.HasSuffix(out.String(), want) || strings.Count(out.String(), "\n") != 14 {
 			t.Errorf("ok %v, output:\n%s", ok, out.String())
 		}
 		if after := fingerprint(t, d); after != before {
@@ -229,6 +231,96 @@ func TestIntegrationDoctor(t *testing.T) {
 			_, err := c.Exec(t.Context(), "DELETE FROM replicas")
 			if err == nil || !strings.Contains(err.Error(), "read-only transaction") {
 				t.Errorf("a write on a doctor connection: %v", err)
+			}
+		}
+	})
+}
+
+// TestIntegrationDoctorSchema: the schema line on PostgreSQL, from an empty database through a migrated one to a dirty
+// schema and one newer than the binary knows, which fail the doctor; the doctor itself changes nothing.
+func TestIntegrationDoctorSchema(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		u := s.NewDatabase(t)
+		conn := config.Database{URL: logging.Secret(u), SSLMode: "disable"}
+		d, err := db.Open(t.Context(), conn, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+		dsn, err := url.Parse(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := dsn.Query()
+		q.Set("sslmode", "disable")
+		dsn.RawQuery = q.Encode()
+		key, _ := keys('a')
+		env := []string{"MUSTER_DATABASE_URL=" + dsn.String(), "MUSTER_PUBLIC_URL=http://localhost:8080",
+			"MUSTER_SECRET_KEYS=" + key}
+		schema := func() (string, bool) {
+			t.Helper()
+			var out bytes.Buffer
+			ok, err := Run(t.Context(), Options{Environ: env, Out: &out})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for line := range strings.Lines(out.String()) {
+				if strings.HasPrefix(line[min(len(line), 5):], CheckSchema+": ") {
+					return strings.TrimSuffix(line, "\n"), ok
+				}
+			}
+			t.Fatalf("no schema line:\n%s", out.String())
+			return "", false
+		}
+		known := knownVersion(t)
+		dirty := func(v int64) string {
+			return fmt.Sprintf("FAIL schema: dirty at version %d (schema_dirty): a migration failed halfway; see "+
+				"Upgrade notes in Requirements and tested versions", v)
+		}
+		if line, _ := schema(); line != fmt.Sprintf("WARN schema: no migration has run yet, this binary knows "+
+			"version %d; muster migrate applies them", known) {
+			t.Errorf("on an empty database: %s", line)
+		}
+
+		log := logging.New(&bytes.Buffer{}, logging.LevelInfo)
+		if err := d.Migrate(t.Context(), log); err != nil {
+			t.Fatal(err)
+		}
+		k, err := keyring.Load(t.Context(), keyring.Env{Keys: logging.Secret(key), Source: keyring.SecretKeysVar}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := k.Establish(t.Context(), keyring.NewStore(d.Pool), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		before := fingerprint(t, d)
+		if line, ok := schema(); !ok || line != fmt.Sprintf("OK   schema: version %d, as this binary knows", known) {
+			t.Errorf("ok %v, migrated: %s", ok, line)
+		}
+		if after := fingerprint(t, d); after != before {
+			t.Errorf("the doctor changed the database:\nbefore %s\nafter  %s", before, after)
+		}
+
+		for _, tt := range []struct {
+			version int64
+			dirty   bool
+			want    string
+			ok      bool
+		}{
+			{version: known - 1, want: fmt.Sprintf("WARN schema: version %d, older than this binary's %d; muster "+
+				"migrate applies the rest", known-1, known), ok: true},
+			{version: known, dirty: true, want: dirty(known)},
+			{version: known + 1, dirty: true, want: dirty(known + 1)},
+			{version: known + 1, want: fmt.Sprintf("FAIL schema: version %d is newer than this binary knows (%d) "+
+				"(schema_too_new)", known+1, known)},
+		} {
+			if _, err := d.Pool.Exec(t.Context(), "UPDATE schema_migrations SET version = $1, dirty = $2", tt.version,
+				tt.dirty); err != nil {
+				t.Fatal(err)
+			}
+			if line, ok := schema(); ok != tt.ok || line != tt.want {
+				t.Errorf("version %d, dirty %v: ok %v, %s\nwant ok %v, %s", tt.version, tt.dirty, ok, line, tt.ok,
+					tt.want)
 			}
 		}
 	})

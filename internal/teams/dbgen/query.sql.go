@@ -356,7 +356,7 @@ func (q *Queries) GetOrganizationWorkingHours(ctx context.Context, orgID int64) 
 
 const getTeam = `-- name: GetTeam :one
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
-       t.working_end, t.working_time_zone, t.created_at, t.version,
+       t.working_end, t.working_time_zone, t.created_at, t.version, t.managed_by,
        (SELECT count(*)
         FROM team_users tu
         JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
@@ -383,6 +383,7 @@ type GetTeamRow struct {
 	WorkingTimeZone pgtype.Text
 	CreatedAt       time.Time
 	Version         int64
+	ManagedBy       pgtype.Text
 	UserCount       int64
 }
 
@@ -403,6 +404,7 @@ func (q *Queries) GetTeam(ctx context.Context, arg GetTeamParams) (GetTeamRow, e
 		&i.WorkingTimeZone,
 		&i.CreatedAt,
 		&i.Version,
+		&i.ManagedBy,
 		&i.UserCount,
 	)
 	return i, err
@@ -510,12 +512,12 @@ func (q *Queries) GetTeamUser(ctx context.Context, arg GetTeamUserParams) (GetTe
 const insertTeam = `-- name: InsertTeam :one
 INSERT INTO teams (
     org_id, public_id, name, slug, description, own_working_hours, working_days, working_start, working_end,
-    working_time_zone, created_at, updated_at
+    working_time_zone, managed_by, created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7::text[],
-    $8::text, $9::text, $10::text, $11,
-    $11
+    $8::text, $9::text, $10::text,
+    $11::text, $12, $12
 )
 RETURNING id
 `
@@ -531,6 +533,7 @@ type InsertTeamParams struct {
 	WorkingStart    pgtype.Text
 	WorkingEnd      pgtype.Text
 	WorkingTimeZone pgtype.Text
+	ManagedBy       pgtype.Text
 	Now             time.Time
 }
 
@@ -547,6 +550,7 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (int64, 
 		arg.WorkingStart,
 		arg.WorkingEnd,
 		arg.WorkingTimeZone,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -1521,7 +1525,7 @@ func (q *Queries) ListTeamUsers(ctx context.Context, arg ListTeamUsersParams) ([
 
 const listTeams = `-- name: ListTeams :many
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
-       t.working_end, t.working_time_zone, t.created_at, t.version,
+       t.working_end, t.working_time_zone, t.created_at, t.version, t.managed_by,
        (SELECT count(*)
         FROM team_users tu
         JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
@@ -1558,6 +1562,7 @@ type ListTeamsRow struct {
 	WorkingTimeZone pgtype.Text
 	CreatedAt       time.Time
 	Version         int64
+	ManagedBy       pgtype.Text
 	UserCount       int64
 	SortName        string
 }
@@ -1592,6 +1597,7 @@ func (q *Queries) ListTeams(ctx context.Context, arg ListTeamsParams) ([]ListTea
 			&i.WorkingTimeZone,
 			&i.CreatedAt,
 			&i.Version,
+			&i.ManagedBy,
 			&i.UserCount,
 			&i.SortName,
 		); err != nil {
@@ -2063,8 +2069,8 @@ UPDATE teams
 SET name = $1, slug = $2, description = $3, own_working_hours = $4,
     working_days = $5::text[], working_start = $6::text,
     working_end = $7::text, working_time_zone = $8::text,
-    updated_at = $9, version = version + 1
-WHERE org_id = $10 AND id = $11
+    managed_by = $9::text, updated_at = $10, version = version + 1
+WHERE org_id = $11 AND id = $12
 `
 
 type UpdateTeamParams struct {
@@ -2076,6 +2082,7 @@ type UpdateTeamParams struct {
 	WorkingStart    pgtype.Text
 	WorkingEnd      pgtype.Text
 	WorkingTimeZone pgtype.Text
+	ManagedBy       pgtype.Text
 	Now             time.Time
 	OrgID           int64
 	ID              int64
@@ -2092,6 +2099,7 @@ func (q *Queries) UpdateTeam(ctx context.Context, arg UpdateTeamParams) error {
 		arg.WorkingStart,
 		arg.WorkingEnd,
 		arg.WorkingTimeZone,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

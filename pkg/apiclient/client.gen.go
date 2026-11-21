@@ -6242,8 +6242,11 @@ type EscalationChain struct {
 	Etag *string `json:"etag,omitempty"`
 
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
-	Id   PublicId `json:"id"`
-	Name string   `json:"name"`
+	Id PublicId `json:"id"`
+
+	// ManagedBy The name of the tool that keeps the chain as code, such as `terraform`, or null when none does (C-33.FR-11); see `EscalationChainInput`.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// OwningTeam The Team that owns the chain, null when none does.
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
@@ -6263,6 +6266,9 @@ type EscalationChain struct {
 type EscalationChainInput struct {
 	// Description Omit it on an update to keep it.
 	Description *string `json:"description,omitempty"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// Name Unique in the Organization, ignoring case.
 	Name string `json:"name"`
@@ -6788,6 +6794,9 @@ type Integration struct {
 	IngestUrl      *string                      `json:"ingest_url,omitempty"`
 	LastSnapshotAt nullable.Nullable[time.Time] `json:"last_snapshot_at,omitempty"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// Name Unique in the Organization.
 	Name string `json:"name"`
 
@@ -6863,6 +6872,9 @@ type IntegrationBase struct {
 	Description            *string                       `json:"description,omitempty"`
 	DuplicateWindowSeconds int                           `json:"duplicate_window_seconds"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// Name Unique in the Organization.
 	Name string `json:"name"`
 
@@ -6880,6 +6892,9 @@ type IntegrationInput struct {
 	Description            *string                        `json:"description,omitempty"`
 	DuplicateWindowSeconds int                            `json:"duplicate_window_seconds"`
 	Heartbeat              HeartbeatSettingsInput         `json:"heartbeat"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// Name Unique in the Organization.
 	Name string `json:"name"`
@@ -7014,10 +7029,13 @@ type LinkRule struct {
 	Etag *string `json:"etag,omitempty"`
 
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
-	Id       PublicId      `json:"id"`
-	Matchers []Matcher     `json:"matchers"`
-	Name     string        `json:"name"`
-	Scope    LinkRuleScope `json:"scope"`
+	Id PublicId `json:"id"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Matchers  []Matcher                 `json:"matchers"`
+	Name      string                    `json:"name"`
+	Scope     LinkRuleScope             `json:"scope"`
 
 	// UrlTemplate Go template that may call `lookup table key column`.
 	UrlTemplate string `json:"url_template"`
@@ -7025,9 +7043,11 @@ type LinkRule struct {
 
 // LinkRuleBase defines model for LinkRuleBase.
 type LinkRuleBase struct {
-	Matchers []Matcher     `json:"matchers"`
-	Name     string        `json:"name"`
-	Scope    LinkRuleScope `json:"scope"`
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Matchers  []Matcher                 `json:"matchers"`
+	Name      string                    `json:"name"`
+	Scope     LinkRuleScope             `json:"scope"`
 
 	// UrlTemplate Go template that may call `lookup table key column`.
 	UrlTemplate string `json:"url_template"`
@@ -7101,6 +7121,9 @@ type LookupTable struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// Name Unique in the Organization; Link rule templates call `lookup` with it.
 	Name string `json:"name"`
 }
@@ -7113,6 +7136,9 @@ type LookupTableBase struct {
 
 	// Entries Rows. The keys of `values` must be exactly `columns` (`422` otherwise).
 	Entries []LookupEntry `json:"entries"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// Name Unique in the Organization; Link rule templates call `lookup` with it.
 	Name string `json:"name"`
@@ -8892,6 +8918,9 @@ type Route struct {
 	Id        PublicId `json:"id"`
 	IsDefault bool     `json:"is_default"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
 
@@ -8951,6 +8980,9 @@ type RouteInput struct {
 
 	// GroupKey Label names whose values split the Route's Alerts into Alert Groups. A missing label counts as an empty value.
 	GroupKey []string `json:"group_key"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
@@ -9106,7 +9138,10 @@ type Schedule struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Main bool     `json:"main"`
-	Name string   `json:"name"`
+
+	// ManagedBy The name of the tool that keeps the Schedule as code, such as `terraform`, or null when none does (C-33.FR-11); see `ScheduleInput`.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+	Name      string                    `json:"name"`
 
 	// NextGap The first gap within `schedule.gap_view` from the business clock's now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it.
 	NextGap nullable.Nullable[ScheduleGap] `json:"next_gap,omitempty"`
@@ -9138,6 +9173,9 @@ type ScheduleInput struct {
 
 	// Main True makes the Schedule its Team's main Schedule, whose On-call is the Team's; the first Schedule of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main instead.
 	Main *bool `json:"main,omitempty"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// Name Unique in the Team, ignoring case.
 	Name string `json:"name"`
@@ -9941,6 +9979,9 @@ type Team struct {
 	// IdpEntries The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.
 	IdpEntries []TeamIdpEntry `json:"idp_entries"`
 
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
+
 	// Matchers The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
 	Matchers []Matcher `json:"matchers"`
 
@@ -9988,6 +10029,9 @@ type TeamInput struct {
 
 	// IdpEntries The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.
 	IdpEntries *[]TeamIdpEntry `json:"idp_entries,omitempty"`
+
+	// ManagedBy The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.
+	ManagedBy nullable.Nullable[string] `json:"managed_by,omitempty"`
 
 	// Matchers The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
 	Matchers *[]Matcher `json:"matchers,omitempty"`

@@ -36,6 +36,10 @@ export const listRoutesResponseItemsItemOnePolicyThreadBatchingWindowSecondsMin 
 
 
 
+export const listRoutesResponseItemsItemOneManagedByMax = 32;
+
+
+export const listRoutesResponseItemsItemOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const listRoutesResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listRoutesResponseItemsItemTwoOwningTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listRoutesResponseItemsItemTwoDestinationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -92,7 +96,8 @@ export const ListRoutesResponse = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(listRoutesResponseItemsItemOneManagedByMax).regex(listRoutesResponseItemsItemOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 }).and(zod.object({
   "id": zod.string().regex(listRoutesResponseItemsItemTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "owning_team": zod.union([zod.object({
@@ -166,6 +171,10 @@ export const createRouteBodyPolicyThreadBatchingWindowSecondsMin = 0;
 
 
 
+export const createRouteBodyManagedByMax = 32;
+
+
+export const createRouteBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const CreateRouteBody = zod.object({
@@ -216,7 +225,8 @@ export const CreateRouteBody = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(createRouteBodyManagedByMax).regex(createRouteBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 })
 
 
@@ -242,6 +252,10 @@ export const createRouteResponseOnePolicyThreadBatchingWindowSecondsMin = 0;
 
 
 
+export const createRouteResponseOneManagedByMax = 32;
+
+
+export const createRouteResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const createRouteResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createRouteResponseTwoOwningTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createRouteResponseTwoDestinationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -297,7 +311,8 @@ export const CreateRouteResponse = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(createRouteResponseOneManagedByMax).regex(createRouteResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 }).and(zod.object({
   "id": zod.string().regex(createRouteResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "owning_team": zod.union([zod.object({
@@ -376,6 +391,10 @@ export const getRouteResponseOnePolicyThreadBatchingWindowSecondsMin = 0;
 
 
 
+export const getRouteResponseOneManagedByMax = 32;
+
+
+export const getRouteResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const getRouteResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getRouteResponseTwoOwningTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getRouteResponseTwoDestinationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -431,7 +450,8 @@ export const GetRouteResponse = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(getRouteResponseOneManagedByMax).regex(getRouteResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 }).and(zod.object({
   "id": zod.string().regex(getRouteResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "owning_team": zod.union([zod.object({
@@ -515,6 +535,10 @@ export const updateRouteBodyPolicyThreadBatchingWindowSecondsMin = 0;
 
 
 
+export const updateRouteBodyManagedByMax = 32;
+
+
+export const updateRouteBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateRouteBody = zod.object({
@@ -565,7 +589,8 @@ export const UpdateRouteBody = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(updateRouteBodyManagedByMax).regex(updateRouteBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 })
 
 
@@ -591,6 +616,10 @@ export const updateRouteResponseOnePolicyThreadBatchingWindowSecondsMin = 0;
 
 
 
+export const updateRouteResponseOneManagedByMax = 32;
+
+
+export const updateRouteResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const updateRouteResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateRouteResponseTwoOwningTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateRouteResponseTwoDestinationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -646,7 +675,8 @@ export const UpdateRouteResponse = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(updateRouteResponseOneManagedByMax).regex(updateRouteResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 }).and(zod.object({
   "id": zod.string().regex(updateRouteResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "owning_team": zod.union([zod.object({
@@ -747,6 +777,10 @@ export const reorderRoutesResponseItemsItemOnePolicyThreadBatchingWindowSecondsM
 
 
 
+export const reorderRoutesResponseItemsItemOneManagedByMax = 32;
+
+
+export const reorderRoutesResponseItemsItemOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const reorderRoutesResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const reorderRoutesResponseItemsItemTwoOwningTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const reorderRoutesResponseItemsItemTwoDestinationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -803,7 +837,8 @@ export const ReorderRoutesResponse = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(reorderRoutesResponseItemsItemOneManagedByMax).regex(reorderRoutesResponseItemsItemOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 }).and(zod.object({
   "id": zod.string().regex(reorderRoutesResponseItemsItemTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "owning_team": zod.union([zod.object({
@@ -1069,6 +1104,10 @@ export const listRouteSuggestionsResponseItemsItemRoutePolicyThreadBatchingWindo
 
 
 
+export const listRouteSuggestionsResponseItemsItemRouteManagedByMax = 32;
+
+
+export const listRouteSuggestionsResponseItemsItemRouteManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const ListRouteSuggestionsResponse = zod.object({
@@ -1122,7 +1161,8 @@ export const ListRouteSuggestionsResponse = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(listRouteSuggestionsResponseItemsItemRouteManagedByMax).regex(listRouteSuggestionsResponseItemsItemRouteManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 }).describe('The Route that accepting would create at the top of the list, or for `internal_alerts` directly below the last Route other than the Default route that takes an Internal alert.')
 }))
 })
@@ -1165,6 +1205,10 @@ export const acceptRouteSuggestionResponseOnePolicyThreadBatchingWindowSecondsMi
 
 
 
+export const acceptRouteSuggestionResponseOneManagedByMax = 32;
+
+
+export const acceptRouteSuggestionResponseOneManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 export const acceptRouteSuggestionResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acceptRouteSuggestionResponseTwoOwningTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acceptRouteSuggestionResponseTwoDestinationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1220,7 +1264,8 @@ export const AcceptRouteSuggestionResponse = zod.object({
   "cap_seconds": zod.int().min(1).describe('Intervals double up to this cap.')
 }),
   "auto_unacknowledge": zod.boolean()
-})
+}),
+  "managed_by": zod.string().max(acceptRouteSuggestionResponseOneManagedByMax).regex(acceptRouteSuggestionResponseOneManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it. The Default route takes it like any Route.')
 }).and(zod.object({
   "id": zod.string().regex(acceptRouteSuggestionResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `EC` Escalation chain, `ER` run of an Escalation chain, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "owning_team": zod.union([zod.object({

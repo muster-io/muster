@@ -334,7 +334,7 @@ func (q *Queries) GetOrganizationTimeZone(ctx context.Context, orgID int64) (str
 }
 
 const getSchedule = `-- name: GetSchedule :one
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.managed_by, s.team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted
 FROM schedules s
@@ -356,6 +356,7 @@ type GetScheduleRow struct {
 	GapAlert     string
 	Version      int64
 	CreatedAt    time.Time
+	ManagedBy    pgtype.Text
 	TeamID       int64
 	TeamPublicID string
 	TeamName     string
@@ -376,6 +377,7 @@ func (q *Queries) GetSchedule(ctx context.Context, arg GetScheduleParams) (GetSc
 		&i.GapAlert,
 		&i.Version,
 		&i.CreatedAt,
+		&i.ManagedBy,
 		&i.TeamID,
 		&i.TeamPublicID,
 		&i.TeamName,
@@ -586,20 +588,25 @@ func (q *Queries) InsertRotationLayerUsers(ctx context.Context, arg InsertRotati
 }
 
 const insertSchedule = `-- name: InsertSchedule :one
-INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, gap_alert, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+INSERT INTO schedules (
+    org_id, public_id, team_id, name, time_zone, main, gap_alert, managed_by, created_at, updated_at
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8::text, $9, $9
+)
 RETURNING id
 `
 
 type InsertScheduleParams struct {
-	OrgID    int64
-	PublicID string
-	TeamID   int64
-	Name     string
-	TimeZone string
-	Main     bool
-	GapAlert string
-	Now      time.Time
+	OrgID     int64
+	PublicID  string
+	TeamID    int64
+	Name      string
+	TimeZone  string
+	Main      bool
+	GapAlert  string
+	ManagedBy pgtype.Text
+	Now       time.Time
 }
 
 // InsertSchedule creates a Schedule.
@@ -612,6 +619,7 @@ func (q *Queries) InsertSchedule(ctx context.Context, arg InsertScheduleParams) 
 		arg.TimeZone,
 		arg.Main,
 		arg.GapAlert,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -1486,7 +1494,7 @@ func (q *Queries) ListScheduleOverrides(ctx context.Context, arg ListScheduleOve
 }
 
 const listSchedules = `-- name: ListSchedules :many
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.managed_by, s.team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted, lower(s.name)::text AS sort_name
 FROM schedules s
@@ -1523,6 +1531,7 @@ type ListSchedulesRow struct {
 	GapAlert     string
 	Version      int64
 	CreatedAt    time.Time
+	ManagedBy    pgtype.Text
 	TeamID       int64
 	TeamPublicID string
 	TeamName     string
@@ -1559,6 +1568,7 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 			&i.GapAlert,
 			&i.Version,
 			&i.CreatedAt,
+			&i.ManagedBy,
 			&i.TeamID,
 			&i.TeamPublicID,
 			&i.TeamName,
@@ -1956,19 +1966,20 @@ func (q *Queries) UpdateRotationLayer(ctx context.Context, arg UpdateRotationLay
 
 const updateSchedule = `-- name: UpdateSchedule :exec
 UPDATE schedules
-SET name = $1, time_zone = $2, main = $3, gap_alert = $4, updated_at = $5,
-    version = version + 1
-WHERE org_id = $6 AND id = $7
+SET name = $1, time_zone = $2, main = $3, gap_alert = $4,
+    managed_by = $5::text, updated_at = $6, version = version + 1
+WHERE org_id = $7 AND id = $8
 `
 
 type UpdateScheduleParams struct {
-	Name     string
-	TimeZone string
-	Main     bool
-	GapAlert string
-	Now      time.Time
-	OrgID    int64
-	ID       int64
+	Name      string
+	TimeZone  string
+	Main      bool
+	GapAlert  string
+	ManagedBy pgtype.Text
+	Now       time.Time
+	OrgID     int64
+	ID        int64
 }
 
 // UpdateSchedule replaces the configured fields of a Schedule and bumps its version.
@@ -1978,6 +1989,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		arg.TimeZone,
 		arg.Main,
 		arg.GapAlert,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

@@ -28,7 +28,7 @@ change. People link their messenger accounts to their User themselves, with
 
 ## Install
 
-The first release, L1, is Muster `0.1.x`. [Requirements and tested versions](docs/install/versions.md) lists what
+L1 is Muster `0.1.x` and L2 is Muster `0.2.x`. [Requirements and tested versions](docs/install/versions.md) lists what
 Muster needs and explains its version numbers and image tags.
 
 - [Quick start](docs/quick-start.md): Docker Compose on one machine, beside its own PostgreSQL, in about five minutes.
@@ -100,4 +100,5 @@ The Bridge protocol specification, [`api/bridge.yaml`](api/bridge.yaml), is lice
 bridge may stay closed. The bridge libraries, [`muster-bridge-go`](https://github.com/muster-io/muster-bridge-go) and
 [`muster-bridge-python`](https://github.com/muster-io/muster-bridge-python), and the example bridge, in
 `examples/chat` of `muster-bridge-go`, are MIT licensed too, in repositories of their own that take contributions
-without a CLA.
+without a CLA. The API specification, [`api/openapi.yaml`](api/openapi.yaml), is MIT licensed as well, so that clients
+generated from it, such as the Terraform provider, may carry any licence.

@@ -34,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
@@ -297,6 +298,8 @@ type Route struct {
 	// the effective list (C-29.FR-2): its own, or the one computed from its Group key and labels while it has none.
 	OwnMessageLabels bool
 	MessageLabels    []string
+	// ManagedBy is the tool that keeps the Route as code, nil for none (C-33.FR-11); nothing that routes reads it.
+	ManagedBy *string
 	// labels are the Organization's labels the computed list is made of.
 	labels labelSettings
 }
@@ -434,6 +437,8 @@ type Input struct {
 	// when the request left it out — which keeps a stored list of its own — and a slice, empty included, when it gave one.
 	OwnMessageLabels *bool
 	MessageLabels    []string
+	// ManagedBy is the mark of the tool that keeps the Route as code (C-33.FR-11), the Default route's included.
+	ManagedBy managedby.Input
 }
 
 // List is every Route that is not deleted in evaluation order, the Default route last, with the version of the list
@@ -705,7 +710,7 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 			OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName,
 			OwningTeamSlug: r.OwningTeamSlug, OwningTeamDeleted: r.OwningTeamDeleted, MessageLabels: r.MessageLabels,
 			SeverityLabel: r.SeverityLabel, TeamLabel: r.TeamLabel, DeliverToTeams: r.DeliverToTeams,
-			RunTeamChains: r.RunTeamChains})
+			RunTeamChains: r.RunTeamChains, ManagedBy: r.ManagedBy})
 	}
 	if err := s.withMatchers(ctx, q, out.Routes); err != nil {
 		return List{}, err
@@ -1162,7 +1167,8 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
 			OwningTeamID: ownerID(owner), MessageLabels: own,
 			DeliverToTeams: in.DeliverToTeams != nil && *in.DeliverToTeams,
-			RunTeamChains:  in.RunTeamChains == nil || *in.RunTeamChains, Now: s.clock.Now().UTC(),
+			RunTeamChains:  in.RunTeamChains == nil || *in.RunTeamChains,
+			ManagedBy:      managedby.Text(in.ManagedBy.Apply(nil)), Now: s.clock.Now().UTC(),
 		})
 		if err != nil {
 			return fmt.Errorf("create the route: %w", nameTaken(err))
@@ -1329,6 +1335,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
+		next.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		own, err := messageLabelsOf(in, &before)
 		if err != nil {
 			return err
@@ -1353,7 +1360,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			RemindersEnabled: p.Reminders.Enabled, RemindersFirstIntervalSeconds: p.Reminders.FirstIntervalSeconds,
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
 			OwningTeamID: ownerID(next.OwningTeam), MessageLabels: own, DeliverToTeams: next.DeliverToTeams,
-			RunTeamChains: next.RunTeamChains, Now: s.clock.Now().UTC(),
+			RunTeamChains: next.RunTeamChains, ManagedBy: managedby.Text(next.ManagedBy), Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the route %s: %w", before.PublicID, nameTaken(err))
 		}
@@ -1654,6 +1661,9 @@ func check(in Input) error {
 	if err := checkGroupKey("/group_key", in.GroupKey); err != nil {
 		return err
 	}
+	if in.ManagedBy.Check() != nil {
+		return &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
+	}
 	return checkPolicy(in.Policy)
 }
 
@@ -1867,6 +1877,7 @@ type view struct {
 	// MessageLabels is the Route's own list of "Labels in the message", null while it is computed.
 	MessageLabels []string `json:"message_labels"`
 	Policy        Policy   `json:"policy"`
+	ManagedBy     *string  `json:"managed_by"`
 }
 
 func viewOf(r Route) view {
@@ -1894,7 +1905,8 @@ func viewOf(r Route) view {
 	}
 	v := view{Name: r.Name, Description: r.Description, Matchers: ms, MinimumSeverity: r.MinimumSeverity,
 		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, DestinationEntries: entries, ChainEntries: chains,
-		DeliverToTeams: r.DeliverToTeams, RunTeamChains: r.RunTeamChains, MessageLabels: r.ownLabels(), Policy: p}
+		DeliverToTeams: r.DeliverToTeams, RunTeamChains: r.RunTeamChains, MessageLabels: r.ownLabels(), Policy: p,
+		ManagedBy: r.ManagedBy}
 	if r.OwningTeam != nil {
 		v.OwningTeamID = &r.OwningTeam.PublicID
 	}
@@ -1916,7 +1928,7 @@ func routeOf(r dbgen.GetRouteRow) Route {
 			Name: r.OwningTeamName.String, Slug: r.OwningTeamSlug.String, Deleted: r.OwningTeamDeleted}
 	}
 	labels := labelSettings{severity: r.SeverityLabel, team: r.TeamLabel}
-	return Route{Storm: st, TemplateError: te, OwningTeam: owner, labels: labels,
+	return Route{Storm: st, TemplateError: te, OwningTeam: owner, labels: labels, ManagedBy: managedby.Of(r.ManagedBy),
 		OwnMessageLabels: r.MessageLabels != nil,
 		MessageLabels:    MessageLabels(r.MessageLabels, r.GroupKey, labels.severity, labels.team),
 		ID:               r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),

@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/oidc"
@@ -208,7 +209,8 @@ func (s *fakeStore) ListTeams(_ context.Context, arg dbgen.ListTeamsParams) ([]d
 		out = append(out, dbgen.ListTeamsRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Slug: r.Slug,
 			Description: r.Description, OwnWorkingHours: r.OwnWorkingHours, WorkingDays: r.WorkingDays,
 			WorkingStart: r.WorkingStart, WorkingEnd: r.WorkingEnd, WorkingTimeZone: r.WorkingTimeZone,
-			CreatedAt: r.CreatedAt, Version: r.Version, UserCount: r.UserCount, SortName: strings.ToLower(r.Name)})
+			CreatedAt: r.CreatedAt, Version: r.Version, ManagedBy: r.ManagedBy, UserCount: r.UserCount,
+			SortName: strings.ToLower(r.Name)})
 	}
 	return out, nil
 }
@@ -248,7 +250,7 @@ func (s *fakeStore) InsertTeam(_ context.Context, arg dbgen.InsertTeamParams) (i
 	s.teams = append(s.teams, &teamRec{GetTeamRow: dbgen.GetTeamRow{ID: s.nextID, PublicID: arg.PublicID,
 		Name: arg.Name, Slug: arg.Slug, Description: arg.Description, OwnWorkingHours: arg.OwnWorkingHours,
 		WorkingDays: arg.WorkingDays, WorkingStart: arg.WorkingStart, WorkingEnd: arg.WorkingEnd,
-		WorkingTimeZone: arg.WorkingTimeZone, CreatedAt: arg.Now, Version: 1}})
+		WorkingTimeZone: arg.WorkingTimeZone, CreatedAt: arg.Now, Version: 1, ManagedBy: arg.ManagedBy}})
 	return s.nextID, nil
 }
 
@@ -262,7 +264,7 @@ func (s *fakeStore) UpdateTeam(_ context.Context, arg dbgen.UpdateTeamParams) er
 	t := s.byID(arg.ID)
 	t.Name, t.Slug, t.Description, t.OwnWorkingHours = arg.Name, arg.Slug, arg.Description, arg.OwnWorkingHours
 	t.WorkingDays, t.WorkingStart, t.WorkingEnd = arg.WorkingDays, arg.WorkingStart, arg.WorkingEnd
-	t.WorkingTimeZone, t.Version = arg.WorkingTimeZone, t.Version+1
+	t.WorkingTimeZone, t.Version, t.ManagedBy = arg.WorkingTimeZone, t.Version+1, arg.ManagedBy
 	return nil
 }
 
@@ -903,6 +905,7 @@ func TestCheck(t *testing.T) {
 		{Input{Name: "x", Slug: ""}, "/slug", CodeInvalidFormat},
 		{Input{Name: "x", Slug: "pay ments"}, "/slug", CodeInvalidFormat},
 		{Input{Name: "x", Slug: "x", Description: ptr(strings.Repeat("d", 2001))}, "/description", CodeTooLong},
+		{Input{Name: "x", Slug: "x", ManagedBy: managedby.Set("Terraform")}, "/managed_by", CodeInvalidFormat},
 		{hours(func(w *WorkingHours) { w.Days = nil }), "/working_hours/days", CodeRequired},
 		{hours(func(w *WorkingHours) { w.Days = []string{"monday", "funday"} }), "/working_hours/days/1",
 			CodeInvalidFormat},
@@ -1159,6 +1162,52 @@ func TestUpdate(t *testing.T) {
 	store.fail["GetTeam"] = errBoom
 	if _, err := svc.Update(ctx, by, team.PublicID, nil, Input{Name: "x", Slug: "x"}); !errors.Is(err, errBoom) {
 		t.Errorf("GetTeam fails = %v", err)
+	}
+}
+
+// TestManagedBy is C-33.FR-11: a creation stores the mark or none, an update that leaves it out keeps it, null clears
+// it, and each change is in the Audit log diff.
+func TestManagedBy(t *testing.T) {
+	svc, store := newService(t)
+	ctx := t.Context()
+	marked, err := svc.Create(ctx, by, Input{Name: "Payments", Slug: "payments", ManagedBy: managedby.Set("terraform")})
+	if err != nil || marked.ManagedBy == nil || *marked.ManagedBy != "terraform" {
+		t.Fatalf("create marked = %v, %v", marked.ManagedBy, err)
+	}
+	if d := string(store.audit[len(store.audit)-1].Diff); !strings.Contains(d, `{"pointer":"/managed_by","after":"terraform"}`) {
+		t.Errorf("creation diff %s", d)
+	}
+	plain, err := svc.Create(ctx, by, Input{Name: "Search", Slug: "search"})
+	if err != nil || plain.ManagedBy != nil {
+		t.Errorf("create without = %v, %v", plain.ManagedBy, err)
+	}
+	kept, err := svc.Update(ctx, by, marked.PublicID, nil, Input{Name: "Payments 2", Slug: "payments"})
+	if err != nil || kept.ManagedBy == nil || *kept.ManagedBy != "terraform" {
+		t.Errorf("update without = %v, %v", kept.ManagedBy, err)
+	}
+	page, err := svc.List(ctx, ListFilter{Limit: 10})
+	if err != nil || len(page.Teams) != 2 {
+		t.Fatalf("list = %+v, %v", page.Teams, err)
+	}
+	for _, team := range page.Teams {
+		if want := team.PublicID == marked.PublicID; (team.ManagedBy != nil) != want ||
+			want && *team.ManagedBy != "terraform" {
+			t.Errorf("listed %s with the mark %v", team.Name, team.ManagedBy)
+		}
+	}
+	// A change of the mark alone asks for no evaluation, rename or Destination row (C-33.FR-11).
+	evaluations, rows := len(store.evaluations), len(store.destinationRows)
+	cleared, err := svc.Update(ctx, by, marked.PublicID, nil, Input{Name: "Payments 2", Slug: "payments",
+		ManagedBy: managedby.Clear})
+	if err != nil || cleared.ManagedBy != nil || cleared.Version != kept.Version+1 {
+		t.Errorf("update with null = %v, %v", cleared.ManagedBy, err)
+	}
+	if d := string(store.audit[len(store.audit)-1].Diff); d != `[{"pointer":"/managed_by","before":"terraform"}]` {
+		t.Errorf("clearing diff %s", d)
+	}
+	if len(store.evaluations) != evaluations || len(store.destinationRows) != rows {
+		t.Errorf("a change of the mark alone wrote %+v, %+v", store.evaluations[evaluations:],
+			store.destinationRows[rows:])
 	}
 }
 

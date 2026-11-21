@@ -33,6 +33,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/metrics"
@@ -170,6 +171,8 @@ type Team struct {
 	UserCount    int64
 	CreatedAt    time.Time
 	Version      int64
+	// ManagedBy is the tool that keeps the Team as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 
 	DestinationEntries []DestinationEntry
 	Destinations       []DestinationRef
@@ -212,6 +215,8 @@ type Input struct {
 	// Mentions replace the Team mentions of the Team as a whole (C-25.FR-8); nil keeps them on an update and is none
 	// on a creation.
 	Mentions *[]MentionInput
+	// ManagedBy is the mark of the tool that keeps the Team as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // Person is someone in a Team with their Role, how they are in it, the identity provider entries that matched them and
@@ -425,13 +430,15 @@ type teamRow struct {
 	WorkingTimeZone pgtype.Text
 	CreatedAt       time.Time
 	Version         int64
+	ManagedBy       pgtype.Text
 	UserCount       int64
 }
 
 // teamOf is the Team of a row with the Organization's Working hours org and its identity provider entries.
 func teamOf(r teamRow, org WorkingHours, entries []IdpEntry) Team {
 	t := Team{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Slug: r.Slug, Description: r.Description,
-		IdpEntries: nonNilEntries(entries), UserCount: r.UserCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
+		IdpEntries: nonNilEntries(entries), UserCount: r.UserCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
+		ManagedBy: managedby.Of(r.ManagedBy)}
 	if r.OwnWorkingHours {
 		t.Own = &WorkingHours{Days: r.WorkingDays, Start: r.WorkingStart.String, End: r.WorkingEnd.String,
 			TimeZone: r.WorkingTimeZone.String}
@@ -492,7 +499,8 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 		page.Teams = append(page.Teams, teamOf(teamRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Slug: r.Slug,
 			Description: r.Description, OwnWorkingHours: r.OwnWorkingHours, WorkingDays: r.WorkingDays,
 			WorkingStart: r.WorkingStart, WorkingEnd: r.WorkingEnd, WorkingTimeZone: r.WorkingTimeZone,
-			CreatedAt: r.CreatedAt, Version: r.Version, UserCount: r.UserCount}, org, entries[r.ID]))
+			CreatedAt: r.CreatedAt, Version: r.Version, ManagedBy: r.ManagedBy, UserCount: r.UserCount}, org,
+			entries[r.ID]))
 	}
 	if err := s.withMatchers(ctx, s.store, page.Teams); err != nil {
 		return Page{}, err
@@ -613,6 +621,8 @@ func check(in Input) (Input, error) {
 	case in.Description != nil && utf8.RuneCountInString(*in.Description) > MaxDescriptionLength:
 		return in, &FieldError{Pointer: "/description", Code: CodeTooLong,
 			Detail: fmt.Sprintf("The description is longer than %d characters.", MaxDescriptionLength)}
+	case in.ManagedBy.Check() != nil:
+		return in, &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
 	}
 	if in.Matchers != nil {
 		for i, m := range *in.Matchers {
@@ -818,7 +828,8 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 		}
 		now := s.clock.Now().UTC()
 		p := dbgen.InsertTeamParams{OrgID: s.orgID, PublicID: publicid.New(publicid.Team), Name: in.Name,
-			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours, Now: now}
+			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours,
+			ManagedBy: managedby.Text(in.ManagedBy.Apply(nil)), Now: now}
 		setHours(&p.WorkingDays, &p.WorkingStart, &p.WorkingEnd, &p.WorkingTimeZone, in.WorkingHours)
 		id, err := q.InsertTeam(ctx, p)
 		if err != nil {
@@ -913,6 +924,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		next := before
 		next.Name, next.Slug, next.Own = in.Name, in.Slug, in.WorkingHours
+		next.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -961,7 +973,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		now := s.clock.Now().UTC()
 		p := dbgen.UpdateTeamParams{OrgID: s.orgID, ID: before.ID, Name: next.Name, Slug: next.Slug,
-			Description: next.Description, OwnWorkingHours: next.Own != nil, Now: now}
+			Description: next.Description, OwnWorkingHours: next.Own != nil, ManagedBy: managedby.Text(next.ManagedBy),
+			Now: now}
 		setHours(&p.WorkingDays, &p.WorkingStart, &p.WorkingEnd, &p.WorkingTimeZone, next.Own)
 		if err := q.UpdateTeam(ctx, p); err != nil {
 			return fmt.Errorf("update the team %s: %w", before.PublicID, taken(err))
@@ -1417,6 +1430,8 @@ type view struct {
 	TeamMentions []MentionInput `json:"team_mentions"`
 	// ChainEntries are the Escalation chains of the Team (C-32.FR-2).
 	ChainEntries []ChainEntry `json:"chain_entries"`
+	// ManagedBy is the mark of the tool that keeps the Team as code (C-33.FR-11).
+	ManagedBy *string `json:"managed_by"`
 }
 
 func viewOf(t Team) view {
@@ -1434,7 +1449,7 @@ func viewOf(t Team) view {
 	}
 	return view{Name: t.Name, Slug: t.Slug, Description: t.Description, OwnWorkingHours: t.Own != nil,
 		WorkingHours: t.Own, Matchers: ms, IdpEntries: nonNilEntries(t.IdpEntries), DestinationEntries: dests,
-		TeamMentions: mentionInputs(t.Mentions), ChainEntries: chains}
+		TeamMentions: mentionInputs(t.Mentions), ChainEntries: chains, ManagedBy: t.ManagedBy}
 }
 
 // exportInfo sets the muster_team_info series of a Team.

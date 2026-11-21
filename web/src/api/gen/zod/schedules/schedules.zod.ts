@@ -74,6 +74,7 @@ export const ListSchedulesResponse = zod.object({
   "end": zod.string().regex(listSchedulesResponseItemsItemRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()])
 })).describe('From the lowest to the highest.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the Schedule as code, such as `terraform`, or null when none does (C-33.FR-11); see `ScheduleInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })),
@@ -96,6 +97,10 @@ export const createScheduleBodyRotationLayersItemHandoverTimeRegExp = new RegExp
 
 export const createScheduleBodyRotationLayersItemLimitsOneStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const createScheduleBodyRotationLayersItemLimitsOneEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createScheduleBodyManagedByMax = 32;
+
+
+export const createScheduleBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const CreateScheduleBody = zod.object({
@@ -118,7 +123,8 @@ export const CreateScheduleBody = zod.object({
   "start": zod.string().regex(createScheduleBodyRotationLayersItemLimitsOneStartRegExp).optional().describe('Given with `end`.'),
   "end": zod.string().regex(createScheduleBodyRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()]).optional().describe('The days and time of day to which the Shifts are cut; null for none.')
-}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).')).describe('From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.')
+}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).')).describe('From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.'),
+  "managed_by": zod.string().max(createScheduleBodyManagedByMax).regex(createScheduleBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 })
 
 export const createScheduleResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -173,6 +179,7 @@ export const CreateScheduleResponse = zod.object({
   "end": zod.string().regex(createScheduleResponseRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()])
 })).describe('From the lowest to the highest.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the Schedule as code, such as `terraform`, or null when none does (C-33.FR-11); see `ScheduleInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })
@@ -239,6 +246,7 @@ export const GetScheduleResponse = zod.object({
   "end": zod.string().regex(getScheduleResponseRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()])
 })).describe('From the lowest to the highest.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the Schedule as code, such as `terraform`, or null when none does (C-33.FR-11); see `ScheduleInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })
@@ -270,6 +278,10 @@ export const updateScheduleBodyRotationLayersItemHandoverTimeRegExp = new RegExp
 
 export const updateScheduleBodyRotationLayersItemLimitsOneStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateScheduleBodyRotationLayersItemLimitsOneEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateScheduleBodyManagedByMax = 32;
+
+
+export const updateScheduleBodyManagedByRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,31}$');
 
 
 export const UpdateScheduleBody = zod.object({
@@ -292,7 +304,8 @@ export const UpdateScheduleBody = zod.object({
   "start": zod.string().regex(updateScheduleBodyRotationLayersItemLimitsOneStartRegExp).optional().describe('Given with `end`.'),
   "end": zod.string().regex(updateScheduleBodyRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()]).optional().describe('The days and time of day to which the Shifts are cut; null for none.')
-}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).')).describe('From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.')
+}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).')).describe('From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.'),
+  "managed_by": zod.string().max(updateScheduleBodyManagedByMax).regex(updateScheduleBodyManagedByRegExp).nullish().describe('The name of the tool that keeps the object as code, such as `terraform`, or null when none does (C-33.FR-11) — 1 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter or a digit; another value is refused with `422` `invalid_format` at `/managed_by`. A mark only, recorded in the Audit log like any field; the mark itself changes no behaviour of Muster and never causes a write to be refused. Omitted on a creation, none; omitted on an update, kept; `null` clears it. Reads always carry it.')
 })
 
 export const updateScheduleResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -347,6 +360,7 @@ export const UpdateScheduleResponse = zod.object({
   "end": zod.string().regex(updateScheduleResponseRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()])
 })).describe('From the lowest to the highest.'),
+  "managed_by": zod.string().nullish().describe('The name of the tool that keeps the Schedule as code, such as `terraform`, or null when none does (C-33.FR-11); see `ScheduleInput`.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update.')
 })

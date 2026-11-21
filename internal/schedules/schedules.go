@@ -32,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/internalalerts"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/schedules/dbgen"
@@ -189,6 +190,8 @@ type Schedule struct {
 	CreatedAt      time.Time
 	Version        int64
 	NextGap        *Gap
+	// ManagedBy is the tool that keeps the Schedule as code, nil for none (C-33.FR-11).
+	ManagedBy *string
 }
 
 // GapAlertActive reports whether the Schedule reports its gaps as MusterScheduleGap: with gap_alert on, and with
@@ -207,6 +210,8 @@ type Input struct {
 	Main           *bool
 	GapAlert       *string
 	RotationLayers []RotationLayerInput
+	// ManagedBy is the mark of the tool that keeps the Schedule as code (C-33.FR-11).
+	ManagedBy managedby.Input
 }
 
 // RotationLayerInput is a Rotation layer of an Input; an ID names one of the Schedule's, which keeps its identity.
@@ -420,8 +425,8 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 		}
 		page.Schedules = append(page.Schedules, Schedule{ID: r.ID, PublicID: r.PublicID, Name: r.Name,
 			TimeZone: r.TimeZone, Main: r.Main, GapAlert: r.GapAlert, CreatedAt: r.CreatedAt.UTC(),
-			Version: r.Version, Team: TeamRef{ID: r.TeamID, PublicID: r.TeamPublicID, Name: r.TeamName,
-				Slug: r.TeamSlug, Deleted: r.TeamDeleted}})
+			Version: r.Version, ManagedBy: managedby.Of(r.ManagedBy), Team: TeamRef{ID: r.TeamID,
+				PublicID: r.TeamPublicID, Name: r.TeamName, Slug: r.TeamSlug, Deleted: r.TeamDeleted}})
 	}
 	if err := s.withLayers(ctx, s.store, page.Schedules); err != nil {
 		return Page{}, err
@@ -463,7 +468,7 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Schedule
 		return Schedule{}, fmt.Errorf("read the schedule %s: %w", id, err)
 	}
 	list := []Schedule{{ID: r.ID, PublicID: r.PublicID, Name: r.Name, TimeZone: r.TimeZone, Main: r.Main,
-		GapAlert: r.GapAlert, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
+		GapAlert: r.GapAlert, CreatedAt: r.CreatedAt.UTC(), Version: r.Version, ManagedBy: managedby.Of(r.ManagedBy),
 		Team: TeamRef{ID: r.TeamID, PublicID: r.TeamPublicID, Name: r.TeamName, Slug: r.TeamSlug,
 			Deleted: r.TeamDeleted}}}
 	if err := s.withLayers(ctx, q, list); err != nil {
@@ -543,6 +548,9 @@ func check(in Input) (Input, error) {
 	if in.GapAlert != nil && !slices.Contains([]string{GapAlertByDefault, GapAlertOn, GapAlertOff}, *in.GapAlert) {
 		return in, &FieldError{Pointer: "/gap_alert", Code: CodeInvalidFormat,
 			Detail: "The gap alert is by_default, on or off."}
+	}
+	if in.ManagedBy.Check() != nil {
+		return in, &FieldError{Pointer: managedby.Pointer, Code: CodeInvalidFormat, Detail: managedby.Detail}
 	}
 	if len(in.RotationLayers) > MaxRotationLayers {
 		return in, &FieldError{Pointer: "/rotation_layers", Code: CodeOutOfRange,
@@ -893,7 +901,8 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Schedule, 
 			gapAlert = *in.GapAlert
 		}
 		sid, err := q.InsertSchedule(ctx, dbgen.InsertScheduleParams{OrgID: s.orgID, PublicID: id, TeamID: team.ID,
-			Name: in.Name, TimeZone: zone, Main: main, GapAlert: gapAlert, Now: now})
+			Name: in.Name, TimeZone: zone, Main: main, GapAlert: gapAlert,
+			ManagedBy: managedby.Text(in.ManagedBy.Apply(nil)), Now: now})
 		if err != nil {
 			return fmt.Errorf("create the schedule: %w", taken(err))
 		}
@@ -1071,6 +1080,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		next := before
 		next.Name, next.TimeZone, next.Main, next.GapAlert = in.Name, zone, main, gapAlert
+		next.ManagedBy = in.ManagedBy.Apply(before.ManagedBy)
 		next.RotationLayers = make([]RotationLayer, len(in.RotationLayers))
 		for i, l := range in.RotationLayers {
 			next.RotationLayers[i] = rotationLayerFromInput(l, people)
@@ -1087,7 +1097,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 		}
 		if err := q.UpdateSchedule(ctx, dbgen.UpdateScheduleParams{OrgID: s.orgID, ID: before.ID, Name: in.Name,
-			TimeZone: zone, Main: main, GapAlert: gapAlert, Now: now}); err != nil {
+			TimeZone: zone, Main: main, GapAlert: gapAlert, ManagedBy: managedby.Text(next.ManagedBy),
+			Now: now}); err != nil {
 			return fmt.Errorf("update the schedule %s: %w", before.PublicID, taken(err))
 		}
 		if err := s.writeLayers(ctx, q, before.ID, in.RotationLayers, before.RotationLayers, people); err != nil {
@@ -1215,6 +1226,7 @@ type view struct {
 	Main           bool                `json:"main"`
 	GapAlert       string              `json:"gap_alert"`
 	RotationLayers []rotationLayerView `json:"rotation_layers"`
+	ManagedBy      *string             `json:"managed_by"`
 }
 
 // rotationLayerView is a Rotation layer as the Audit log diff shows it.
@@ -1232,7 +1244,7 @@ type rotationLayerView struct {
 
 func viewOf(sc Schedule) view {
 	v := view{TeamID: sc.Team.PublicID, Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main, GapAlert: sc.GapAlert,
-		RotationLayers: make([]rotationLayerView, len(sc.RotationLayers))}
+		RotationLayers: make([]rotationLayerView, len(sc.RotationLayers)), ManagedBy: sc.ManagedBy}
 	for i, l := range sc.RotationLayers {
 		lv := rotationLayerView{ID: l.PublicID, Name: l.Name, UserIDs: make([]string, len(l.Users)),
 			ShiftLength: l.ShiftLength, HandoverTime: l.HandoverTime, StartDate: l.StartDate.Format(time.DateOnly),

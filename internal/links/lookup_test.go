@@ -23,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/links/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/publicid"
 )
 
@@ -200,8 +201,8 @@ func (f *fakeStore) InsertLookupTable(_ context.Context, arg dbgen.InsertLookupT
 	}
 	id := f.id()
 	f.tables = append(f.tables, &tableRow{GetLookupTableRow: dbgen.GetLookupTableRow{ID: id, PublicID: arg.PublicID,
-		Name: arg.Name, Description: arg.Description, ColumnNames: arg.ColumnNames, CreatedAt: arg.Now, Version: 1},
-		entries: map[string][]byte{}})
+		Name: arg.Name, Description: arg.Description, ColumnNames: arg.ColumnNames, CreatedAt: arg.Now, Version: 1,
+		ManagedBy: arg.ManagedBy}, entries: map[string][]byte{}})
 	return id, nil
 }
 
@@ -216,7 +217,8 @@ func (f *fakeStore) UpdateLookupTable(_ context.Context, arg dbgen.UpdateLookupT
 	}
 	for _, t := range f.tables {
 		if t.ID == arg.ID {
-			t.Name, t.Description, t.ColumnNames = arg.Name, arg.Description, arg.ColumnNames
+			t.Name, t.Description, t.ColumnNames, t.ManagedBy = arg.Name, arg.Description, arg.ColumnNames,
+				arg.ManagedBy
 			t.Version++
 		}
 	}
@@ -358,7 +360,7 @@ func (f *fakeStore) InsertLinkRule(_ context.Context, arg dbgen.InsertLinkRulePa
 	id := f.id()
 	f.rules = append(f.rules, &ruleRow{GetLinkRuleRow: dbgen.GetLinkRuleRow{ID: id, PublicID: arg.PublicID,
 		Name: arg.Name, ScopeType: arg.ScopeType, ScopeLabel: arg.ScopeLabel, UrlTemplate: arg.UrlTemplate,
-		CreatedAt: arg.Now, Version: 1}})
+		CreatedAt: arg.Now, Version: 1, ManagedBy: arg.ManagedBy}})
 	return id, nil
 }
 
@@ -374,6 +376,7 @@ func (f *fakeStore) UpdateLinkRule(_ context.Context, arg dbgen.UpdateLinkRulePa
 	for _, r := range f.rules {
 		if r.ID == arg.ID {
 			r.Name, r.ScopeType, r.ScopeLabel, r.UrlTemplate = arg.Name, arg.ScopeType, arg.ScopeLabel, arg.UrlTemplate
+			r.ManagedBy = arg.ManagedBy
 			r.Version++
 		}
 	}
@@ -636,6 +639,8 @@ func TestLookupTableChecks(t *testing.T) {
 		{TableInput{Name: " ", Columns: []string{"a"}}, "/name", CodeInvalidFormat},
 		{TableInput{Name: strings.Repeat("n", MaxNameLength+1), Columns: []string{"a"}}, "/name", CodeTooLong},
 		{TableInput{Name: "t", Description: &desc, Columns: []string{"a"}}, "/description", CodeTooLong},
+		{TableInput{Name: "t", Columns: []string{"a"}, ManagedBy: managedby.Set("a b")}, "/managed_by",
+			CodeInvalidFormat},
 		{TableInput{Name: "t"}, "/columns", CodeRequired},
 		{TableInput{Name: "t", Columns: many}, "/columns", CodeTooLong},
 		{TableInput{Name: "t", Columns: []string{"a", ""}}, "/columns/1", CodeInvalidFormat},
@@ -879,8 +884,8 @@ func TestLookupStoreFailures(t *testing.T) {
 // TestLinksRerender is C-12.FR-9 for the open Root messages: each creation, change and deletion of a Lookup table or a
 // Link rule requests, in its transaction, one open_group_updates row organization_links at the business time of the
 // change and wakes the workers on muster_open_group_updates, so that the links of the open Root messages follow it; a
-// save that changes nothing requests nothing, and a failing request or wake fails the change, which then records no
-// Audit log entry.
+// save that changes nothing, or only the mark managed_by (C-33.FR-11), requests nothing, and a failing request or wake
+// fails the change, which then records no Audit log entry.
 func TestLinksRerender(t *testing.T) {
 	ctx := t.Context()
 	f := newFake()
@@ -918,24 +923,45 @@ func TestLinksRerender(t *testing.T) {
 		t.Fatal(err)
 	}
 	requests(t, "a changed row", 3)
+	// C-33.FR-11: a change of the mark alone changes no link and requests nothing; with another change it requests as
+	// that change does.
+	marked := in
+	marked.ManagedBy = managedby.Set("terraform")
+	if got, err := s.UpdateTable(ctx, by, table.PublicID, nil, marked); err != nil || got.ManagedBy == nil {
+		t.Fatalf("mark the table = %v, %v", got.ManagedBy, err)
+	}
+	requests(t, "a table whose mark alone changed", 3)
+	unmarked := grafana()
+	unmarked.ManagedBy = managedby.Clear
+	if got, err := s.UpdateTable(ctx, by, table.PublicID, nil, unmarked); err != nil || got.ManagedBy != nil {
+		t.Fatalf("clear the mark with a row = %v, %v", got.ManagedBy, err)
+	}
+	requests(t, "a table whose mark and row changed", 4)
 	if _, err := s.UpdateRule(ctx, by, rule.PublicID, nil, dashboard()); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "the same rule again", 3)
+	requests(t, "the same rule again", 4)
+	markedRule := dashboard()
+	markedRule.ManagedBy = managedby.Set("terraform")
+	if got, err := s.UpdateRule(ctx, by, rule.PublicID, nil, markedRule); err != nil || got.ManagedBy == nil {
+		t.Fatalf("mark the rule = %v, %v", got.ManagedBy, err)
+	}
+	requests(t, "a rule whose mark alone changed", 4)
 	changed := dashboard()
 	changed.URLTemplate += "&from=now-1h"
-	if _, err := s.UpdateRule(ctx, by, rule.PublicID, nil, changed); err != nil {
-		t.Fatal(err)
+	changed.ManagedBy = managedby.Clear
+	if got, err := s.UpdateRule(ctx, by, rule.PublicID, nil, changed); err != nil || got.ManagedBy != nil {
+		t.Fatalf("change the rule and clear its mark = %v, %v", got.ManagedBy, err)
 	}
-	requests(t, "a changed rule", 4)
+	requests(t, "a changed rule", 5)
 	if err := s.DeleteRule(ctx, by, rule.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "a deleted rule", 5)
+	requests(t, "a deleted rule", 6)
 	if err := s.DeleteTable(ctx, by, table.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "a deleted table no rule reads", 5)
+	requests(t, "a deleted table no rule reads", 6)
 
 	for _, name := range []string{"InsertLinksUpdate", "NotifyOpenGroupUpdates"} {
 		f := newFake()

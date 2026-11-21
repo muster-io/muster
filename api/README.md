@@ -8,6 +8,10 @@ it out, so a release changes no generated file. Compatibility does not follow th
 the breaking changes of each pull request without blocking it before 1.0, the maintainer reviews them, and a breaking
 change goes only into a new minor version, with the next layer.
 
+The specification is licensed MIT (`info.license`, `NOTICE`), as the Bridge protocol is, so that clients generated from
+it — the Terraform provider in `muster-io/terraform-provider-muster` among them — may carry any licence, while the
+server that implements it stays AGPL-3.0-only (ADR-0001).
+
 ## How the spec is organised
 
 - **One file.** `paths` are grouped by tag, one tag per capability area: Sessions, Profile, Users, OIDC, Audit log, API
@@ -40,10 +44,10 @@ change goes only into a new minor version, with the next layer.
 reach a messenger it has no native support for (ADR-0017, capability C-22). Muster is its client, and the bridge its
 server; the `webhooks` entry `bridgeEvent` is the one request that goes the other way, an event the bridge pushes to
 Muster's ingest listener. It is versioned by its paths (`/v1/`) and by `protocol_version` in `GET /v1/info`, not by
-Muster's release, and it is licensed MIT (`info.license`), unlike the rest of the repository, so that a bridge may be
-derived from it and stay closed. `make lint` runs Redocly over it with the same rules. Muster's own operations for
-Bridge Connections and Destinations, and the push callback itself, are in `openapi.yaml`, added by the stories that
-implement them.
+Muster's release, and it is licensed MIT (`info.license`), as `openapi.yaml` is and unlike the rest of the
+repository, so that a bridge may be derived from it and stay closed. `make lint` runs Redocly over it with the same
+rules. Muster's own operations for Bridge Connections and Destinations, and the push callback itself, are in
+`openapi.yaml`, added by the stories that implement them.
 
 The bridge libraries for Go and Python, `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python`, each keep a
 copy of `bridge.yaml`, generate their types from it and fail their CI when the copy differs from the one on `master`
@@ -136,7 +140,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `x-permission` | operation | The Permission needed (`<resource>:<verb>`, see the `Permission` schema for the Role matrix), a list of alternatives, or `authenticated` (any signed-in identity), `integration-token` or `none`. |
 | `x-permission-check` | operation | `dispatcher` on the Command operations: the middleware checks only that the caller is authenticated, and the dispatcher of `internal/groups` checks the Permission of `x-permission` as its first step, logs `command_refused` and answers the same `403` `forbidden` (ADR-0016). Without it the middleware checks `x-permission`. |
 | `x-listener` | operation, server | `app`, `ingest` or `internal`. |
-| `x-unprocessable` | top-level property of a request body | When every failure of the request validation is the `pattern`, `maxLength` or `minLength` of such properties, the answer is the `422` `invalid_format` at each of them that the domain gives for the same value, instead of `400`. A missing property (`required`), a wrong type or `null` (`type`, `nullable`), any other keyword, and any failure elsewhere in the request keep the `400`. A Team's `slug` carries it. |
+| `x-unprocessable` | top-level property of a request body | When every failure of the request validation is the `pattern`, `maxLength` or `minLength` of such properties, the answer is the `422` `invalid_format` at each of them that the domain gives for the same value, instead of `400`. A missing property (`required`), a wrong type or `null` (`type`, `nullable`), any other keyword, and any failure elsewhere in the request keep the `400`. A Team's `slug` carries it, and so does `managed_by` on the write schemas of the objects a tool may keep as code (C-33.FR-11). |
 | `x-problem-types` | `Problem` schema | Stable problem types with their statuses. |
 | `x-problem-codes` | `Problem` schema | The stable `code` values of each problem type, and whether they appear in `code` or in `errors[].code`. |
 | `x-event-kinds` | `LifecycleEvent` schema | The Timeline kind of each lifecycle event. |

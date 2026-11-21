@@ -181,7 +181,7 @@ func (q *Queries) GetLinkGroup(ctx context.Context, arg GetLinkGroupParams) (Get
 }
 
 const getLinkRule = `-- name: GetLinkRule :one
-SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version
+SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version, managed_by
 FROM link_rules
 WHERE org_id = $1 AND public_id = $2
 `
@@ -201,6 +201,7 @@ type GetLinkRuleRow struct {
 	UrlTemplate string
 	CreatedAt   time.Time
 	Version     int64
+	ManagedBy   pgtype.Text
 }
 
 // GetLinkRule reads a Link rule by public_id.
@@ -217,6 +218,7 @@ func (q *Queries) GetLinkRule(ctx context.Context, arg GetLinkRuleParams) (GetLi
 		&i.UrlTemplate,
 		&i.CreatedAt,
 		&i.Version,
+		&i.ManagedBy,
 	)
 	return i, err
 }
@@ -257,7 +259,7 @@ func (q *Queries) GetLookupCells(ctx context.Context, arg GetLookupCellsParams) 
 }
 
 const getLookupTable = `-- name: GetLookupTable :one
-SELECT id, public_id, name, description, column_names, created_at, version
+SELECT id, public_id, name, description, column_names, created_at, version, managed_by
 FROM lookup_tables
 WHERE org_id = $1 AND public_id = $2
 `
@@ -275,6 +277,7 @@ type GetLookupTableRow struct {
 	ColumnNames []string
 	CreatedAt   time.Time
 	Version     int64
+	ManagedBy   pgtype.Text
 }
 
 // GetLookupTable reads a Lookup table by public_id.
@@ -289,13 +292,19 @@ func (q *Queries) GetLookupTable(ctx context.Context, arg GetLookupTableParams) 
 		&i.ColumnNames,
 		&i.CreatedAt,
 		&i.Version,
+		&i.ManagedBy,
 	)
 	return i, err
 }
 
 const insertLinkRule = `-- name: InsertLinkRule :one
-INSERT INTO link_rules (org_id, public_id, name, scope_type, scope_label, url_template, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+INSERT INTO link_rules (
+    org_id, public_id, name, scope_type, scope_label, url_template, managed_by, created_at, updated_at
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7::text,
+    $8, $8
+)
 RETURNING id
 `
 
@@ -306,6 +315,7 @@ type InsertLinkRuleParams struct {
 	ScopeType   string
 	ScopeLabel  pgtype.Text
 	UrlTemplate string
+	ManagedBy   pgtype.Text
 	Now         time.Time
 }
 
@@ -318,6 +328,7 @@ func (q *Queries) InsertLinkRule(ctx context.Context, arg InsertLinkRuleParams) 
 		arg.ScopeType,
 		arg.ScopeLabel,
 		arg.UrlTemplate,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -403,8 +414,8 @@ func (q *Queries) InsertLookupEntries(ctx context.Context, arg InsertLookupEntri
 }
 
 const insertLookupTable = `-- name: InsertLookupTable :one
-INSERT INTO lookup_tables (org_id, public_id, name, description, column_names, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5::text[], $6, $6)
+INSERT INTO lookup_tables (org_id, public_id, name, description, column_names, managed_by, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5::text[], $6::text, $7, $7)
 RETURNING id
 `
 
@@ -414,6 +425,7 @@ type InsertLookupTableParams struct {
 	Name        string
 	Description string
 	ColumnNames []string
+	ManagedBy   pgtype.Text
 	Now         time.Time
 }
 
@@ -425,6 +437,7 @@ func (q *Queries) InsertLookupTable(ctx context.Context, arg InsertLookupTablePa
 		arg.Name,
 		arg.Description,
 		arg.ColumnNames,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -567,7 +580,7 @@ func (q *Queries) ListLinkRuleTemplates(ctx context.Context, orgID int64) ([]Lis
 }
 
 const listLinkRules = `-- name: ListLinkRules :many
-SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version
+SELECT id, public_id, name, builtin, scope_type, scope_label, url_template, created_at, version, managed_by
 FROM link_rules
 WHERE org_id = $1 AND ($2::bigint IS NULL OR id > $2::bigint)
 ORDER BY id
@@ -590,6 +603,7 @@ type ListLinkRulesRow struct {
 	UrlTemplate string
 	CreatedAt   time.Time
 	Version     int64
+	ManagedBy   pgtype.Text
 }
 
 // ListLinkRules lists a page of the Link rules in the order they were created, after the id after_id.
@@ -612,6 +626,7 @@ func (q *Queries) ListLinkRules(ctx context.Context, arg ListLinkRulesParams) ([
 			&i.UrlTemplate,
 			&i.CreatedAt,
 			&i.Version,
+			&i.ManagedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -665,7 +680,7 @@ func (q *Queries) ListLookupEntries(ctx context.Context, arg ListLookupEntriesPa
 const listLookupTables = `-- name: ListLookupTables :many
 
 
-SELECT id, public_id, name, description, column_names, created_at, version
+SELECT id, public_id, name, description, column_names, created_at, version, managed_by
 FROM lookup_tables
 WHERE org_id = $1 AND ($2::bigint IS NULL OR id > $2::bigint)
 ORDER BY id
@@ -686,6 +701,7 @@ type ListLookupTablesRow struct {
 	ColumnNames []string
 	CreatedAt   time.Time
 	Version     int64
+	ManagedBy   pgtype.Text
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -710,6 +726,7 @@ func (q *Queries) ListLookupTables(ctx context.Context, arg ListLookupTablesPara
 			&i.ColumnNames,
 			&i.CreatedAt,
 			&i.Version,
+			&i.ManagedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -828,8 +845,8 @@ func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) er
 const updateLinkRule = `-- name: UpdateLinkRule :exec
 UPDATE link_rules
 SET name = $1, scope_type = $2, scope_label = $3, url_template = $4,
-    updated_at = $5, version = version + 1
-WHERE org_id = $6 AND id = $7
+    managed_by = $5::text, updated_at = $6, version = version + 1
+WHERE org_id = $7 AND id = $8
 `
 
 type UpdateLinkRuleParams struct {
@@ -837,6 +854,7 @@ type UpdateLinkRuleParams struct {
 	ScopeType   string
 	ScopeLabel  pgtype.Text
 	UrlTemplate string
+	ManagedBy   pgtype.Text
 	Now         time.Time
 	OrgID       int64
 	ID          int64
@@ -849,6 +867,7 @@ func (q *Queries) UpdateLinkRule(ctx context.Context, arg UpdateLinkRuleParams) 
 		arg.ScopeType,
 		arg.ScopeLabel,
 		arg.UrlTemplate,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
@@ -858,15 +877,16 @@ func (q *Queries) UpdateLinkRule(ctx context.Context, arg UpdateLinkRuleParams) 
 
 const updateLookupTable = `-- name: UpdateLookupTable :exec
 UPDATE lookup_tables
-SET name = $1, description = $2, column_names = $3::text[], updated_at = $4,
-    version = version + 1
-WHERE org_id = $5 AND id = $6
+SET name = $1, description = $2, column_names = $3::text[],
+    managed_by = $4::text, updated_at = $5, version = version + 1
+WHERE org_id = $6 AND id = $7
 `
 
 type UpdateLookupTableParams struct {
 	Name        string
 	Description string
 	ColumnNames []string
+	ManagedBy   pgtype.Text
 	Now         time.Time
 	OrgID       int64
 	ID          int64
@@ -878,6 +898,7 @@ func (q *Queries) UpdateLookupTable(ctx context.Context, arg UpdateLookupTablePa
 		arg.Name,
 		arg.Description,
 		arg.ColumnNames,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

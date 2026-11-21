@@ -492,11 +492,12 @@ USING doomed d
 WHERE g.org_id = @org_id AND g.id = d.id;
 
 -- GetAcknowledgedCall reads the call public_id of a Notification gateway's Connection, whatever its state, with the
--- User it was for — Role, state, name and profile language — for the Acknowledge of a notification_acknowledged event
--- (C-30.FR-6). No row for a call of another Connection or Organization, or none.
+-- notification_id the gateway accepted it under and when it ended, and with the User it was for — Role, state, name
+-- and profile language — for the Acknowledge of a notification_acknowledged event (C-30.FR-6). No row for a call of
+-- another Connection or Organization, or none.
 -- name: GetAcknowledgedCall :one
-SELECT g.id, g.public_id, g.state, u.id AS user_id, u.public_id AS user_public_id, u.role AS user_role,
-       u.status AS user_status, u.language AS user_language
+SELECT g.id, g.public_id, g.state, g.notification_id, g.ended_at, u.id AS user_id, u.public_id AS user_public_id,
+       u.role AS user_role, u.status AS user_status, u.language AS user_language
 FROM gateway_calls g
 JOIN users u ON u.org_id = g.org_id AND u.id = g.user_id
 WHERE g.org_id = @org_id AND g.connection_id = @connection_id AND g.public_id = @public_id;

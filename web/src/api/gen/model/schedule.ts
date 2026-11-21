@@ -22,6 +22,11 @@ export interface Schedule {
   readonly next_gap: ScheduleGap | null;
   /** From the lowest to the highest. */
   rotation_layers: RotationLayer[];
+  /**
+     * The name of the tool that keeps the Schedule as code, such as `terraform`, or null when none does (C-33.FR-11); see `ScheduleInput`.
+     * @nullable
+     */
+  managed_by?: string | null;
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. */
   readonly etag: string;
