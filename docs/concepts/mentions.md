@@ -204,9 +204,18 @@ message that ends Not delivered records none, nor does a Quiet message or an edi
 first publication of a Storm summary belongs to no Alert Group, so its undelivered Mentions appear in no Timeline. They
 still warn on the Destination.
 
+A group, a Team mention or everyone in the chat that a bridge's line of Mentions has no room for is recorded the same
+way, with `message_too_long`: "Mention not delivered" names the group's name or the word of everyone (`mention` in
+the API, in place of the person), the entry that named it and the Loud event. A `{{ mention "here" }}` or group token
+of a template that the line leaves out names no entry and no event: the Timeline still records it, but no warning
+follows, since the Destination has no entry to show it on. A group or a mention of everyone that the bridge no longer
+declares when the message is sent is not sent at all, so it is not recorded as left out either. Neither is the Team
+or everyone that a Page names, which no entry names.
+
 The Destination page warns about each person and entry whose latest "Mention not delivered" is not followed by a
-delivered Mention of that person through that entry. The API reads the warnings in `mention_warnings` of every
-Destination, each with the person, the entry, the messenger, the reason and since when. For example: "Mention not
+delivered Mention of that person through that entry, and in the same way about each group, Team mention and everyone
+in the chat left out through an entry. The API reads the warnings in `mention_warnings` of every Destination, each
+with the person or the `mention`, the entry, the messenger, the reason and since when. For example: "Mention not
 delivered: @petr, On-call of payments, has no linked Mattermost account."
 
 The warning clears by itself, because Muster computes it from the delivery events and never stores it:
@@ -216,7 +225,9 @@ The warning clears by itself, because Muster computes it from the delivery event
 - When their link is fixed so that a marker can be written for it, the next Loud message that mentions them through
   that entry clears it.
 - When the message's line of Mentions had no room for them, a later Loud message whose line has room for them clears
-  it.
+  it. The same holds for a group, a Team mention or everyone in the chat. Its warning names the group as it was then:
+  when a Team's mention is renamed, the warning about the old name stays until retention removes it or a message
+  carries that name again.
 - When the events behind it are older than `retention.alert_details`, which removes them, the warning goes too.
 
 A warning whose entry was removed from the Destination since goes at once. So does the warning of a deleted User.
