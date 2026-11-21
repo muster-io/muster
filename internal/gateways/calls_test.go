@@ -46,6 +46,8 @@ type fakeCalls struct {
 	recovered map[int64]time.Time
 	// stopped are the runs of chains and the rule runs that stopped, by id, which stop the items that name them.
 	stopped map[int64]bool
+	// claiming runs before each claim of the due calls (round_test.go).
+	claiming func()
 }
 
 type fakeCall struct {
@@ -332,6 +334,9 @@ func (f *fakeCalls) NotifyCalls(_ context.Context, channel string) error {
 }
 
 func (f *fakeCalls) ClaimDueCalls(_ context.Context, a dbgen.ClaimDueCallsParams) ([]dbgen.ClaimDueCallsRow, error) {
+	if f.claiming != nil {
+		f.claiming()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.err("ClaimDueCalls"); err != nil {
@@ -492,6 +497,28 @@ func (f *fakeCalls) RescheduleCall(_ context.Context, a dbgen.RescheduleCallPara
 	if a.Error.Valid {
 		c.errorText = a.Error
 	}
+	return 1, nil
+}
+
+func (f *fakeCalls) UnstartCall(_ context.Context, a dbgen.UnstartCallParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.err("UnstartCall"); err != nil {
+		return 0, err
+	}
+	c := f.call(a.ID)
+	if c == nil || c.state != CallSending || c.attempts != 0 || c.firstFailed.Valid || c.owner != a.Owner {
+		return 0, nil
+	}
+	for _, w := range f.calls {
+		if w.conn == c.conn && w.user == c.user && w.state == CallWaiting {
+			return 0, nil
+		}
+	}
+	c.state, c.contactID, c.language, c.text = CallWaiting, pgtype.Int8{}, pgtype.Text{}, pgtype.Text{}
+	c.actionData, c.buttonKeyID, c.firstAttempt = pgtype.Text{}, pgtype.Text{}, pgtype.Timestamptz{}
+	c.nextAttempt = pgtype.Timestamptz{Time: a.At, Valid: true}
+	f.release(c)
 	return 1, nil
 }
 
