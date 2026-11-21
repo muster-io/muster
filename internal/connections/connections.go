@@ -174,13 +174,13 @@ type Limiter struct {
 }
 
 // Connection is a Connection as the API reads it; its secrets show only their status. ServerURL is a Mattermost
-// Connection's; BotAPIBaseURL, UpdateMode and Warnings are a Telegram Connection's; BridgeBaseURL, EventDelivery,
-// PushSecret, BridgeInfo — the last info its check read, as the bridge sent it, nil before — and BridgeInfoReadAt are a
-// Bridge Connection's; EventMode, AppToken, SlackSigningSecret, what its last passing check learned — SlackTeamID,
-// SlackTeamName and SlackAppID, nil before — and SlackSocket — what the last hello of its Socket Mode connection
-// counted, nil in http mode and before the first hello after a save — are a Slack Connection's. SlackUsergroupsRead
-// and MattermostGroupsRead are what the last passing check of a Slack or a Mattermost Connection found of its groups,
-// nil before one (C-25.FR-8).
+// Connection's; BotAPIBaseURL and UpdateMode are a Telegram Connection's; Warnings are a Telegram or a Bridge
+// Connection's; BridgeBaseURL, EventDelivery, PushSecret, BridgeInfo — the last info its check read, as the bridge sent
+// it, nil before — and BridgeInfoReadAt are a Bridge Connection's; EventMode, AppToken, SlackSigningSecret, what its
+// last passing check learned — SlackTeamID, SlackTeamName and SlackAppID, nil before — and SlackSocket — what the last
+// hello of its Socket Mode connection counted, nil in http mode and before the first hello after a save — are a Slack
+// Connection's. SlackUsergroupsRead and MattermostGroupsRead are what the last passing check of a Slack or a
+// Mattermost Connection found of its groups, nil before one (C-25.FR-8).
 type Connection struct {
 	ID                 int64
 	PublicID           string
@@ -457,7 +457,7 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 		if err != nil {
 			return Page{}, err
 		}
-		page.Connections = append(page.Connections, c)
+		page.Connections = append(page.Connections, s.withBridgeWarnings(c, dbgen.GetConnectionRow(r)))
 	}
 	return page, nil
 }
@@ -468,7 +468,8 @@ func (s *Service) Get(ctx context.Context, publicID string) (Connection, error) 
 	if err != nil {
 		return Connection{}, err
 	}
-	return connectionOf(row)
+	c, err := connectionOf(row)
+	return s.withBridgeWarnings(c, row), err
 }
 
 // row reads the Connection publicID with its secrets as stored.
@@ -644,7 +645,7 @@ func proxy(in proxyconf.Input, stored proxyconf.Config) (proxyconf.Config, error
 // (C-24.FR-1). The bot token, the push secret of a Bridge and the app-level token and Slack signing secret of a Slack
 // Connection are encrypted with the active key and never returned. A Telegram Connection created in the webhook mode
 // gets a new secret token and its webhook is set before the creation commits; when setWebhook fails, nothing is
-// created.
+// created. A Bridge has its info read once the creation committed (readSavedInfo), which never fails it.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection, error) {
 	if err := check(&in, nil); err != nil {
 		return Connection{}, err
@@ -681,6 +682,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection
 		return Connection{}, err
 	}
 	s.webhookSet(ctx, created.PublicID, hooked)
+	if created.Type == TypeBridge {
+		created = s.readSavedInfo(ctx, created)
+	}
 	return created, nil
 }
 
@@ -736,12 +740,16 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 // Bridge's info and events cursor, and the workspace and app that a Slack check found. An update that changes nothing
 // writes nothing. A Telegram Connection that enters the webhook mode, or changes its base URL or bot token in it, gets
 // a new secret token and setWebhook; one that leaves it gets deleteWebhook; both run before the update commits, and
-// when they fail nothing is saved.
+// when they fail nothing is saved. A Bridge given a new base URL or bot token has its info read once the update
+// committed (readSavedInfo), which never fails it; a save of its other fields calls nothing.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Connection,
 	error) {
 	var out Connection
 	var hooked string
+	// forgot is a save that forgot the bot: a new address or bot token.
+	var forgot bool
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
+		forgot = false
 		id, err := publicid.Parse(publicid.Connection, publicID)
 		if err != nil {
 			return ErrNotFound
@@ -799,7 +807,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		after.Proxy, after.Limiter = p, in.Limiter
 		diff := append(audit.Diff(viewOf(before), viewOf(after)), secretDiff...)
 		if len(diff) == 0 {
-			out = before
+			out = s.withBridgeWarnings(before, row)
 			return nil
 		}
 		tokenAt := row.BotTokenUpdatedAt
@@ -812,6 +820,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
+		forgot = in.ServerURL != before.ServerURL || in.BotAPIBaseURL != before.BotAPIBaseURL ||
+			in.BridgeBaseURL != before.BridgeBaseURL || in.BotToken.Given
 		if err := q.UpdateConnection(ctx, dbgen.UpdateConnectionParams{OrgID: s.cfg.OrgID, ID: row.ID, Name: in.Name,
 			ServerUrl: nonEmpty(in.ServerURL), BotApiBaseUrl: nonEmpty(in.BotAPIBaseURL),
 			UpdateMode: nonEmpty(in.UpdateMode), WebhookSecretCiphertext: hook.Ciphertext,
@@ -823,10 +833,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			SlackAppTokenUpdatedAt: timestamp(app.UpdatedAt), SlackSigningSecretCiphertext: signing.Ciphertext,
 			SlackSigningSecretKeyID: nonEmpty(signing.KeyID), SlackSigningSecretUpdatedAt: timestamp(signing.UpdatedAt),
 			BotTokenCiphertext: token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: tokenAt,
-			ForgetBot: in.ServerURL != before.ServerURL || in.BotAPIBaseURL != before.BotAPIBaseURL ||
-				in.BridgeBaseURL != before.BridgeBaseURL || in.BotToken.Given,
-			ForgetUpdates: in.BotToken.Given,
-			Proxy:         p.JSON(), ProxyPasswordCiphertext: password.Ciphertext,
+			ForgetBot: forgot, ForgetUpdates: in.BotToken.Given,
+			Proxy: p.JSON(), ProxyPasswordCiphertext: password.Ciphertext,
 			ProxyPasswordKeyID: nonEmpty(password.KeyID), ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt),
 			LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
 			return fmt.Errorf("update the connection %s: %w", id, nameTaken(err))
@@ -837,6 +845,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if out, err = connectionOf(row); err != nil {
 			return err
 		}
+		out = s.withBridgeWarnings(out, row)
 		if s.cfg.Gateways.Renamed != nil && row.GatewayBrokenSince.Valid && out.Name != before.Name {
 			if err := s.cfg.Gateways.Renamed(ctx, q.DB(), out.PublicID, out.Name); err != nil {
 				return err
@@ -853,6 +862,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		return Connection{}, err
 	}
 	s.webhookSet(ctx, out.PublicID, hooked)
+	if forgot && out.Type == TypeBridge {
+		out = s.readSavedInfo(ctx, out)
+	}
 	return out, nil
 }
 

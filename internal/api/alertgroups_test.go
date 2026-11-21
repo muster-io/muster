@@ -1055,7 +1055,7 @@ func TestTimelineMentionNotDeliveredAPI(t *testing.T) {
 	onCall, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA1", At: t0, Kind: groups.KindDelivery,
 		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
 			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "payments-notice"},
-			Mention: &groups.MentionView{User: bob, Position: 1, Target: groups.MentionTarget{Kind: "on_call_of_team",
+			Mention: &groups.MentionView{User: bob, Position: 1, Target: &groups.MentionTarget{Kind: "on_call_of_team",
 				TeamID: "TM0000000000PA", Team: &groups.TeamRef{PublicID: "TM0000000000PA", Name: "Payments",
 					Slug: "payments"}}, Event: "new_alert_group", Reason: "no_account_link"}}})
 	raw, _ := json.Marshal(onCall)
@@ -1069,13 +1069,45 @@ func TestTimelineMentionNotDeliveredAPI(t *testing.T) {
 	person, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA2", At: t0, Kind: groups.KindDelivery,
 		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
 			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "bridge"},
-			Mention: &groups.MentionView{User: bob, Target: groups.MentionTarget{Kind: "user", UserID: "SR0000000000BB",
+			Mention: &groups.MentionView{User: bob, Target: &groups.MentionTarget{Kind: "user", UserID: "SR0000000000BB",
 				User: bob}, Event: "reopen", Reason: "bridge_cannot_mention_people"}}})
 	raw, _ = json.Marshal(person)
 	if err != nil || !strings.Contains(string(raw), `"target":{"kind":"user","user":{"deactivated":false,`+
 		`"id":"SR0000000000BB","login":"bob","name":"Bob"},"user_id":"SR0000000000BB"}}`) ||
 		!strings.Contains(string(raw), `"reason":"bridge_cannot_mention_people"`) {
 		t.Errorf("person %s, %v", raw, err)
+	}
+	// A group a bridge's Mention line left out names the group and no person (#626); a token names no entry or event.
+	ops, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA4", At: t0, Kind: groups.KindDelivery,
+		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
+			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "bridge"},
+			Mention: &groups.MentionView{Mention: &groups.MentionName{Kind: "group", Name: "ops"}, Position: 2,
+				Target: &groups.MentionTarget{Kind: "group", Group: "ops"}, Event: "new_alerts",
+				Reason: "message_too_long"}}})
+	raw, _ = json.Marshal(ops)
+	if err != nil || !strings.Contains(string(raw), `"mention":{"entry":{"position":2,"target":{"group":"ops",`+
+		`"kind":"group"}},"event":"new_alerts","mention":{"kind":"group","name":"ops"},"reason":"message_too_long"}`) {
+		t.Errorf("group %s, %v", raw, err)
+	}
+	here, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA5", At: t0, Kind: groups.KindDelivery,
+		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
+			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "bridge"},
+			Mention: &groups.MentionView{Mention: &groups.MentionName{Kind: "everyone", Name: "here"},
+				Target: &groups.MentionTarget{Kind: "everyone", Everyone: "here"}, Event: "reopen",
+				Reason: "message_too_long"}}})
+	raw, _ = json.Marshal(here)
+	if err != nil || !strings.Contains(string(raw), `"target":{"everyone":"here","kind":"everyone"}`) {
+		t.Errorf("everyone %s, %v", raw, err)
+	}
+	token, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA6", At: t0, Kind: groups.KindDelivery,
+		Loudness: groups.Quiet, Mentions: []string{}, Actor: system, Delivery: &groups.DeliveryView{
+			Event: "mention_not_delivered", Destination: groups.Ref{PublicID: "DSAAAAAAAAAAAA", Name: "bridge"},
+			Mention: &groups.MentionView{Mention: &groups.MentionName{Kind: "everyone", Name: "channel"},
+				Reason: "message_too_long"}}})
+	raw, _ = json.Marshal(token)
+	if err != nil || !strings.Contains(string(raw),
+		`"mention":{"mention":{"kind":"everyone","name":"channel"},"reason":"message_too_long"}`) {
+		t.Errorf("token %s, %v", raw, err)
 	}
 	publication, err := timelineEntryOf(groups.TimelineEntry{PublicID: "DEAAAAAAAAAAA3", At: t0,
 		Kind: groups.KindDelivery, Loudness: groups.Loud, Mentions: []string{}, Actor: system,

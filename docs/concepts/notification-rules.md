@@ -8,9 +8,11 @@ A **Notification rule** says how a Page reaches a person. Every User has two: th
   contact there;
 - **Wait**: a pause of whole minutes before the next action.
 
-Actions without a wait between them happen at the same moment. Muster sends no direct messages to Page anyone. The
-rules are read and changed through the API under `/api/v1/me/notification-rules` and
-`/api/v1/users/{user_id}/notification-rules`, listed in the [API reference](../reference/api.md).
+Actions without a wait between them happen at the same moment. Muster sends no direct messages to Page anyone. An
+[Escalation step](escalation-chains.md) decides whom to Page and when; the rule decides how, and
+[How an alert reaches people](how-an-alert-reaches-people.md) shows the two working together. The rules are read and
+changed through the API under `/api/v1/me/notification-rules` and `/api/v1/users/{user_id}/notification-rules`, listed
+in the [API reference](../reference/api.md).
 
 ## Normal and important
 
@@ -86,8 +88,53 @@ A call in a person's custom rules needs their confirmed contact at its gateway (
 a call while no gateway exists is `gateway_required` at the action. Custom rules stay as they are when the
 Organization's rules change. "Reset to the Organization's rules" brings back "As in the Organization".
 
-Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described with the
-Escalation chains.
+Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described below.
+
+## In the web UI
+
+In **Profile**, the section **Personal notification rules** shows "Normal" and "Important" each in words, as the
+person's own sequence — "a Mention in the Thread of the Root message" for the normal rule with the default rules — with
+the switch "Also call through the Notification gateway":
+"As in the Organization", "Call" and "Don't call", the contact a call goes to ("to +10000000001") and, with several
+gateways, "Call through" to choose one. Without a confirmed contact the section says "Confirm your contact for calls
+and SMS below first.", and without a gateway "Unavailable: a Notification gateway is needed (a bridge for calls and
+SMS)". Custom rules show as "These rules are custom: they were set through the API or by an Admin." and **Reset to the
+Organization's rules** brings back the default. An Admin sees and changes the rules of any User on the User's page.
+**Linked accounts**, the first section of the Profile, says what a Mention needs: "A Page is a Mention in the Thread; it
+reaches only a linked account."
+
+## With the steps of a chain
+
+An [Escalation step](escalation-chains.md#steps) that Pages people — "Page the On-call of a Schedule", "Page people" —
+Pages each person by their own rule, the one named by the step's importance: `normal` or `important`. The step
+decides whom and when; the person's rule decides how and how often. A step "Page the whole Team" Pages nobody by a
+rule: it writes the Team mention, or the word for everyone in the chat, once. A step "Call through a Notification
+gateway" calls the persons it names through its gateway, whatever their rules say.
+
+The rule belongs to the Page that started it, and stops with it. It stops when the Alert Group is acknowledged,
+snoozed or resolved, and when its chain starts over; a Mention or a call that comes due after that is not made. A chain
+that has only run out does not stop its rules: the later Mention of an important Page still comes due. The rule is read
+when the Page starts, so a change of a person's rules reaches their next Page and not the one that runs. The same person
+Paged by two steps, or by two chains, has two runs of their rule, each of its own.
+
+A person who has to be reached by a call at night puts a call in the rule their Pages run — in the state "Call", the
+important rule. A chain then needs no call step for them: a step that Pages them importantly rings their phone.
+
+## Mentions and Account links
+
+A Mention of a rule is a Thread reply that names the person as their messenger understands it, and Muster can name
+them only through an [Account link](../messengers/account-links.md) in the Identity space of the Connection of the
+Destination in whose Thread the reply is written. A person with no Account link there is named in a line "Page not
+delivered: @petr has no linked Mattermost account" instead, which mentions nobody, and their rule's Mentions of that
+Destination do not make them an Assignee. Their calls are not affected: a call needs a confirmed contact at a gateway,
+not an Account link.
+
+An Identity space is all of Telegram, one Mattermost Connection, one Slack Connection or one Bridge. A person with
+Account links in several of them is Mentioned in each Destination whose Connection lies in one of their spaces, and a
+person linked in one Mattermost Connection is not Mentioned in the Destinations of another. Even where they are
+Mentioned, a Mention is a message in a chat: whether it also pushes a notification to the phone depends on the
+messenger, its app, the phone's settings and the push mode, so at night only a call through a Notification gateway is
+reliable ([At night](../messengers/notification-gateways.md#at-night)).
 
 ## Calls in rules
 

@@ -932,8 +932,9 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   `destinations`, `oidc_settings` and the outgoing heartbeat. `telegram_update_offset` lets a new Leader resume
   `getUpdates` where the old one stopped. A Bridge in push mode has a push secret until it is deleted
   (`connections_type_fields_check`), kept with its key id by `connections_bridge_push_secret_check`; a Bridge in poll
-  mode has none. `bridge_info` is the last `info` a Connection check read, as the bridge sent it — at most 64 KiB,
-  fields Muster does not know yet included — with `bridge_info_read_at` on the business clock; `bridge_events_cursor`
+  mode has none. `bridge_info` is the last `info` Muster read — on a Connection check, right after a save that created
+  the Connection or gave it a new base URL or bot token, or before a call that depends on it — as the bridge sent it,
+  at most 64 KiB, fields Muster does not know yet included, with `bridge_info_read_at` on the business clock; `bridge_events_cursor`
   is where the poller of the Bridge's events goes on, written by the Leader task `bridge_polling` after each batch it
   handled, and only for the version of the Connection the poller read, so that a poller of an earlier version or of a
   frozen old Leader writes nothing; it is not a change of the configuration. A new base URL or bot token forgets all
@@ -1674,7 +1675,11 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   warning. Both are Quiet, without Mentions; their `detail` holds the person (`user_id`), the entry (`entry_id`,
   `position` and `target`, the target in the API's form, which identifies the entry across saves of the Destination,
   which write its entries again), the Loud event (`event`) and, for `mention_not_delivered`, the `reason`
-  (`no_account_link`, `bridge_cannot_mention_people` or `message_too_long`, a free value that no CHECK constrains). The
+  (`no_account_link`, `bridge_cannot_mention_people` or `message_too_long`, a free value that no CHECK constrains). A
+  group, a Team mention or everyone in the chat that an entry named and a bridge's line of Mentions left out for length
+  (C-12.FR-11, #626) is recorded the same way, keyed by `mention` (`{"kind": "group" | "everyone", "name": …}`) in
+  place of `user_id`; one of a template's token names no entry, so its `detail` has only `mention` and `reason`, and it
+  is written only about an Alert Group and never warns. The
   Timeline lists `mention_not_delivered` and never `mention_delivered`. The warnings of a Destination are computed
   from them, never stored, on the partial index `delivery_events_mentions_idx` `(org_id, destination_id, kind,
   occurred_at DESC) WHERE kind IN ('mention_not_delivered', 'mention_delivered')`: created on the parent alone,
@@ -1962,12 +1967,12 @@ stored `info` declares the role `gateway`; it has no table of its own.
   its notification — only the newest sent code of a contact is checked, so that a code still being sent, or one whose
   sending failed, never hides an earlier valid one — `used_at` once it confirmed its contact and `voided_at` once the
   last attempt was wrong, a newer code of the contact was sent or its own sending failed. `user_id` and `contact_hash`,
-  the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User
-  (`gateway_contact_codes_user_idx`) and per contact whoever asked (`gateway_contact_codes_hash_idx`), each on `(org_id,
-  …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that removing and
-  adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id, contact_id,
-  created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since `created_at` comes
-  from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
+  the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User and per User
+  and contact (`gateway_contact_codes_user_idx`) and per contact whoever asked (`gateway_contact_codes_hash_idx`), each
+  on `(org_id, …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that
+  removing and adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id,
+  contact_id, created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since
+  `created_at` comes from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
   `gateway_contact_codes_contact_fk_idx` on `(contact_id)` serve the foreign key actions: the pruning of sessions
   deletes their codes, and removing a contact sets the contact of its codes to null. The Leader's short-lived pruning
   deletes the codes that expired a day ago (`gateway_contact_codes_expires_idx` on `(org_id, expires_at)`) with the
@@ -2433,9 +2438,10 @@ in order once it commits, and a run of many batches stalls them once per batch, 
 no worker claims it before the save commits, and its run classifies with every save before it. A row
 `organization_message_settings` is inserted the same way while one of the Organization is still unclaimed, and a row
 `team_name` while one of the same Team is, a row `organization_links` while one of the Organization is, a row
-`user_name` or `account_links` while one of either kind of the same User is, and a row `service_account_name` while
-one of the same Service account is: the run renders with the settings, the name, the rules, the tables and the links
-as they are then.
+`user_name` or `account_links` while one of either kind of the same User is, a row `service_account_name` while
+one of the same Service account is, a row `route_minimum_severity` while one of the same Route is, and a row
+`route_message_labels` or `route_message_settings` while one of either kind of the same Route is: the run renders with
+the settings, the name, the rules, the tables, the links and the Route as they are then.
 
 Every walk also takes the resolved Alert Groups of its scope whose final edit still waits, those with a `pending`
 delivery — in its Destination for `destination_buttons` and `destination_connection`, in a Destination that follows

@@ -4,9 +4,11 @@
 package delivery
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -47,8 +49,8 @@ func (s *Service) ReminderReached(ctx context.Context, db groups.DBTX, groupID, 
 	return reached, nil
 }
 
-// claimReplies is the claim of the due Thread replies of an Organization; a non-zero until claims only the replies
-// due by then.
+// claimReplies is the claim of the due Thread replies of an Organization, in the order of ClaimDueReplies: the
+// earliest first. A non-zero until claims only the replies due by then.
 func (w *Worker) claimReplies(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
 	return func(ctx context.Context, org int64) ([]int64, error) {
 		dests, conns := refusedOf(ctx)
@@ -61,6 +63,9 @@ func (w *Worker) claimReplies(until time.Time) func(ctx context.Context, org int
 		if err != nil {
 			return nil, fmt.Errorf("claim the due thread replies: %w", err)
 		}
+		slices.SortFunc(rows, func(a, b dbgen.ClaimDueRepliesRow) int {
+			return cmp.Or(a.NextAttemptAt.Compare(b.NextAttemptAt), cmp.Compare(a.ID, b.ID))
+		})
 		ids := make([]int64, len(rows))
 		for i, r := range rows {
 			ids[i] = r.ID

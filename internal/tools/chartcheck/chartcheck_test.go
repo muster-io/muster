@@ -250,7 +250,7 @@ func TestRunPasses(t *testing.T) {
 		"release":           {version: "2.10.3", segment: "2.10"},
 		"collapsed row": {version: "0.0.0-dev", segment: "latest", change: func(f *fixture) {
 			panels := f.panels()
-			i := slices.IndexFunc(panels, func(p any) bool { return p.(map[string]any)["title"] == "Platform" })
+			i := slices.IndexFunc(panels, func(p any) bool { return p.(map[string]any)["title"] == "Paging" })
 			row := panels[i].(map[string]any)
 			row["collapsed"] = true
 			row["panels"] = slices.Clone(panels[i+1:])
@@ -475,18 +475,18 @@ func TestRunReportsProblems(t *testing.T) {
 		"row missing": {
 			change: func(f *fixture) {
 				f.dashboard["panels"] = slices.DeleteFunc(f.panels(), func(p any) bool {
-					return p.(map[string]any)["title"] == "Platform"
+					return p.(map[string]any)["title"] == "Paging"
 				})
 			},
-			want: []string{"the dashboard rows are [Overview Ingestion Delivery], not [Overview Ingestion Delivery Platform]"},
+			want: []string{"the dashboard rows are [Overview Ingestion Delivery Platform], not [Overview Ingestion Delivery Platform Paging]"},
 		},
 		"empty row": {
 			change: func(f *fixture) {
 				panels := f.panels()
-				i := slices.IndexFunc(panels, func(p any) bool { return p.(map[string]any)["title"] == "Platform" })
+				i := slices.IndexFunc(panels, func(p any) bool { return p.(map[string]any)["title"] == "Paging" })
 				f.dashboard["panels"] = panels[:i+1]
 			},
-			want: []string{`dashboard row "Platform" has no panel`},
+			want: []string{`dashboard row "Paging" has no panel`},
 		},
 		"panel above the first row": {
 			change: func(f *fixture) { f.dashboard["panels"] = append([]any{f.panel("Delivery queues")}, f.panels()...) },

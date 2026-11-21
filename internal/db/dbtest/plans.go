@@ -23,6 +23,64 @@ import (
 // table it updates.
 func LockRowsLoops(t testing.TB, connString string, f func(ctx context.Context, conn *pgx.Conn)) int {
 	t.Helper()
+	most := 0
+	for _, p := range loggedPlans(t, connString, []string{"SET auto_explain.log_analyze = on", "SET enable_hashjoin = off",
+		"SET enable_mergejoin = off"}, f) {
+		most = max(most, lockRowsLoops(t, p))
+	}
+	return most
+}
+
+// UpdateScans runs f on a connection to the database at connString that plans every prepared statement as mode, a
+// plan_cache_mode, says and sends the plan of every statement it executes back as a notice (auto_explain); for every
+// UPDATE among them it returns how its plan reads the table it updates, each scan of that table under the alias of the
+// UPDATE as EXPLAIN names it: "Seq Scan on deliveries d" or "Index Scan using deliveries_pkey on deliveries d".
+func UpdateScans(t testing.TB, connString, mode string, f func(ctx context.Context, conn *pgx.Conn)) []string {
+	t.Helper()
+	var scans []string
+	for _, p := range loggedPlans(t, connString, []string{"SET plan_cache_mode = " + mode}, f) {
+		var top planNode
+		if err := json.Unmarshal(p, &top); err != nil {
+			t.Fatalf("plan %s: %v", p, err)
+		}
+		if top.Type == "ModifyTable" && top.Operation == "Update" {
+			scans = append(scans, top.scansOf(top.Relation, top.Alias)...)
+		}
+	}
+	return scans
+}
+
+// planNode is a node of an EXPLAIN plan in JSON.
+type planNode struct {
+	Type      string     `json:"Node Type"`
+	Operation string     `json:"Operation"`
+	Relation  string     `json:"Relation Name"`
+	Alias     string     `json:"Alias"`
+	Index     string     `json:"Index Name"`
+	Plans     []planNode `json:"Plans"`
+}
+
+// scansOf names every scan of relation under alias at n and below it.
+func (n planNode) scansOf(relation, alias string) []string {
+	var out []string
+	if n.Type != "ModifyTable" && n.Relation == relation && n.Alias == alias {
+		s := n.Type
+		if n.Index != "" {
+			s += " using " + n.Index
+		}
+		out = append(out, s+" on "+relation+" "+alias)
+	}
+	for _, c := range n.Plans {
+		out = append(out, c.scansOf(relation, alias)...)
+	}
+	return out
+}
+
+// loggedPlans runs f on a connection to the database at connString, after settings, that sends the plan of every
+// statement it executes back as a notice (auto_explain, in JSON); it returns the top node of each plan.
+func loggedPlans(t testing.TB, connString string, settings []string,
+	f func(ctx context.Context, conn *pgx.Conn)) []json.RawMessage {
+	t.Helper()
 	cfg, err := pgx.ParseConfig(connString)
 	if err != nil {
 		t.Fatal(err)
@@ -42,10 +100,9 @@ func LockRowsLoops(t testing.TB, connString string, f func(ctx context.Context, 
 		t.Fatal(err)
 	}
 	defer conn.Close(context.WithoutCancel(ctx))
-	for _, stmt := range []string{"LOAD 'auto_explain'", "SET auto_explain.log_min_duration = 0",
-		"SET auto_explain.log_analyze = on", "SET auto_explain.log_format = 'json'",
-		"SET auto_explain.log_level = 'notice'", "SET client_min_messages = 'notice'", "SET enable_hashjoin = off",
-		"SET enable_mergejoin = off"} {
+	for _, stmt := range append([]string{"LOAD 'auto_explain'", "SET auto_explain.log_min_duration = 0",
+		"SET auto_explain.log_format = 'json'", "SET auto_explain.log_level = 'notice'",
+		"SET client_min_messages = 'notice'"}, settings...) {
 		if _, err := conn.Exec(ctx, stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
 		}
@@ -56,7 +113,7 @@ func LockRowsLoops(t testing.TB, connString string, f func(ctx context.Context, 
 	if len(plans) == 0 {
 		t.Fatal("no plan was logged")
 	}
-	most := 0
+	out := make([]json.RawMessage, 0, len(plans))
 	for _, p := range plans {
 		var doc struct {
 			Plan json.RawMessage `json:"Plan"`
@@ -64,9 +121,9 @@ func LockRowsLoops(t testing.TB, connString string, f func(ctx context.Context, 
 		if err := json.Unmarshal([]byte(p), &doc); err != nil {
 			t.Fatalf("plan %s: %v", p, err)
 		}
-		most = max(most, lockRowsLoops(t, doc.Plan))
+		out = append(out, doc.Plan)
 	}
-	return most
+	return out
 }
 
 // lockRowsLoops is the most loops of a LockRows node in the plan node raw and below it.

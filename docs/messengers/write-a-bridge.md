@@ -1119,13 +1119,17 @@ What `layout` has, in the order a message shows it:
 
 `owner` and `assignees`
 :   People, each with a `name`, their name in Muster, and a `ref`. `owner` is who acknowledged the Alert Group, while it
-    is acknowledged, and `null` otherwise; `assignees` are whom Muster Paged before an acknowledgement, and are empty
-    until Muster Pages people through Escalation chains. A `ref` names the entry of the same `ref` in the envelope's
-    `mentions`, which has the person's `external_id` in your messenger, so that you mention them by your own user id.
-    It is `null` where the message carries no Mention of them: in every edit, which carries no Mentions at all, and in a
-    message to a bridge without `native_mentions` or for a person whose account is not linked. Then write the `name`.
-    A person who snoozed or resolved the Alert Group is no `owner`: they appear only as text in a line of `notices`, with
-    no `ref`, so that a bridge cannot mention them from `layout`.
+    is acknowledged, and `null` otherwise; it has no `team`, and "Escalation chains stopped" after an acknowledgement
+    that stopped running chains is the last line of `notices`. `assignees` are the people whom Muster's
+    [Escalation chains](../concepts/escalation-chains.md#assignees) Paged last and reached, before an acknowledgement,
+    and are empty until Muster Pages people; each has the owning Team of their chain in `team`, an object with a `name`,
+    where it has one. Write them as a line of their own, such as "Assignees: @ivan (devops), @petr (payments)", not as
+    part of the `notices`. A `ref` names the entry of the same `ref` in the envelope's `mentions`, which has the
+    person's `external_id` in your messenger, so that you mention them by your own user id. It is `null` where the
+    message carries no Mention of them: in every edit, which carries no Mentions at all, and in a message to a bridge
+    without `native_mentions` or for a person whose account is not linked. Then write the `name`. A person who
+    snoozed or resolved the Alert Group is no `owner`: they appear only as text in a line of `notices`, with no `ref`,
+    so that a bridge cannot mention them from `layout`.
 
 `links`
 :   A list of `label` and `url`, "Open in Muster" first. A `url` is an absolute `http` or `https` address as the Route
@@ -2433,7 +2437,7 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
 :   Where the bridge reaches the push listener, the listener's own address by default.
 
 `--push-secret-file <file>`
-:   The push secret, `whsec_` and base64, instead of a generated one.
+:   The push secret, `whsec_` and the base64 of at least 24 bytes, instead of a generated one.
 
 `--no-interactive`
 :   Skip `press`, `push` and `notification_acknowledged`, which need a person.

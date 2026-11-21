@@ -5,7 +5,6 @@ package connections
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -48,11 +47,16 @@ const (
 	StepEventDelivery = "event_delivery"
 )
 
-const (
-	fieldPushSecret = "connections.bridge_push_secret"
-	// pushSecretPrefix starts a push secret in the Standard Webhooks form, followed by base64.
-	pushSecretPrefix = "whsec_"
-)
+// WarningPushSecretTooShort is the warning of a Bridge Connection in push mode whose stored push secret has a key
+// shorter than bridge.MinPushSecretBytes, saved before Muster refused one: it keeps working, and a new push secret ends
+// the warning.
+const WarningPushSecretTooShort = "push_secret_too_short"
+
+// HintPushSecretTooShort is what muster doctor says of a Bridge Connection with WarningPushSecretTooShort.
+const HintPushSecretTooShort = "the push secret is shorter than 24 bytes: set a new one, whsec_ followed by the " +
+	"base64 of 24 to 64 random bytes, on the Connection and on the bridge"
+
+const fieldPushSecret = "connections.bridge_push_secret"
 
 // bridgeEventLockClass is the first key of the transaction advisory lock of the claim of one Bridge event, whose second
 // key is hashtext of the Connection's id and the event id: HandleEventOnce holds it while the event is handled, so
@@ -88,8 +92,10 @@ func checkBridgeAddress(in *Input) error {
 }
 
 // checkPushSecret validates the push secret of the Bridge Connection in, saved over stored (nil on a creation): push
-// event delivery needs one, sent now or stored, in the Standard Webhooks form, whsec_ followed by base64; poll takes
-// none, and its save clears the stored one. The detail never shows the value.
+// event delivery needs one, sent now or stored, in the Standard Webhooks form, whsec_ followed by the base64 of at
+// least bridge.MinPushSecretBytes; poll takes none, and its save clears the stored one. Only a push secret sent now is
+// checked: a stored one shorter than the minimum, saved before it, is kept and reported with
+// WarningPushSecretTooShort. The detail never shows the value.
 func checkPushSecret(in Input, stored *Connection) error {
 	p := in.PushSecret
 	if in.EventDelivery != EventDeliveryPush {
@@ -103,20 +109,38 @@ func checkPushSecret(in Input, stored *Connection) error {
 	case p.Null, !p.Given && (stored == nil || !stored.PushSecret.Set):
 		return &FieldError{Pointer: "/push_secret", Code: CodeRequired,
 			Detail: "Push event delivery needs a push secret."}
-	case p.Given && !validPushSecret(p.Value):
+	case p.Given && !bridge.ValidPushSecret(p.Value):
 		return &FieldError{Pointer: "/push_secret", Code: CodeInvalidFormat,
-			Detail: "The push secret is not whsec_ followed by base64."}
+			Detail: "The push secret is not whsec_ followed by base64 of at least 24 bytes."}
 	}
 	return nil
 }
 
-func validPushSecret(v logging.Secret) bool {
-	rest, ok := strings.CutPrefix(string(v), pushSecretPrefix)
-	if !ok {
-		return false
+// withBridgeWarnings adds WarningPushSecretTooShort to the Bridge Connection c of row in push mode when its stored
+// push secret is shorter than bridge.MinPushSecretBytes. A push secret that cannot be opened adds nothing here: the
+// check, muster doctor and the push callback report it.
+func (s *Service) withBridgeWarnings(c Connection, row dbgen.GetConnectionRow) Connection {
+	if row.Type != TypeBridge || row.BridgeEventDelivery.String != EventDeliveryPush || s.cfg.Keyring == nil {
+		return c
 	}
-	key, err := base64.StdEncoding.DecodeString(rest)
-	return err == nil && len(key) > 0
+	if short, err := s.pushSecretTooShort(row); err == nil && short {
+		c.Warnings = append(c.Warnings, WarningPushSecretTooShort)
+	}
+	return c
+}
+
+// pushSecretTooShort reports whether the stored push secret of the Bridge Connection row is set and shorter than
+// bridge.MinPushSecretBytes.
+func (s *Service) pushSecretTooShort(row dbgen.GetConnectionRow) (bool, error) {
+	stored := storedPushSecret(row)
+	if !stored.Set() {
+		return false, nil
+	}
+	v, err := s.cfg.Keyring.OpenSecret(fieldPushSecret, stored)
+	if err != nil {
+		return false, fmt.Errorf("open the push secret of the connection %s: %w", row.PublicID, err)
+	}
+	return !bridge.ValidPushSecret(v), nil
 }
 
 // pushSecret applies the push secret of in to the stored one at now: the one sent in push event delivery, none
@@ -344,32 +368,94 @@ func (s *Service) checkBridge(ctx context.Context, row dbgen.GetConnectionRow, b
 	if err != nil {
 		return CheckResult{}, err
 	}
-	conn := bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c}
-	var info bridge.Info
-	var r bridge.Result
-	var stored error
-	var latency time.Duration
-	id := row.ID
-	if _, err := s.cfg.Interactive.Do(ctx, delivery.Subject{Connection: &id}, delivery.ReadOp(
-		func(ctx context.Context, call delivery.Call) delivery.Outcome {
-			start := s.cfg.Clocks.Real.Now()
-			info, r, stored = s.info.Refresh(ctx, conn, call.Class)
-			latency = s.cfg.Clocks.Real.Now().Sub(start)
-			return r.Outcome()
-		})); err != nil {
+	read, err := s.refreshInfo(ctx, row, c)
+	if err != nil {
 		return CheckResult{}, err
 	}
-	if stored != nil {
-		return CheckResult{}, stored
+	if read.stored != nil {
+		return CheckResult{}, read.stored
 	}
 	// The step info read the bridge as a probe of a Broken Notification gateway does: its success ends the state
 	// (C-30.FR-8), whatever the step event_delivery says.
-	if r.OK() && row.GatewayBrokenSince.Valid && s.cfg.Gateways.Checked != nil {
+	if read.result.OK() && row.GatewayBrokenSince.Valid && s.cfg.Gateways.Checked != nil {
 		if err := s.cfg.Gateways.Checked(ctx, row.ID); err != nil {
 			return CheckResult{}, err
 		}
 	}
-	return bridgeResult(info, r, latency, c.Via(), row.BridgeEventDelivery.String), nil
+	return bridgeResult(read.info, read.result, read.latency, c.Via(), row.BridgeEventDelivery.String), nil
+}
+
+// infoRead is a read of the info of a Bridge Connection: the info, how the read ended, its latency on the real clock,
+// and stored, a failure of the store of a fresh read.
+type infoRead struct {
+	info    bridge.Info
+	result  bridge.Result
+	latency time.Duration
+	stored  error
+}
+
+// refreshInfo reads the info of the Bridge Connection row again through its client c on the interactive path, limited
+// by the Connection, through the InfoCache, which stores a fresh read for the version of row, keeps and logs it. The
+// error is a call that did not run, such as no limiter token within the budget, a *delivery.LimitedError.
+func (s *Service) refreshInfo(ctx context.Context, row dbgen.GetConnectionRow, c *bridge.Client) (infoRead, error) {
+	conn := bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c}
+	var read infoRead
+	id := row.ID
+	if _, err := s.cfg.Interactive.Do(ctx, delivery.Subject{Connection: &id}, delivery.ReadOp(
+		func(ctx context.Context, call delivery.Call) delivery.Outcome {
+			start := s.cfg.Clocks.Real.Now()
+			read.info, read.result, read.stored = s.info.Refresh(ctx, conn, call.Class)
+			read.latency = s.cfg.Clocks.Real.Now().Sub(start)
+			return read.result.Outcome()
+		})); err != nil {
+		return infoRead{}, err
+	}
+	return read, nil
+}
+
+// readSavedInfo reads the info of the Bridge Connection c right after a save created it or gave it a new base URL or
+// bot token committed, as its check reads it (refreshInfo), so that a Connection's info is never unknown once it is
+// saved (C-22.FR-2, #658): a call that depends on it, such as a Page through one of its Destinations, finds it. The
+// read is stored only for the version saved, so that it never overwrites what a later save forgot. It returns c with
+// the info stored. A read that fails or cannot run changes nothing, never fails the save, and is logged as
+// bridge_info_read_failed; the read is in the Request log of the Connection, and its check reads info again.
+func (s *Service) readSavedInfo(ctx context.Context, c Connection) Connection {
+	failed := func(reason string) Connection {
+		s.cfg.Log.Log(ctx, logging.BridgeInfoReadFailed, logging.F("connection", c.PublicID),
+			logging.F("error", reason))
+		return c
+	}
+	row, err := s.row(ctx, s.cfg.Store, c.PublicID)
+	if errors.Is(err, ErrNotFound) {
+		return c
+	}
+	if err != nil {
+		return failed(err.Error())
+	}
+	// A later save changed the Connection meanwhile and reads info for its own version.
+	if row.Version != c.Version {
+		return c
+	}
+	client, err := s.bridgeClient(row)
+	if err != nil {
+		return failed(err.Error())
+	}
+	read, err := s.refreshInfo(ctx, row, client)
+	switch {
+	case err != nil:
+		return failed(err.Error())
+	case !read.result.OK():
+		return failed(strings.TrimSpace(read.result.CheckCode() + " " + string(read.result.Error)))
+	case read.stored != nil:
+		return failed(read.stored.Error())
+	}
+	if row, err = s.row(ctx, s.cfg.Store, c.PublicID); err != nil || row.Version != c.Version {
+		return c
+	}
+	if saved, err := connectionOf(row); err == nil {
+		return saved
+	}
+	return c
 }
 
 // ProbeGateway is the probe of the Broken Notification gateway connectionID (gateways.Prober, C-30.FR-8): getInfo read

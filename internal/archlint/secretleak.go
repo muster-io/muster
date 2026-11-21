@@ -1465,7 +1465,8 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 	for _, g := range groups.Groups {
 		errs = append(errs, errors.New(g.ID+" "+g.Name+" "+g.DisplayName))
 	}
-	errs = append(errs, probePresses(ctx, svc, k, clocks, logger, c.PublicID), probeAdapter(ctx, svc, store, clocks))
+	errs = append(errs, probePresses(ctx, svc, k, clocks, log, c.PublicID), probeAdapter(ctx, svc, k, store, clocks,
+		c.PublicID))
 	checked, err := svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID, TeamID: "t",
 		ChannelID: "c"})
 	errs = append(errs, err)
@@ -1692,12 +1693,17 @@ func (probeTGBindings) TelegramReplyBinding(ctx context.Context, conn int64, gro
 	return probeTGBindings{}.TelegramPressBinding(ctx, conn, group, chat, message)
 }
 
-// probePresses sends button presses to the callback of the Connection publicID: one that cannot be verified, one from
-// an account without an Account link and one whose Command is refused, on a Root message and on a Reminder, whose
-// answers go to the Thread of its Root message, each answered with an ephemeral post that the stand-in server refuses
-// with the bot token in its error, each logged, and returns the answers, whose ephemeral_text must carry no secret.
+// probePresses sends button presses to the callback of the Connection publicID, each with the callback secret of its
+// button: one that cannot be verified, one from an account without an Account link and one whose Command is refused,
+// on a Root message and on a Reminder, whose answers go to the Thread of its Root message; then one without a secret,
+// whose refresh of the Root message fails, and one with the secret of another button. Each is answered with an
+// ephemeral post that the stand-in server refuses with the bot token in its error, and each is logged; it returns the
+// answers, whose ephemeral_text must carry no secret. The callback secrets are not planted secrets, so the probe looks
+// for them in the log output and the answers itself.
 func probePresses(ctx context.Context, svc *connections.Service, k *keyring.Keyring, clocks clock.Clocks,
-	logger *logging.Logger, publicID string) error {
+	log io.Writer, publicID string) error {
+	var logged bytes.Buffer
+	logger := logging.New(io.MultiWriter(log, &logged), logging.LevelInfo)
 	action, keyID, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
 		Command: buttons.CommandAcknowledge})
 	if err != nil {
@@ -1708,18 +1714,30 @@ func probePresses(ctx context.Context, svc *connections.Service, k *keyring.Keyr
 	if err != nil {
 		return err
 	}
+	ackSecret, err := mattermost.CallbackSecret(k, keyID, publicID, action)
+	if err != nil {
+		return err
+	}
+	reminderSecret, err := mattermost.CallbackSecret(k, keyID, publicID, reminder)
+	if err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{Connections: svc,
-		Bindings: probeBindings{}, Links: probeLinks{}, Commands: probeCommands{}, Keys: k,
+		Bindings: probeBindings{}, Links: probeLinks{}, Commands: probeCommands{}, Keys: k, Refresh: probeRefresher{},
 		Path: deliverytest.Unlimited(1, clocks), Business: clocks.Business, PublicURL: "http://localhost:8080",
 		Log: logger}))
 	var errs []error
-	for _, p := range []struct{ user, action string }{{"u-linked", "x" + action[1:]}, {"u-unlinked", action},
-		{"u-linked", action}, {"u-unlinked", reminder}, {"u-linked", reminder}} {
-		body := fmt.Sprintf(`{"user_id":%q,"channel_id":"c","post_id":"p","context":{"action":%q,"key_id":%q}}`,
-			p.user, p.action, keyID)
+	for _, p := range []struct{ user, action, secret string }{{"u-linked", "x" + action[1:], ackSecret},
+		{"u-unlinked", action, ackSecret}, {"u-linked", action, ackSecret}, {"u-unlinked", reminder, reminderSecret},
+		{"u-linked", reminder, reminderSecret}, {"u-linked", action, ""}, {"u-linked", action, reminderSecret}} {
+		body, err := json.Marshal(map[string]any{"user_id": p.user, "channel_id": "c", "post_id": "p",
+			"context": map[string]string{"action": p.action, "key_id": keyID, "secret": p.secret}})
+		if err != nil {
+			return err
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mattermost.CallbackPath+publicID,
-			strings.NewReader(body))
+			bytes.NewReader(body))
 		if err != nil {
 			return err
 		}
@@ -1727,19 +1745,55 @@ func probePresses(ctx context.Context, svc *connections.Service, k *keyring.Keyr
 		mux.ServeHTTP(rec, req)
 		errs = append(errs, errors.New(rec.Body.String()))
 	}
+	returned := strings.Join(errorTexts(errors.Join(errs...), 0), "\n")
+	var leaks []string
+	for _, s := range []string{ackSecret, reminderSecret} {
+		for _, f := range leakForms(s) {
+			if strings.Contains(logged.String(), f.text) {
+				leaks = append(leaks, "the callback secret of a Mattermost button reached the log output")
+			}
+			if strings.Contains(returned, f.text) {
+				leaks = append(leaks, "the callback secret of a Mattermost button reached the returned error")
+			}
+		}
+	}
+	if len(leaks) > 0 {
+		slices.Sort(leaks)
+		errs = append(errs, &probeLeak{what: slices.Compact(leaks)})
+	}
+	if strings.Count(logged.String(), `"event":"mattermost_press"`) != 7 {
+		errs = append(errs, &probeIncomplete{"the callback did not log every press"})
+	}
 	return errors.Join(errs...)
+}
+
+// probeRefresher fails every refresh of a Root message.
+type probeRefresher struct{}
+
+func (probeRefresher) RefreshButtons(context.Context, int64, int64) (bool, error) {
+	return false, errors.New("the root message could not be read")
 }
 
 // probeAdapter publishes, edits and replies through the adapter to the Destination 1 of the Connection on the
 // interactive path, as lint 3 allows, checks it in the delivery class as the Broken probe does, and runs the checks of
-// muster doctor in the background class; it returns the text of every outcome and finding.
-func probeAdapter(ctx context.Context, svc *connections.Service, store *probeConnections, clocks clock.Clocks) error {
+// muster doctor in the background class; it returns the text of every outcome and finding. Its buttons, and those of
+// the Destination test and the preview, carry callback secrets, which are not planted secrets: the probe looks for
+// the secret of its button and for any unmasked secret member in what it returns itself.
+func probeAdapter(ctx context.Context, svc *connections.Service, k *keyring.Keyring, store *probeConnections,
+	clocks clock.Clocks, publicID string) error {
 	a := &mattermost.Adapter{Targets: svc, PublicURL: "http://localhost:8080", IngestURL: "http://localhost:8081",
-		Version: "v0.0.0"}
+		Version: "v0.0.0", Keys: k}
 	conn := int64(1)
 	dest := delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost, Connection: &conn}
+	action, keyID, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
 	m := delivery.Message{Kind: messages.KindRoot, Language: "en", Colour: "firing", Heading: &messages.Heading{
-		Number: 1, Title: "probe", URL: "http://localhost:8080/alert-groups/AGAAAAAAAAAAA1"}}
+		Number: 1, Title: "probe", URL: "http://localhost:8080/alert-groups/AGAAAAAAAAAAA1"},
+		Buttons: []messages.Button{{Command: buttons.CommandAcknowledge, Label: "Acknowledge", ActionID: action,
+			KeyID: keyID}}}
 	path := deliverytest.Unlimited(1, clocks)
 	var errs []error
 	for _, op := range []delivery.Op{delivery.PublishOp(a, m), delivery.UpdateOp(a, "post-1", m),
@@ -1759,8 +1813,20 @@ func probeAdapter(ctx context.Context, svc *connections.Service, store *probeCon
 	for _, f := range found {
 		errs = append(errs, errors.New(f.Message))
 	}
+	secret, err := mattermost.CallbackSecret(k, keyID, publicID, action)
+	if err != nil {
+		return err
+	}
+	returned := strings.Join(errorTexts(errors.Join(errs...), 0), "\n")
+	if strings.Contains(returned, secret) || probeSecretMember.MatchString(returned) {
+		errs = append(errs, &probeLeak{what: []string{"the callback secret of a Mattermost button reached the " +
+			"returned error, a Destination test or a preview"}})
+	}
 	return errors.Join(errs...)
 }
+
+// probeSecretMember is a member secret whose value is a callback secret, in JSON or in JSON inside a JSON string.
+var probeSecretMember = regexp.MustCompile(`secret\\*"\s*:\s*\\*"[A-Za-z0-9_-]{43}`)
 
 // probeBindings bind every press to Destination 1 in the channel c.
 type probeBindings struct{}
@@ -1852,7 +1918,8 @@ const (
 // the Connection with getInfo and its Destination with checkChannel, the Bridge delivery, its deletion, and a client
 // with an unsupported proxy.
 func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
-	logger := logging.New(log, logging.LevelInfo)
+	var logged bytes.Buffer
+	logger := logging.New(io.MultiWriter(log, &logged), logging.LevelInfo)
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
 	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
 	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
@@ -1997,6 +2064,11 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 		channelAnswer.Store(a)
 		doctorRun()
 	}
+	shortErrs, err := probeShortPushSecret(ctx, svc, store, k, secrets[1][:16], now)
+	if err != nil {
+		return err
+	}
+	errs = append(errs, shortErrs...)
 	check()
 	for _, a := range []int32{bridgeProblem, bridgeUnauthorized, bridgeForbidden} {
 		messageAnswer.Store(a)
@@ -2026,7 +2098,76 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 	_, err = bridge.NewClient(bridge.Network(network), bridge.Settings{BaseURL: "http://" + ln.Addr().String(),
 		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
 			Password: logging.Secret(secrets[2])}})
-	return errors.Join(append(errs, err)...)
+	errs = append(errs, err)
+	// The short push secret is no planted secret: its key is part of one, which CheckProbe does not find, so the
+	// probe looks for the key itself, in any form, the whsec_ value included.
+	returned := strings.Join(errorTexts(errors.Join(errs...), 0), "\n")
+	var leaks []string
+	for _, f := range leakForms(secrets[1][:16]) {
+		if strings.Contains(logged.String(), f.text) {
+			leaks = append(leaks, "the key of a short push secret reached the log output")
+		}
+		if strings.Contains(returned, f.text) {
+			leaks = append(leaks, "the key of a short push secret reached the returned error")
+		}
+	}
+	if len(leaks) > 0 {
+		slices.Sort(leaks)
+		errs = append(errs, &probeLeak{what: slices.Compact(leaks)})
+	}
+	return errors.Join(errs...)
+}
+
+// probeShortPushSecret stores on the push-mode Connection of store a push secret whose key, key, is shorter than
+// bridge.MinPushSecretBytes, as a version before that minimum saved it, and reads it as the warnings of Get, List and
+// muster doctor open it; then once more with a ciphertext that cannot be opened, whose error those reads swallow or
+// report; then it restores the stored row. It returns what each read returned, and a probeIncomplete when the short
+// push secret was not reported.
+func probeShortPushSecret(ctx context.Context, svc *connections.Service, store *probeConnections, k *keyring.Keyring,
+	key string, now time.Time) ([]error, error) {
+	short := logging.Secret("whsec_" + base64.StdEncoding.EncodeToString([]byte(key)))
+	sealed, _, err := k.ApplySecret("connections.bridge_push_secret", keyring.StoredSecret{}, keyring.Replace(short),
+		now)
+	if err != nil {
+		return nil, err
+	}
+	saved := *store.row
+	var errs []error
+	reported := map[string]bool{}
+	read := func() {
+		store.row.Version++
+		c, err := svc.Get(ctx, store.row.PublicID)
+		errs = append(errs, err, errors.New(strings.Join(c.Warnings, " ")))
+		reported["get"] = reported["get"] || slices.Contains(c.Warnings, connections.WarningPushSecretTooShort)
+		page, err := svc.List(ctx, connections.ListFilter{})
+		errs = append(errs, err)
+		for _, c := range page.Connections {
+			errs = append(errs, errors.New(strings.Join(c.Warnings, " ")))
+			reported["list"] = reported["list"] || slices.Contains(c.Warnings, connections.WarningPushSecretTooShort)
+		}
+		found, err := svc.Doctor(ctx, store, 2*time.Second)
+		errs = append(errs, err)
+		for _, f := range found {
+			errs = append(errs, errors.New(f.Message), errors.New(f.Warning))
+			reported["doctor"] = reported["doctor"] || f.Warning == connections.HintPushSecretTooShort
+		}
+	}
+	store.row.BridgePushSecretCiphertext = sealed.Ciphertext
+	store.row.BridgePushSecretKeyID = pgtype.Text{String: sealed.KeyID, Valid: true}
+	read()
+	broken := bytes.Clone(sealed.Ciphertext)
+	broken[len(broken)-1] ^= 1
+	store.row.BridgePushSecretCiphertext = broken
+	read()
+	version := store.row.Version + 1
+	*store.row = saved
+	store.row.Version = version
+	for _, r := range []string{"get", "list", "doctor"} {
+		if !reported[r] {
+			errs = append(errs, &probeIncomplete{"the short push secret was not reported by " + r})
+		}
+	}
+	return errs, nil
 }
 
 // probeBridgeAdapter posts, edits and replies through the Bridge delivery to the Destination 2 of the Connection on the
@@ -2688,6 +2829,11 @@ func (s *probeContactStore) LockContactText(context.Context, gwdb.LockContactTex
 func (s *probeContactStore) CountUserCodes(_ context.Context, a gwdb.CountUserCodesParams) (gwdb.CountUserCodesRow,
 	error) {
 	return gwdb.CountUserCodesRow{Oldest: a.Since}, nil
+}
+
+func (s *probeContactStore) CountUserContactCodes(_ context.Context, a gwdb.CountUserContactCodesParams) (
+	gwdb.CountUserContactCodesRow, error) {
+	return gwdb.CountUserContactCodesRow{Oldest: a.Since}, nil
 }
 
 func (s *probeContactStore) CountContactCodes(_ context.Context, a gwdb.CountContactCodesParams) (
@@ -5131,6 +5277,9 @@ func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, se
 	if err != nil {
 		return err
 	}
+	// A Bridge reads its info right after it is saved (#658): to the saved address, through the saved proxy, with the
+	// stored token, as C-13.FR-14 allows. Only that read is forgotten; any other request of the save stays recorded.
+	saved.discard(func(record string) bool { return strings.HasPrefix(record, "GET /v1/info ") })
 	draft := func(addr string, token keyring.SecretInput, p *proxyconf.Input) connections.Draft {
 		setAddress(addr)
 		return connections.Draft{Type: typ, ServerURL: in.ServerURL, BotAPIBaseURL: in.BotAPIBaseURL,
@@ -5209,6 +5358,13 @@ func (s *probeDraftStandIn) taken() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.records)
+}
+
+// discard forgets the requests recorded so far that match.
+func (s *probeDraftStandIn) discard(match func(record string) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = slices.DeleteFunc(s.records, match)
 }
 
 func (s *probeDraftStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -5679,6 +5835,10 @@ func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error
 	if err != nil {
 		return err
 	}
+	mmSecret, err := mattermost.CallbackSecret(k, keyID, "CNAAAAAAAAAAA2", signed)
+	if err != nil {
+		return err
+	}
 	stand := &probeRLServer{tg: probeWord(), mm: probeWord(), br: probeWord(), token: secrets[0], signed: signed,
 		start: probeToken(), link: probeToken(), cookie: probeWord(), proxyAuth: probeWord(), setCookie: probeWord()}
 	var lc net.ListenConfig
@@ -5731,7 +5891,7 @@ func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error
 			KeyID: keyID}}}
 	for i, a := range []delivery.Adapter{&telegram.Adapter{Targets: targets},
 		&mattermost.Adapter{Targets: targets, PublicURL: "http://localhost:8080", IngestURL: "http://localhost:8081",
-			Version: "v0.0.0"}, &bridge.Adapter{Targets: targets}} {
+			Version: "v0.0.0", Keys: k}, &bridge.Adapter{Targets: targets}} {
 		conn := int64(i + 1)
 		typ := []string{delivery.TypeTelegram, delivery.TypeMattermost, delivery.TypeBridge}[i]
 		dest := delivery.Destination{ID: conn, PublicID: fmt.Sprintf("DSAAAAAAAAAAA%d", conn), Type: typ,
@@ -5766,7 +5926,8 @@ func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error
 	}
 	draftCtx, _ := outbound.StartCheck(ctx, outbound.CheckDraft, 0)
 	_, _ = draft.GetMe(draftCtx, outbound.ClassInteractive)
-	return rows.verdict(stand, signed)
+	return rows.verdict(stand, signed, probeRLValue{"the key id of a Mattermost button", keyID},
+		probeRLValue{"the callback secret of a Mattermost button", mmSecret})
 }
 
 // probeRLWebhook sends one event of an outgoing webhook whose Secrets are the second and the third secret through a
@@ -6001,7 +6162,7 @@ func (probeRLNoRow) Scan(...any) error { return errors.New("the probe reads no r
 // verdict is the error of probeRequestLog: every stored value, for CheckProbe to search for the planted secrets; a
 // probeLeak for each value that is no planted secret but must not be stored either, which the probe searches for
 // itself; and a probeIncomplete when an operation it drove left no record or the stand-in saw no code or signature.
-func (p *probeRLRows) verdict(stand *probeRLServer, signed string) error {
+func (p *probeRLRows) verdict(stand *probeRLServer, signed string, extra ...probeRLValue) error {
 	p.mu.Lock()
 	rows := slices.Clone(p.rows)
 	p.mu.Unlock()
@@ -6048,6 +6209,7 @@ func (p *probeRLRows) verdict(stand *probeRLServer, signed string) error {
 		{"the value of Cookie", stand.cookie}, {"the value of Proxy-Authorization", stand.proxyAuth},
 		{"the value of Set-Cookie", stand.setCookie},
 	}
+	values = append(values, extra...)
 	for _, c := range mmCodes {
 		values = append(values, probeRLValue{"the code of a Mattermost direct message", c})
 	}
@@ -6092,9 +6254,10 @@ func probeRLLeaks(rows []probeRLRow, values []probeRLValue) error {
 // which is refused before its body is read; an account_link event signed with the push secret under another
 // webhook-id, refused after the signature check, and the same event with a forged signature; a Slack press of the
 // signed action id with its response_url and verification token in the form, signed with the Slack signing secret, and
-// again with a forged signature; each with an Authorization or a Cookie header. The signed action id, the tokens, the
-// response_url, the wrong secret token, the header values and the signatures are not planted secrets, so the probe
-// looks for them in the stored values itself; it is incomplete when a callback answered otherwise or left no record.
+// again with a forged signature; each with an Authorization or a Cookie header. The signed action id, the key id and
+// the callback secret of the Mattermost press, the tokens, the response_url, the wrong secret token, the header values
+// and the signatures are not planted secrets, so the probe looks for them in the stored values itself; it is
+// incomplete when a callback answered otherwise or left no record.
 func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
@@ -6149,8 +6312,12 @@ func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer
 	}
 	auth, cookie, wrong, start, link := probeWord(), probeWord(), probeWord(), probeToken(), probeToken()
 
+	mmSecret, err := mattermost.CallbackSecret(k, keyID, "CNAAAAAAAAAAA2", signed)
+	if err != nil {
+		return err
+	}
 	press, err := json.Marshal(map[string]any{"user_id": "u-bob", "channel_id": "c", "post_id": "p",
-		"trigger_id": "t", "context": map[string]string{"action": signed, "key_id": keyID}})
+		"trigger_id": "t", "context": map[string]string{"action": signed, "key_id": keyID, "secret": mmSecret}})
 	if err != nil {
 		return err
 	}
@@ -6205,7 +6372,8 @@ func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer
 		{"the value of Cookie", cookie}, {"the value of webhook-signature", sigA},
 		{"the value of webhook-signature", sigB}, {"the response_url of a Slack press", hooks},
 		{"the verification token of a Slack press", verification}, {"the value of X-Slack-Signature", slackSig},
-		{"the value of X-Slack-Signature", forgedSig}})
+		{"the value of X-Slack-Signature", forgedSig}, {"the key id of a Mattermost button", keyID},
+		{"the callback secret of a Mattermost button", mmSecret}})
 }
 
 // inboundVerdict is the error of probeRequestLogInbound: errs, the answers that were not as they should be; a

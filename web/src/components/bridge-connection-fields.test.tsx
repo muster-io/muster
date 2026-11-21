@@ -39,6 +39,9 @@ import { ConnectionForm } from "./connection-form";
 
 const CALLBACK = "http://localhost:8081/api/v1/callbacks/bridge/CN0000000000BR";
 
+/** A push secret whose key has 32 bytes. */
+const PUSH_SECRET = "whsec_bXVzdGVyLXRlc3QtcHVzaC1zZWNyZXQtb2YtMzItYnk=";
+
 /** The info of the fake bridge with its default configuration. */
 const INFO: BridgeInfo = {
   protocol_version: "1",
@@ -127,11 +130,15 @@ afterEach(async () => {
 });
 
 describe("the push secret and the limiter proposal", () => {
-  test("accepts a push secret as the server does: whsec_ followed by base64 of at least one byte", () => {
-    expect(isPushSecret("whsec_c2VjcmV0")).toBe(true);
-    expect(isPushSecret("whsec_AA==")).toBe(true);
+  test("accepts a push secret as the server does: whsec_ followed by base64 of at least 24 bytes", () => {
+    expect(isPushSecret(`whsec_${btoa("k".repeat(24))}`)).toBe(true);
+    expect(isPushSecret(`whsec_${btoa("k".repeat(32))}`)).toBe(true);
+    expect(isPushSecret(`whsec_${btoa("k".repeat(65))}`)).toBe(true);
     for (const bad of [
       "",
+      `whsec_${btoa("k".repeat(23))}`,
+      "whsec_c2VjcmV0",
+      "whsec_AA==",
       "whsec_",
       "c2VjcmV0",
       "whsec_c2VjcmV",
@@ -264,15 +271,24 @@ describe("ConnectionForm of a Bridge Connection", () => {
       .element(
         page
           .getByTestId("secret-connection-push-secret")
-          .getByText("Enter the push secret as whsec_ followed by base64."),
+          .getByText(
+            "Enter the push secret as whsec_ followed by the base64 of at least 24 bytes.",
+          ),
       )
       .toBeVisible();
     await expect.element(page.getByLabelText("Push secret")).toHaveFocus();
     expect(save).not.toHaveBeenCalled();
-    await userEvent.fill(page.getByLabelText("Push secret"), "whsec_c2VjcmV0");
+    // A key of 23 bytes is refused as the server refuses it.
+    await userEvent.fill(
+      page.getByLabelText("Push secret"),
+      "whsec_dHdlbnR5LXRocmVlLWJ5dGUta2V5ISE=",
+    );
+    await page.getByRole("button", { name: "Save" }).click();
+    expect(save).not.toHaveBeenCalled();
+    await userEvent.fill(page.getByLabelText("Push secret"), PUSH_SECRET);
     await page.getByRole("button", { name: "Save" }).click();
     expect(save).toHaveBeenLastCalledWith(
-      expect.objectContaining({ event_delivery: "push", push_secret: "whsec_c2VjcmV0" }),
+      expect.objectContaining({ event_delivery: "push", push_secret: PUSH_SECRET }),
     );
     // Back to polling: the push secret is not sent, so the save clears a stored one.
     await page.getByRole("radio", { name: "Polling" }).click();
@@ -300,6 +316,46 @@ describe("ConnectionForm of a Bridge Connection", () => {
     await expect
       .element(page.getByTestId("secret-connection-push-secret-status"))
       .toHaveTextContent("Not set");
+  });
+
+  test("warns of a stored push secret shorter than 24 bytes while it is kept", async () => {
+    const save = vi.fn((_input: ConnectionInput) => Promise.resolve(undefined));
+    const short: BridgeConnection = {
+      ...BRIDGE,
+      event_delivery: "push",
+      push_secret_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
+      warnings: ["push_secret_too_short"],
+    };
+    const screen = await render(
+      providers(<ConnectionForm connection={short} submitLabel="Save" save={save} />),
+    );
+    const warning = page.getByTestId("bridge-push-secret-too-short");
+    await expect
+      .element(warning)
+      .toHaveTextContent(
+        "The stored push secret is shorter than 24 bytes and can be guessed. Events signed with it are still accepted: set a new push secret of at least 24 bytes here and in the bridge.",
+      );
+    // Saving the other fields keeps it and is not refused.
+    await page.getByRole("button", { name: "Save" }).click();
+    expect(save).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ push_secret: expect.anything() }),
+    );
+    // Typing a new one hides the warning.
+    await page
+      .getByTestId("secret-connection-push-secret")
+      .getByRole("button", { name: "Replace" })
+      .click();
+    await expect.element(warning).not.toBeInTheDocument();
+    await screen.unmount();
+
+    // Without the warning there is nothing to say.
+    await render(
+      providers(
+        <ConnectionForm connection={{ ...short, warnings: [] }} submitLabel="Save" save={save} />,
+      ),
+    );
+    await expect.element(page.getByTestId("bridge-push")).toBeVisible();
+    await expect.element(page.getByTestId("bridge-push-secret-too-short")).not.toBeInTheDocument();
   });
 
   test("keeps a stored push secret and the callback address of a Connection in push mode", async () => {

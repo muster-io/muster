@@ -143,8 +143,7 @@ WITH due AS MATERIALIZED (
 )
 UPDATE gateway_calls c
 SET lease_owner = $1::text, lease_until = $2::timestamptz
-FROM due
-WHERE c.org_id = $3 AND c.id = due.id
+WHERE c.org_id = $3 AND c.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING c.id, c.public_id, c.connection_id, c.user_id, c.critical,
           c.next_attempt_at::timestamptz AS next_attempt_at
 `
@@ -218,8 +217,7 @@ WITH due AS MATERIALIZED (
 UPDATE connections c
 SET gateway_probe_lease_owner = $1::text, gateway_probe_lease_until = $2::timestamptz,
     gateway_next_probe_at = $3::timestamptz
-FROM due
-WHERE c.org_id = $4 AND c.id = due.id
+WHERE c.org_id = $4 AND c.id = ANY (ARRAY(SELECT due.id FROM due))
 RETURNING c.id, c.public_id, c.name
 `
 
@@ -356,6 +354,37 @@ type CountUserCodesRow struct {
 func (q *Queries) CountUserCodes(ctx context.Context, arg CountUserCodesParams) (CountUserCodesRow, error) {
 	row := q.db.QueryRow(ctx, countUserCodes, arg.Since, arg.OrgID, arg.UserID)
 	var i CountUserCodesRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
+const countUserContactCodes = `-- name: CountUserContactCodes :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM gateway_contact_codes
+WHERE org_id = $2 AND user_id = $3 AND contact_hash = $4 AND created_at > $1::timestamptz
+`
+
+type CountUserContactCodesParams struct {
+	Since       time.Time
+	OrgID       int64
+	UserID      int64
+	ContactHash []byte
+}
+
+type CountUserContactCodesRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountUserContactCodes counts the codes a User asked for to one contact text after since, with the oldest of them.
+func (q *Queries) CountUserContactCodes(ctx context.Context, arg CountUserContactCodesParams) (CountUserContactCodesRow, error) {
+	row := q.db.QueryRow(ctx, countUserContactCodes,
+		arg.Since,
+		arg.OrgID,
+		arg.UserID,
+		arg.ContactHash,
+	)
+	var i CountUserContactCodesRow
 	err := row.Scan(&i.Requests, &i.Oldest)
 	return i, err
 }

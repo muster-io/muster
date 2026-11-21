@@ -853,6 +853,65 @@ func TestMentionsPlain(t *testing.T) {
 	}
 }
 
+// TestMentionsLeftOutGroups covers C-28.FR-3 and C-12.FR-11 (#626): through a bridge with max_body_length 500 that
+// declares group mentions, here and channel, a Publication and a Thread reply whose Mention line leaves out a group
+// entry, a mention of everyone, a Team mention and the template's tokens for length report each of them once in
+// LeftOutMentions, in the order of the targets, and not those the line keeps, nor a person, who stays in LeftOut. With
+// room for them, through a bridge that declares neither group mentions nor everyone, and in a Quiet call, nothing is
+// reported.
+func TestMentionsLeftOutGroups(t *testing.T) {
+	bob := linked("Bob", "u-bob", "Bob")
+	bob.User.PublicID = "SRBOB000000001"
+	group := func(name string) mentions.Target { return mentions.Target{Kind: mentions.TargetGroup, Group: name} }
+	everyone := func(word string) mentions.Target {
+		return mentions.Target{Kind: mentions.TargetEveryone, Everyone: word}
+	}
+	token := templates.MentionToken
+	m := rootMessage(t, messages.ColourFiring)
+	m.Body = &messages.Body{Text: "Paging " + token(templates.Token{Name: templates.MentionHere}) + " " +
+		token(templates.Token{Name: templates.MentionGroup, Group: "payments_team"}) + " " +
+		token(templates.Token{Name: templates.MentionChannel}), Markup: messages.MarkupCommonMark}
+	// The first group's marker takes 222 of the line's 250 characters and the second's 25; nothing else fits.
+	targets := []mentions.Target{group(strings.Repeat("a", 200)), group("ops"), everyone(mentions.EveryoneChannel),
+		group(strings.Repeat("b", 30)), bob, group("ops")}
+	want := []mentions.Target{everyone(mentions.EveryoneChannel), group(strings.Repeat("b", 30)),
+		everyone(mentions.EveryoneHere), group("payments_team")}
+
+	tiny := newAdapterEnv(t, set("limits", "max_body_length", 500), declaring("here", "channel"))
+	c := call(groups.Loud, "pub-"+destPublicID+"-1-1")
+	c.Targets = targets
+	tiny.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m1","truncated":false,"replayed":false}`))
+	o := tiny.adapter.Publish(t.Context(), c, m)
+	if o.Kind != delivery.OutcomeOK || !slices.Equal(o.LeftOutMentions, want) ||
+		!slices.Equal(o.LeftOut, []string{bob.User.PublicID}) {
+		t.Fatalf("publish %+v, body %q", o, decode(t, tiny.bridge.requests("post")[0])["body"])
+	}
+	c.Key = "reply-" + destPublicID + "-1"
+	o = tiny.adapter.Reply(t.Context(), c, delivery.Root{MessageID: "m1"}, m)
+	if o.Kind != delivery.OutcomeOK || !slices.Equal(o.LeftOutMentions, want) {
+		t.Fatalf("reply %+v", o)
+	}
+	c.Loudness, c.Key = groups.Quiet, "pub-"+destPublicID+"-2-1"
+	tiny.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+		`{"message_id":"m2","truncated":false,"replayed":false}`))
+	if o = tiny.adapter.Publish(t.Context(), c, m); o.Kind != delivery.OutcomeOK || o.LeftOutMentions != nil {
+		t.Fatalf("quiet %+v", o)
+	}
+
+	for name, e := range map[string]*adapterEnv{"room": newAdapterEnv(t, declaring("here", "channel")),
+		"undeclared": newAdapterEnv(t, set("limits", "max_body_length", 500),
+			set("capabilities", "group_mentions", false))} {
+		c := call(groups.Loud, "pub-"+destPublicID+"-1-1")
+		c.Targets = targets
+		e.bridge.answer("post", answerJSON(http.StatusCreated, "application/json",
+			`{"message_id":"m1","truncated":false,"replayed":false}`))
+		if o := e.adapter.Publish(t.Context(), c, m); o.Kind != delivery.OutcomeOK || len(o.LeftOutMentions) != 0 {
+			t.Errorf("%s: publish %+v", name, o)
+		}
+	}
+}
+
 // TestFooterOfTheConnection covers C-22.FR-16 and C-12.FR-12: the body's footer names the user as the identity space
 // of the Destination's Connection does — by the display name of their Bridge link there — and by the Muster display
 // name without a link there.
