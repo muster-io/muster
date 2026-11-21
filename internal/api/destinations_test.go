@@ -1662,19 +1662,27 @@ func TestDestinationMentionWarningsAPI(t *testing.T) {
 	fd.list[0].MentionWarnings = []destinations.MentionWarning{{
 		User:  mentions.UserRef{ID: 2, PublicID: "SR0000000000BB", Name: "Bob", Login: "bob"},
 		Entry: onCall, Messenger: destinations.TypeMattermost, Reason: mentions.ReasonNoAccountLink,
-		Since: t0.Add(-time.Hour)}}
+		Since: t0.Add(-time.Hour)}, {
+		// A Team mention that a bridge's Mention line left out (#626) names the group and no person.
+		Mention: mentions.Mention{Kind: mentions.TargetGroup, Name: "payments_team"}, Entry: onCall,
+		Messenger: destinations.TypeMattermost, Reason: mentions.ReasonMessageTooLong, Since: t0}}
 	a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+mattermostID, "")
 	var read gen.MattermostDestination
 	decodeInto(t, a, &read)
-	if a.status != http.StatusOK || len(read.MentionWarnings) != 1 {
+	if a.status != http.StatusOK || len(read.MentionWarnings) != 2 {
 		t.Fatalf("read = %d %s", a.status, a.body)
 	}
 	w := read.MentionWarnings[0]
-	if w.User.Id != "SR0000000000BB" || w.User.Name != "Bob" || *w.User.Login != "bob" || w.User.Deactivated ||
+	if w.User == nil || w.User.Id != "SR0000000000BB" || w.User.Name != "Bob" || *w.User.Login != "bob" ||
+		w.User.Deactivated || w.Mention != nil ||
 		w.Entry.Position != 0 || w.Entry.Target.Kind != gen.MentionTargetKindOnCallOfTeamsFromLabel ||
 		w.Messenger != gen.ConnectionTypeMattermost || w.Reason != gen.MentionNotDeliveredReasonNoAccountLink ||
 		!w.Since.Equal(t0.Add(-time.Hour)) {
 		t.Errorf("warning %s", a.body)
+	}
+	if g := read.MentionWarnings[1]; g.User != nil || g.Mention == nil || g.Mention.Kind != gen.NamedMentionKindGroup ||
+		g.Mention.Name != "payments_team" || g.Reason != gen.MentionNotDeliveredReasonMessageTooLong {
+		t.Errorf("group warning %s", a.body)
 	}
 	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations", "")
 	var page struct {
@@ -1685,7 +1693,7 @@ func TestDestinationMentionWarningsAPI(t *testing.T) {
 	}
 	for i, item := range page.Items {
 		ws, ok := item["mention_warnings"].([]any)
-		if !ok || len(ws) != map[int]int{0: 1}[i] {
+		if !ok || len(ws) != map[int]int{0: 2}[i] {
 			t.Errorf("item %d: mention_warnings %v", i, item["mention_warnings"])
 		}
 	}

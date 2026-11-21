@@ -2204,6 +2204,24 @@ func (e MinimumSeverity) Valid() bool {
 	}
 }
 
+// Defines values for NamedMentionKind.
+const (
+	NamedMentionKindEveryone NamedMentionKind = "everyone"
+	NamedMentionKindGroup    NamedMentionKind = "group"
+)
+
+// Valid indicates whether the value is a known member of the NamedMentionKind enum.
+func (e NamedMentionKind) Valid() bool {
+	switch e {
+	case NamedMentionKindEveryone:
+		return true
+	case NamedMentionKindGroup:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NextNoticeKind.
 const (
 	NextNoticeKindAckTimeout NextNoticeKind = "ack_timeout"
@@ -7107,20 +7125,23 @@ type MattermostActionAnswer struct {
 	SkipSlackParsing *bool `json:"skip_slack_parsing,omitempty"`
 }
 
-// MattermostActionContext The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
+// MattermostActionContext The integration data Muster put on the button, which the Mattermost server strips from the posts it sends to clients. Mattermost does not sign the request, so authenticity rests on the callback secret, which only the Mattermost server knows, and on the signed action id.
 type MattermostActionContext struct {
 	// Action Opaque action id signed with the button-signature key.
 	Action string `json:"action"`
 
 	// KeyId Id of the key that signed the action id.
 	KeyId string `json:"key_id"`
+
+	// Secret The button's callback secret, derived with the key `key_id` from the Connection and the action id. A press without it, or with another one, changes nothing and is not verified; a press without it on a Root message posted before buttons carried one also has that Root message edited again, so that its buttons carry it.
+	Secret *string `json:"secret,omitempty"`
 }
 
 // MattermostActionRequest Button press sent by the Mattermost server.
 type MattermostActionRequest struct {
 	ChannelId string `json:"channel_id"`
 
-	// Context The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
+	// Context The integration data Muster put on the button, which the Mattermost server strips from the posts it sends to clients. Mattermost does not sign the request, so authenticity rests on the callback secret, which only the Mattermost server knows, and on the signed action id.
 	Context              MattermostActionContext `json:"context"`
 	DataSource           *string                 `json:"data_source,omitempty"`
 	PostId               string                  `json:"post_id"`
@@ -7380,7 +7401,7 @@ type MentionEntryInput struct {
 	Target MentionTargetInput `json:"target"`
 }
 
-// MentionEntryRef The Mention entry that named a person, as on the Destination — its position in the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
+// MentionEntryRef The Mention entry that named a person, a group or everyone, as on the Destination — its position in the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
 type MentionEntryRef struct {
 	Position int `json:"position"`
 
@@ -7394,7 +7415,7 @@ type MentionEvent string
 // MentionName A symbolic Mention that each Destination turns into real Mentions; `paged` is the people of a Page by their Account links, or the Team mention or token of a step "Page the whole Team" (C-32.FR-9).
 type MentionName string
 
-// MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).
+// MentionNotDeliveredReason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11). `message_too_long` is also the reason of a group, a Team mention or everyone in the chat that such a line left out, the only reason a Mention that names no one person is not delivered.
 type MentionNotDeliveredReason string
 
 // MentionResolution What an entry mentions now for one Team, or for no Team.
@@ -7515,11 +7536,14 @@ type MentionTargetKind string
 // MentionUnavailableReason Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.
 type MentionUnavailableReason string
 
-// MentionWarning A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none.
+// MentionWarning A warning of a Destination about a person and an entry whose latest "Mention not delivered" is not followed by a delivered Mention of that person through that entry (C-28.FR-3): computed from the delivery events kept for `retention.alert_details`, never stored, so it clears once a later Loud message mentions the person through the entry, or once retention removes the events. An entry removed from the Destination since, or a deleted User, has none. Through a bridge whose Mention line left out a group, a Team mention or everyone in the chat that an entry named (C-12.FR-11), the warning is about that Mention, with `mention` in place of `user`, and clears once a later Loud message carries it.
 type MentionWarning struct {
 	// Entry The entry as it is on the Destination now.
-	Entry     MentionEntryRef `json:"entry"`
-	Messenger ConnectionType  `json:"messenger"`
+	Entry MentionEntryRef `json:"entry"`
+
+	// Mention The group or everyone in the chat; absent for a person.
+	Mention   *NamedMention  `json:"mention,omitempty"`
+	Messenger ConnectionType `json:"messenger"`
 
 	// Reason The reason of the latest "Mention not delivered".
 	Reason MentionNotDeliveredReason `json:"reason"`
@@ -7527,8 +7551,8 @@ type MentionWarning struct {
 	// Since When the first "Mention not delivered" of the person through the entry since their last delivered Mention through it was recorded.
 	Since time.Time `json:"since"`
 
-	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.
-	User UserRef `json:"user"`
+	// User The person; absent for a group or everyone, which `mention` names.
+	User *UserRef `json:"user,omitempty"`
 }
 
 // MessageLayout The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.
@@ -7640,6 +7664,15 @@ type MovedAlertGroups struct {
 	// Moved Open Alert Groups moved to the Default route.
 	Moved int `json:"moved"`
 }
+
+// NamedMention A Mention that names no one person, which a bridge's Mention line left out for length (C-28.FR-3, C-12.FR-11): `group`, a messenger group — a group entry or a Team mention — by its name, or `everyone`, everyone in the chat, by its symbolic name (`here`, `channel` or `all`).
+type NamedMention struct {
+	Kind NamedMentionKind `json:"kind"`
+	Name string           `json:"name"`
+}
+
+// NamedMentionKind defines model for NamedMention.Kind.
+type NamedMentionKind string
 
 // NextNotice defines model for NextNotice.
 type NextNotice struct {
@@ -10505,7 +10538,7 @@ type TimelineDeliveryEntry struct {
 	Kind     TimelineDeliveryEntryKind `json:"kind"`
 	Loudness Loudness                  `json:"loudness"`
 
-	// Mention For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); nothing was written in the Thread for it.
+	// Mention For `mention_not_delivered` only, the person whom a Mention entry named and the delivered Loud message did not mention as their messenger mentions them (C-28.FR-3), or the group, Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11); nothing was written in the Thread for it.
 	Mention *UndeliveredMention `json:"mention,omitempty"`
 
 	// Mentions Mentions the delivery event carried (see the Loud and Quiet table of delivery events).
@@ -10771,19 +10804,22 @@ type TotpStatus struct {
 // Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
-// UndeliveredMention A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not mention as their messenger mentions them (C-28.FR-3).
+// UndeliveredMention A person whom a Mention entry named for a Loud event and whom a delivered Loud message did not mention as their messenger mentions them (C-28.FR-3); or a group, a Team mention or everyone in the chat that a bridge's Mention line left out for length (C-12.FR-11), with `mention` in place of `user`. A Mention of a template's token (`{{ mention "here" }}`, a group's token), which no entry named, has neither `entry` nor `event`.
 type UndeliveredMention struct {
-	// Entry The Mention entry that named a person, as on the Destination — its position in the Destination's `mention_entries` and its target; in the Timeline, as it was when the message was delivered.
-	Entry MentionEntryRef `json:"entry"`
+	// Entry The entry that named the person or the Mention; absent for a template's token.
+	Entry *MentionEntryRef `json:"entry,omitempty"`
 
-	// Event A Loud event a Mention entry applies to (C-28.FR-1): a new Alert Group (`new_alert_group`, which also applies to `destination_joined`), new Alerts, a Reopen, an ack timeout notice, the end of a Snooze, a rise to critical, and the start of a Storm (`storm_started`, the first publication of a Storm summary).
-	Event MentionEvent `json:"event"`
+	// Event The Loud event the entry applied to; absent for a template's token.
+	Event *MentionEvent `json:"event,omitempty"`
 
-	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11).
+	// Mention The group or everyone in the chat; absent for a person.
+	Mention *NamedMention `json:"mention,omitempty"`
+
+	// Reason Why a person whom a Mention entry named was not mentioned as their messenger mentions them (C-28.FR-3): they have no Account link in the Identity space of the Destination's Connection, so the message left them out (`no_account_link`), or the bridge does not declare `native_mentions` in its `info` — or Muster has read none yet — or their Account link has no marker, its `external_id` being longer than 512 characters or neither it nor the person having a display name, so the message named them by the plain name, which notifies nobody (`bridge_cannot_mention_people`, C-22.FR-16), or the message went through a bridge whose Mention line keeps only the whole Mentions that fit half of `limits.max_body_length` and left theirs out (`message_too_long`, C-12.FR-11). `message_too_long` is also the reason of a group, a Team mention or everyone in the chat that such a line left out, the only reason a Mention that names no one person is not delivered.
 	Reason MentionNotDeliveredReason `json:"reason"`
 
-	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.
-	User UserRef `json:"user"`
+	// User The person; absent for a group or everyone, which `mention` names.
+	User *UserRef `json:"user,omitempty"`
 }
 
 // User defines model for User.

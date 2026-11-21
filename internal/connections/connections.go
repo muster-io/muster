@@ -644,7 +644,7 @@ func proxy(in proxyconf.Input, stored proxyconf.Config) (proxyconf.Config, error
 // (C-24.FR-1). The bot token, the push secret of a Bridge and the app-level token and Slack signing secret of a Slack
 // Connection are encrypted with the active key and never returned. A Telegram Connection created in the webhook mode
 // gets a new secret token and its webhook is set before the creation commits; when setWebhook fails, nothing is
-// created.
+// created. A Bridge has its info read once the creation committed (readSavedInfo), which never fails it.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection, error) {
 	if err := check(&in, nil); err != nil {
 		return Connection{}, err
@@ -681,6 +681,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection
 		return Connection{}, err
 	}
 	s.webhookSet(ctx, created.PublicID, hooked)
+	if created.Type == TypeBridge {
+		created = s.readSavedInfo(ctx, created)
+	}
 	return created, nil
 }
 
@@ -736,12 +739,16 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 // Bridge's info and events cursor, and the workspace and app that a Slack check found. An update that changes nothing
 // writes nothing. A Telegram Connection that enters the webhook mode, or changes its base URL or bot token in it, gets
 // a new secret token and setWebhook; one that leaves it gets deleteWebhook; both run before the update commits, and
-// when they fail nothing is saved.
+// when they fail nothing is saved. A Bridge given a new base URL or bot token has its info read once the update
+// committed (readSavedInfo), which never fails it; a save of its other fields calls nothing.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Connection,
 	error) {
 	var out Connection
 	var hooked string
+	// forgot is a save that forgot the bot: a new address or bot token.
+	var forgot bool
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
+		forgot = false
 		id, err := publicid.Parse(publicid.Connection, publicID)
 		if err != nil {
 			return ErrNotFound
@@ -812,6 +819,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
+		forgot = in.ServerURL != before.ServerURL || in.BotAPIBaseURL != before.BotAPIBaseURL ||
+			in.BridgeBaseURL != before.BridgeBaseURL || in.BotToken.Given
 		if err := q.UpdateConnection(ctx, dbgen.UpdateConnectionParams{OrgID: s.cfg.OrgID, ID: row.ID, Name: in.Name,
 			ServerUrl: nonEmpty(in.ServerURL), BotApiBaseUrl: nonEmpty(in.BotAPIBaseURL),
 			UpdateMode: nonEmpty(in.UpdateMode), WebhookSecretCiphertext: hook.Ciphertext,
@@ -823,10 +832,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			SlackAppTokenUpdatedAt: timestamp(app.UpdatedAt), SlackSigningSecretCiphertext: signing.Ciphertext,
 			SlackSigningSecretKeyID: nonEmpty(signing.KeyID), SlackSigningSecretUpdatedAt: timestamp(signing.UpdatedAt),
 			BotTokenCiphertext: token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: tokenAt,
-			ForgetBot: in.ServerURL != before.ServerURL || in.BotAPIBaseURL != before.BotAPIBaseURL ||
-				in.BridgeBaseURL != before.BridgeBaseURL || in.BotToken.Given,
-			ForgetUpdates: in.BotToken.Given,
-			Proxy:         p.JSON(), ProxyPasswordCiphertext: password.Ciphertext,
+			ForgetBot: forgot, ForgetUpdates: in.BotToken.Given,
+			Proxy: p.JSON(), ProxyPasswordCiphertext: password.Ciphertext,
 			ProxyPasswordKeyID: nonEmpty(password.KeyID), ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt),
 			LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
 			return fmt.Errorf("update the connection %s: %w", id, nameTaken(err))
@@ -853,6 +860,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		return Connection{}, err
 	}
 	s.webhookSet(ctx, out.PublicID, hooked)
+	if forgot && out.Type == TypeBridge {
+		out = s.readSavedInfo(ctx, out)
+	}
 	return out, nil
 }
 

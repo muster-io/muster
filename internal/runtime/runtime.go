@@ -852,7 +852,7 @@ func (p *process) serve(ctx context.Context) error {
 func (p *process) messengerAdapters() {
 	if p.mattermost == nil {
 		p.mattermost = &mattermost.Adapter{Targets: p.connections, PublicURL: p.cfg.PublicURL.String(),
-			IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version}
+			IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version, Keys: p.keyring}
 	}
 	if p.telegram == nil {
 		p.telegram = &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real}
@@ -891,8 +891,9 @@ func Callbacks(rec requestlog.InboundRecorder, realClock clock.Clock, mm matterm
 func (p *process) callbacks(presses context.Context) http.Handler {
 	return Callbacks(p.requestLog, p.clocks.Real, mattermost.CallbackConfig{
 		Connections: p.connections, Bindings: p.delivery, Links: p.links,
-		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
-		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, TestPresses: p.testPresses, Log: p.log},
+		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Refresh: p.delivery, Path: p.interactive,
+		Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit,
+		TestPresses: p.testPresses, Log: p.log},
 		telegram.WebhookConfig{Connections: p.connections, Router: p.updates, Outages: p.connections,
 			Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log},
 		bridge.PushConfig{Connections: p.connections, Events: p.bridgeEvents, Real: p.clocks.Real, Log: p.log},
@@ -1079,6 +1080,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.groups.SetFinalEdits(p.delivery)
 	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
 		return p.delivery.RouteDestinationsChanged(ctx, tx, c)
+	})
+	// The Storm summary of a Route's active Storm names the Route in its language (C-12.FR-10): a rename or a new
+	// language edits it Quietly (C-11.FR-6).
+	p.routes.SetStormSummaries(func(ctx context.Context, tx routingdb.DBTX, routeID int64) error {
+		return p.delivery.StormRouteChanged(ctx, tx, routeID)
 	})
 	// Connections and Mattermost and Telegram Destinations check their bot on the interactive path, which takes the tokens of the
 	// same limiters as the delivery worker (C-11.FR-2).

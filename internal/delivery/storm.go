@@ -32,8 +32,9 @@ import (
 // calm check ends the Storm once the count stayed at or below the threshold for delivery.storm_calm_period: the summary
 // gets its final state — Quiet even where it was never published — the held Alert Groups still open are published
 // Quietly within the limiters, and those that resolved are withheld. A Destination that joins the Route during a Storm
-// gets its summary and holds the Alert Groups the Storm holds; one that leaves the Route retires its summary there. The
-// summary texts are fixed English lines in UTC until S-036.
+// gets its summary and holds the Alert Groups the Storm holds; one that leaves the Route retires its summary there. A
+// rename of the Route or a change of its language edits, Quietly, each summary that has not ended. The summary texts
+// are fixed English lines in UTC until S-036.
 
 // TimerStormCalmCheck is the timers kind of the calm check of a Storm.
 const TimerStormCalmCheck = "storm_calm_check"
@@ -186,6 +187,47 @@ func (s *Service) renderSummaries(ctx context.Context, q queries, st *storm, rou
 	return nil
 }
 
+// StormRouteChanged is the hook of the Routes (routing.StormSummaries), in the transaction tx of a save of the Route
+// routeID that changed its name or its language: the Storm summary of its active Storm in each Destination where it has
+// not ended shows them from now on (C-11.FR-6, C-12.FR-10), as a Quiet edit of one already published, with the Storm's
+// counts as they are; a Storm summary that left its Destination stays as it is. Locks: the Route's active Storm FOR
+// SHARE (LockActiveStorm) after the Route's row and before the summaries, as in the lock order of worker.go. It wakes
+// the delivery workers once tx commits when any summary has not ended. A rendering that does not create an Alert Group
+// shares the Storm without the Route's row, so a summary it creates in a Destination new to the Storm while the save
+// commits may show the name and language it read before the save until its next rendering; taking the Route's row in
+// Enqueue would invert the lock order of grouping, so that rare case is accepted.
+func (s *Service) StormRouteChanged(ctx context.Context, tx dbgen.DBTX, routeID int64) error {
+	q := s.store.queries(tx)
+	st, err := s.activeStorm(ctx, q, routeID)
+	if err != nil || st == nil {
+		return err
+	}
+	rows, err := q.ListStormSummaries(ctx, dbgen.ListStormSummariesParams{OrgID: s.orgID, StormID: st.id})
+	if err != nil {
+		return fmt.Errorf("list the summaries of the storm %d: %w", st.id, err)
+	}
+	var dests []stormDest
+	for _, r := range rows {
+		if !ended(r.State) {
+			dests = append(dests, stormDest{id: r.DestinationID, publicID: r.DestinationPublicID, typ: r.DestinationType})
+		}
+	}
+	if len(dests) == 0 {
+		return nil
+	}
+	// In Destination id order, as every other rendering locks the summaries.
+	slices.SortFunc(dests, func(a, b stormDest) int { return cmp.Compare(a.id, b.id) })
+	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: routeID})
+	if err != nil {
+		return fmt.Errorf("read the route %d: %w", routeID, err)
+	}
+	if err := s.renderSummaries(ctx, q, st, stormRoute{publicID: route.PublicID, name: route.Name,
+		language: route.Language}, dests, s.clock.Now().UTC()); err != nil {
+		return err
+	}
+	return s.wake(ctx, q, true)
+}
+
 // setSummary stores msg as the Desired state of a Storm summary when what it shows changed.
 func (s *Service) setSummary(ctx context.Context, q queries, id int64, hash []byte, msg encoded, now time.Time) error {
 	if bytes.Equal(hash, msg.hash) {
@@ -252,14 +294,20 @@ func (s *Service) endStorm(ctx context.Context, q queries, st dbgen.LockStormRow
 	if err != nil {
 		return nil, fmt.Errorf("list the summaries of the storm %d: %w", st.ID, err)
 	}
-	m := s.renderer.StormOver(st.RoutePublicID, st.RouteLanguage, open)
+	// A statement of its own, after the Storm's lock: a rename or a new language whose save this check waited for is
+	// read as committed (LockStorm).
+	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: st.RouteID})
+	if err != nil {
+		return nil, fmt.Errorf("read the route of the storm %d: %w", st.ID, err)
+	}
+	m := s.renderer.StormOver(st.RoutePublicID, route.Language, open)
 	if err := q.QuietStormSummaries(ctx, dbgen.QuietStormSummariesParams{OrgID: s.orgID, StormID: st.ID,
 		Now: now}); err != nil {
 		return nil, fmt.Errorf("make the unpublished summaries of the storm %d quiet: %w", st.ID, err)
 	}
 	for _, sm := range summaries {
-		msg, err := s.summaryOf(ctx, q.DB(), sm.DestinationID, sm.DestinationType, st.RouteLanguage, m,
-			StormState{Route: st.RouteName, AlertGroupCount: st.AlertGroupCount, UrgentCount: st.UrgentCount,
+		msg, err := s.summaryOf(ctx, q.DB(), sm.DestinationID, sm.DestinationType, route.Language, m,
+			StormState{Route: route.Name, AlertGroupCount: st.AlertGroupCount, UrgentCount: st.UrgentCount,
 				Final: true})
 		if err != nil {
 			return nil, fmt.Errorf("render the final storm summary %d: %w", sm.ID, err)
@@ -292,9 +340,9 @@ func (s *Service) endStorm(ctx context.Context, q queries, st dbgen.LockStormRow
 	if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: hintRoute, ID: st.RoutePublicID}); err != nil {
 		return nil, err
 	}
-	route, count, urgent := st.RoutePublicID, st.AlertGroupCount, st.UrgentCount
+	routeID, count, urgent := st.RoutePublicID, st.AlertGroupCount, st.UrgentCount
 	return func(ctx context.Context) {
-		s.log.Log(ctx, logging.StormEnded, logging.F("route", route), logging.F("alert_groups", count),
+		s.log.Log(ctx, logging.StormEnded, logging.F("route", routeID), logging.F("alert_groups", count),
 			logging.F("urgent", urgent))
 	}, nil
 }

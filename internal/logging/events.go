@@ -692,10 +692,22 @@ var TelegramWebhookDeleteFailed = newEvent("telegram_webhook_delete_failed", Lev
 
 // BridgeInfoRead is logged when Muster read the info of a Bridge Connection (C-22.FR-2, FR-24).
 var BridgeInfoRead = newEvent("bridge_info_read", LevelInfo, "C-22",
-	"Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than "+
-		"bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge "+
-		"speaks, features the names of the optional features it declares.",
+	"Muster read the info of a Bridge Connection, on a Connection check, when the Connection was created or saved "+
+		"with a new base URL or token, or because its copy was older than bridge.info_max_age: connection is the "+
+		"public_id of the Connection, protocol_version the version the bridge speaks, features the names of the "+
+		"optional features it declares.",
 	"connection", "protocol_version", "features")
+
+// BridgeInfoReadFailed is logged when the read of the info of a Bridge Connection right after its save failed
+// (C-22.FR-2).
+var BridgeInfoReadFailed = newEvent("bridge_info_read_failed", LevelWarn, "C-22",
+	"Muster could not read the info of a Bridge Connection right after it was created or saved with a new base URL "+
+		"or token, and the save stands: connection is the public_id of the Connection and error what failed — the "+
+		"check code of the step info with the bridge's text, masked of the token and the push secret, no limiter "+
+		"token within delivery.interactive_budget, or a failed store of the info. The Connection has no info until "+
+		"its check, or a call that depends on it, reads it; until then a Page through its Destinations names "+
+		"people without markers. Check the Connection from its page; its Request log has the request.",
+	"connection", "error")
 
 // BridgeRepublishedPastEditWindow is logged when a Bridge Root message past its edit window was published again
 // (C-22.FR-9, FR-24).
@@ -797,8 +809,10 @@ var GatewayContactCodeSent = newEvent("gateway_contact_code_sent", LevelInfo, "C
 		"the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and "+
 		"outcome ok when the gateway accepted the notification, limited when no limiter token was free within "+
 		"delivery.interactive_budget and nothing was sent, the error class of the Bridge protocol — transient, "+
-		"rate_limited, gone, forbidden or invalid — when the gateway refused it, or error when it failed otherwise. "+
-		"The contact text and the code are never logged.",
+		"rate_limited, gone, forbidden or invalid — when the gateway refused it, error when it failed otherwise, or "+
+		"withheld when the contact text had received the codes gateway.contact_code_requests allows within the hour "+
+		"across Users, so that nothing was sent and the request was answered as if it had been. The contact text and "+
+		"the code are never logged.",
 	"user", "connection", "contact", "outcome")
 
 // GatewayCallQueued is logged for each Page queued as a call through a Notification gateway (C-30.FR-4, FR-10).

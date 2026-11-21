@@ -6,7 +6,9 @@ with Muster and calls or texts people through your provider. Muster ships no gat
 by itself: you run a gateway written for your provider, and Muster sends it the person's contact and a plain text.
 
 A gateway does not depend on a messenger, so it still reaches a person whose messenger is down or silent at night. Read
-[At night](#at-night) before you rely on a messenger alone for that.
+[At night](#at-night) before you rely on a messenger alone for that, and
+[How an alert reaches people](../concepts/how-an-alert-reaches-people.md) to see where a call fits among the Pages of
+an Alert.
 
 The page follows the way a gateway is used: [connect it](#connect-a-notification-gateway), [let people confirm a
 contact](#contact-for-calls-and-sms), then see [how calls are made](#how-calls-are-made), [how a person acknowledges
@@ -94,14 +96,16 @@ Code requests — adding a contact and asking for a new code — are limited (`g
 Per person
 :   5 within an hour.
 
-Per contact
-:   3 within an hour for one contact, as typed and trimmed, whoever asks.
+Per person and contact
+:   3 within an hour from one person for one contact, as typed and trimmed.
 
 A request beyond them answers `429` `contact_code_requests_exceeded` with `Retry-After`; a request whose code the
-gateway could not deliver still counts. The code is sent on the interactive path, since the person waits for it: when
-no rate-limit token of the gateway is free within `delivery.interactive_budget`, the answer is `503` with
-`Retry-After`, and when the gateway refuses the notification, `502` `gateway_refused` with its `gateway_class`. The
-contact stays, unconfirmed, and a new code can be asked for.
+gateway could not deliver still counts. What others ask for never refuses a person's request: a contact receives at
+most 10 codes within an hour whoever asks, and a request beyond them is answered as if its code were sent, but nothing
+is sent, so that the answer never tells of other people's requests. The code is sent on the interactive path, since
+the person waits for it: when no rate-limit token of the gateway is free within `delivery.interactive_budget`, the
+answer is `503` with `Retry-After`, and when the gateway refuses the notification, `502` `gateway_refused` with its
+`gateway_class`. The contact stays, unconfirmed, and a new code can be asked for.
 
 ### Change a contact
 
@@ -221,10 +225,13 @@ find the cause, fix it and check that calls go through again, with `muster bridg
 ## At night
 
 A person's phone is quiet at night unless something rings or buzzes it. Whether a Mention in a Thread reply reaches a
-phone as a push, in Mattermost, Slack and Telegram, is not verified yet, and until it is, **only a Notification
-gateway is reliable at night**. A messenger's own push may arrive, or may not, depending on the messenger, its app, the
-settings of the person's phone and the mode of the push notifications.
+phone as a push, in Mattermost, Slack and Telegram, depends on the messenger, its app, the settings of the person's
+phone and the mode of the push notifications: a push may arrive, or may not, and Muster cannot see which. A Mention
+shows the person that they were named; **only a Notification gateway is reliable at night**, because a call or an SMS
+does not depend on any of that.
 
 So, for anybody who must be reached at night, connect a Notification gateway, have them [confirm a
-contact](#contact-for-calls-and-sms), and do not count on a Mention alone. This note is revisited when the facts are
-checked.
+contact](#contact-for-calls-and-sms), put a call in their important [Notification rule](../concepts/notification-rules.md#the-switch)
+or in a step of the [Escalation chain](../concepts/escalation-chains.md#calls-through-a-notification-gateway), and do
+not count on a Mention alone. [How an alert reaches people](../concepts/how-an-alert-reaches-people.md) shows a Page by
+Mention and by call side by side.

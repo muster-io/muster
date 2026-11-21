@@ -62,8 +62,8 @@ type env struct {
 }
 
 // setup is a migrated database with the Organization, the Audit log partition of November 2026, the Notification
-// gateway CN0000000000G1, the Bridge Connection CN0000000000B1 for messages only, and the Users petr and olga, each
-// signed in twice.
+// gateway CN0000000000G1, the Bridge Connection CN0000000000B1 for messages only, and the Users petr, olga, ivan, anna
+// and lev, each signed in twice.
 func setup(t *testing.T, s dbtest.Server) *env {
 	t.Helper()
 	ctx := t.Context()
@@ -104,7 +104,7 @@ func setup(t *testing.T, s dbtest.Server) *env {
 		svc: gateways.New(gateways.Config{OrgID: org.ID, Store: gateways.NewStore(d.Pool),
 			Audit: audit.NewWriter(logger, c), Business: c, Log: logger, Gateway: gw,
 			Path: deliverytest.Unlimited(org.ID, clock.Clocks{Business: c, Real: clock.Real{}})})}
-	for i, login := range []string{"petr", "olga"} {
+	for i, login := range []string{"petr", "olga", "ivan", "anna", "lev"} {
 		pub := "SR00000000000" + string(rune('A'+i))
 		var uid int64
 		if err := d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
@@ -239,8 +239,16 @@ func TestIntegrationLimitsAndSessions(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := e.svc.Create(ctx, olga, "CN0000000000G1", "+10000000001"); !limited(err) {
-			t.Errorf("a fourth code for the contact by another User: %v", err)
+		if _, err := e.svc.SendCode(ctx, petr, a.PublicID); !limited(err) {
+			t.Errorf("a fourth code of the User for the contact: %v", err)
+		}
+		// Another User's codes for the contact text neither refuse nor withhold the code of the one whose contact it is.
+		o, err := e.svc.Create(ctx, olga, "CN0000000000G1", "+10000000001")
+		if err != nil {
+			t.Fatalf("a fourth code for the contact by another User: %v", err)
+		}
+		if c, err := e.svc.Confirm(ctx, olga, o.PublicID, e.gw.last()); err != nil || !c.Confirmed() {
+			t.Errorf("the other User confirms: %+v, %v", c, err)
 		}
 		for _, c := range []string{"+10000000002", "+10000000003"} {
 			if _, err := e.svc.Create(ctx, petr, "CN0000000000G1", c); err != nil {
@@ -259,8 +267,60 @@ func TestIntegrationLimitsAndSessions(t *testing.T) {
 		}
 		pruned, err := gateways.NewPruner(e.d.Pool).Codes(ctx, e.orgID,
 			e.clock.Now().Add(gateways.CodePruneAfter+gateways.CodeTTL+time.Second), 100)
-		if err != nil || pruned != 7 || e.count(t, `SELECT count(*) FROM gateway_contact_codes`) != 0 {
+		if err != nil || pruned != 8 || e.count(t, `SELECT count(*) FROM gateway_contact_codes`) != 0 {
 			t.Errorf("pruned %d, %v", pruned, err)
+		}
+	})
+}
+
+// TestIntegrationContactCap is the cap of gateway.contact_code_requests per contact text across Users on PostgreSQL:
+// ten codes within an hour reach the contact; a request beyond them is answered as sent, sends nothing and stores a
+// code that looks sent but that no one knows, which counts toward the requester's own limits.
+func TestIntegrationContactCap(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		const text = "+10000000001"
+		var anna gateways.Contact
+		for _, login := range []string{"petr", "olga", "ivan", "anna"} {
+			c, err := e.svc.Create(ctx, e.people[login], "CN0000000000G1", text)
+			if err != nil {
+				t.Fatal(err)
+			}
+			anna = c
+			for range 2 {
+				if login == "anna" {
+					break
+				}
+				e.clock.Advance(time.Minute)
+				if _, err := e.svc.SendCode(ctx, e.people[login], c.PublicID); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		tenth := e.gw.last()
+		e.clock.Advance(time.Minute)
+		if _, err := e.svc.SendCode(ctx, e.people["anna"], anna.PublicID); err != nil {
+			t.Fatalf("the eleventh code: %v", err)
+		}
+		if _, err := e.svc.Create(ctx, e.people["lev"], "CN0000000000G1", text); err != nil {
+			t.Fatalf("a first request beyond the cap: %v", err)
+		}
+		if n := len(e.gw.codes); n != 10 {
+			t.Errorf("%d codes sent", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM gateway_contact_codes WHERE sent_at IS NOT NULL
+			AND voided_at IS NULL AND expires_at = created_at + interval '10 minutes'`); n != 5 {
+			t.Errorf("%d codes that look sent and unused", n)
+		}
+		if _, err := e.svc.Confirm(ctx, e.people["anna"], anna.PublicID, tenth); !codeInvalid(err) {
+			t.Errorf("the code sent before the withheld one: %v", err)
+		}
+		if _, err := e.svc.SendCode(ctx, e.people["anna"], anna.PublicID); err != nil {
+			t.Errorf("the requester's third code: %v", err)
+		}
+		if _, err := e.svc.SendCode(ctx, e.people["anna"], anna.PublicID); !limited(err) {
+			t.Errorf("the requester's fourth code for the contact text: %v", err)
 		}
 	})
 }

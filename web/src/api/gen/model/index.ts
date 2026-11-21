@@ -370,6 +370,8 @@ export * from './messenger';
 export * from './meUpdate';
 export * from './minimumSeverity';
 export * from './movedAlertGroups';
+export * from './namedMention';
+export * from './namedMentionKind';
 export * from './nextNotice';
 export * from './nextNoticeKind';
 export * from './note';

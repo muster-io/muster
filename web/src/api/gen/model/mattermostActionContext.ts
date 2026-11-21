@@ -4,11 +4,13 @@
  */
 
 /**
- * The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
+ * The integration data Muster put on the button, which the Mattermost server strips from the posts it sends to clients. Mattermost does not sign the request, so authenticity rests on the callback secret, which only the Mattermost server knows, and on the signed action id.
  */
 export interface MattermostActionContext {
   /** Opaque action id signed with the button-signature key. */
   action: string;
   /** Id of the key that signed the action id. */
   key_id: string;
+  /** The button's callback secret, derived with the key `key_id` from the Connection and the action id. A press without it, or with another one, changes nothing and is not verified; a press without it on a Root message posted before buttons carried one also has that Root message edited again, so that its buttons carry it. */
+  secret?: string;
 }
