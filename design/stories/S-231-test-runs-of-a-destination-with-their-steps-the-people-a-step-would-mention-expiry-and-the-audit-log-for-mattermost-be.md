@@ -5,7 +5,7 @@ capability: C-42
 kind: be
 layer: L2
 depends_on: [S-047, S-061, S-114, S-125, S-140, S-049, S-068, S-198]
-covers: [C-42.FR-1, C-42.FR-2, C-42.FR-3, C-42.FR-4, C-42.FR-5, C-42.FR-6, C-42.FR-10, C-42.AC-1, C-42.AC-4, C-42.AC-5, C-42.AC-8, C-42.AC-10]
+covers: [C-42.FR-1, C-42.FR-2, C-42.FR-3, C-42.FR-4, C-42.FR-5, C-42.FR-6, C-42.FR-10, C-42.FR-11, C-42.AC-1, C-42.AC-4, C-42.AC-5, C-42.AC-8, C-42.AC-10]
 files_touched:
   - api/openapi.yaml
   - api/README.md
@@ -47,6 +47,7 @@ acceptance:
   - "[C-42.FR-5] The buttons of the Test message are those its status shows from the Destination's button set; the presses on them are S-234's, and until it merges the run's result lists none (`teststeps_test.go`)."
   - "[C-42.FR-6, C-42.AC-1] A run writes no Alert Group, Alert, Timeline, Note or Assignee — `internal/groups` writes nothing (lint 2) —, its Test messages are never reconciled, it adds no row of `deliveries`, `thread_replies` or `webhook_events`, and `muster_delivery_attempts_total`, `muster_commands_total` and `muster_pages_total` stay as they were while its requests count only in `muster_client_requests_total` with the client `interactive`; its Test messages stay in the Destination when it ends and Muster never deletes them (`testruns_integration_test.go`, `test/e2e/destination_test_runs_test.go`, `make lint-arch`)."
   - "[C-42.FR-10, C-42.AC-8] The four operations need `destinations:test`, from the web session or a token: a Responder and a Viewer get `403` on each, without authentication `401`; each step that sends is recorded in the Audit log as `destination.tested` with the run and the step, and ending or expiring a run records nothing; a run started with an Admin Service account's token acknowledges and takes over as the example people; a Destination of a type without a stepper in this build answers `501` until S-232 and S-233 merge (`destinations_test.go`, `testruns_test.go`, `test/e2e/destination_test_runs_test.go`)."
+  - "[C-42.FR-11] The built-in texts of every Test message of a Mattermost run — the \"🧪 Test message\" marker, the buttons' labels and \"Would mention:\" — are in the language of the source's Route (`route.language`); for the built-in example they are those of the first Route by name that names the Destination, so that with the Routes \"Billing\" (English) and \"Infrastructure\" (Russian) both naming `infra-critical` the example run's first Test message is in English, and after \"Billing\" no longer names it, in Russian (\"🧪 Тестовое сообщение\"); an Alert Group of a Route in Russian gives Russian texts (`teststeps_test.go`, `testruns_test.go`, `test/e2e/destination_test_runs_test.go`)."
   - "[C-42.FR-1, C-42.FR-6] `getDestinationTestRun` reads the run with its source, Severity level, the steps made with their results and, from S-234, its presses; a run of another Destination's id or of another Organization is `404` and every query filters by `org_id` (lint 1) (`testruns_test.go`, `make lint-arch`)."
 verify: "make ci test-integration e2e-go"
 operator_attention: false
@@ -80,28 +81,33 @@ issue: null
   as `TestSource` and `severity_level`, → `DestinationTestRun` with the result of its first step),
   `getDestinationTestRun` (`GET …/test-runs/{run_id}`), `deleteDestinationTestRun` (`DELETE …`, ends it) and
   `createDestinationTestRunStep` (`POST …/test-runs/{run_id}/steps`, no body, → `DestinationTestStepResult` of the next
-  step). New schemas: `DestinationTestRun` (`id`, `source`, `severity_level`, `steps`, `next_step`, `presses`, `created_at`,
+  step). New schemas: `DestinationTestRun` (`id`, `source`, `severity_level`, `steps`, `next_step`, `presses`,
+  `created_at`,
   `expires_at`), `DestinationTestStepResult` (the step's name as a `TestRunStepName` enum — `created`, `new_alert`,
   `acknowledge`, `reminder`, `takeover`, `snooze`, `resolve`, `unresolve` —, the requests as the existing `TestStep`
   shape with `DeliveryErrorClass`, `would_mention`, `buttons`), `WouldMention` (`entries`, each `{kind, name, reason}`).
   A call after a failed step makes that step again; a call after the last step finds the run ended, `404`, as a call on
   an expired or deleted one does. `api/README.md` says so.
-- **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md` §4.6):
+- **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md` §4.5):
   `destination_test_runs` — `id`, `org_id`, `public_id` (a new prefix in `internal/publicid`), `destination_id`
   (`ON DELETE CASCADE`), `created_by_user_id` or `created_by_service_account_id`, `source` (jsonb), `severity_level`,
   `step_number`, `results` (jsonb: the steps made), `message_ref` (the Root message's identifier in its messenger, null
   before the first step), `created_at`, `last_step_at`; an index on `(org_id, destination_id)` and one on
   `(org_id, last_step_at)` for the lazy expiry. No CHECK replaces another; down drops the table. Rows are deleted by the
   lazy expiry, by `deleteDestinationTestRun`, with the Destination, and with the Organization's cascade.
-- **Packages** (ADR-0016: flat CRUD, `org_id` in every query): `internal/destinations/testruns.go` is the service — create,
+- **Packages** (ADR-0016: flat CRUD, `org_id` in every query): `internal/destinations/testruns.go` is the service —
+  create,
   step, read, end, the expiry on the business clock (injected), the Audit log row of each step — beside `test.go`, which
-  it reuses for the source and the interactive limiter; `testmentions.go` computes "Would mention" from the Destination's
+  it reuses for the source and the interactive limiter; `testmentions.go` computes "Would mention" from the
+  Destination's
   Mention entries for the step's event through `internal/mentions` and the Account links, reading and sending nothing.
   `internal/delivery/teststeps.go` holds the stepper contract, declared by its consumer (`delivery.Stepper`: the step
   after the previous one, given the run and the source), the order of the steps, the masking and the class mapping of
-  `destinationtest.go`; `internal/messages/teststeps.go` builds the `messages.Source` of each step (statuses, two Alerts,
+  `destinationtest.go`; `internal/messages/teststeps.go` builds the `messages.Source` of each step (statuses, two
+  Alerts,
   Owner, the example people, the Snooze) and renders it with the built-in texts in the Route's language
-  (`route.language`; for the built-in example that of the first Route, by name, naming the Destination), adding two texts
+  (`route.language`; for the built-in example that of the first Route, by name, naming the Destination), adding two
+  texts
   to `texts/en.json` and `ru.json` ("Test message" marker and "Would mention:"); `internal/mattermost/teststeps.go`
   implements the stepper for Mattermost — the create, the edit, the Thread reply and the buttons — with the mention
   markup stripped into plain text. A step records nothing in `deliveries`, `thread_replies` or any Timeline.
@@ -120,7 +126,8 @@ issue: null
 2. Write the spec parts and `api/README.md`. Check: `make generate-check`, `make lint`.
 3. Write `messages/teststeps.go` and its texts. Check: `teststeps_test.go` of `messages` (eight sources in order, each
    a valid transition, the Service account's example people, the languages).
-4. Write `delivery/teststeps.go` and `mattermost/teststeps.go`. Check: `teststeps_test.go` of both (the requests per step,
+4. Write `delivery/teststeps.go` and `mattermost/teststeps.go`. Check: `teststeps_test.go` of both (the requests per
+   step,
    masking, `limited`, a failed step stopping the run, no Mention markup).
 5. Write `testmentions.go`. Check: `testmentions_test.go` (a person without an Account link, a Team, an On-call, a
    messenger group, the Reminder's and the Takeover's Owners).
@@ -140,7 +147,7 @@ R=$(curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs -d '{"source":{"kin
 RID=$(jq -r .id <<<"$R"); jq -c '{s: .steps[0].name, w: .steps[0].would_mention.entries[].name}' <<<"$R"
 # {"s":"created","w":"@devops"} ...
 curl -s $FMM/posts | jq -r '.[] | select(.root_id=="") | .message' | head -3   # contains "🧪 Test message"
-for i in 2 3 4 5 6 7 8; do curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs/$RID/steps | jq -r '.name + " " + (.requests[0].status|tostring)'; done
+for i in 2 3 4 5 6 7 8; do curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs/$RID/steps | jq -r '.name + " " + (.requests[0].response_status|tostring)'; done
 # new_alert 200 / acknowledge 200 / reminder 200 / takeover 200 / snooze 200 / resolve 200 / unresolve 200
 curl -s -o /dev/null -w '%{http_code}\n' -X POST "${A[@]}" $API/destinations/$D/test-runs/$RID/steps   # 404: the eighth step ended the run
 # the Root message after each step as the fake server holds it, and the replies of the Thread, in order
@@ -151,6 +158,12 @@ psql "$MUSTER_DB" -c "select count(*) from alert_groups where title like '%test%
 # the Destination's Mention entries name olga, who has none: the first result says "olga: has no linked Mattermost account"
 curl -s $FMM/posts | jq -r '.[0].message' | grep -c '@olga'        # 0: no Mention markup, the names are plain text after "Would mention:"
 curl -s "${A[@]}" $API/destinations/$D | jq -c '.warnings'          # unchanged
+# C-42.FR-11: the example takes the language of the first Route, by name, that names the Destination ("Billing" en, "Infrastructure" ru)
+curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs -d '{"source":{"kind":"example"}}' > /dev/null
+curl -s $FMM/posts | jq -r '[.[] | select(.root_id=="")] | last | .props.attachments[0].title'   # contains "🧪 Test message"
+# updateRoute: "Billing" no longer names the Destination; a new example run
+curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs -d '{"source":{"kind":"example"}}' > /dev/null
+curl -s $FMM/posts | jq -r '[.[] | select(.root_id=="")] | last | .props.attachments[0].title'   # contains "🧪 Тестовое сообщение"
 # C-42.AC-5: a run left alone ends after the idle timeout
 R2=$(curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs -d '{"source":{"kind":"example"},"severity_level":"critical"}'); ID2=$(jq -r .id <<<"$R2")
 curl -s -X POST $CLK -d '{"advance_seconds": 3660}'
@@ -175,13 +188,15 @@ parallel on one Destination and checks they share nothing, and fails a step by a
   names or the prefix of a run's `public_id`; this story names them as above and adds the prefix to `internal/publicid`.
   Say if the review wants others before the generated clients carry them.
 - **What a run stores of its messages.** C-42.FR-6 says that Test messages stay in the Destination and are never
-  deleted; this story keeps the Root message's identifier in `message_ref` only while the run lives, which S-234 needs to
+  deleted; this story keeps the Root message's identifier in `message_ref` only while the run lives, which S-234 needs
+  to
   match a press to its run, and the identifier of a Thread reply in the result. Confirm that nothing longer-lived is
   wanted.
 
 ## Notes
 
-- Suggested commit: `feat(destinations): add step-by-step test runs of a destination with the people each step would mention`.
+- Suggested commit: `feat(destinations): add step-by-step test runs of a destination with the people each step would
+  mention`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. The migration number
   is assigned by the orchestrator at dispatch; the migration replaces no CHECK and needs no re-versioning.
 - Between this story and S-233 a run on a Telegram, Slack, Bridge or outgoing webhook Destination answers `501`
@@ -205,6 +220,7 @@ parallel on one Destination and checks they share nothing, and fails a step by a
 | C-42.FR-5 | partial | the buttons from the button set; the presses are S-234 |
 | C-42.FR-6 | partial | no writes and no counts, for Mattermost; the others are S-232, S-233 |
 | C-42.FR-10 | partial | the Permission and the Audit log of a step; playing the chains is S-235, S-236 |
+| C-42.FR-11 | partial | the language of the Test message's texts for Mattermost, the example's rule included; Telegram and Slack are S-232, a Bridge and a webhook S-233, the page S-237, S-238 |
 | C-42.AC-1 | full | |
 | C-42.AC-4 | partial | the entry that would mention nobody, on Mattermost; Telegram and the others are S-232, S-233 |
 | C-42.AC-5 | full | |

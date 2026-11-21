@@ -51,8 +51,8 @@ issue: null
 **IN**
 
 - The renderer taking the Route's effective message layout: the order of the four movable blocks, the fields of the
-  catalogue (Severity, Route, Teams, Started, "Firing / total" and labels), the switches of the summary, description, key
-  labels, Alert list and other links, and `alerts_listed` (C-38.FR-2).
+  catalogue (Severity, Route, Teams, Started, "Firing / total" and labels), the switches of the summary, description,
+  key labels, Alert list and other links, and `alerts_listed` (C-38.FR-2).
 - The shortening that keeps its order under any layout (C-38.FR-3), the templates' relation to the layout
   (C-38.FR-8), and the lay-out of each adapter in the layout's order where its messenger allows (C-38.FR-6).
 - That a saved layout reaches the open Root messages through the re-render row that S-210 inserts, Quietly and once
@@ -135,7 +135,7 @@ curl -s 127.0.0.1:18097/_fake/requests | jq -c '[.[] | select(.path | endswith("
   | .body.blocks | map(select(.type=="section")) | .[0].fields | map(.text)'   # four fields in order
 curl -s $FMM/requests | jq '[.[] | select(.method=="PUT" and (.path | endswith("/patch")))] | length'   # 1 edit of the Root message; its body has no Mention
 # C-38.AC-3: every movable block hidden and other links off -> title, status, notices, footer, buttons, "Open in Muster" remain
-# C-38.AC-6: set template_root_message on R: the template body stands where the first of text, labels, alerts stood; fields follow the layout
+# C-38.AC-6: set policy.templates.root_message on R: the template body stands where the first of text, labels, alerts stood; fields follow the layout
 # C-38.AC-11: alerts_listed 3 with twelve Alerts of one Alert Group: three values and "…and 9 more"
 # C-38.AC-5: three saves in a row (sleep 0 between them), then wait: psql shows one route_message_settings row, the fake one edit per message
 ```

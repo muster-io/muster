@@ -88,15 +88,18 @@ issue: null
 make dev > dev.log 2>&1 &
 # As in S-126: the Connection "Example Bridge" (poll mode), its Destination BD on the Route R of S-211, the alert group c1 of three Alerts,
 # two firing; FB=127.0.0.1:18094/_fake
+# an item of /_fake/messages is {envelope, edits, replies, …}: a Root message edited after the save shows its layout in the
+# last edit (the whole envelope Muster sent), an unedited one in the envelope; LY is the layout of the newest message
+LY='[.[] | select((.edits[-1] // .envelope).layout != null)] | last | (.edits[-1] // .envelope).layout'
 # C-38.AC-2: the layout of S-211 ($L) saved on R, then
-curl -s $FB/messages | jq -c '[.[] | select(.layout != null)] | last | {order: .layout.order, f: [.layout.fields[] | .name], d: .layout.description}'
+curl -s $FB/messages | jq -c "$LY | {order: .order, f: [.fields[] | .name], d: .description}"
 # {"order":["fields","text","alerts","labels"],"f":["Severity","Started","Firing / total","cluster"],"d":""}
 # C-38.AC-11: the Alert list first, the key labels hidden
-curl -s $FB/messages | jq -c '[.[] | select(.layout != null)] | last | {order: .layout.order, labels: .layout.labels}'
+curl -s $FB/messages | jq -c "$LY | {order: .order, labels: .labels}"
 # {"order":["alerts","fields","text","labels"],"labels":[]}
 ./bin/muster dev bridge check --url http://127.0.0.1:18094 --token muster-dev-bridge-token | tail -3   # every step passes, the message steps included
-# a Route with a root_message template: no layout, so no order
-curl -s $FB/messages | jq -c '[.[] | select(.route == "templated")] | last | .layout'   # null
+# a Route with a policy.templates.root_message: its Alert Group "TemplatedAlert" has no layout, so no order
+curl -s $FB/messages | jq -c '[.[] | select(.envelope.title | test("TemplatedAlert"))] | last | (.edits[-1] // .envelope).layout'   # null
 # a body limit of 1000 (/_fake/config) with a long description: the layout's description is cut with the body's, order unchanged
 ```
 

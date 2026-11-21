@@ -54,7 +54,8 @@ issue: null
 
 ## Verification
 
-In the repository: `make ci conformance` passes; `python -c "from muster_bridge import Layout; print(Layout.model_fields['order'])"`
+In the repository: `make ci conformance` passes; `python -c "from muster_bridge import Layout;
+print(Layout.model_fields['order'])"`
 (or the generated model's equivalent) shows the field. Against Muster: with `make dev` running from Muster's `master`,
 a bridge built on this branch with the library's minimal example logs `order` of a Root message of a Route whose layout
 was saved with the Alert list first.

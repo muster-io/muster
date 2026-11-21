@@ -39,14 +39,16 @@ issue: null
 
 **IN**
 
-- The part "Escalation chains" of the Test panel: the source and Severity level, the offered chains, "All chains", "Start
+- The part "Escalation chains" of the Test panel: the source and Severity level, the offered chains, "All chains",
+  "Start
   from", "Play" and the timeline with its words, skips, undelivered Pages, folded repeats and Unclaimed (C-42.FR-7,
   FR-8, FR-9, FR-11, UI).
 
 **OUT**
 
 - The step-by-step test: S-237. The API: S-235, S-236. The documentation and its link: S-239.
-- Any Play from the Escalation chain page or the Route form: C-42 offers the accelerated run on the Destination page only.
+- Any Play from the Escalation chain page or the Route form: C-42 offers the accelerated run on the Destination page
+  only.
 
 ## Contracts
 
@@ -57,7 +59,8 @@ issue: null
   rows with a check each, "All chains"), "Play" and the explanation of what playing is; `chain-play-timeline.tsx` — the
   timeline, built from `ChainPlay.moments` with entries of each kind, folded repeats and the stop line; `web/src/lib/
   chain-play.ts` — the formatting of "+N min", the words of entries and skip reasons in both languages, the Start
-  conversion from the person's time zone (C-09.FR-17) to a date-time; `destination-test-panel.tsx` mounts the part in the
+  conversion from the person's time zone (C-09.FR-17) to a date-time; `destination-test-panel.tsx` mounts the part in
+  the
   slot S-237 left; `test-source-picker.tsx` is reused.
 - **Permissions**: `destinations:test`, which only Admins have; absent without it.
 - **Texts** (EN / RU; a missing key fails CI): "Escalation chains" / «Цепочки эскалации»; "All chains" / «Все цепочки»;
@@ -86,14 +89,16 @@ Destination "infra-critical", ivan On-call with a confirmed contact at the fake 
 Account link.
 
 1. Sign in as the Admin, open Destinations → infra-critical → "Test" → "Escalation chains", choose "Example" and
-   "critical". Expect "devops · Route Infrastructure" and "payments · Team payments" offered, each with its Destinations.
+   "critical". Expect "devops · Route Infrastructure" and "payments · Team payments" offered, each with its
+   Destinations.
 2. Choose "All chains", "Start from" a Saturday at 03:00, press "Play". Expect the timeline "+0 min · devops · Step 1 ·
    would Page @ivan (On-call of devops, Main) normally in the Threads of infra-critical and infra-notice", "+0 min ·
    payments · Step 1 · skipped: only during Working hours", "+10 min · devops · Step 3 · would call @ivan through Phone
    gateway", "+10 min · payments · Step 3 · would Page @petr importantly: Page not delivered, @petr has no linked
    Mattermost account", "+25 min · the chains have run out: Unclaimed". Compare with `curl -s -X POST "${A[@]}"
    $API/destinations/$D/chain-plays …`.
-3. Remove the Schedule's member for the Saturday: expect "skipped: a gap in the Schedule". Set "Start from" to "Now": the
+3. Remove the Schedule's member for the Saturday: expect "skipped: a gap in the Schedule". Set "Start from" to "Now":
+   the
    timeline changes with the real moment.
 4. While the timeline is played, check `curl -s $FMM/posts | jq length` and `curl -s $FBR/notifications | jq length`
    before and after: unchanged; `curl -s localhost:8082/_dev/clock | jq -r .now` unchanged.

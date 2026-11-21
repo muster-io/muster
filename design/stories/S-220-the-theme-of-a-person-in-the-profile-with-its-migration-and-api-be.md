@@ -4,7 +4,7 @@ title: The theme of a person in the profile, with its migration and API (BE)
 capability: C-39
 kind: be
 layer: L2
-depends_on: [S-010, S-014]
+depends_on: [S-010]
 covers: [C-39.FR-1, C-39.FR-2, C-39.FR-6, C-39.AC-1]
 files_touched:
   - api/openapi.yaml
@@ -51,7 +51,8 @@ issue: null
   omits it keeps it; an unknown value is refused by request validation with `400` `invalid_format`). `updateMe`
   keeps `sessionCookie` and `csrf` as its only security, so that a token is refused as C-03.FR-27 says.
 - **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md` §4.3):
-  `users.theme text NOT NULL DEFAULT 'system'` with a CHECK of the three values. No CHECK replaces another and nothing is
+  `users.theme text NOT NULL DEFAULT 'system'` with a CHECK of the three values. No CHECK replaces another and
+  nothing is
   backfilled; a replica of the earlier version neither reads nor writes the column, so that a profile it saves keeps
   the theme already there. The down migration drops the column.
 - **Package** (`internal/users`): `Profile` gains `Theme`; `UpdateProfile` writes it with the name, time zone and
@@ -67,7 +68,8 @@ issue: null
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up; `migrate_test.go` finds
    every existing User with `system` and the CHECK refusing `sepia`.
 2. Add `Theme` to the profile, its query, validation and diff. Check: `users_test.go`, `admin_integration_test.go`.
-3. Add the spec and the handlers. Check: `make generate-check lint`; `internal/api/users_test.go` (the omitted field, the
+3. Add the spec and the handlers. Check: `make generate-check lint`; `internal/api/users_test.go` (the omitted field,
+   the
    unknown value, the token's `403`, `Me` against `User`).
 4. Write `test/e2e/profile_theme_test.go`. Check: the Verification below.
 

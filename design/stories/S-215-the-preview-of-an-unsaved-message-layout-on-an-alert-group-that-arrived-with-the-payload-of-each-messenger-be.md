@@ -5,7 +5,7 @@ capability: C-38
 kind: be
 layer: L2
 depends_on: [S-211, S-212, S-129, S-113, S-036]
-covers: [C-38.FR-10, C-38.FR-11, C-38.FR-12, C-38.FR-13, C-38.AC-6, C-38.AC-7, C-38.AC-8]
+covers: [C-12.FR-5, C-38.FR-10, C-38.FR-11, C-38.FR-12, C-38.FR-13, C-38.AC-6, C-38.AC-7, C-38.AC-8]
 files_touched:
   - api/openapi.yaml
   - internal/messages/preview.go
@@ -24,9 +24,9 @@ files_touched:
   - internal/api/templates_test.go
   - test/e2e/layout_preview_test.go
 acceptance:
-  - "[C-38.FR-10, C-38.FR-12] `previewTemplate` for `root_message` takes an unsaved `message_layout` and a `destination_id` and returns, besides `output`, `length` and `messenger_limit`, the messenger payload of the requested `format` — the Mattermost attachment, the Slack blocks, the Telegram HTML with the inline keyboard, the Bridge body with its `layout` and `buttons` — the number of Slack blocks, and the blocks that shortening cut; the buttons are those of the chosen Destination's set or, without one, of the Organization's set; nothing is sent and no Desired state or `open_group_updates` row changes (`preview_test.go`, `templates_test.go`, `test/e2e/layout_preview_test.go`)."
+  - "[C-12.FR-5, C-38.FR-10, C-38.FR-12] `previewTemplate` for `root_message` takes an unsaved `message_layout` and a `destination_id` and returns, besides `output`, `length` and `messenger_limit`, the messenger payload of the requested `format` — the Mattermost attachment, the Slack blocks, the Telegram HTML with the inline keyboard, the Bridge body with its `layout` and `buttons` — the number of Slack blocks, and the blocks that shortening cut; the buttons are those of the chosen Destination's set or, without one, of the Organization's set; nothing is sent and no Desired state or `open_group_updates` row changes (`preview_test.go`, `templates_test.go`, `test/e2e/layout_preview_test.go`)."
   - "[C-38.FR-10, C-38.AC-7] An `alert_group_id` of another Route renders in this Route's language and layout, with the Alert Group's current status, Alerts, Owner or Assignees, notices and links, and with every escape of the messenger's markup; any Alert Group of the Organization may be named (`preview_test.go`, `test/e2e/layout_preview_test.go`)."
-  - "[C-38.FR-11, C-38.AC-7] On a Route with no Alert Group, and without an `alert_group_id`, the preview renders the built-in example and `sample` is `example`; with one, `sample` is `alert_group` (`preview_test.go`)."
+  - "[C-38.FR-11, C-38.AC-7] On a Route with no Alert Group, and without an `alert_group_id`, the preview renders the built-in example and `sample` is `example`; with one, `sample` is `alert_group`; an `alert_group_id` of a resolved Alert Group whose details are removed (past `retention.alert_details`) gets `422` `unknown_id` at `/alert_group_id`, as the editor offers none (`preview_test.go`)."
   - "[C-38.FR-12, C-38.AC-8] The result gives the length against each messenger's limit — 16,383 characters for Mattermost, 4,096 for Telegram, 50 blocks and 3,000 characters in each `section` for Slack, and for a Bridge the `limits.max_body_length` of the chosen Bridge Destination's Connection or none; a message over the limit with the description shown reports the description cut first, and the same message with the description hidden reports the Alert list cut first; a fake bridge that declares a `max_body_length` of 1,000 gives that `messenger_limit` (`shorten_test.go`, `preview_test.go`, `test/e2e/layout_preview_test.go`)."
   - "[C-38.AC-6] For a Route with a Root message template the preview's `layout` is null, as the bridge then receives none, and the body takes the place of the first of the text, key labels and Alert list blocks (`preview_test.go`)."
   - "[C-38.FR-13, C-38.AC-7] The operation needs `templates:preview`: a Responder's token gets `403`, an Admin's `200`; the preview has no switch to show the original of a value (`templates_test.go`, `test/e2e/layout_preview_test.go`)."
@@ -49,7 +49,8 @@ issue: null
 
 - The Route's recent Alert Groups and the lookup by number: the Alert Group list answers both with the filters it has
   (`route`, `status`, `number`); no new operation. The offered order — open ones first, then resolved ones, each newest
-  first, at most `message.layout_preview_groups` — is the editor's (S-218), as two ordinary list calls.
+  first, at most `message.layout_preview_groups`, the resolved ones within `retention.alert_details` by a `from` on
+  the call — is the editor's (S-218), as two ordinary list calls.
 - The editor and its tabs: S-217, S-218. The test message: S-216.
 - The Redaction rules: see Notes.
 
@@ -113,6 +114,8 @@ curl -s "${A[@]}" $API/template-previews -d "{\"kind\":\"root_message\",\"templa
 curl -s "${A[@]}" $API/template-previews -d "{…twelve Alerts, \"length_limit\":600, \"message_layout\":{…show_description true…}}" | jq -c .cut   # {"description":true,…}
 # C-38.AC-7: no Alert Group at all -> the example
 curl -s "${A[@]}" $API/template-previews -d "{\"kind\":\"root_message\",\"template\":\"\",\"route_id\":\"$EMPTYROUTE\",\"format\":\"markdown\",\"message_layout\":$LAYOUT}" | jq -r .sample   # example
+# a resolved Alert Group past retention.alert_details (clock advanced 91 days, retention run): 422 unknown_id at /alert_group_id
+curl -s "${A[@]}" $API/template-previews -d "{\"kind\":\"root_message\",\"template\":\"\",\"route_id\":\"$R\",\"alert_group_id\":\"$OLD\",\"format\":\"markdown\"}" | jq -c '[.status, .code]'
 curl -s -o /dev/null -w '%{http_code}\n' "${RESP[@]}" $API/template-previews -d '{"kind":"root_message","template":""}'   # 403 for a Responder's token
 # nothing was sent or changed
 curl -s $FMM/requests | jq length   # unchanged by the previews; psql: select count(*) from open_group_updates   # unchanged
@@ -124,6 +127,12 @@ the place of the first of the three blocks) and the Bridge Destination whose fak
 
 ## Open questions
 
+- **The names of the new result fields (non-blocking).** C-38.FR-12 names what the preview shows — the Mattermost
+  attachment, the Slack blocks, the Telegram HTML with its inline keyboard, the Bridge body with `layout` and `buttons`,
+  the number of blocks, what shortening cut — but not the fields of the result. This story names them `payload`
+  (`mattermost_attachment`, `slack_blocks`, `telegram_html`, `telegram_keyboard`, `bridge_buttons`),
+  `slack_block_count` and `cut`; if the maintainer chooses other names, only the spec, the handler and S-218's client
+  code change.
 - **Redaction rules (#373).** C-38.FR-13 has the preview apply the Redaction rules as delivery does and mark each
   replaced value, "from the Redaction rules on". They are not specified yet (L2 §1.5), so this story has nothing to
   call; the story that specifies them adds the preview to its files and its acceptance (the replaced values marked in
@@ -144,6 +153,7 @@ the place of the first of the three blocks) and the Bridge Destination whose fak
 
 | ID | Covered | Note |
 |---|---|---|
+| C-12.FR-5 | full | revised for L2: the preview takes an unsaved layout and a Destination and returns the payload, the block count and the cut blocks |
 | C-38.FR-10 | full | |
 | C-38.FR-11 | partial | the example and the any-Route sample; the offered list and "Find by number" are S-218 |
 | C-38.FR-12 | partial | the payload, the length and the cut blocks; the tabs are S-218 |

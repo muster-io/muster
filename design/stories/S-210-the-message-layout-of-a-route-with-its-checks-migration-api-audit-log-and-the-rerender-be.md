@@ -4,7 +4,7 @@ title: The message layout of a Route with its checks, migration, API, Audit log 
 capability: C-38
 kind: be
 layer: L2
-depends_on: [S-209, S-125, S-162, S-123]
+depends_on: [S-209, S-125, S-162]
 covers: [C-38.FR-1, C-38.FR-2, C-38.FR-4, C-38.FR-5, C-38.FR-9, C-38.FR-14, C-38.FR-15, C-38.AC-1, C-38.AC-4, C-38.AC-7, C-38.AC-11, C-38.AC-12]
 files_touched:
   - api/openapi.yaml
@@ -26,12 +26,12 @@ files_touched:
   - test/e2e/route_message_layout_test.go
 acceptance:
   - "[C-38.FR-1, C-38.FR-15, C-38.AC-1] `getRoute`, `listRoutes`, `createRoute` and `updateRoute` carry `own_message_layout` and `message_layout`: a Route that never saved a layout reads `own_message_layout` false and `message_layout` as Muster's default; a read sent back unchanged with `If-Match` keeps `own_message_layout` false, stores no layout and leaves the ETag as it was; an update that omits `own_message_layout` keeps it; a create takes false; a change of Muster's default changes no Route's ETag (`messagelayout_test.go`, `routes_test.go`, `test/e2e/route_message_layout_test.go`)."
-  - "[C-38.FR-2, C-38.FR-4, C-38.AC-4] Saving a layout with an unknown block or field name gets `400` `invalid_format` from request validation; a field given twice `422` `duplicate` at `/message_layout/fields/{i}`; a label field with an empty or invalid label name `422` `invalid_format` at `/message_layout/fields/{i}/label`; more than `message.layout_fields` fields `422` `too_long`; an `alerts_listed` outside 1 to 20 (`route.message_layout_alerts_listed`) `422` `out_of_range` at `/message_layout/alerts_listed`, for 0 and for 21; a stale `If-Match` `412` and a missing one `428` (`messagelayout_test.go`, `routes_test.go`, `test/e2e/route_message_layout_test.go`)."
+  - "[C-38.FR-2, C-38.FR-4, C-38.AC-4, C-38.AC-11] Saving a layout with an unknown block or field name gets `400` `invalid_format` from request validation; a field given twice `422` `duplicate` at `/message_layout/fields/{i}`; a label field with an empty or invalid label name `422` `invalid_format` at `/message_layout/fields/{i}/label`; more than `message.layout_fields` fields `422` `too_long`; an `alerts_listed` outside 1 to 20 (`route.message_layout_alerts_listed`) `422` `out_of_range` at `/message_layout/alerts_listed`, for 0 and for 21; a stale `If-Match` `412` and a missing one `428` (`messagelayout_test.go`, `routes_test.go`, `test/e2e/route_message_layout_test.go`)."
   - "[C-38.FR-2, C-38.FR-4, C-38.AC-4] A valid save writes one Audit log row `route.updated` whose diff holds `/message_layout` before and after, the layout before being Muster's default as it was then; the spec has no `pattern`, `maxItems`, `minimum` or `maximum` on the label name, the fields or `alerts_listed` (`routes_test.go`, `routing_integration_test.go`, `make lint`)."
   - "[C-38.FR-5] `own_message_layout` false stores no layout and the Route follows Muster's default again, with `message_labels` and its own setting untouched; no earlier version of a layout is kept, the Audit log's diff is the only record (`routes_test.go`, `routing_integration_test.go`)."
-  - "[C-38.FR-9, C-38.AC-12] An `updateRoute` that sets `own_message_layout` true with a layout and `template_root_message` null saves both in one transaction with one Audit log row naming both fields (`routes_test.go`, `test/e2e/route_message_layout_test.go`)."
+  - "[C-38.FR-9, C-38.AC-12] An `updateRoute` that sets `own_message_layout` true with a layout and `policy.templates.root_message` null saves both in one transaction with one Audit log row naming `/message_layout` and `/policy/templates/root_message` (`routes_test.go`, `test/e2e/route_message_layout_test.go`)."
   - "[C-38.FR-14] A save, or a reset, that changes the stored layout of a Route with open Alert Groups inserts one row `route_message_settings` of `open_group_updates` in the same transaction, one pending row per Route however many saves come before it runs; a save that changes nothing inserts none (`routing_integration_test.go`)."
-  - "[C-38.FR-15, C-38.AC-7] A Viewer reads the layout with `routes:read` and gets `403` on a write; `message_layout` is read-only without `routes:write` in the generated client's types (`routes_test.go`, `test/e2e/route_message_layout_test.go`)."
+  - "[C-38.FR-15, C-38.AC-7] A Viewer reads the layout with `routes:read` and gets `403` on a write (`routes_test.go`, `test/e2e/route_message_layout_test.go`)."
 verify: "make ci test-integration e2e-go"
 operator_attention: false
 issue: null
@@ -92,8 +92,9 @@ issue: null
   the Route's `language` or templates uses (migration 0039), inside the save's transaction and only for a Route with
   open Alert Groups. The kind and its CHECK are unchanged: a pending row of either kind of the same Route already
   absorbs a new one (`schema.md` §5), which is the "one pending row per Route however many saves" of C-38.FR-14. The
-  save of a layout and of `template_root_message: null` in one request is the existing update; the Audit log row names
-  both fields.
+  save of a layout and of `policy.templates.root_message: null` (`RouteTemplates`, which null resets to the built-in
+  one) in one request is the existing update; the Audit log row names both pointers, `/message_layout` and
+  `/policy/templates/root_message`.
 - **API handlers** (`internal/api/routes.go`): map `own_message_layout` and `message_layout` in both directions, add the
   pointers of the problems, and answer a write without `routes:write` with `403` as the other Route fields are.
 - **Settings**: `route.message_layout`, `route.message_layout_alerts_listed`, `message.layout_fields` and
@@ -153,8 +154,9 @@ psql "$MUSTER_DB" -c "select message_layout is null from routes where public_id=
 ```
 
 `test/e2e/route_message_layout_test.go` repeats these, adds "Remove the template with a layout in one save" (the Route
-with a `template_root_message` and one `updateRoute` that sets the layout and nulls the template: one Audit log row,
-both in its diff), the Responder's `403` for the write and the Viewer's read, and the migration case in the
+with a `policy.templates.root_message` and one `updateRoute` that sets the layout and nulls the template: one Audit log
+row, both pointers in its diff), the Responder's `403` for the write and the Viewer's read, and the migration case in
+the
 migration test (a Route that exists before the migration reads the default).
 
 ## Open questions
@@ -171,7 +173,8 @@ migration test (a Route that exists before the migration reads the default).
 
 ## Notes
 
-- Suggested commit: `feat(routing): add the message layout of a route with its checks and the re-render of open messages`.
+- Suggested commit: `feat(routing): add the message layout of a route with its checks and the re-render of open
+  messages`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. The migration number is
   assigned by the orchestrator at dispatch; the migration replaces no CHECK and needs no re-versioning.
 - The kind `route_message_settings` is reused because a change of the layout, like a change of the Route's language or

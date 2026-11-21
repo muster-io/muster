@@ -5,7 +5,7 @@ capability: C-38
 kind: be
 layer: L2
 depends_on: [S-211, S-215, S-047, S-113]
-covers: [C-38.FR-7, C-38.FR-17, C-38.AC-9, C-38.AC-12]
+covers: [C-16.FR-1, C-38.FR-7, C-38.FR-17, C-38.AC-9, C-38.AC-12]
 files_touched:
   - api/openapi.yaml
   - internal/destinations/test.go
@@ -19,7 +19,7 @@ files_touched:
   - test/e2e/layout_test_message_test.go
 acceptance:
   - "[C-38.FR-7, C-38.AC-9] A test message (C-16.FR-1) of a Destination of the Route, built from an Alert Group of the Route, shows the Route's own layout; one built from the built-in example shows Muster's default, whatever layout the Default route saved (`destinationtest_test.go`, `test_test.go`, `test/e2e/layout_test_message_test.go`)."
-  - "[C-38.FR-17, C-38.AC-12] `testDestination` takes an optional unsaved `message_layout` with the `route_id` of the Route it belongs to and delivers to the fake Mattermost server one \"🧪 Test message\" with that layout, built from the `alert_group_id` of the source — of any Route, not only of the Destination's — with no Mentions, no change of any Desired state and no edit of the Route's open Root messages (`destinations_test.go`, `test/e2e/layout_test_message_test.go`)."
+  - "[C-16.FR-1, C-38.FR-17, C-38.AC-12] `testDestination` takes an optional unsaved `message_layout` with the `route_id` of the Route it belongs to and delivers to the fake Mattermost server one \"🧪 Test message\" with that layout, built from the `alert_group_id` of the source — of any Route, not only of the Destination's — with no Mentions, no change of any Desired state and no edit of the Route's open Root messages (`destinations_test.go`, `test/e2e/layout_test_message_test.go`)."
   - "[C-38.FR-17] The same request to a Destination of each messenger — Mattermost, Slack, Telegram, a Bridge — sends one test message in that messenger with the layout, and for an outgoing webhook the layout is ignored and the existing steps run; a request with `message_layout` and no `route_id` gets `422` `required`, and one with an invalid layout the `422` codes of S-210 at `/message_layout/...` (`destinations_test.go`, `test/e2e/layout_test_message_test.go`)."
   - "[C-38.FR-17, C-38.AC-12] The operation needs `destinations:test` as it does: a Responder's token gets `403` and sends nothing; the Audit log row `destination.tested` names the source and, when an unsaved layout was used, `message_layout` as given without its content being stored anywhere else (`destinations_test.go`)."
 verify: "make ci e2e-go"
@@ -96,16 +96,21 @@ t "{\"source\":{\"kind\":\"example\"},\"message_layout\":$UNSAVED}"   # 422 requ
 curl -s -o /dev/null -w '%{http_code}\n' "${RESP[@]}" $API/destinations/$D/tests -d '{"source":{"kind":"example"}}'   # 403
 ```
 
-`test/e2e/layout_test_message_test.go` repeats these for Mattermost, Telegram, Slack and the fake bridge, and checks that
+`test/e2e/layout_test_message_test.go` repeats these for Mattermost, Telegram, Slack and the fake bridge, and checks
+that
 an outgoing webhook Destination runs its steps as before with the layout in the request.
 
 ## Open questions
 
-None.
+- **The name `route_id` on `DestinationTestRequest` (non-blocking).** The capability file says the test message takes
+  the unsaved layout and the Route, and does not name the field. This story adds `route_id`, as `previewTemplate`
+  names the Route; if the maintainer prefers another name (or the Route inside a `message_layout` envelope), only the
+  spec, `internal/api/destinations.go` and the editor's call change.
 
 ## Notes
 
-- Suggested commit: `feat(destinations): send a test message with the route's layout or an unsaved one from any alert group`.
+- Suggested commit: `feat(destinations): send a test message with the route's layout or an unsaved one from any alert
+  group`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. No migration.
 - "Mentions nobody" is already true of every test message; the story's tests assert it for the new path because the
   unsaved layout reaches the renderer by a new route.
@@ -116,6 +121,7 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
+| C-16.FR-1 | partial | revised for L2: the test message from any Alert Group the preview shows, with an unsaved layout; the button is S-218 |
 | C-38.FR-7 | partial | the test message's layout; Thread replies, Storm summaries and Mentions unchanged are S-211 |
 | C-38.FR-17 | partial | the operation; the editor's button is S-218 |
 | C-38.AC-9 | full | |

@@ -79,7 +79,8 @@ None.
 
 ## Notes
 
-- Suggested commit: `docs: describe the message layout editor, the blocks that always show and the preview on real alert groups`.
+- Suggested commit: `docs: describe the message layout editor, the blocks that always show and the preview on real
+  alert groups`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases.
 - The page says that "Reset to default" returns the Route to Muster's default, "which later releases may improve":
   the same words as C-38.FR-5, so that an Admin who wants a layout to stay as it is saves it as their own.

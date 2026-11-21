@@ -5,7 +5,7 @@ capability: C-41
 kind: fe
 layer: L2
 depends_on: [S-153, S-152, S-157, S-150, S-167]
-covers: [C-41.FR-1, C-41.FR-2, C-41.FR-3, C-41.FR-4, C-41.FR-5, C-41.FR-6, C-41.FR-8, C-41.FR-10, C-41.AC-1, C-41.AC-2, C-41.AC-3, C-41.AC-4, C-41.AC-5, C-41.AC-7, C-41.AC-8, C-41.AC-9]
+covers: [C-31.FR-5, C-41.FR-1, C-41.FR-2, C-41.FR-3, C-41.FR-4, C-41.FR-5, C-41.FR-6, C-41.FR-8, C-41.FR-10, C-41.AC-1, C-41.AC-2, C-41.AC-3, C-41.AC-4, C-41.AC-5, C-41.AC-7, C-41.AC-8, C-41.AC-9]
 files_touched:
   - web/src/components/notification-rules-editor.tsx
   - web/src/components/notification-rules-editor.test.tsx
@@ -26,7 +26,7 @@ files_touched:
   - web/e2e/profile.spec.ts
   - web/e2e/phone-width.spec.ts
 acceptance:
-  - "[C-41.FR-1, C-41.AC-1] Profile → \"Personal notification rules\" has \"Edit sequences\" next to the rules in words, which opens an editor of \"Normal\" and \"Important\" together, each starting from the sequence in effect — the Organization's rules, those of \"Call\" or \"Don't call\", or the custom ones; the switch \"Also call through the Notification gateway\" stays and custom rules keep \"Reset to the Organization's rules\" (`notification-rules-section.test.tsx`, `notification-rules-editor.spec.ts`)."
+  - "[C-31.FR-5, C-41.FR-1, C-41.AC-1] Profile → \"Personal notification rules\" has \"Edit sequences\" next to the rules in words, which opens an editor of \"Normal\" and \"Important\" together, each starting from the sequence in effect — the Organization's rules, those of \"Call\" or \"Don't call\", or the custom ones; the switch \"Also call through the Notification gateway\" stays and custom rules keep \"Reset to the Organization's rules\" (`notification-rules-section.test.tsx`, `notification-rules-editor.spec.ts`)."
   - "[C-41.FR-2, C-41.AC-7] Each rule is an ordered list of actions — \"Mention in the Thread\", \"Call through a Notification gateway\" with \"Call through\" and the gateway when more than one exists, and \"Wait\" with \"minutes\" —; the editor adds an action at the end or after any action with \"Add action\", removes one with \"Remove\", changes its kind, and moves it with \"Move up\" and \"Move down\" buttons that work from the keyboard and at 360 px; actions without a wait between them are shown as one moment, and dragging, where offered, is never the only way (`notification-rule-list.test.tsx`, `notification-rules-editor.spec.ts`)."
   - "[C-41.FR-3, C-41.AC-3] The call action is offered only while a Notification gateway exists and only for gateways where the person has a confirmed contact; the others are listed as unavailable with \"Confirm your contact for calls and SMS below first.\", and without any gateway the action reads \"Unavailable: a Notification gateway is needed (a bridge for calls and SMS)\"; with two gateways and a confirmed contact at one only that one is offered (`notification-rule-list.test.tsx`, `notification-rules-editor.spec.ts`)."
   - "[C-41.FR-3, C-41.AC-4] A stored call whose gateway was deleted or whose contact is gone shows the reason the API reads (`gateway_deleted`, `no_confirmed_contact`) as \"unavailable: the Notification gateway was deleted\" or the contact text; where the person's own rules are stored it may be kept — saving succeeds and a second call through that gateway is refused by the API — or removed; where the editor starts from the Organization's rules, a call at a gateway where the person has no confirmed contact is shown as a problem and \"Save\" stays unavailable until it is removed, as the API would refuse it (`contact_required`) (`notification-rules-editor.test.tsx`, `notification-rules-editor.spec.ts`)."
@@ -84,7 +84,8 @@ issue: null
   «Редактировать цепочки»; "Normal" / «Обычное»; "Important" / «Важное»; "Mention in the Thread" / «Упоминание в
   треде»; "Call through a Notification gateway" / «Звонок через шлюз уведомлений»; "Call through" / «Звонить через»;
   "Wait" / «Ожидание»; "minutes" with Russian plurals; "Move up" / «Выше»; "Move down" / «Ниже»; "Remove" / «Убрать»;
-  "Add action" / «Добавить действие»; "What happens when you are Paged {importance}" / «Что произойдёт, когда вас вызовут
+  "Add action" / «Добавить действие»; "What happens when you are Paged {importance}" / «Что произойдёт, когда вас
+  вызовут
   {importance}»; "At once" / «Сразу»; "After {N} min" / «Через {N} мин»; the problems, warnings and notes quoted in the
   acceptance statements, each in both languages; "Merge the waits" / «Объединить ожидания»; "Save", "Cancel" as the
   profile's words; the changed text for custom rules.
@@ -111,7 +112,8 @@ Playwright against `make dev` (as `web/e2e/support.ts` sets it up), in English a
 confirmed contact at the demo "Example Gateway" (S-150's setup) and a Route whose chain Pages them importantly.
 
 1. Open Profile → "Personal notification rules" → "Edit sequences". Make the important rule Mention, "Wait" 3 minutes,
-   "Call through a Notification gateway", "Wait" 10 minutes, a second call: expect the preview "At once: a Mention in the
+   "Call through a Notification gateway", "Wait" 10 minutes, a second call: expect the preview "At once: a Mention in
+   the
    Thread · After 3 min: a call to <the masked contact> through Example Gateway · After 13 min: the call again", and the
    stop line. Expect the note "Your rules will no longer follow the Organization's rules…" before saving. "Save":
    `curl -s "${A[@]}" $API/me/notification-rules | jq -c '{s: .state, i: [.important[].kind]}'` answers
@@ -121,18 +123,22 @@ confirmed contact at the demo "Example Gateway" (S-150's setup) and a Route whos
    Mention at once, `curl -s 127.0.0.1:18094/_fake/notifications` listing the call after 3 minutes and again after 13.
 3. Add actions to 10: expect "Add action" unavailable with "A rule has at most 10 actions, waits included."; set a wait
    of 0 and of 61: expect "A wait is 1 to 60 minutes." at the action and "Save" unavailable; remove every Mention and
-   call: expect "A rule needs a Mention or a call.". A request that bypasses the editor with a wait of 61 minutes returns
+   call: expect "A rule needs a Mention or a call.". A request that bypasses the editor with a wait of 61 minutes
+   returns
    `422` with the pointer `/important/1/wait_seconds`, which the editor shows at that action when it sends it
    (Playwright sends the draft past the checks).
-4. Make a rule that ends with a wait: expect "A wait at the end does nothing" and "Save" available; waits of 20 and 30 in
+4. Make a rule that ends with a wait: expect "A wait at the end does nothing" and "Save" available; waits of 20 and 30
+   in
    a row: expect "Two waits in a row add up" and "Merge the waits" making one of 50; waits of 40 and 30: no merge.
 5. Delete the gateway of a stored call through the API: reopen the editor and expect "unavailable: the Notification
    gateway was deleted" at that call; "Save" with it kept succeeds; adding a second call through that gateway answers
    `422`. For a person in the state "As in the Organization" whose Organization's important rule calls through a gateway
    where they have no confirmed contact: expect the call shown as a problem and "Save" unavailable until it is removed.
 6. Save in another tab, then "Save" here: expect "The rules changed in the meantime…" with the current rules and the
-   edits kept. Edit the rules to equal the Organization's: expect "These are the Organization's rules…" and "Reset to the
-   Organization's rules"; "Save" anyway, then change the Organization's important rule through the API: the person's rule
+   edits kept. Edit the rules to equal the Organization's: expect "These are the Organization's rules…" and "Reset to
+   the
+   Organization's rules"; "Save" anyway, then change the Organization's important rule through the API: the person's
+   rule
    stays. "Reset to the Organization's rules": `.state` is `organization`. Edit and navigate away: expect the
    confirmation.
 7. With no gateway: expect "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)" on the call
@@ -162,6 +168,7 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
+| C-31.FR-5 | partial | revised for L2: the editor of whole sequences in the profile; a User's page and Alert handling are S-229, the revision marker S-230 |
 | C-41.FR-1 | full | |
 | C-41.FR-2 | full | |
 | C-41.FR-3 | partial | the profile's texts and the person's contacts; the User page's text and the Organization's gateways are S-229 |

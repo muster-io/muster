@@ -62,7 +62,10 @@ issue: null
   date (a new schema `StatisticsHour`). The new operation `getAlertTitleStatistics`
   (`GET /alert-title-statistics`, tag Alert groups, `x-permission: alert-groups:read`, `x-listener: app`) takes the
   parameters of `getAlertGroupStatistics` that choose the selection (`StatisticsRoute`, `StatisticsIntegration`,
-  `AgSeverity`, `AgUrgent`, `AgTeam`, `AgReopened`, `LabelMatchers`, `AgFirstAcknowledgedBy`, `From`, `To`) and
+  `AgSeverity`, `AgUrgent`, `AgTeam`, `AgReopened`, `LabelMatchers`, `AgFirstAcknowledgedBy`, `From`, `To`) and the
+  `time_zone` query parameter of that operation, defined as it defines it
+  (an IANA name, the Organization's by default; the titles have no days to split, so it changes no count, and the
+  dashboard sends one query string to every read), and
   answers the schema `AlertTitleStatistics` — `from`, `to` and `items` of `AlertTitleStatisticsItem`: `title`,
   `alert_group_count`, `reopen_count`, `never_acknowledged_count`, `time_to_resolve` (`DurationStats`) and `routes`
   (`EntityRef` list). The descriptions say that the answer is complete up to `dashboard.noisy_alerts` and not
@@ -85,7 +88,8 @@ issue: null
 1. Write the spec parts and `api/README.md`. Check: `make generate-check`, `make lint` (Redocly).
 2. Add `group_by=all` and the critical split to `statistics.go` and its queries. Check: `statistics_test.go`,
    `statistics_integration_test.go` (the five Alert Groups of AC-1, the equality with `group_by=route`).
-3. Write `titlestatistics.go` and its query. Check: `titlestatistics_test.go` (the order, the ties, the limit, the titles
+3. Write `titlestatistics.go` and its query. Check: `titlestatistics_test.go` (the order, the ties, the limit, the
+   titles
    with one Alert Group left out).
 4. Add the handlers and keep the statistics page compiling. Check: `alertgroups_test.go`, `make ci`.
 5. Write `test/e2e/dashboard_statistics_test.go` and extend `statistics_test.go`. Check: the Verification below.
@@ -98,7 +102,8 @@ API=localhost:8080/api/v1   # A: the Admin's header array; V: a Viewer's; as in 
 CLK=localhost:8082/_dev/clock; FAM=127.0.0.1:19093/_fake
 # the data of C-40.AC-1 through the fake Alertmanager: 5 Alert Groups in the last 7 days (2 critical), acknowledged after 2, 4 and 6 minutes
 # and resolved after 10, 20, 40 and 60 minutes with the development clock, 2 more in the 7 days before (the helper of test/e2e/statistics_test.go)
-F='from='$(date -u -v-7d +%FT%TZ)'&to='$(date -u +%FT%TZ)
+NOW=$(curl -s $CLK | jq -r '.now | sub("\\.[0-9]+"; "") | fromdate')   # the development clock, in seconds; portable
+F=$(jq -nr --argjson n $NOW '"from=\($n - 604800 | todate)&to=\($n | todate)"')
 curl -s "${A[@]}" "$API/alert-group-statistics?group_by=all&$F" | jq -c '.items[0] | {s: .subject, n: .alert_group_count, a: .time_to_acknowledge.median_seconds, r: .time_to_resolve.median_seconds, c: ([.per_day[].critical_count] | add)}'
 # {"s":null,"n":5,"a":240,"r":1800,"c":2}
 # C-40.AC-2: the sum over the Routes equals it, and one Route's item equals the item of all with that Route chosen
@@ -106,7 +111,7 @@ curl -s "${A[@]}" "$API/alert-group-statistics?group_by=route&$F" | jq '[.items[
 curl -s "${A[@]}" "$API/alert-group-statistics?group_by=all&route=$R&$F" | jq -c '.items[0] | [.alert_group_count, .time_to_acknowledge.p95_seconds]'
 curl -s "${A[@]}" "$API/alert-group-statistics?group_by=route&route=$R&$F" | jq -c '.items[0] | [.alert_group_count, .time_to_acknowledge.p95_seconds]'   # the same two numbers
 # a period of one day: hours instead of days
-curl -s "${A[@]}" "$API/alert-group-statistics?group_by=all&from=$(date -u -v-1d +%FT%TZ)&to=$(date -u +%FT%TZ)" | jq -c '.items[0] | {d: (.per_day | length), h: (.per_hour | length)}'
+curl -s "${A[@]}" "$API/alert-group-statistics?group_by=all&from=$(jq -nr --argjson n $NOW '($n - 86400) | todate')&to=$(jq -nr --argjson n $NOW '$n | todate')" | jq -c '.items[0] | {d: (.per_day | length), h: (.per_hour | length)}'
 # {"d":0,"h":24}  (or the hours of the period)
 # C-40.AC-5: three KubePodCrashLooping (one reopened twice, two resolved without acknowledgement), two NodeDown (one Reopen), two DiskFull, one CertExpiring
 curl -s "${A[@]}" "$API/alert-title-statistics?$F" | jq -c '[.items[] | [.title, .alert_group_count, .reopen_count, .never_acknowledged_count]]'
@@ -135,7 +140,8 @@ statistics still shows By route with the numbers of S-174's fixtures.
 
 ## Notes
 
-- Suggested commit: `feat(groups): add statistics of the whole selection with the critical split and of noisy alert titles`.
+- Suggested commit: `feat(groups): add statistics of the whole selection with the critical split and of noisy alert
+  titles`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. No migration: the
   columns the reads need (`title`, `reopen_count`, `first_acknowledged_at`, `severity_level`) exist, and an index that
   the measurements of S-224 call for comes with that story.

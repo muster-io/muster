@@ -4,15 +4,16 @@
 - Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33 (C-34, C-36, C-37, C-38, C-39, C-40, C-41 and C-42 of the 0.2.x patch releases among them). A
-capability is done when its stories together cover every ID
-of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID
-fully or in part; this page joins them.
+[L1](../prd/L1.md), of the core of [L2](../prd/L2.md) and of the capabilities of L2 specified after it, from C-33
+(C-34, C-36, C-37, C-38, C-39, C-40, C-41 and C-42 of the 0.2.x patch releases among them). A capability is done when
+its stories together cover every ID of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each
+story file says whether it covers an ID fully or in part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
-  Every ID of L1, of the core of L2, of C-33, of C-34, of C-36, of C-37, of C-38, of C-39, of C-40, of C-41 and of C-42 is complete. The sections of L2 follow the non-functional requirements
-  of L1, and the requirements of L1 that L2 revises have a section of their own at the end.
+  Every ID of L1, of the core of L2, of C-33, of C-34, of C-36, of C-37, of C-38, of C-39, of C-40, of C-41 and of C-42
+  is complete. The sections of L2 follow the non-functional requirements of L1, and the requirements of L1 that L2
+  revises have a section of their own at the end.
   [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 has a
   row here.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
@@ -22,8 +23,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) ·
 [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) ·
 [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) ·
-[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) · [C-34](#c-34) · [C-36](#c-36) · [C-37](#c-37) · [C-38](#c-38) · [C-39](#c-39) · [C-40](#c-40) · [C-41](#c-41) · [C-42](#c-42) · [L1
-requirements revised for L2](#l1-requirements-revised-for-l2)
+[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [C-33](#c-33) ·
+[C-34](#c-34) · [C-36](#c-36) · [C-37](#c-37) · [C-38](#c-38) · [C-39](#c-39) · [C-40](#c-40) · [C-41](#c-41) ·
+[C-42](#c-42) · [L1 requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
 
@@ -1034,7 +1036,7 @@ S-150, S-154, S-172
 | C-27.FR-6 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 until the test environment; P-88 decided |
 | C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-150 (part), S-172 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API and on the pages (S-150); the Destinations of the chains that Page the Schedule (S-172) |
-| C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part), S-225 (part), S-226 (part) | complete | the Home page gains the section "Dashboard" after "I am an Assignee" and "On call now", which keep their places (S-225, S-226, C-40) |
+| C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part) | complete |  |
 | C-27.FR-10 | S-134 (part), S-136 (part) | complete | P-82 confirmed with S-134; P-81 stays provisional |
 | C-27.FR-11 | S-131 | complete |  |
 | C-27.FR-12 | S-131 (part), S-154 (part) | complete | `schedule_in_use` raised for Escalation steps (S-154); P-66 confirmed with S-131 |
@@ -1163,7 +1165,7 @@ S-154, S-169, S-155, S-177, S-178, S-168, S-156, S-157, S-158, S-159, S-160, S-1
 | C-32.FR-6 | S-169 | complete |  |
 | C-32.FR-7 | S-169 | complete |  |
 | C-32.FR-8 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram, Bridges and outgoing webhooks (S-177) |
-| C-32.FR-9 | S-155 (part), S-177 (part), S-222 (part) | complete | Mattermost and Slack (S-155), Telegram and Bridges (S-177); each Page also records whether it was made outside Working hours, for the dashboard of C-40 (S-222) |
+| C-32.FR-9 | S-155 (part), S-177 (part) | complete | Mattermost and Slack (S-155), Telegram and Bridges (S-177) |
 | C-32.FR-10 | S-155 (part), S-157 (part) | complete |  |
 | C-32.FR-11 | S-155 (part), S-177 (part), S-157 (part), S-160 (part), S-161 (part) | complete | the push of Mentions in Thread replies checked by the spike S-160 |
 | C-32.FR-12 | S-168 (part), S-157 (part) | complete | P-89 decided with S-168: the Owner is named without a Team; Assignees by calls S-157 |
@@ -1291,8 +1293,8 @@ S-195, S-196. They start after the tag of 0.2.0 and ship in a 0.2.x patch releas
 
 ## C-36
 
-[Loud and Quiet settings of a Route](../prd/l2/C-36-route-loud-and-quiet-settings.md) · L2 0.2.x · stories: S-197, S-198,
-S-199, S-200, S-201. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
+[Loud and Quiet settings of a Route](../prd/l2/C-36-route-loud-and-quiet-settings.md) · L2 0.2.x · stories: S-197,
+S-198, S-199, S-200, S-201. They start after the tag of 0.2.0 and ship in a 0.2.x patch release.
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -1373,7 +1375,7 @@ their contracts were written against the open pull request that adds the capabil
 | C-38.FR-8 | S-211 | complete | the preview's own `layout` null for a template is S-215's, under AC-6 |
 | C-38.FR-9 | S-210 (part), S-217 (part) | complete | the save with the template removed (S-210); the hint and "Remove the template" (S-217) |
 | C-38.FR-10 | S-215 | complete |  |
-| C-38.FR-11 | S-215 (part), S-218 (part) | complete | the example and an Alert Group of any Route (S-215); the offered list and "Find by number" (S-218) |
+| C-38.FR-11 | S-215 (part), S-218 (part) | complete | the example, an Alert Group of any Route and the refusal of one whose details are removed (S-215); the offered list within `retention.alert_details` and "Find by number" (S-218) |
 | C-38.FR-12 | S-215 (part), S-218 (part) | complete | the payload, the length and the cut blocks (S-215); the tabs (S-218) |
 | C-38.FR-13 | S-215 | complete | the Redaction clause waits for the capability that specifies the rules (S-215, Open questions) |
 | C-38.FR-14 | S-210 (part), S-211 (part) | complete | the re-render row (S-210); the edits, Quietly and once (S-211) |
@@ -1494,7 +1496,7 @@ contracts were written against the open pull request that adds the capability fi
 | C-42.FR-8 | S-235 (part), S-236 (part), S-238 (part) | complete | the timeline of a chain (S-235), of all chains (S-236) and on the page (S-238) |
 | C-42.FR-9 | S-235 (part), S-236, S-238 (part) | complete | the computation without effects (S-235); no Thread reply in a Test message (S-236); the page's words (S-238) |
 | C-42.FR-10 | S-231 (part), S-235 (part), S-236 (part) | complete | the steps' Permission and Audit log (S-231); playing, not recorded (S-235, S-236) |
-| C-42.FR-11 | S-237 (part), S-238 (part) | complete |  |
+| C-42.FR-11 | S-231 (part), S-232 (part), S-233 (part), S-237 (part), S-238 (part) | complete | the language of the Test message's texts by type (S-231, S-232, S-233); 360 px and Russian on the page (S-237, S-238) |
 | C-42.FR-12 | S-239 | complete |  |
 | C-42.AC-1 | S-231, S-237 (part) | complete | the eight steps through the API (S-231) and in the browser (S-237) |
 | C-42.AC-2 | S-233 | complete |  |
@@ -1570,7 +1572,7 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-12.FR-1 | S-125 (part), S-126 (part) | complete |  |
 | C-12.FR-2 | S-125 | complete |  |
 | C-12.FR-3 | S-125 (part), S-143 (part), S-148 (part), S-173 (part), S-155 (part), S-168 (part) | complete | the layout (S-125), undelivered Mentions (S-143), calls (S-148), their answers (S-173), Pages (S-155), Assignees (S-168) |
-| C-12.FR-5 | S-215 | complete | added for L2: a preview of a Root message takes an unsaved message layout and a Destination and returns the messenger payload, the number of Slack blocks and the blocks shortening cut |
+| C-12.FR-5 | S-215 | complete | revised for L2: a preview of a Root message takes an unsaved message layout and a Destination and returns the messenger payload, the number of Slack blocks and the blocks shortening cut |
 | C-12.FR-8 | S-140 (part), S-143 (part) | complete | the Mention entries in delivery and on the form |
 | C-12.FR-11 | S-125, S-171 (part) | complete | the shortening of the compact layout (S-125); the Mention line of a Bridge message within half of the body limit (S-171) |
 | C-12.FR-12 | S-140 (part), S-165 (part), S-168 (part) | complete | an unlinked person left out and recorded (S-140, S-165); the Assignees named like the footer's people (S-168) |
@@ -1581,7 +1583,7 @@ complete when the revision is. Every L1 ID of L2 §6 has its row, and every row 
 | C-14.FR-16 | S-125 | complete |  |
 | C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-177 (part), S-168 (part), S-156 (part), S-198 (part), S-206 (part) | complete | the L2 events in events mode (S-118, S-121, S-148, S-169, S-155), the people of `paged` (S-177), the `webhook_events` CHECK extended by S-118, S-121 and S-148; the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156); `notify` from the loudness a Route gives the event (S-198); the five events of Attach and Detach and `attached_to` in `alert_group` (S-206) |
 | C-15.FR-11 | S-140 (part), S-177 | complete | Teams and the On-call as targets (S-140); the people that `paged` names (S-177) |
-| C-16.FR-1 | S-216 (part), S-218 (part) | complete | added for L2: a test message with an unsaved message layout, built from any Alert Group the preview shows (S-216), sent from the editor (S-218) |
+| C-16.FR-1 | S-216 (part), S-218 (part) | complete | revised for L2: a test message with an unsaved message layout, built from any Alert Group the preview shows (S-216), sent from the editor (S-218) |
 | C-16.FR-4 | S-113 (part), S-125 (part) | complete |  |
 | C-17.FR-1 | S-169, S-199 (part), S-204 (part) | complete | the first chain stops the ack timeout (S-169); the ack timeout and chains start over when new Alerts remove an acknowledgement (S-199); they stop on Attach and start over on Detach (S-204) |
 | C-17.FR-2 | S-140, S-198 (part) | complete | the Mentions of the entries for `ack_timeout` (S-140); the notice Quiet where the Route does not list `ack_timeout` (S-198) |

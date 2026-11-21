@@ -5,7 +5,7 @@ capability: C-42
 kind: be
 layer: L2
 depends_on: [S-231, S-074, S-081, S-126, S-044, S-045, S-177, S-212]
-covers: [C-42.FR-2, C-42.FR-3, C-42.FR-4, C-42.FR-6, C-42.AC-2, C-42.AC-4]
+covers: [C-42.FR-2, C-42.FR-3, C-42.FR-4, C-42.FR-6, C-42.FR-11, C-42.AC-2, C-42.AC-4]
 files_touched:
   - internal/bridge/teststeps.go
   - internal/bridge/teststeps_test.go
@@ -30,7 +30,8 @@ files_touched:
   - test/e2e/destination_test_runs_bridge_test.go
   - test/e2e/destination_test_runs_webhook_test.go
 acceptance:
-  - "[C-42.FR-2, C-42.FR-3] A step-by-step test of a Bridge Destination makes the eight steps of S-231 in order as the Bridge protocol's requests that delivery sends for each lifecycle event — the Publication of the Root message with the `layout` and its `order`, the edits within the bridge's edit window or the pointer reply and final edit where `info` says it cannot edit, and the Thread replies — each through the interactive path with the Connection's and the Destination's limiters, the token masked, the answer truncated and masked, and the error class of the Bridge's classification; the Root message is marked \"🧪 Test message\" in the layout's summary, and a bridge that answers `rate_limited` ends the step `limited` (`teststeps_test.go` of `bridge`, `test/e2e/destination_test_runs_bridge_test.go`)."
+  - "[C-42.FR-2, C-42.FR-3] A step-by-step test of a Bridge Destination makes the eight steps of S-231 in order as the Bridge protocol's requests that delivery sends for each lifecycle event — the Publication of the Root message with the `layout` and its `order`, the edits within the bridge's edit window or the pointer reply and final edit where `info` says it cannot edit, and the Thread replies — each through the interactive path with the Connection's and the Destination's limiters, the token masked, the answer truncated and masked, and the error class of the Bridge's classification; the Root message carries \"🧪 Test message\" as the first of the layout's `notices`, as `api/bridge.yaml` says of a test message, and a bridge that answers `rate_limited` ends the step `retry_after`, while `limited` stays for a step that finds no limiter token within the budget (`teststeps_test.go` of `bridge`, `test/e2e/destination_test_runs_bridge_test.go`)."
+  - "[C-42.FR-11] The built-in texts of the Test message of a Bridge or webhook run — the marker, the buttons' labels, \"Would mention:\" — are in the language of the source's Route, for the built-in example that of the first Route, by name, that names the Destination; the notice of a Bridge run and the `layout` it carries read \"🧪 Тестовое сообщение\" for a Route in Russian (`teststeps_test.go` of `bridge` and `webhooks`, `test/e2e/destination_test_runs_bridge_test.go`)."
   - "[C-42.FR-2, C-42.AC-2] A step-by-step test of an outgoing webhook Destination in events mode delivers one event for each step, marked `test: true` like the `test` event of C-16.FR-1 — the events `alert_group` for Created, `alerts_added` for New Alert, then the events of the lifecycle step in its place — each with `version` 1 and the signature of the Signing secret, which the fake endpoint verifies; its answers are shown masked, truncated and as untrusted text; in mode `both` the `event` request comes before the template request of each step (`teststeps_test.go` of `webhooks`, `test/e2e/destination_test_runs_webhook_test.go`)."
   - "[C-42.FR-2, C-42.AC-2] In template mode the fake endpoint receives the \"create\", \"update\" and \"reply in thread\" requests that the Destination's templates build for each step, with the extraction rules applied to the \"create\" answer and the extracted id used by the next steps' \"update\" and \"reply in thread\" as delivery uses it, Secrets masked in the shown requests and the values extracted shown; a step whose template fails to render ends with the template error as the step's error and stops the run (`teststeps_test.go`, `test/e2e/destination_test_runs_webhook_test.go`)."
   - "[C-42.FR-4, C-42.AC-4] Each Loud step of a Bridge or webhook run lists whom the Destination's Mention entries would mention with the reason of each that would mention nobody — a person with no Account link in the Identity space of the bridge's Connection, a group or everyone that the bridge's `info` does not declare — and the names are plain text after \"Would mention:\": the `mentions` of a Bridge request and the Mentions as data of a webhook request are empty, no \"Mention not delivered\" is recorded and no warning of the Destination changes (`testmentions_test.go`, `teststeps_test.go`, the e2e tests)."
@@ -72,7 +73,8 @@ issue: null
 - **Events** (events mode): the event for each step is the event name delivery uses for that lifecycle event
   (`webhook_events` names, C-15.FR-2), with `test: true`, the `sequence` of the run, and `version` 1; the signing is the
   one of S-044.
-- **Fake servers**: `internal/fakes/fakebridge/messages.go` and `internal/fakes/fakewebhook/{fakewebhook,chat}.go` keep the
+- **Fake servers**: `internal/fakes/fakebridge/messages.go` and `internal/fakes/fakewebhook/{fakewebhook,chat}.go`
+  keep the
   requests in order and verify signatures, as they do; extended only where they lack the edit or the reply, so the e2e
   tests read the eight steps.
 - **Log events, metrics, settings**: those of S-231; none are added.
@@ -94,12 +96,14 @@ API=localhost:8080/api/v1; FBR=127.0.0.1:18094/_fake; FWH=127.0.0.1:18093
 # A: the Admin's header array, as in S-231; the Destinations "bridge-alerts", "auto" (events mode) and "chat" (template mode) of S-048's setup
 step_all() { D=$(curl -s "${A[@]}" $API/destinations | jq -r --arg n "$1" '.items[] | select(.name==$n) | .id')
   RID=$(curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs -d '{"source":{"kind":"example"},"severity_level":"critical"}' | jq -r .id)
-  for i in 2 3 4 5 6 7 8; do curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs/$RID/steps | jq -r '.name + " " + (.requests[0].status|tostring)'; done; }
+  for i in 2 3 4 5 6 7 8; do curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs/$RID/steps | jq -r '.name + " " + (.requests[0].response_status|tostring)'; done; }
 step_all bridge-alerts
-curl -s $FBR/messages | jq -c '[.[] | {k: .kind, t: (.layout.title // "" | test("Test message"))}]'    # the Publication, then edits and replies in order
+# the Publication is the envelope, each later step an edit of it (the whole envelope Muster sent) or a Thread reply
+curl -s $FBR/messages | jq -c '.[-1] | {k: .envelope.kind, t: (.envelope.layout.notices[0] | test("Test message")), e: (.edits | length), r: (.replies | length)}'
+# {"k":"root","t":true,"e":…,"r":…}; the last edit: curl -s $FBR/messages | jq -c '.[-1].edits[-1].layout.notices[0]'
 # C-42.AC-2: events mode: one event per step, marked test: true, verified with the Signing secret
 step_all auto
-curl -s $FWH/_fake/requests | jq -c '[.[] | {e: .body.event, t: .body.test, ok: .signature_ok}]'
+curl -s $FWH/_fake/received/auto | jq -c '[.[] | {e: .body.event, t: .body.test, ok: (.signatures_valid > 0)}]'
 # [{"e":"alert_group","t":true,"ok":true}, ... eight in order, all signed correctly]
 # template mode: "create", "update" and "reply in thread"
 step_all chat
@@ -108,7 +112,7 @@ curl -s $FWH/_fake/requests | jq -r '[.[] | .path] | join(" ")'     # the create
 R=$(curl -s -X POST "${A[@]}" $API/destinations/$D/test-runs -d '{"source":{"kind":"example"}}')
 jq -c '.steps[0].requests[0].headers' <<<"$R"   # the Secret's header reads [redacted]
 # C-42.AC-4 and no Mention data
-curl -s $FBR/messages | jq -c '[.[] | .mentions // []] | flatten | length'      # 0
+curl -s $FBR/messages | jq -c '[.[] | .envelope.mentions] | flatten | length'      # 0
 psql "$MUSTER_DB" -c "select (select count(*) from webhook_events), (select count(*) from deliveries)"   # as before
 ```
 
@@ -122,7 +126,7 @@ None.
 
 ## Notes
 
-- Suggested commit: `feat(webhooks): add step-by-step test runs for bridge and outgoing webhook destinations`.
+- Suggested commit: `feat(destinations): add step-by-step test runs for bridge and outgoing webhook destinations`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. No migration.
 - A webhook that is an outgoing endpoint of a third party receives these requests for real, marked `test: true` in
   events mode; in template mode the templates build the requests, so what marks a test there is the content of the
@@ -138,5 +142,6 @@ None.
 | C-42.FR-3 | partial | the interactive path, masking and classes for the two; the others are S-231, S-232 |
 | C-42.FR-4 | partial | "Would mention" and no Mention data for the two; the others are S-231, S-232 |
 | C-42.FR-6 | partial | no writes and no counts for the two; the others are S-231, S-232 |
+| C-42.FR-11 | partial | the language of the Test message's texts for a Bridge and a webhook; Mattermost is S-231, Telegram and Slack S-232 |
 | C-42.AC-2 | full | |
 | C-42.AC-4 | partial | the entry that mentions nobody in a Bridge and a webhook; Mattermost is S-231, Telegram and Slack S-232 |

@@ -48,7 +48,8 @@ issue: null
 
 **OUT**
 
-- The "Escalation chains" part of the panel, with the offered chains and the timeline: S-238; this story leaves its place
+- The "Escalation chains" part of the panel, with the offered chains and the timeline: S-238; this story leaves its
+  place
   in the panel.
 - The API: S-231 to S-236. The documentation and its link: S-239.
 - The one-message test "Send test message": unchanged (S-048).
@@ -79,7 +80,8 @@ issue: null
 
 ## Steps
 
-1. Write `web/src/lib/destination-test-run.ts`. Check: `destination-test-run.test.ts` (the order, the names, the expiry).
+1. Write `web/src/lib/destination-test-run.ts`. Check: `destination-test-run.test.ts` (the order, the names, the
+   expiry).
 2. Write the step component. Check: `destination-test-step.test.tsx` (the folds, masking shown, "Would mention:" with a
    reason, the presses, the Slack and Bridge hint).
 3. Write the run and the panel section. Check: `destination-step-test.test.tsx` (Start, Next, a failed step and "Try
@@ -94,23 +96,28 @@ Playwright against `make dev` (as `web/e2e/support.ts` sets it up), in English a
 Destination "infra-critical" whose Mention entries name `@devops` and olga, who has no Account link, and the fake
 Mattermost server.
 
-1. Sign in as the Admin, open Destinations → infra-critical → "Test" → "Step-by-step test", choose "Example" and "critical",
+1. Sign in as the Admin, open Destinations → infra-critical → "Test" → "Step-by-step test", choose "Example" and
+   "critical",
    press "Start". Expect the first step "Created" with "Sent", "Request" and "Answer" folded and, opened, the bot token
    shown as `[redacted]`, and "Would mention: @devops, olga (has no linked Mattermost account)"; the fake server holds
    the post marked "🧪 Test message" and `curl -s $FMM/posts | jq -r '.[0].message' | grep -c '@olga'` prints 0.
 2. Press "Next: New Alert": expect the Root message edited to two Alerts and a Thread reply in the fake server. Press
    through "Acknowledge", "Reminder", "Takeover", "Snooze", "Resolve" and "Unresolve", each showing its requests and
    answers; expect "Next:" to stop after the last and the run to end.
-3. Start a run again. In the fake Mattermost server press Acknowledge as Ivan (`POST $FMM/press`): expect "A press reached
+3. Start a run again. In the fake Mattermost server press Acknowledge as Ivan (`POST $FMM/press`): expect "A press
+   reached
    Muster: @ivan, Acknowledge" within the polling interval and the private answer "This is a test message; nothing was
    changed". For a Slack Destination expect the hint that the bot cannot press its own button.
-4. Script a fault in the fake server (`/_fake/faults`) for the next request: expect the step's error and "Try again", and
+4. Script a fault in the fake server (`/_fake/faults`) for the next request: expect the step's error and "Try again",
+   and
    no "Next:" until it succeeds; press "Try again": the step is made. Press "End the test": expect the run gone and the
    Test messages still in the fake server.
 5. Start a run, advance the clock with `curl -s -X POST localhost:8082/_dev/clock -d '{"advance_seconds": 3660}'`, press
-   "Next:": expect the notice that the test ended after an hour without a step and "Start". Open the page in a second tab
+   "Next:": expect the notice that the test ended after an hour without a step and "Start". Open the page in a second
+   tab
    and run two runs at once: each shows its own steps.
-6. Make the Destination Broken (the fake server refuses), run the first step after it recovers: expect "Healthy" without a
+6. Make the Destination Broken (the fake server refuses), run the first step after it recovers: expect "Healthy"
+   without a
    reload. Sign in as a Responder: expect no "Step-by-step test".
 7. At 360 px: the steps one under the other, requests folded, no horizontal scrolling. Switch to Russian: the Russian
    texts and the step names.
@@ -123,7 +130,8 @@ None.
 
 - Suggested commit: `feat(web): add the step-by-step test of a destination with its steps and presses`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases.
-- The run lives in the database, not in the page, so closing the page leaves a run that ends an hour later (C-42 scenario
+- The run lives in the database, not in the page, so closing the page leaves a run that ends an hour later (C-42
+  scenario
   6); the page does not offer to resume it, which the capability does not ask for.
 - The design pass of the UI belongs to the later layers (journal D315); this panel uses the existing components.
 

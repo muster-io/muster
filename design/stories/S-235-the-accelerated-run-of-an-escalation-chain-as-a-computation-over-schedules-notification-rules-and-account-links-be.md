@@ -34,7 +34,7 @@ acceptance:
   - "[C-42.FR-8, C-42.AC-7] Played from a chosen Saturday 03:00 of the Team's time zone, a step limited to Working hours is shown skipped with its reason, a Schedule with a gap at that moment shows the skip of a gap, a step whose gateway or contact is gone, and one whose person became a Viewer or was disabled, each shows its reason as C-32.FR-14 words it; a step that Pages the whole Team or everyone in the chat is shown as such and names nobody (`play_test.go`, `test/e2e/destination_chain_play_test.go`)."
   - "[C-42.FR-8] Repeats are made as C-32.FR-15 makes them, up to the 4,020 steps a run makes, the passes after the first folded in the timeline as one entry with the count of passes; at the end the timeline shows the moment the Alert Group would become Unclaimed (C-32.FR-7) — after the last chain ran out and the last step's waits — or says that the chain repeats without end within the limit (`play_test.go`)."
   - "[C-42.FR-8, C-42.FR-9] The decisions of a step — whether it is skipped and why, the people it names, how repeats count and which Page importance it has — are made by the same functions the running engine calls (`internal/escalation/engine.go`), extracted so that a change of the engine changes the play, never by a copy; the engine's behaviour and its tests are unchanged (`engine_test.go`, `play_test.go`)."
-  - "[C-42.FR-10] The operation needs `destinations:test`: a Responder and a Viewer get `403`, without authentication `401`; a chain that does not exist or does not name the Route or the Team given is `422` `unknown_id`; a start in the past or the future is accepted and a start that is not a time is `400`; playing is not recorded in the Audit log (`destinations_test.go`, `test/e2e/destination_chain_play_test.go`)."
+  - "[C-42.FR-10, C-42.AC-8] The operation needs `destinations:test`: a Responder and a Viewer get `403`, without authentication `401`; a chain that does not exist or does not name the Route or the Team given is `422` `unknown_id`; a start in the past or the future is accepted and a start that is not a time is `400`; playing is not recorded in the Audit log (`destinations_test.go`, `test/e2e/destination_chain_play_test.go`)."
 verify: "make ci test-integration e2e-go"
 operator_attention: false
 issue: null
@@ -67,13 +67,15 @@ issue: null
   `plays` — a list of `{chain_id, route_id | team_id}`, the Route or the Team whose naming of the chain makes it run —
   and `start`, a date-time, default the business clock's now) → `ChainPlay`: `start`, `moments` — each `{offset_seconds,
   at, entries}` — and `unclaimed_at` (a moment, or null with `repeats_without_end` true). The schema `ChainPlayEntry`
-  has `kind` (`page`, `rule_action`, `call`, `skipped`, `not_reached`, `webhook`, `repeats`), `chain`, `step`, `importance`,
+  has `kind` (`page`, `rule_action`, `call`, `skipped`, `not_reached`, `webhook`, `repeats`), `chain`, `step`,
+  `importance`,
   `target` (the On-call of a Schedule, chosen people, a Team or everyone in the chat, by name), `destinations` (every
   Destination whose Threads the Page would be made in), `person`, `action`, `gateway`, `reason`, `count` (a folded
   repeat). Reasons are the codes C-32.FR-10, FR-11 and FR-14 name. `api/README.md` says that nothing is stored.
 - **Package `escalation`** (flat; `org_id` in every query): `play.go` has `Play(ctx, in PlayInput) (Play, error)` —
   the chain and its steps as they are, the owning Team's Working hours else the Organization's, the people and Schedules
-  as they are now —, run in a read-only transaction (`BEGIN READ ONLY`, so a write would fail the test) with the business
+  as they are now —, run in a read-only transaction (`BEGIN READ ONLY`, so a write would fail the test) with the
+  business
   clock injected; `engine.go` and `steps.go` give up their decisions (`skipReason`, the people of a step, repeat
   counting, importance) as functions of plain values that both the engine's `walk` and `Play` call.
 - **Schedules** (`internal/schedules/oncallat.go`): `OnCallAt(ctx, db, scheduleID, t)` — the On-call of a Schedule at
@@ -81,7 +83,8 @@ issue: null
 - **Notification rules** (`internal/notificationrules/rules.go`): a read-only `EffectiveAt` that returns the rule a
   person has — Organization's, `call`, `no_call`, `custom` — for an importance, with each action's availability, without
   starting a run.
-- **Destinations** (`internal/destinations/chainplay.go`): resolves the Destination, the source and the Severity level as
+- **Destinations** (`internal/destinations/chainplay.go`): resolves the Destination, the source and the Severity level
+  as
   `Test` does, checks the chains and their origins, and calls `escalation.Play`; the handler maps the timeline.
 - **Clocks**: the moments are the chosen start plus the waits, computed on the business clock's value; no timer, run or
   row exists, and neither clock moves (C-42.FR-9). The real clock is not read for them.
@@ -156,7 +159,8 @@ make lint-arch
 - The moments are on the business clock but the play never advances it: under `muster dev` the development clock moves
   the business clock only by its own endpoint, which the play does not call (C-42.FR-9).
 - A chain that Pages only through a gateway, or only in other Destinations, is not offered by S-236, but may be played
-  here when named explicitly, since the request names the chain and its origin; the Destination only chooses the source's
+  here when named explicitly, since the request names the chain and its origin; the Destination only chooses the
+  source's
   Routes and the layout of the answer.
 
 ## Coverage

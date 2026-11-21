@@ -57,7 +57,8 @@ issue: null
   `concepts/broken-destinations.md`. The pages of the messengers (`docs/messengers/mattermost.md`, `telegram.md`,
   `slack.md`, `bridge.md`) and of outgoing webhooks (`docs/outgoing-webhooks/events.md`, `templates.md`) get a link in
   their sections that describe the Test message; `docs/concepts/broken-destinations.md` links to it where it says a
-  successful test ends the Broken state; `docs/llms.txt.tmpl` names the page in the step list for verifying a Destination,
+  successful test ends the Broken state; `docs/llms.txt.tmpl` names the page in the step list for verifying a
+  Destination,
   with a `quote` of one of its sentences, which the template check verifies against the page.
 - **Documentation links** (`web/src/lib/docs-links.json`): `page.destination_test` →
   `concepts/testing-a-destination.md#step-by-step` and `field.chain_play` → `concepts/testing-a-destination.md#play`,
@@ -83,7 +84,8 @@ issue: null
 
 1. `make docs-check` passes: pages, images and their alternative text, links, anchors, the anchors of `docs-links.json`,
    and the values and quotes of `docs/llms.txt.tmpl`.
-2. `make docs-serve`, open Concepts → Testing a Destination: it reads in the order of the acceptance statements, with two
+2. `make docs-serve`, open Concepts → Testing a Destination: it reads in the order of the acceptance statements, with
+   two
    screenshots; each messenger page and the two webhook pages link to it.
 3. `make dev`, open a Destination's Test panel and press each "Learn more": the page opens at `#step-by-step` and at
    `#play`.
@@ -96,7 +98,8 @@ None.
 
 ## Notes
 
-- Suggested commit: `docs: describe testing a destination with the step-by-step test and the accelerated run of the chains`.
+- Suggested commit: `docs: describe testing a destination with the step-by-step test and the accelerated run of the
+  chains`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases.
 - The page says "Play" and calls the computation an accelerated run only as a description: it is no term of the glossary
   (C-42.FR-9) and it is never described as a run of a chain.

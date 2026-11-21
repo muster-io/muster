@@ -5,7 +5,7 @@ capability: C-41
 kind: fe
 layer: L2
 depends_on: [S-228, S-153, S-180, S-181, S-150]
-covers: [C-41.FR-3, C-41.FR-7, C-41.FR-8, C-41.FR-9, C-41.FR-10, C-41.AC-3, C-41.AC-6, C-41.AC-7, C-41.AC-10]
+covers: [C-31.FR-5, C-41.FR-3, C-41.FR-7, C-41.FR-8, C-41.FR-9, C-41.FR-10, C-41.AC-3, C-41.AC-6, C-41.AC-7, C-41.AC-10]
 files_touched:
   - api/openapi.yaml
   - web/src/components/user-notification-rules.tsx
@@ -27,7 +27,7 @@ files_touched:
   - web/e2e/audit-log.spec.ts
   - web/e2e/phone-width.spec.ts
 acceptance:
-  - "[C-41.FR-7, C-41.AC-6] An Admin edits any User's rules with the editor of S-228 on the User's page, saving through `updateUserNotificationRules` with `If-Match` and the state `custom`; a call is offered for the gateways at which that User has a confirmed contact (`listUserGatewayContacts`); the User is not notified of it, and the User's own profile shows the rules as custom; the Audit log shows `notification_rules.updated` with the diff of `normal` and `important`; a Viewer or a Responder sees the User's rules in words, with no \"Edit sequences\", and a request of theirs for another User's rules gets `403` (`user-notification-rules.test.tsx`, `notification-rules-editor.spec.ts`, `users.spec.ts`)."
+  - "[C-31.FR-5, C-41.FR-7, C-41.AC-6] An Admin edits any User's rules with the editor of S-228 on the User's page, saving through `updateUserNotificationRules` with `If-Match` and the state `custom`; a call is offered for the gateways at which that User has a confirmed contact (`listUserGatewayContacts`); the User is not notified of it, and the User's own profile shows the rules as custom; the Audit log shows `notification_rules.updated` with the diff of `normal` and `important`; a Viewer or a Responder sees the User's rules in words, with no \"Edit sequences\", and a request of theirs for another User's rules gets `403` (`user-notification-rules.test.tsx`, `notification-rules-editor.spec.ts`, `users.spec.ts`)."
   - "[C-41.FR-3, C-41.AC-3] On a User's page a gateway where the User has no confirmed contact is listed as unavailable with \"{name} has no confirmed contact for calls and SMS.\", and in the profile with \"Confirm your contact for calls and SMS below first.\"; without any gateway the call action reads \"Unavailable: a Notification gateway is needed (a bridge for calls and SMS)\" in both (`user-notification-rules.test.tsx`, `notification-rules-editor.spec.ts`)."
   - "[C-41.FR-9, C-41.AC-10] Organization → Alert handling shows the Organization's default rules in words to everyone who reads it and, to an Admin with `organization:write`, \"Edit sequences\" opening the same editor, with the checks and warnings of S-228, a call offered through any Notification gateway since the Organization has no contacts, and the note that they change for every User who follows them; \"Save\" stores them with `updateOrganization` and `If-Match`; a Responder sees them only in words (`default-notification-rules.test.tsx`, `notification-rules-editor.spec.ts`, `organization-settings.spec.ts`)."
   - "[C-41.FR-9, C-41.AC-10] Saving the Organization's important rule as a Mention, a wait of 2 minutes, a wait of 3 minutes and a Mention — after \"Two waits in a row add up\" and \"Merge the waits\" — is recorded in the Audit log as `organization.updated` with a before/after diff at `/notification_rules/important`; a User in the state \"As in the Organization\" reads the new rule at once from `getMyNotificationRules`; a stale `If-Match` after any other change of the Organization's settings shows the current rules with the edits kept, as in S-228 (`default-notification-rules.test.tsx`, `notification-rules-editor.spec.ts`, `audit-log.spec.ts`)."
@@ -91,7 +91,8 @@ issue: null
 
 ## Verification
 
-Playwright against `make dev`, in English and then Russian, as the Admin, with the User "sergey" whose gateway contact is
+Playwright against `make dev`, in English and then Russian, as the Admin, with the User "sergey" whose gateway contact
+is
 confirmed at the demo "Example Gateway" and "ivan" with none.
 
 1. Open Administration → Users → sergey. Expect the section "Notification rules" in words and "Edit sequences"; change
@@ -121,7 +122,8 @@ None.
 
 ## Notes
 
-- Suggested commit: `feat(web): add the notification rules editor to a user's page and the organization's alert handling`.
+- Suggested commit: `feat(web): add the notification rules editor to a user's page and the organization's alert
+  handling`.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. The Organization's
   `managed_by` mark comes from S-180 and S-181, which ship in 0.2.0, so the warning exists when this story merges.
 - This story edits `api/openapi.yaml` for one description, which C-41 asks it to revise (C-41 API surface); that makes
@@ -133,6 +135,7 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
+| C-31.FR-5 | partial | revised for L2: the editor on a User's page and on Alert handling; the profile is S-228, the revision marker S-230 |
 | C-41.FR-3 | partial | the User page's text and the Organization's gateways; the profile's text is S-228 |
 | C-41.FR-7 | full | |
 | C-41.FR-8 | partial | the Organization's warning and the absence of a marker on a User's rules; the profile is S-228 |

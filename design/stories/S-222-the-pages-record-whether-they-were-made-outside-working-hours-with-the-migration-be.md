@@ -93,7 +93,7 @@ FAM=127.0.0.1:19093/_fake
 curl -s -X PUT $FAM/groups/p1 -d '{"receiver":"sev","route":"{}","labels":{"alertname":"DiskFull"}}' > /dev/null
 PUTA p1 a '{"labels":{"team":"payments","severity":"warning"}}'; NOTIFY p1 '{"reason":"first notification"}'   # PUTA and NOTIFY as in S-155
 psql "$MUSTER_DB" -c "select kind, outside_working_hours from pages order by id"   # mention | t
-curl -s -X POST localhost:8082/_dev/clock -d '{"advance_seconds": 187200}'         # Monday 11:00
+curl -s -X POST localhost:8082/_dev/clock -d '{"advance_seconds": 201600}'         # 56 h after Saturday 03:00: Monday 11:00
 curl -s -X PUT $FAM/groups/p2 -d '{"receiver":"sev","route":"{}","labels":{"alertname":"NodeDown"}}' > /dev/null
 PUTA p2 a '{"labels":{"team":"payments","severity":"warning"}}'; NOTIFY p2 '{"reason":"first notification"}'          # a second Alert Group of payments
 psql "$MUSTER_DB" -c "select kind, outside_working_hours from pages order by id"   # mention | t, mention | f

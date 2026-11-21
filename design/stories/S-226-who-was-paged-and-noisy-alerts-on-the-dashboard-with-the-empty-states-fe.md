@@ -28,7 +28,7 @@ acceptance:
   - "[C-40.FR-7, C-40.AC-5] A title is a link to the Alert Group list searched by that title with the dashboard's filters, without \"Acknowledged first by\", and a time range covering the period; in a real browser the link of `KubePodCrashLooping` opens the list showing those 3 Alert Groups; the list gains no filter by exact title (`dashboard.test.ts`, `dashboard-noisy-table.test.tsx`, `home-dashboard.spec.ts`)."
   - "[C-40.FR-9, C-40.AC-7] Empty states: nobody Paged — \"Nobody was Paged in this period.\", and while no Escalation chain exists \"No Escalation chain Pages anyone yet.\" with a link to Escalation chains shown only to a User with `escalation-chains:write`; no title with more than one Alert Group — \"No alert started more than one Alert Group in this period.\"; on an empty installation every part of the dashboard shows its empty state (`dashboard-paged-table.test.tsx`, `dashboard-noisy-table.test.tsx`, `home-dashboard.spec.ts`)."
   - "[C-40.FR-8, C-40.AC-7] The two tables are parts of S-225's kind: each reads separately and shows its own error and \"Try again\" when its request answers `500`, with the other parts unchanged; both follow the period, the filters and \"Refresh\" and read again every `dashboard.refresh_interval`, and a live-update hint reads neither of them (`home-dashboard.test.tsx`, `home-dashboard.spec.ts`)."
-  - "[C-40.FR-3, C-40.AC-6] A Viewer sees both tables with every row, as everyone with `alert-groups:read` sees By people; with the Team \"payments\" chosen both count only its Alert Groups and the URL carries the filter (`home-dashboard.spec.ts`)."
+  - "[C-40.FR-1, C-40.FR-3, C-40.AC-3, C-40.AC-6] A Viewer sees both tables with every row, as everyone with `alert-groups:read` sees By people; with the Team \"payments\" chosen both count only its Alert Groups and the URL carries the filter (`home-dashboard.spec.ts`)."
   - "[C-40.FR-11, C-40.AC-8] At 360 CSS pixels wide each table scrolls inside its own region and the Home page does not scroll sideways, in English and in Russian; every new text exists in English and Russian with Russian plurals (`phone-width.spec.ts`, the missing-key check of `make ci`)."
 verify: "make ci e2e-web"
 operator_attention: false
@@ -54,7 +54,8 @@ issue: null
 ## Contracts
 
 - **API used**: `getPageStatistics` and `getAlertTitleStatistics` with the period and the filters of the section; the
-  generated client of S-223 and S-224. The links go to the Alert Group list (`/alert-groups`) with the search of the
+  generated client of S-223 and S-224; `listEscalationChains` (a limit of 1, to decide "while no Escalation chain
+  exists"). The links go to the Alert Group list (`/alert-groups`) with the search of the
   list's own parameters: `web/src/lib/alert-group-search.ts` builds the search from a title, the filters and the period
   (`from`, `to` covering it; the hint says the range is of the lifetime), adding no new filter.
 - **Components**: `dashboard-paged-table.tsx` — the table of people, sorted in its own state by every column (the
@@ -100,10 +101,12 @@ without an Account link of his; as `test/e2e/dashboard_pages_test.go` sets it up
 3. Expect "Noisy alerts": `KubePodCrashLooping` 3, 2, 2 first, then `NodeDown`, then `DiskFull`, no `CertExpiring`,
    with the Routes of each. Press `KubePodCrashLooping`: expect `/alert-groups` searched by it, the dashboard's Team and
    a time range covering the period, showing exactly 3 Alert Groups.
-4. Choose the Team "payments": both tables count only its Alert Groups and the URL carries the Team. Sign in as a Viewer:
+4. Choose the Team "payments": both tables count only its Alert Groups and the URL carries the Team. Sign in as a
+   Viewer:
    expect both tables, the same rows.
 5. On an empty database: expect "Nobody was Paged in this period.", "No Escalation chain Pages anyone yet." with the
-   link "Escalation chains" for the Admin and without it for a Viewer, and "No alert started more than one Alert Group in
+   link "Escalation chains" for the Admin and without it for a Viewer, and "No alert started more than one Alert Group
+   in
    this period.". Make `page-statistics` answer `500` (Playwright route): expect that table's error and "Try again" and
    the other parts with their numbers.
 6. Acknowledge an Alert Group through the API without pressing "Refresh": expect the counts of "Open now" to change

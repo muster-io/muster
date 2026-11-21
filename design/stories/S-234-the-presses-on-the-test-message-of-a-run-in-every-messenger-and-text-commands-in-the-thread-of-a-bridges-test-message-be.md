@@ -66,19 +66,24 @@ issue: null
 
 ## Contracts
 
-- **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md` §4.6):
+- **Schema** (a new migration, expand only; the number is assigned by the orchestrator at dispatch; `schema.md` §4.5):
   `destination_test_presses` — `id`, `org_id`, `run_id` (`destination_test_runs`, `ON DELETE CASCADE`), `step`,
   `action` (the button's action or a Text command), `person` (text: the User's login, or the messenger's name of the
-  person), `user_id` (nullable), `pressed_at` (business clock); an index on `(org_id, run_id)`. No CHECK replaces another;
+  person), `user_id` (nullable), `pressed_at` (business clock); an index on `(org_id, run_id)`. No CHECK replaces
+  another;
   down drops the table.
 - **Spec** (`api/openapi.yaml`): `DestinationTestRun.presses` (introduced empty by S-231) becomes a list of
   `DestinationTestPress` — `person`, `user` (`EntityRef` or null), `action`, `step`, `pressed_at`; no new operation.
 - **Recognising the Test message**: the buttons of a Test message already carry a signed marker that makes the press
-  answered as a test (C-16.FR-3; `internal/delivery/presses.go`); this story extends the marker with the run's
-  `message_ref` so that the press handler of each messenger (`internal/mattermost/callback.go`,
-  `internal/telegram/presses.go`, `internal/slack/{presses,callback}.go`, `internal/bridge/{presses,commands}.go`) calls
-  one function of `internal/destinations/testpresses.go` — which finds the run by `(destination, message_ref)`, writes the
-  press, and returns "This is a test message; nothing was changed" — and nothing else. A press whose run is gone is
+  answered as a test (C-16.FR-3; `internal/delivery/presses.go`); the press handler of each messenger
+  (`internal/mattermost/callback.go`, `internal/telegram/presses.go`, `internal/slack/{presses,callback}.go`,
+  `internal/bridge/{presses,commands}.go`) calls one function of `internal/destinations/testpresses.go` — which finds
+  the run by `(destination, message_ref)`, writes the press, and returns "This is a test message; nothing was changed"
+  — and nothing else. Telegram's `callback_data` takes 64 bytes (`buttons.MaxLen`) and already holds the action id,
+  the key id and the signature, so for Telegram the marker is not extended: the handler finds the run by the chat and
+  the message id of the callback's message, which `message_ref` holds for a Telegram run as `{chat_id}:{message_id}`.
+  For the other messengers `message_ref` is the Root message's own identifier, which every press names (a Mattermost
+  post id, a Slack message timestamp, a bridge's message id). A press whose run is gone is
   answered the same and recorded nowhere.
 - **Bot press** (`internal/mattermost/teststeps.go`): after the first step the stepper presses the first button of the
   Root message through `POST /api/v4/posts/{post_id}/actions/{action_id}` as a second interactive request, as
@@ -92,7 +97,8 @@ issue: null
 
 1. Write the migration, `schema.md` and the spec part. Check: `make test-integration` runs up, down and up;
    `make generate-check`.
-2. Write `testpresses.go` and the marker's extension. Check: `testpresses_test.go` (the run found, a gone run, the
+2. Write `testpresses.go` and the lookup of a run by its message (Telegram by chat and message id).
+   Check: `testpresses_test.go` (the run found, a gone run, the
    answer, no Command).
 3. Wire the four messengers' handlers and the Bridge's Text commands. Check: `presses_test.go` of each,
    `callback_test.go`.
@@ -130,7 +136,8 @@ curl -s -X POST $FMM/press -d "{\"post_id\":\"$POST\",\"user\":\"ivan\",\"action
 make lint-arch
 ```
 
-`test/e2e/destination_test_presses_test.go` repeats these for all four messengers with the exact bodies of each fake, and
+`test/e2e/destination_test_presses_test.go` repeats these for all four messengers with the exact bodies of each fake,
+and
 for the Mattermost fake's "Action integration error" fault.
 
 ## Open questions

@@ -27,7 +27,7 @@ files_touched:
 acceptance:
   - "[C-38.FR-2, C-38.AC-10] Route → \"Message\" has \"Message layout\", which opens a page of its own, \"Message layout · Route {name}\", with the hint \"Applies to every Destination of the Route\"; on its left \"Blocks from top to bottom\" lists the fixed title \"#N title and the status as a word\", the four movable blocks — Fields, Text, Key labels, Alert list — each with a switch and a handle, and the fixed blocks \"Notices\", \"Assignees / Acknowledged by\", \"Buttons — the set of each Destination\" and \"Links\" with \"Open in Muster\" always on and the switch \"Other links\" (`message-layout-blocks.test.tsx`, `route-message-layout.spec.ts`)."
   - "[C-38.FR-2, C-38.AC-10] In a real browser the Admin adds the field \"Firing / total\" and the label `cluster` from \"+ field\", which offers the catalogue and the labels of recent Alert Groups of the Route with an example value; removes a chip; moves the Alert list up with \"Move up\" by keyboard and by the drag handle; hides the description; turns \"Other links\" off; each field appears once and at most 10 are accepted, the 11th \"+ field\" being unavailable with the limit named; and \"Apply to the Route\" saves it, the Route's ETag in `If-Match` (`message-layout-fields.test.tsx`, `message-layout-blocks.test.tsx`, `route-message-layout.spec.ts`)."
-  - "[C-38.FR-2] Under Fields the hint \"In Mattermost the fields always show under the text\" is shown; under Key labels \"Labels in the message\" are the editor of S-129 in place, saving through `own_message_labels` and not duplicated; under Alert list \"Up to {N} values\" accepts 1 to 20 and shows the server's `out_of_range` at the field when it refuses (`message-layout-editor.test.tsx`, `route-message-layout.spec.ts`)."
+  - "[C-38.FR-2] Under Fields the hint \"In Mattermost the fields always show under the text\" is shown; under Key labels \"Labels in the message\" are the editor of S-129 in place, saving through `own_message_labels` and not duplicated; under Alert list \"Up to {N} values\" accepts 1 to 20 and refuses 0 and 21 at the field before a save, showing the server's `out_of_range` or `too_long` there if it refuses anyway (`message-layout-editor.test.tsx`, `route-message-layout.spec.ts`)."
   - "[C-38.FR-5, C-38.AC-10] \"Reset to default\" sends `own_message_layout` false and the page shows Muster's default read back, the layout of C-29; \"Labels in the message\" keep their own reset; leaving with unsaved changes asks for confirmation; a refused save (`412`) shows \"Reload the Route\", which drops the unsaved layout (`message-layout-editor.test.tsx`, `route-message-layout.spec.ts`)."
   - "[C-38.FR-9] On a Route with a Root message template the blocks it renders — Text, Key labels, Alert list — show \"Rendered by the Route's template\" with a link to the template's editor, the fields, their order and \"Other links\" still apply, and \"Remove the template\" saves the layout and the removal of the template in one `updateRoute` (`message-layout-editor.test.tsx`, `route-message-layout.spec.ts`)."
   - "[C-38.FR-15] A User with `routes:read` and not `routes:write` sees the layout read-only with the same blocks and no switch, handle, \"Apply to the Route\" or \"Reset to default\"; a route whose own layout was saved reads `own_message_layout` true, and one that follows Muster's default shows \"Muster's default\" (`message-layout-editor.test.tsx`, `route-message-layout.spec.ts`)."
@@ -58,7 +58,7 @@ issue: null
 ## Contracts
 
 - **API used**: `getRoute`, `updateRoute` (`If-Match`; `own_message_layout`, `message_layout`, `own_message_labels`,
-  `template_root_message`), `listRouteLabelSuggestions` (the labels with an example value), `listAuditLog`. The
+  `policy.templates.root_message`), `listRouteLabelSuggestions` (the labels with an example value), `listAuditLog`. The
   generated client carries `RouteMessageLayout` (S-210); `message_layout` is read as the effective layout and written
   only with `own_message_layout` true.
 - **Route and page**: `web/src/routes/routes.$routeId_.message-layout.tsx` is the page at `/routes/{id}/message-layout`;
@@ -71,7 +71,10 @@ issue: null
   "Move up" and "Move down" buttons, with the order announced to assistive technology; dragging uses the
   browser's drag events, with no new dependency (see Notes); `message-layout-fields.tsx` — the chips in their order,
   "+ field" as a disclosure panel offering the catalogue and the suggested labels, the limit
-  `message.layout_fields` read from the error of the server and shown from the count; `web/src/lib/message-layout.ts` —
+  `message.layout_fields` shown from the count; `web/src/lib/message-layout.ts` — the built-in constants of
+  `message.layout_fields` (10) and of `route.message_layout_alerts_listed` (1 to 20), the rows of `defaults.md` that
+  S-210 takes as built-in values too, so that "+ field" is unavailable at the eleventh and "Up to {N}" is checked
+  before the save, the server's `too_long` and `out_of_range` still shown at the field when a stale build disagrees;
   the draft, conversions to and from `RouteMessageLayout`, the catalogue, the move and toggle operations, shared by
   S-218; `audit-diff.tsx` — the label of `/message_layout`.
 - **Texts** (EN / RU; `en.json` and `ru.json` are the real files; a missing key fails CI): "Message layout" / «Макет
@@ -81,7 +84,8 @@ issue: null
   «Текст»; "Key labels" / «Ключевые метки»; "Alert list" / «Список алертов»; "Move up" / «Выше»; "Move down" / «Ниже»;
   "+ field" / «+ поле»; "In Mattermost the fields always show under the text" / «В Mattermost поля всегда показываются
   под текстом»; "Up to {N} values" / «До {N} значений»; "Other links" / «Прочие ссылки»; "Rendered by the Route's
-  template" / «Рендерится шаблоном маршрута»; "Remove the template" / «Убрать шаблон»; "Reload the Route" / «Перезагрузить
+  template" / «Рендерится шаблоном маршрута»; "Remove the template" / «Убрать шаблон»;
+  "Reload the Route" / «Перезагрузить
   маршрут»; the field names of the catalogue, whose names in messages are built-in texts in the Route's language
   (C-12.FR-3). Russian plurals are written for "{N} values".
 - **Permissions**: `routes:write` edits, `routes:read` reads; the fixed blocks are static text with no switch.
@@ -90,7 +94,8 @@ issue: null
 
 ## Steps
 
-1. Write `web/src/lib/message-layout.ts` with the draft and its operations. Check: `message-layout.test.ts` (move, toggle,
+1. Write `web/src/lib/message-layout.ts` with the draft and its operations. Check:
+   `message-layout.test.ts` (move, toggle,
    add a field twice, the limit).
 2. Write the blocks and the fields components. Check: `message-layout-blocks.test.tsx` (keyboard move, drag, switches),
    `message-layout-fields.test.tsx`.
@@ -104,7 +109,8 @@ issue: null
 Playwright against `make dev` (as `web/e2e/support.ts` sets it up), in English and then Russian, with the Route
 "Infrastructure" and its Alert Group #… `KubernetesContainerOOMKilled` of S-125's setup.
 
-1. Sign in as the Admin, open Routes → Infrastructure → "Message" → "Message layout". Expect the header "Message layout ·
+1. Sign in as the Admin, open Routes → Infrastructure → "Message" → "Message layout". Expect the header
+   "Message layout ·
    Route Infrastructure", the hint "Applies to every Destination of the Route", the blocks Fields (Severity, Route,
    Teams, Started as chips), Text, Key labels, Alert list in this order, and the fixed ones.
 2. "+ field" → "Firing / total", then "+ field" → the label `cluster` (offered with "e.g. prod"). Expect two more chips.
@@ -115,14 +121,16 @@ Playwright against `make dev` (as `web/e2e/support.ts` sets it up), in English a
    `{"o":true,"order":["fields","alerts","text","labels"],"d":false}`, and the open Root message in the fake Mattermost
    server shows the new fields within a few seconds (S-211).
 4. Add 7 more fields: expect "+ field" unavailable at 10 with the limit named. Set "Up to {N} values" to 21: expect the
-   server's refusal at the field after "Apply to the Route"; set 3: expect three values and "…and 9 more" for twelve Alerts.
-5. Save the Route in another tab, then "Apply to the Route" here: expect `412` as "Reload the Route"; press it, expect the
+   refusal at the field before any save ("Apply to the Route" unavailable); set 3: expect three values and
+   "…and 9 more" for twelve Alerts.
+5. Save the Route in another tab, then "Apply to the Route" here: expect `412` as "Reload the Route"; press it,
+   expect the
    draft dropped and the other tab's layout shown. Edit and navigate away: expect the confirmation.
 6. "Reset to default": expect "Muster's default" with the four fields of C-29 and `own_message_layout` false in the API;
    "Labels in the message" unchanged.
 7. On a Route with a Root message template: expect "Rendered by the Route's template" on Text, Key labels and Alert list
    with a link to the template editor, and "Remove the template"; press it, then "Apply to the Route": one Audit log row
-   `route.updated` naming `/message_layout` and `/template_root_message`.
+   `route.updated` naming `/message_layout` and `/policy/templates/root_message`.
 8. Sign in as a Viewer: expect the same blocks read-only, no handles or buttons. At 360 px: no horizontal scrolling, the
    blocks full width. Switch to Russian: the Russian texts, and the Audit log row "Макет сообщения".
 

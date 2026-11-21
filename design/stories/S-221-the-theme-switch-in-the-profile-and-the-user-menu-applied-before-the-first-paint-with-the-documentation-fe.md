@@ -113,7 +113,8 @@ in English and then Russian.
 2. Open the Alert Group list, then reload with `/assets/*.js` delayed: expect the document dark — its computed
    `color-scheme` `dark` and a dark background — before the bundle runs. `curl -s localhost:8080/ | sha256sum` is the
    same with and without the session cookie.
-3. In the user menu choose "Light": expect the page light at once; choose "Dark" again. In another tab, change the name in
+3. In the user menu choose "Light": expect the page light at once; choose "Dark" again. In another tab, change the
+   name in
    the profile; choose a theme in the menu of the first tab: expect the new name unchanged afterwards.
 4. Open the Alert Group page, the Route page and the statistics page at 1280 px and 360 px: expect both themes without
    horizontal scrolling, the status colours legible and the dialogs, menus and charts in the theme.
@@ -132,7 +133,8 @@ None.
 - Implementation starts after the tag of 0.2.0: these capabilities ship in 0.2.x patch releases. No migration.
 - The copy is a convenience, not state (the rule for `localStorage`): a browser that blocks it follows the system until
   the profile is read, and a profile read always wins.
-- The key of the copy, `muster-theme`, is shared by the script and `theme.ts`; the test that reads both keeps them equal.
+- The key of the copy, `muster-theme`, is shared by the script and `theme.ts`; the test that reads both keeps them
+  equal.
 - A contrast check, such as axe-core (MPL-2.0, a test dependency with its licence statement), comes with the design
   pass of the later layers and its NFR row, as C-39.FR-4 says; this story adds none.
 
