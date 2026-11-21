@@ -34,7 +34,7 @@ acceptance:
   - "[C-33.FR-12, C-33.AC-4] With marks on an Integration, a Team, a Schedule, an Escalation chain, a Connection, a Destination, a Lookup table and a Link rule, each page shows the mark next to its title and the warning in its form; with the Organization marked, every page under Organization shows the Organization's mark, and the Outbound address policy page and the OIDC settings page show their own marks only when those objects carry them (`managed-by.spec.ts`)."
 verify: "make ci && make e2e-web"
 operator_attention: false
-issue: null
+issue: 699
 ---
 
 # S-181. The "Managed by" mark and the warnings before a change on every configuration page (FE)

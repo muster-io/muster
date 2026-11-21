@@ -45,7 +45,7 @@ acceptance:
   - "[C-33.FR-9, C-33.AC-7] Each resource of this story imports — by `public_id`, the Team's for `muster_team_escalation_chains`, any id for the Default route and the Route order — and plans without changes (`TestAcc*_import`)."
 verify: "make ci testacc"
 operator_attention: false
-issue: null
+issue: 705
 ---
 
 # S-187. The Terraform resources of Escalation chains, a Team's chains, Routes, the Default route and the Route order, with a complete example (BE)
