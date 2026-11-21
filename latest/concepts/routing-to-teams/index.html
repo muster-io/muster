@@ -17,7 +17,7 @@
         <link rel="prev" href="../teams/">
       
       
-        <link rel="next" href="../what-critical-changes/">
+        <link rel="next" href="../how-an-alert-reaches-people/">
       
       
         
@@ -1423,6 +1423,8 @@
       
         
       
+        
+      
     
     
     
@@ -1825,6 +1827,33 @@
   
 </nav>
       
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-an-alert-reaches-people/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  How an alert reaches people
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -3306,7 +3335,11 @@ Destinations of each of its Teams — the Teams its Alerts belong to by the Team
 Group goes only to the Route's own Destinations. The owning Team of a Route adds nothing: it only organizes and
 filters.</p>
 <p><img alt="The option Also to the Teams from the label on the Route form, switched on, with its hint" class="screenshot" src="../../assets/screenshots/concepts/teams/06-route-teams-option.png" /></p>
-<p>"Run the Teams' Escalation chains" (<code>run_team_chains</code>) is stored with the option; it acts once Escalation chains run.</p>
+<p>"Run the Teams' Escalation chains" (<code>run_team_chains</code>) decides whether the Escalation chains that each Team names start
+on the Alert Group. With it on, they do, each Paging in the Threads of its own Team's Destinations; with it off, the
+Teams' Destinations still receive the Alert Group, but no chain of a Team starts, and only the chains the Route names
+run (<a href="../escalation-chains/#when-chains-run">When chains run</a>). <a href="../how-an-alert-reaches-people/">How an alert reaches people</a>
+follows an Alert of <code>team="payments"</code> through the Route, the Teams' Destinations and both kinds of chain.</p>
 <h3 id="operations-and-team-destinations-by-severity">Operations and team Destinations by Severity<a class="headerlink" href="#operations-and-team-destinations-by-severity" title="Permanent link">&para;</a></h3>
 <p>Operations has <code>infra-critical</code> and <code>infra-notice</code>, and the Team <code>payments</code> has <code>payments-critical</code> and
 <code>payments-notice</code>. The Route "Infrastructure" takes <code>category="infra"</code>, names <code>infra-critical</code> for <code>critical</code> and

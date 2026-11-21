@@ -44,7 +44,13 @@ Open in Muster · Runbook · Source
    otherwise the first label, by name, whose values differ — with up to five values (`message.compact_alerts_listed`),
    firing Alerts first and resolved ones struck through, then "…and K more".
 6. **The notices** that apply, such as "Nobody has taken this" or the Reopen count.
-7. **The footer**: who acknowledged, snoozed or resolved the Alert Group, or why Muster resolved it.
+7. **The footer**: while the Alert Group is firing and [Escalation chains](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#assignees)
+   have Paged people, its Assignees, each with the Team of their chain — "Assignees: @ivan (devops), @petr (payments)",
+   as Mentions where their account is linked in the Destination's Identity space and by name otherwise; after an
+   acknowledgement, who acknowledged it, the Owner, named without a Team and followed by "· Escalation chains stopped"
+   when the acknowledgement stopped running chains — "Acknowledged by @ivan · Escalation chains stopped"; otherwise
+   who snoozed or resolved the Alert Group, or why Muster resolved it. An edit that shows the Assignees notifies nobody;
+   a new message that carries them may.
 8. **The buttons** of the Destination's set.
 9. **The links**: "Open in Muster" first, then the runbook, the source and the links of Link rules.
 

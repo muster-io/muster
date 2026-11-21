@@ -1423,6 +1423,8 @@
       
         
       
+        
+      
     
     
     
@@ -1671,6 +1673,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-an-alert-reaches-people/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  How an alert reaches people
 
     
   </span>
@@ -3271,7 +3300,9 @@
 <h1 id="schedules">Schedules<a class="headerlink" href="#schedules" title="Permanent link">&para;</a></h1>
 <p>A <strong>Schedule</strong> says who in a Team is On-call and when. It is made of Rotation layers, in which people take Shifts in
 turn, with Overrides on top. Schedules are managed through the API under <code>/api/v1/schedules</code>; nothing about a Schedule
-sends a message.</p>
+sends a message. The On-call of a Schedule is whom a Mention of the Team's On-call names and whom a step of an
+<a href="../escalation-chains/">Escalation chain</a> Pages; <a href="../how-an-alert-reaches-people/">How an alert reaches people</a> shows
+where that happens on the way of an Alert.</p>
 <h2 id="what-a-schedule-is">What a Schedule is<a class="headerlink" href="#what-a-schedule-is" title="Permanent link">&para;</a></h2>
 <p>A Schedule belongs to one Team and has:</p>
 <ul>

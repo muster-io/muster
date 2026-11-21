@@ -1423,6 +1423,8 @@
       
         
       
+        
+      
     
     
     
@@ -1690,6 +1692,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../how-an-alert-reaches-people/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  How an alert reaches people
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../what-critical-changes/" class="md-nav__link">
         
   
@@ -1829,6 +1858,39 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Custom rules
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#with-the-steps-of-a-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        With the steps of a chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mentions-and-account-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Mentions and Account links
       </span>
     </span>
   </a>
@@ -3128,6 +3190,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#with-the-steps-of-a-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        With the steps of a chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mentions-and-account-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Mentions and Account links
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#calls-in-rules" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3167,9 +3262,11 @@
   contact there;</li>
 <li><strong>Wait</strong>: a pause of whole minutes before the next action.</li>
 </ul>
-<p>Actions without a wait between them happen at the same moment. Muster sends no direct messages to Page anyone. The
-rules are read and changed through the API under <code>/api/v1/me/notification-rules</code> and
-<code>/api/v1/users/{user_id}/notification-rules</code>, listed in the <a href="../../reference/api/">API reference</a>.</p>
+<p>Actions without a wait between them happen at the same moment. Muster sends no direct messages to Page anyone. An
+<a href="../escalation-chains/">Escalation step</a> decides whom to Page and when; the rule decides how, and
+<a href="../how-an-alert-reaches-people/">How an alert reaches people</a> shows the two working together. The rules are read and
+changed through the API under <code>/api/v1/me/notification-rules</code> and <code>/api/v1/users/{user_id}/notification-rules</code>, listed
+in the <a href="../../reference/api/">API reference</a>.</p>
 <h2 id="normal-and-important">Normal and important<a class="headerlink" href="#normal-and-important" title="Permanent link">&para;</a></h2>
 <p>The Organization sets the default rules, the field <code>notification_rules</code> of the Organization
 (<code>organization.notification_rules</code>):</p>
@@ -3229,8 +3326,44 @@ one gets <code>412</code>.</p>
 <p>A call in a person's custom rules needs their confirmed contact at its gateway (<code>contact_required</code> at the action), and
 a call while no gateway exists is <code>gateway_required</code> at the action. Custom rules stay as they are when the
 Organization's rules change. "Reset to the Organization's rules" brings back "As in the Organization".</p>
-<p>Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described with the
-Escalation chains.</p>
+<p>Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described below.</p>
+<h2 id="in-the-web-ui">In the web UI<a class="headerlink" href="#in-the-web-ui" title="Permanent link">&para;</a></h2>
+<p>In <strong>Profile</strong>, the section <strong>Personal notification rules</strong> shows "Normal" and "Important" each in words, as the
+person's own sequence — "a Mention in the Thread of the Root message" for the normal rule with the default rules — with
+the switch "Also call through the Notification gateway":
+"As in the Organization", "Call" and "Don't call", the contact a call goes to ("to +10000000001") and, with several
+gateways, "Call through" to choose one. Without a confirmed contact the section says "Confirm your contact for calls
+and SMS below first.", and without a gateway "Unavailable: a Notification gateway is needed (a bridge for calls and
+SMS)". Custom rules show as "These rules are custom: they were set through the API or by an Admin." and <strong>Reset to the
+Organization's rules</strong> brings back the default. An Admin sees and changes the rules of any User on the User's page.
+<strong>Linked accounts</strong>, the first section of the Profile, says what a Mention needs: "A Page is a Mention in the Thread; it
+reaches only a linked account."</p>
+<h2 id="with-the-steps-of-a-chain">With the steps of a chain<a class="headerlink" href="#with-the-steps-of-a-chain" title="Permanent link">&para;</a></h2>
+<p>An <a href="../escalation-chains/#steps">Escalation step</a> that Pages people — "Page the On-call of a Schedule", "Page people" —
+Pages each person by their own rule, the one named by the step's importance: <code>normal</code> or <code>important</code>. The step
+decides whom and when; the person's rule decides how and how often. A step "Page the whole Team" Pages nobody by a
+rule: it writes the Team mention, or the word for everyone in the chat, once. A step "Call through a Notification
+gateway" calls the persons it names through its gateway, whatever their rules say.</p>
+<p>The rule belongs to the Page that started it, and stops with it. It stops when the Alert Group is acknowledged,
+snoozed or resolved, and when its chain starts over; a Mention or a call that comes due after that is not made. A chain
+that has only run out does not stop its rules: the later Mention of an important Page still comes due. The rule is read
+when the Page starts, so a change of a person's rules reaches their next Page and not the one that runs. The same person
+Paged by two steps, or by two chains, has two runs of their rule, each of its own.</p>
+<p>A person who has to be reached by a call at night puts a call in the rule their Pages run — in the state "Call", the
+important rule. A chain then needs no call step for them: a step that Pages them importantly rings their phone.</p>
+<h2 id="mentions-and-account-links">Mentions and Account links<a class="headerlink" href="#mentions-and-account-links" title="Permanent link">&para;</a></h2>
+<p>A Mention of a rule is a Thread reply that names the person as their messenger understands it, and Muster can name
+them only through an <a href="../../messengers/account-links/">Account link</a> in the Identity space of the Connection of the
+Destination in whose Thread the reply is written. A person with no Account link there is named in a line "Page not
+delivered: @petr has no linked Mattermost account" instead, which mentions nobody, and their rule's Mentions of that
+Destination do not make them an Assignee. Their calls are not affected: a call needs a confirmed contact at a gateway,
+not an Account link.</p>
+<p>An Identity space is all of Telegram, one Mattermost Connection, one Slack Connection or one Bridge. A person with
+Account links in several of them is Mentioned in each Destination whose Connection lies in one of their spaces, and a
+person linked in one Mattermost Connection is not Mentioned in the Destinations of another. Even where they are
+Mentioned, a Mention is a message in a chat: whether it also pushes a notification to the phone depends on the
+messenger, its app, the phone's settings and the push mode, so at night only a call through a Notification gateway is
+reliable (<a href="../../messengers/notification-gateways/#at-night">At night</a>).</p>
 <h2 id="calls-in-rules">Calls in rules<a class="headerlink" href="#calls-in-rules" title="Permanent link">&para;</a></h2>
 <p>When an <a href="../escalation-chains/">Escalation step</a> Pages a person normally or importantly, their rule of that name runs:
 its Mentions are Thread replies in the chain's Threads, and each call action is a call through its gateway to their

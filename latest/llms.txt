@@ -71,6 +71,7 @@
 - [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md): A Destination is **Broken** when Muster has decided that it cannot deliver there until something…
 - [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md): A **Team** says who owns what: Routes and Destinations may name the Team that owns them, so that…
 - [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md): One Route can serve many teams.
+- [How an alert reaches people](https://muster-io.github.io/muster/latest/concepts/how-an-alert-reaches-people.md): This page follows one Alert from the moment Alertmanager sends it to the moment a person…
 - [What critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md): An Alert Group whose Severity level is **critical** is **Urgent**.
 - [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md): A **Schedule** says who in a Team is On-call and when.
 - [Notification rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md): A **Notification rule** says how a Page reaches a person.
@@ -124,13 +125,13 @@
 
 The full text, one file per section of the document map; [`llms-full.txt`](https://muster-io.github.io/muster/latest/llms-full.txt) lists them.
 
-- [Home, Quick start, First alert in a messenger](https://muster-io.github.io/muster/latest/llms-full-home.txt): 3 pages, about 7314 tokens.
+- [Home, Quick start, First alert in a messenger](https://muster-io.github.io/muster/latest/llms-full-home.txt): 3 pages, about 7417 tokens.
 - [Install](https://muster-io.github.io/muster/latest/llms-full-install.txt): 3 pages, about 25610 tokens.
-- [Configure](https://muster-io.github.io/muster/latest/llms-full-configure.txt): 3 pages, about 12695 tokens.
+- [Configure](https://muster-io.github.io/muster/latest/llms-full-configure.txt): 3 pages, about 12868 tokens.
 - [Integrations](https://muster-io.github.io/muster/latest/llms-full-integrations.txt): 3 pages, about 11363 tokens.
-- [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, about 68070 tokens.
+- [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, about 68350 tokens.
 - [Outgoing webhooks](https://muster-io.github.io/muster/latest/llms-full-outgoing-webhooks.txt): 3 pages, about 13844 tokens.
 - [Sign-in](https://muster-io.github.io/muster/latest/llms-full-sign-in.txt): 5 pages, about 11234 tokens.
-- [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 13 pages, about 57728 tokens.
+- [Concepts](https://muster-io.github.io/muster/latest/llms-full-concepts.txt): 14 pages, about 63611 tokens.
 - [Operations](https://muster-io.github.io/muster/latest/llms-full-operations.txt): 26 pages, about 31715 tokens.
 - [Reference](https://muster-io.github.io/muster/latest/llms-full-reference.txt): 8 pages, about 32883 tokens.

@@ -1586,6 +1586,8 @@
       
         
       
+        
+      
     
     
     
@@ -1834,6 +1836,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-an-alert-reaches-people/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  How an alert reaches people
 
     
   </span>
@@ -3338,7 +3367,13 @@ Open in Muster · Runbook · Source
    otherwise the first label, by name, whose values differ — with up to five values (<code>message.compact_alerts_listed</code>),
    firing Alerts first and resolved ones struck through, then "…and K more".</li>
 <li><strong>The notices</strong> that apply, such as "Nobody has taken this" or the Reopen count.</li>
-<li><strong>The footer</strong>: who acknowledged, snoozed or resolved the Alert Group, or why Muster resolved it.</li>
+<li><strong>The footer</strong>: while the Alert Group is firing and <a href="../../concepts/escalation-chains/#assignees">Escalation chains</a>
+   have Paged people, its Assignees, each with the Team of their chain — "Assignees: @ivan (devops), @petr (payments)",
+   as Mentions where their account is linked in the Destination's Identity space and by name otherwise; after an
+   acknowledgement, who acknowledged it, the Owner, named without a Team and followed by "· Escalation chains stopped"
+   when the acknowledgement stopped running chains — "Acknowledged by @ivan · Escalation chains stopped"; otherwise
+   who snoozed or resolved the Alert Group, or why Muster resolved it. An edit that shows the Assignees notifies nobody;
+   a new message that carries them may.</li>
 <li><strong>The buttons</strong> of the Destination's set.</li>
 <li><strong>The links</strong>: "Open in Muster" first, then the runbook, the source and the links of Link rules.</li>
 </ol>

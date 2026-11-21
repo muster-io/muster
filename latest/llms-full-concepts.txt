@@ -1829,6 +1829,12 @@ Mentions of the Team's On-call use, and a Team that has Schedules cannot be dele
 and shows who is On-call now. See [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md): Rotation layers, several Schedules, Overrides, gaps and the
 iCal feed.
 
+A Team may also name [Escalation chains](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#naming-chains-on-routes-and-teams), which Page its people
+and its On-call while an Alert Group of the Team stays firing, in the Threads of the Team's own Destinations that have
+the Root message and, where none has, of the Route. The
+Team page lists them under "Escalation chain of the Team". [How an alert reaches people](https://muster-io.github.io/muster/latest/concepts/how-an-alert-reaches-people.md)
+follows one Alert of a Team from its Route to the people its chains Page.
+
 ## Membership from the identity provider
 
 A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through
@@ -2002,7 +2008,11 @@ filters.
 
 ![The option Also to the Teams from the label on the Route form, switched on, with its hint](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/06-route-teams-option.png){ .screenshot }
 
-"Run the Teams' Escalation chains" (`run_team_chains`) is stored with the option; it acts once Escalation chains run.
+"Run the Teams' Escalation chains" (`run_team_chains`) decides whether the Escalation chains that each Team names start
+on the Alert Group. With it on, they do, each Paging in the Threads of its own Team's Destinations; with it off, the
+Teams' Destinations still receive the Alert Group, but no chain of a Team starts, and only the chains the Route names
+run ([When chains run](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#when-chains-run)). [How an alert reaches people](https://muster-io.github.io/muster/latest/concepts/how-an-alert-reaches-people.md)
+follows an Alert of `team="payments"` through the Route, the Teams' Destinations and both kinds of chain.
 
 ### Operations and team Destinations by Severity
 
@@ -2118,6 +2128,174 @@ workloads ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#w
 A Minimum severity on the Route would make every test alert critical, and so [Urgent](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md); leave it
 at none.
 
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/how-an-alert-reaches-people.md -->
+# How an alert reaches people
+
+This page follows one Alert from the moment Alertmanager sends it to the moment a person acknowledges it. Along the way
+it names every step that decides who is told, where and when: the [Route](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) and the Alert
+Group, the [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md) of the Alert, the Destinations, the [Escalation chains](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md), and the
+[Notification rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md) of the people they Page. Each step has a page of its own; this one shows
+how they fit together.
+
+## The example
+
+The installation has two Teams and two people:
+
+- The Team `devops` has `ivan`, whose Schedule "Main" puts him On-call. He has linked his Mattermost account
+  ([Account links](https://muster-io.github.io/muster/latest/messengers/account-links.md)).
+- The Team `payments` has `petr`, who is On-call in its Schedule "Main". The Team also has a Schedule "Second line".
+  Petr has not linked a Mattermost account yet.
+- The Route "Infrastructure" takes the Alerts with `category="infra"`. It has two Destinations, `infra-critical` for
+  critical Alert Groups and `infra-notice` for the rest, and names the Escalation chain `devops`. "Also to the Teams
+  from the label" and "Run the Teams' Escalation chains" are on.
+- The Team `payments` has two Destinations, `payments-critical` and `payments-notice`, by the same Severity conditions,
+  and names the Escalation chain `payments`.
+
+The chain `devops`, owned by the Team `devops`, has three steps: Page the On-call of "Main" normally, wait 10 minutes,
+Page the On-call importantly. The chain `payments`, owned by the Team `payments`, has seven:
+
+1. Page the On-call of "Main" normally.
+2. Wait 10 minutes.
+3. Only for critical: Page the On-call of "Main" importantly.
+4. Wait 15 minutes.
+5. Only for critical: Page the On-call of "Second line" importantly.
+6. In the Working hours of `payments` only: Page the whole Team.
+7. Repeat from step 3, up to 2 times.
+
+Everyone has the default [Notification rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md): a normal Page is a Mention, an important Page is a
+Mention, a wait of 5 minutes and a second Mention.
+
+At 03:12 a warning `KubernetesContainerOOMKilled` of `team="payments"` arrives.
+
+## The path of the Alert
+
+```mermaid
+flowchart TD
+  am["Alertmanager"] -- "Snapshot" --> integration["Integration"]
+  integration --> route["Route Infrastructure<br/>category=infra"]
+  route --> group["Alert Group<br/>one status, one number"]
+  group -- "team label: payments" --> team["Team payments"]
+  route -- "warning" --> infra["Destination infra-notice"]
+  team -- "warning" --> pay["Destination payments-notice"]
+  route -. "names" .-> devops["chain devops"]
+  team -. "names" .-> payments["chain payments"]
+  devops -- "Pages in the Thread of" --> infra
+  payments -- "Pages in the Thread of" --> pay
+  infra -. "Mention, only with an Account link" .-> ivan["ivan"]
+  pay -. "Mention, only with an Account link" .-> petr["petr"]
+  devops -. "call, by the rules of the person" .-> gw["Notification gateway"]
+  payments -. "call, by the rules of the person" .-> gw
+  gw -. "calls the confirmed contact" .-> ivan
+  gw -. "calls the confirmed contact" .-> petr
+```
+
+The diagram reads from the top. Solid arrows are what always happens for this Alert; dotted arrows are what happens
+only where the configuration asks for it, such as a call through a Notification gateway.
+
+1. **Integration.** Alertmanager sends its Snapshot to the Integration, which stores the Alerts
+   ([Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md)).
+2. **Route and Alert Group.** The first Route whose Matchers pick the Alert takes it, here "Infrastructure", and the
+   Alert joins the Alert Group of its Group key, or starts one ([Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md)). The
+   Alert Group has one status, whatever number of Destinations show it.
+3. **Teams.** The value of the Team label, `payments`, names the Team `payments`, so the Alert Group has that Team
+   ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team)).
+4. **Destinations.** The Route's own Destinations and, with "Also to the Teams from the label" on, those of each Team
+   are reached when their Severity condition is met by the Alert Group's Severity level
+   ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md)). The warning reaches `infra-notice` and `payments-notice`; a critical Alert
+   Group reaches `infra-critical` and `payments-critical` instead. Muster publishes the Root message of the Alert Group
+   in each, so each Destination has a Thread for it.
+5. **Escalation chains.** The chains that run are those the Route names, `devops`, and those the Teams name, `payments`,
+   because "Run the Teams' Escalation chains" is on. Both start when the Alert Group is first published
+   ([When chains run](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#when-chains-run)). The Team `devops` is not a Team of this Alert, but its
+   chain runs all the same: the Route names it.
+6. **Where each chain Pages.** A chain Pages only in the Threads of its own Destinations: `devops` in the Thread in
+   `infra-notice`, `payments` in the Thread in `payments-notice`
+   ([Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page)). So a step that Pages everyone in a chat never rings
+   another team's chat.
+7. **Pages.** A step Pages a person by one of their two Notification rules: normal or important. A Mention of the rule
+   is a reply in the Thread, and it rings the person only where they have an Account link in the Identity space of that
+   Destination's Connection. A call of the rule goes through a Notification gateway to the person's confirmed contact,
+   and needs no Root message and no messenger ([How a Page reaches a person](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#how-a-page-reaches-a-person)).
+8. **Assignees.** A person whom a Page reached becomes an Assignee, and the Root messages and the Alert Group page name
+   the Assignees until somebody acknowledges.
+9. **Acknowledge.** An acknowledgement from any Destination, from the web UI or from a call stops every chain and makes
+   the person the Owner.
+
+## The timeline of the chains
+
+```mermaid
+sequenceDiagram
+  participant D as "chain devops"
+  participant P as "chain payments"
+  participant I as "Thread in infra-notice"
+  participant N as "Thread in payments-notice"
+  Note over D,N: "03:12 the Alert Group is published"
+  D->>I: "Step 1: Mention @ivan"
+  P->>N: "Page not delivered: @petr has no linked Mattermost account"
+  Note over D,N: "03:22 ten minutes later"
+  D->>I: "Step 3: Mention @ivan, important"
+  Note over P: "Step 3 skipped: only for critical"
+  Note over D,N: "03:24 ivan acknowledges"
+  Note over D,N: "both chains stop, the Mention of 03:27 is not made"
+```
+
+The diagram shows the first 12 minutes of the example, and it ends when Ivan acknowledges. In words, minute by minute:
+
+03:12, the first Publication
+:   Both chains start at their first step. The chain `devops` writes "Step 1: @ivan, you are needed" in the Thread in
+    `infra-notice`. Ivan has a linked account there, so he becomes an Assignee with his Team, and the Root messages read
+    "Assignees: @ivan (devops)". The chain `payments` Pages petr in the Thread in `payments-notice`, but Petr has no
+    Account link, so the reply reads "Page not delivered: @petr has no linked Mattermost account" and mentions
+    nobody. The Timeline records `page_not_delivered`, and Petr is not an Assignee. Both chains then wait 10 minutes.
+
+03:22, step 3 of both chains
+:   The chain `devops` Pages Ivan importantly: his important rule is a Mention now, a wait of 5 minutes and a second
+    Mention. The chain `payments` skips its step 3, "only for critical", because this Alert Group is a warning, records
+    `escalation_step_skipped` and goes on to its wait of 15 minutes.
+
+03:24, Ivan acknowledges
+:   Acknowledge from `infra-notice` acknowledges the Alert Group in `payments-notice` too. Both chains stop, the
+    second Mention of Ivan's rule, due at 03:27, is not made, and the Assignees are cleared. The Root messages read
+    "Acknowledged by @ivan · Escalation chains stopped": the Owner is named without a Team.
+
+If nobody acknowledges, the chains go on. The chain `devops` has no step left after 03:22 and has run out. The chain
+`payments` skips its steps 3 and 5 on every pass, "only for critical", and its step 6, first made at 03:37, falls
+outside the Working hours of `payments` at night, so that is skipped too, with the reason `outside_working_hours`. Step
+7 sends it back to step 3 twice, so steps 3 to 6 are made three times in all: step 3 at 03:22, 03:37 and 03:52, and
+steps 5 and 6 at 03:37, 03:52 and 04:07. The chain runs out at 04:07, and the Alert Group is then Unclaimed: the Root
+messages read "Nobody has taken this", and the chains Page nobody more until a point that starts them again, such as a
+rise to critical or a Team that joins by a new Alert ([Unclaimed](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#unclaimed)).
+
+### The critical Alert
+
+A critical `CheckoutQueueBacklog` of `payments`, with `category="infra"` like the first, goes to `infra-critical` and
+`payments-critical`, and step 3 of `payments` is made, not skipped: it Pages the On-call of "Main" importantly. If
+Petr's rules are in the state "Call" ([the switch](https://muster-io.github.io/muster/latest/concepts/notification-rules.md#the-switch)), his important rule calls him
+through the Notification gateway at the same moment as its first Mention, and Mentions him again 5 minutes later. The
+call goes to his confirmed contact whatever his messenger does, and he can acknowledge in the call
+([Acknowledging from a call](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#acknowledging-from-a-call)). The Mentions of his
+rule are not delivered, since he has no Account link; the call needs none. Once the gateway accepts the call he becomes
+an Assignee, as by a delivered Mention; a call the gateway refuses leaves the Assignees as they were. Calls to the same
+person through the same gateway that come due close together go in one call
+([Calls through a Notification gateway](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#calls-through-a-notification-gateway)).
+
+## What the people see
+
+![The Alert Group page lists the chains that run, devops and payments, each at step 2 with the time of its next step](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/escalation-chains/05-alert-group-chains.png){ .screenshot }
+
+The Alert Group page lists the chains that run with their current step and the time of their next step, and names the
+Assignees with their Teams. The Alert Group list has a column and a filter for Assignees, and the Home page lists,
+under "I am an Assignee", the open Alert Groups that an Escalation chain Paged the signed-in person about. The Timeline
+records each Page, each skipped step and each Page that was not delivered.
+
+## Where to go next
+
+- [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md) and [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md) say who is On-call and in which Team.
+- [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md) says which Destinations an Alert Group reaches.
+- [Escalation chains](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md) say what each step does and when chains start, start over and stop.
+- [Notification rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md) say how a Page reaches one person.
+- [Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md) say how a call reaches a person at night.
+
 <!-- Source: https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md -->
 # What critical changes
 
@@ -2204,7 +2382,9 @@ events show what each Alert says.
 
 A **Schedule** says who in a Team is On-call and when. It is made of Rotation layers, in which people take Shifts in
 turn, with Overrides on top. Schedules are managed through the API under `/api/v1/schedules`; nothing about a Schedule
-sends a message.
+sends a message. The On-call of a Schedule is whom a Mention of the Team's On-call names and whom a step of an
+[Escalation chain](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md) Pages; [How an alert reaches people](https://muster-io.github.io/muster/latest/concepts/how-an-alert-reaches-people.md) shows
+where that happens on the way of an Alert.
 
 ## What a Schedule is
 
@@ -2511,9 +2691,11 @@ A **Notification rule** says how a Page reaches a person. Every User has two: th
   contact there;
 - **Wait**: a pause of whole minutes before the next action.
 
-Actions without a wait between them happen at the same moment. Muster sends no direct messages to Page anyone. The
-rules are read and changed through the API under `/api/v1/me/notification-rules` and
-`/api/v1/users/{user_id}/notification-rules`, listed in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
+Actions without a wait between them happen at the same moment. Muster sends no direct messages to Page anyone. An
+[Escalation step](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md) decides whom to Page and when; the rule decides how, and
+[How an alert reaches people](https://muster-io.github.io/muster/latest/concepts/how-an-alert-reaches-people.md) shows the two working together. The rules are read and
+changed through the API under `/api/v1/me/notification-rules` and `/api/v1/users/{user_id}/notification-rules`, listed
+in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
 
 ## Normal and important
 
@@ -2589,8 +2771,53 @@ A call in a person's custom rules needs their confirmed contact at its gateway (
 a call while no gateway exists is `gateway_required` at the action. Custom rules stay as they are when the
 Organization's rules change. "Reset to the Organization's rules" brings back "As in the Organization".
 
-Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described with the
-Escalation chains.
+Deleting a User deletes their rules. How the rules run when an Escalation step Pages a person is described below.
+
+## In the web UI
+
+In **Profile**, the section **Personal notification rules** shows "Normal" and "Important" each in words, as the
+person's own sequence — "a Mention in the Thread of the Root message" for the normal rule with the default rules — with
+the switch "Also call through the Notification gateway":
+"As in the Organization", "Call" and "Don't call", the contact a call goes to ("to +10000000001") and, with several
+gateways, "Call through" to choose one. Without a confirmed contact the section says "Confirm your contact for calls
+and SMS below first.", and without a gateway "Unavailable: a Notification gateway is needed (a bridge for calls and
+SMS)". Custom rules show as "These rules are custom: they were set through the API or by an Admin." and **Reset to the
+Organization's rules** brings back the default. An Admin sees and changes the rules of any User on the User's page.
+**Linked accounts**, the first section of the Profile, says what a Mention needs: "A Page is a Mention in the Thread; it
+reaches only a linked account."
+
+## With the steps of a chain
+
+An [Escalation step](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#steps) that Pages people — "Page the On-call of a Schedule", "Page people" —
+Pages each person by their own rule, the one named by the step's importance: `normal` or `important`. The step
+decides whom and when; the person's rule decides how and how often. A step "Page the whole Team" Pages nobody by a
+rule: it writes the Team mention, or the word for everyone in the chat, once. A step "Call through a Notification
+gateway" calls the persons it names through its gateway, whatever their rules say.
+
+The rule belongs to the Page that started it, and stops with it. It stops when the Alert Group is acknowledged,
+snoozed or resolved, and when its chain starts over; a Mention or a call that comes due after that is not made. A chain
+that has only run out does not stop its rules: the later Mention of an important Page still comes due. The rule is read
+when the Page starts, so a change of a person's rules reaches their next Page and not the one that runs. The same person
+Paged by two steps, or by two chains, has two runs of their rule, each of its own.
+
+A person who has to be reached by a call at night puts a call in the rule their Pages run — in the state "Call", the
+important rule. A chain then needs no call step for them: a step that Pages them importantly rings their phone.
+
+## Mentions and Account links
+
+A Mention of a rule is a Thread reply that names the person as their messenger understands it, and Muster can name
+them only through an [Account link](https://muster-io.github.io/muster/latest/messengers/account-links.md) in the Identity space of the Connection of the
+Destination in whose Thread the reply is written. A person with no Account link there is named in a line "Page not
+delivered: @petr has no linked Mattermost account" instead, which mentions nobody, and their rule's Mentions of that
+Destination do not make them an Assignee. Their calls are not affected: a call needs a confirmed contact at a gateway,
+not an Account link.
+
+An Identity space is all of Telegram, one Mattermost Connection, one Slack Connection or one Bridge. A person with
+Account links in several of them is Mentioned in each Destination whose Connection lies in one of their spaces, and a
+person linked in one Mattermost Connection is not Mentioned in the Destinations of another. Even where they are
+Mentioned, a Mention is a message in a chat: whether it also pushes a notification to the phone depends on the
+messenger, its app, the phone's settings and the push mode, so at night only a call through a Notification gateway is
+reliable ([At night](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#at-night)).
 
 ## Calls in rules
 
@@ -2631,6 +2858,9 @@ Threads of its chain's own Destinations ([Where chains Page](https://muster-io.g
 Notification gateway, and the call actions of the Notification rules, call the person's confirmed contact
 ([Calls through a Notification gateway](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#calls-through-a-notification-gateway)). Where no chain runs, the ack timeout
 of a Route keeps working as before.
+
+[How an alert reaches people](https://muster-io.github.io/muster/latest/concepts/how-an-alert-reaches-people.md) walks one Alert through the chains, and [Notification
+rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md) says how a Page reaches one person.
 
 ## What an Escalation chain is
 
@@ -2704,6 +2934,25 @@ field of another kind is refused with `422` `unsupported` at it, and a missing o
 A gateway or a webhook Destination that a stored step names may be deleted; the chain warns about it and can still be
 saved.
 
+### The chain of payments
+
+The Team `payments` names a chain with seven steps, which the examples of these pages use:
+
+1. Page the On-call of its Schedule "Main", normally.
+2. Wait 10 minutes.
+3. For critical Alert Groups only, Page the On-call of "Main" importantly.
+4. Wait 15 minutes.
+5. For critical Alert Groups only, Page the On-call of its Schedule "Second line" importantly.
+6. During the Working hours of `payments`, Page the whole Team.
+7. Repeat from step 3, up to 2 times.
+
+A warning Alert Group Pages the On-call once, skips steps 3 and 5 as "only for critical", and in Working hours Pages the
+whole Team at step 6, in each of the three passes. A critical one Pages the On-call importantly 10 minutes later, the
+second line 15 minutes after that, and the whole Team in Working hours, and does so three times in all before the chain
+runs out.
+
+![The steps of the chain payments on its page: the seven steps numbered, each with its limits as chips such as Severity = critical and only in the working hours of payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/escalation-chains/01-chain-steps.png){ .screenshot }
+
 ### Webhook steps
 
 A step "Send to an outgoing webhook" (`webhook`) sends the event `escalation_webhook` to the outgoing webhook
@@ -2735,10 +2984,38 @@ entries and the chains by name, `chains`, and the Audit log of the Route or the 
 {"chain_entries": [{"chain_id": "ECK7M3QX9P2RTA", "severity_condition": "critical"}]}
 ```
 
-Naming a chain on a Route needs `routes:write`, and on a Team `teams:write`. A chain Pages only in the Threads of its
-own Destinations: a chain of a Route in those of the Route's Destinations that have the Alert Group's Root message; a
-chain of a Team in those of the Team's Destinations that have it, and, where none has, in those of the Route's
-Destinations. So a step that Pages everyone in the chat never rings another team's chat.
+Naming a chain on a Route needs `routes:write`, and on a Team `teams:write`. Where the chain then Pages is the rule of
+[Where chains Page](https://muster-io.github.io/muster/latest/concepts/escalation-chains.md#where-chains-page).
+
+## In the web UI
+
+The button **Escalation chains** on the Teams page opens the list of the chains with the Routes and Teams that name
+each, which filters them by Team. **New chain**, also on the Team page under "Escalation chain of the Team", opens the
+chain page, where an Admin builds the steps; everyone else reads them ("Only Admins change Escalation chains."). "Add
+step" offers the seven kinds — "Page the On-call of a Schedule", "Page people", "Page the whole Team", "Wait", "Send to
+an outgoing webhook", "Repeat from step" and "Call through the Notification gateway", which is greyed with "Unavailable:
+a Notification gateway is needed (a bridge for calls and SMS)" while there is none. Each step shows in words, numbered,
+with its limits as chips: "Severity: any", "always", "only in the working hours of payments" with the days and hours,
+or "Severity = critical". "Whom 'Page the whole Team' calls" offers the Team mention, `@channel`, `@here`, `@all` and
+`@everyone`, and greys the ones that the chain's Destinations cannot mention with their reason. The warnings of the
+chain are listed under "Warnings", a section that shows only when the chain has any.
+
+The page also says what the chain does:
+
+![The chain page of payments: where it writes, when it stops and starts over, and the Routes and Teams it runs for](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/escalation-chains/02-chain-behaviour.png){ .screenshot }
+
+"Writes only in the Threads of" names the Destinations that the chain Pages in, "Stops when the Alert Group is
+acknowledged, snoozed or resolved; starts over on Unacknowledge, the end of a Snooze, a Reopen, and a rise to critical
+that ends an acknowledgement or a Snooze." gives its lifecycle, and "Run for" lists the Routes and Teams that name the
+chain, each with the Severity condition it meets. The Route form has "Escalation chains" with the conditions of its
+chains, and the Team page names a Team's chains. Under "Normal and important" the page reminds that each person's
+Notification rules decide what exactly a Page does, and that Muster sends no direct messages: a Page is a Mention in the
+Thread of the Root message.
+
+"How it went" lists the recent Alert Groups the chain ran on, with their Pages, the steps it skipped and what stopped
+it. The screenshot is of a run that a person acknowledged:
+
+![How it went on the chain page of payments: the Alert Group, step 1 with its Page not delivered, and Stopped: acknowledged](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/escalation-chains/03-how-it-went.png){ .screenshot }
 
 ## When chains run
 
@@ -2758,7 +3035,7 @@ A chain runs only while the Alert Group is firing, and only Alerts and Commands 
 | It becomes firing again: a Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to critical that ends an acknowledgement or a Snooze, an auto-unacknowledge, its Owner disabled or deleted | The chains that apply start over at their first step |
 | Its Severity level rises by its Alerts while it is firing and nobody owns it | The chains whose condition it now meets start; running chains go on |
 | A Team joins it by a new Alert while it is firing and nobody owns it | That Team's chains start, where the Route runs the chains of Teams |
-| A change of configuration: saving a Team, turning on "Also to the Teams from the label" or "Run the Teams' Escalation chains", naming a chain on a Route or a Team or changing its condition, changing the Minimum severity | No chain starts, and the running chains go on |
+| A change of configuration: saving a Team, turning on "Also to the Teams from the label" or "Run the Teams' Escalation chains", naming a chain on a Route or a Team or changing its condition, changing the Severity condition of a Destination, changing the Minimum severity | No chain starts, and the running chains go on |
 | Acknowledge, Snooze, Resolve | Every chain stops |
 
 A chain whose condition the Alert Group no longer meets after its Severity level falls goes on. A chain that a change of
@@ -2888,8 +3165,11 @@ One whose "reply in thread" request was removed after the Page was queued sends 
 delivered.
 
 !!! warning "At night, only a Notification gateway is reliable"
-    Whether a Mention in a Thread pushes a notification to a phone is still to be verified for Mattermost and Slack.
-    Until it is, rely on a call through a Notification gateway for Pages at night.
+    A Mention in a Thread may or may not reach a person's phone as a push notification: it depends on the messenger,
+    on its app, on the settings of the person's phone and on the push mode of the messenger. Muster cannot see whether a
+    push arrived. For Pages that must wake someone at night, rely on a call through a Notification gateway, and treat a
+    Mention as the record in the Thread that the person was named, not as a promise that a phone rang. See
+    [At night](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#at-night).
 
 ## Calls through a Notification gateway
 
@@ -2972,6 +3252,19 @@ each as a Mention where their account is linked in the Destination's Identity sp
 acknowledgement that stopped running chains it reads "Acknowledged by @ivan · Escalation chains stopped": the Owner is
 named without a Team. The `layout` that a bridge receives names the Assignees in `assignees` with the Team in `team`,
 and with the `ref` of their Mention entry in a new message to a bridge with `native_mentions`.
+
+The Alert Group page names the Assignees under its title as "Assignees: @ivan (devops), @petr (payments)", each with the
+owning Team of their chain, and below it lists "Escalation chains": each running chain with its state — "step 2 · next
+step at" with a date and time, "ran out" or "stopped" — and a link to the chain.
+
+![The header of an Alert Group page, which names the Assignees: @ivan with the Team devops and @petr with the Team payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/escalation-chains/04-alert-group-assignees.png){ .screenshot }
+
+![The Escalation chains of an Alert Group: the chains devops and payments, each at step 2 with the time of its next step](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/escalation-chains/05-alert-group-chains.png){ .screenshot }
+
+The Alert Group list has the column "Assignees" and the filter "Assignee", a person or "me". The Home page lists, under
+"I am an Assignee", the open Alert Groups that an Escalation chain Paged the signed-in person about — "Alert Groups that
+an Escalation chain Paged you about. They leave this list once acknowledged." — with their Assignees, the chain and its
+step, and the buttons to acknowledge and snooze.
 
 The API reads them in `assignees` of an Alert Group (`user`, `team`, `chain`, `since`), and
 `GET /api/v1/alert-groups?assignee=me` lists the open Alert Groups where the calling User is an Assignee, by a User's

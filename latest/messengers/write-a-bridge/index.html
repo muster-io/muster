@@ -1985,6 +1985,8 @@
       
         
       
+        
+      
     
     
     
@@ -2233,6 +2235,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/how-an-alert-reaches-people/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  How an alert reaches people
 
     
   </span>
@@ -5042,13 +5071,17 @@ why Muster resolved it. A test message has the mark of a test as its first notic
 rest of the message, so that nobody takes a test for an Alert Group.</dd>
 <dt><code>owner</code> and <code>assignees</code></dt>
 <dd>People, each with a <code>name</code>, their name in Muster, and a <code>ref</code>. <code>owner</code> is who acknowledged the Alert Group, while it
-is acknowledged, and <code>null</code> otherwise; <code>assignees</code> are whom Muster Paged before an acknowledgement, and are empty
-until Muster Pages people through Escalation chains. A <code>ref</code> names the entry of the same <code>ref</code> in the envelope's
-<code>mentions</code>, which has the person's <code>external_id</code> in your messenger, so that you mention them by your own user id.
-It is <code>null</code> where the message carries no Mention of them: in every edit, which carries no Mentions at all, and in a
-message to a bridge without <code>native_mentions</code> or for a person whose account is not linked. Then write the <code>name</code>.
-A person who snoozed or resolved the Alert Group is no <code>owner</code>: they appear only as text in a line of <code>notices</code>, with
-no <code>ref</code>, so that a bridge cannot mention them from <code>layout</code>.</dd>
+is acknowledged, and <code>null</code> otherwise; it has no <code>team</code>, and "Escalation chains stopped" after an acknowledgement
+that stopped running chains is the last line of <code>notices</code>. <code>assignees</code> are the people whom Muster's
+<a href="../../concepts/escalation-chains/#assignees">Escalation chains</a> Paged last and reached, before an acknowledgement,
+and are empty until Muster Pages people; each has the owning Team of their chain in <code>team</code>, an object with a <code>name</code>,
+where it has one. Write them as a line of their own, such as "Assignees: @ivan (devops), @petr (payments)", not as
+part of the <code>notices</code>. A <code>ref</code> names the entry of the same <code>ref</code> in the envelope's <code>mentions</code>, which has the
+person's <code>external_id</code> in your messenger, so that you mention them by your own user id. It is <code>null</code> where the
+message carries no Mention of them: in every edit, which carries no Mentions at all, and in a message to a bridge
+without <code>native_mentions</code> or for a person whose account is not linked. Then write the <code>name</code>. A person who
+snoozed or resolved the Alert Group is no <code>owner</code>: they appear only as text in a line of <code>notices</code>, with no <code>ref</code>,
+so that a bridge cannot mention them from <code>layout</code>.</dd>
 <dt><code>links</code></dt>
 <dd>A list of <code>label</code> and <code>url</code>, "Open in Muster" first. A <code>url</code> is an absolute <code>http</code> or <code>https</code> address as the Route
 gives it, and may be an IRI, with characters outside ASCII in its host or path: a messenger that needs ASCII

@@ -178,6 +178,12 @@ Mentions of the Team's On-call use, and a Team that has Schedules cannot be dele
 and shows who is On-call now. See [Schedules](schedules.md): Rotation layers, several Schedules, Overrides, gaps and the
 iCal feed.
 
+A Team may also name [Escalation chains](escalation-chains.md#naming-chains-on-routes-and-teams), which Page its people
+and its On-call while an Alert Group of the Team stays firing, in the Threads of the Team's own Destinations that have
+the Root message and, where none has, of the Route. The
+Team page lists them under "Escalation chain of the Team". [How an alert reaches people](how-an-alert-reaches-people.md)
+follows one Alert of a Team from its Route to the people its chains Page.
+
 ## Membership from the identity provider
 
 A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through

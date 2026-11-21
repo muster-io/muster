@@ -1423,6 +1423,8 @@
       
         
       
+        
+      
     
     
     
@@ -1817,6 +1819,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-an-alert-reaches-people/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  How an alert reaches people
 
     
   </span>
@@ -3422,6 +3451,11 @@ person an Admin added, <code>idp</code> for a person the identity provider put i
 Mentions of the Team's On-call use, and a Team that has Schedules cannot be deleted. The Team page lists its Schedules
 and shows who is On-call now. See <a href="../schedules/">Schedules</a>: Rotation layers, several Schedules, Overrides, gaps and the
 iCal feed.</p>
+<p>A Team may also name <a href="../escalation-chains/#naming-chains-on-routes-and-teams">Escalation chains</a>, which Page its people
+and its On-call while an Alert Group of the Team stays firing, in the Threads of the Team's own Destinations that have
+the Root message and, where none has, of the Route. The
+Team page lists them under "Escalation chain of the Team". <a href="../how-an-alert-reaches-people/">How an alert reaches people</a>
+follows one Alert of a Team from its Route to the people its chains Page.</p>
 <h2 id="membership-from-the-identity-provider">Membership from the identity provider<a class="headerlink" href="#membership-from-the-identity-provider" title="Permanent link">&para;</a></h2>
 <p>A Team may name groups of the identity provider in <code>idp_entries</code>; the people in those groups who sign in through
 OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:</p>
