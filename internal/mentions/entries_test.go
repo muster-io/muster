@@ -459,6 +459,39 @@ func TestWriteEntries(t *testing.T) {
 	}
 }
 
+// TestQueriesThroughTheGivenDB: a save writes its entries through the transaction it is given, and a read without one
+// reads them through the main pool.
+func TestQueriesThroughTheGivenDB(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	pool, tx := &dummyDB{}, &dummyDB{}
+	s := New(orgID, pool)
+	var through []string
+	s.queries = func(db DBTX) Queries {
+		switch db {
+		case pool:
+			through = append(through, "pool")
+		case tx:
+			through = append(through, "transaction")
+		case nil:
+			through = append(through, "nil")
+		default:
+			through = append(through, "another")
+		}
+		return f
+	}
+	if err := s.WriteEntries(ctx, tx, 10, []EntryInput{person(alice)}, t0); err != nil ||
+		!slices.Equal(through, []string{"transaction"}) {
+		t.Errorf("a save = %v, through %v", err, through)
+	}
+	through = nil
+	got, err := s.Entries(ctx, nil, []EntryDestination{{ID: 10, Type: TypeTelegram}})
+	if err != nil || len(got[10]) != 1 || got[10][0].Target != (EntryTarget{Kind: TargetUser, UserID: alice}) ||
+		!slices.Equal(through, []string{"pool"}) {
+		t.Errorf("a read = %+v %v, through %v", got, err, through)
+	}
+}
+
 // TestAddTeamEntry is C-28.FR-6 and AC-8: a Destination of a Team without an entry naming it gets "Team {Team}" for
 // every Loud event after its other entries, with a new version and its entries before and after; one that has it,
 // a Telegram one and a deleted one get nothing; a failing query fails.
@@ -530,7 +563,8 @@ func TestValidateKeepsStoredUsers(t *testing.T) {
 // TestMergeSettingsKeepsHiddenKinds is C-28.FR-5 for the kinds the L1 form hides: with @here for new_alert_group and
 // @channel for every event, the form shows here for new_alert_group; a save from the L1 editor that only adds a User to
 // ack_timeout keeps @channel for new_alert_group, and one that changes new_alert_group's choice drops it there. A second
-// word hidden in every kind it has is kept as its own entry.
+// word hidden in every kind it has is kept as its own entry, after the other mentions of everyone, and a word hidden in
+// a kind joins the entry of the conversion that has it, the first included.
 func TestMergeSettingsKeepsHiddenKinds(t *testing.T) {
 	stored := []EntryInput{everyone(EveryoneHere, KindNewAlertGroup), everyone(EveryoneChannel)}
 	set := L1Form(TypeMattermost, stored)
@@ -565,6 +599,25 @@ func TestMergeSettingsKeepsHiddenKinds(t *testing.T) {
 		person(alice, KindNewAlerts), person(bob, KindReopen)}
 	if got := MergeSettings(TypeMattermost, behind, form); !reflect.DeepEqual(got, want) {
 		t.Errorf("a hidden word = %+v", got)
+	}
+	// @channel for every event behind @here for reopen: the form shows here for reopen, and @channel, the first entry
+	// of the conversion, keeps reopen.
+	first := []EntryInput{everyone(EveryoneHere, KindReopen), everyone(EveryoneChannel)}
+	form = L1Form(TypeMattermost, first)
+	form[KindAckTimeout] = Setting{Everyone: EveryoneChannel, UserIDs: []string{alice}, Groups: []string{}}
+	want = []EntryInput{everyone(EveryoneChannel), everyone(EveryoneHere, KindReopen), person(alice, KindAckTimeout)}
+	if got := MergeSettings(TypeMattermost, first, form); !reflect.DeepEqual(got, want) {
+		t.Errorf("hidden in the first entry = %+v", got)
+	}
+	// @here for reopen behind @channel for every event, and a save that only drops new_alert_group: every entry of the
+	// conversion is a mention of everyone, and @here goes after them.
+	last := []EntryInput{everyone(EveryoneChannel), everyone(EveryoneHere, KindReopen)}
+	form = L1Form(TypeMattermost, last)
+	form[KindNewAlertGroup] = Setting{Everyone: EveryoneNone, UserIDs: []string{}, Groups: []string{}}
+	want = []EntryInput{everyone(EveryoneChannel, KindNewAlerts, KindReopen, KindAckTimeout, KindSnoozeEnded,
+		KindRiseToUrgent, EventStormStarted), everyone(EveryoneHere, KindReopen)}
+	if got := MergeSettings(TypeMattermost, last, form); !reflect.DeepEqual(got, want) {
+		t.Errorf("hidden after every mention of everyone = %+v", got)
 	}
 	// An outgoing webhook's mention of everyone with the word everyone, which L1 cannot express, is not hidden in the
 	// form but outside it: it stays whole and last.
