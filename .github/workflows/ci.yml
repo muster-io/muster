@@ -495,7 +495,7 @@ jobs:
           compare() {
             if [ "$2" = "$3" ]; then echo "$1: $2"; else echo "$1 is '$2', the example sets '$3'"; failed=1; fi
           }
-          for setting in shared_buffers=96MB work_mem=2MB maintenance_work_mem=32MB max_connections=30; do
+          for setting in shared_buffers=32MB work_mem=2MB maintenance_work_mem=32MB max_connections=30; do
             name="${setting%%=*}"
             got=$(docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
               psql -U muster -Atc "SHOW $name")

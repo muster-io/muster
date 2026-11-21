@@ -264,22 +264,43 @@ jobs:
             make load-test LOAD_TEST_FLAGS=-destination=none 2>&1 | tee "$RUNNER_TEMP/load-compose.txt"
           kill "$sampler" 2>/dev/null || true
           sample
-      # Runs after a failed load test too. The example's memory limit and settings must hold: a PostgreSQL process
-      # that the OOM killer ended, which PostgreSQL logs as terminated by signal 9 and the container's memory cgroup
-      # counts as oom_kill, fails the job.
+      # Runs after a failed load test too. The example's memory limit and settings must hold, so the job fails when the
+      # OOM killer ended a PostgreSQL process: a backend, which PostgreSQL logs as terminated by signal 9 and the
+      # container's memory cgroup counts as oom_kill, or the postmaster, after which Docker marks the container
+      # OOM-killed and restarts it with a fresh cgroup. A running container whose memory.events cannot be read fails
+      # it too.
       - name: check that PostgreSQL lost no process to the OOM killer
         if: always() && steps.compose.outcome != 'skipped'
         run: |
           set -euo pipefail
           compose=(docker compose -f deploy/compose/docker-compose.yml)
-          killed=$("${compose[@]}" logs --no-color postgres | grep -F -A 1 'terminated by signal 9' || true)
-          oom=$("${compose[@]}" exec -T postgres sed -n 's/^oom_kill //p' /sys/fs/cgroup/memory.events || true)
-          echo "oom_kill of the PostgreSQL container's memory cgroup: ${oom:-unknown}"
-          if [ -n "$killed" ] || [ "${oom:-0}" != 0 ]; then
-            echo "The OOM killer ended a PostgreSQL process:"
-            printf '%s\n' "$killed"
+          id=$("${compose[@]}" ps -aq postgres)
+          if [ -z "$id" ]; then
+            echo "the compose example has no PostgreSQL container"
             exit 1
           fi
+          failed=0
+          state=$(docker inspect -f '{{.State.Running}} {{.State.OOMKilled}} {{.RestartCount}}' "$id")
+          echo "PostgreSQL container: running, OOM-killed, restarts: $state"
+          if [ "${state#* }" != "false 0" ]; then
+            echo "the PostgreSQL container was OOM-killed or restarted"
+            failed=1
+          fi
+          if [ "${state%% *}" = true ]; then
+            if oom=$(docker exec "$id" sed -n 's/^oom_kill //p' /sys/fs/cgroup/memory.events) && [ -n "$oom" ]; then
+              echo "oom_kill of its memory cgroup: $oom"
+              if [ "$oom" != 0 ]; then failed=1; fi
+            else
+              echo "the memory.events of the running PostgreSQL container cannot be read"
+              failed=1
+            fi
+          fi
+          killed=$("${compose[@]}" logs --no-color postgres | grep -F -A 1 'terminated by signal 9' || true)
+          if [ -n "$killed" ]; then
+            printf 'The OOM killer ended a PostgreSQL process:\n%s\n' "$killed"
+            failed=1
+          fi
+          exit "$failed"
       - name: write the job summary
         if: always()
         run: |

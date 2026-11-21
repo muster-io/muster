@@ -104,10 +104,11 @@ issue: 3
   Gateway API and ServiceMonitor schemas); CI runs it on every pull request.
 - **Compose example** (`deploy/compose/`): services `postgres` (PostgreSQL 17) and `muster` (the released image).
   PostgreSQL gets a container memory limit and its settings on the command line — `mem_limit: 768m`,
-  `shared_buffers=96MB`, `work_mem=2MB`, `maintenance_work_mem=32MB`, `max_connections=30` — sized for evaluation and
-  small installations and checked with 100,000 Alert Groups (the starting values, `160m` with `shared_buffers=32MB`,
-  lost PostgreSQL processes to the OOM killer at 50,000); the nightly load test reports the footprint of NFR-3 with
-  them (P-43) and fails when the kernel kills a PostgreSQL process. `.env.example` holds the master key placeholder
+  `shared_buffers=32MB`, `work_mem=2MB`, `maintenance_work_mem=32MB`, `max_connections=30` — sized for evaluation and
+  small installations, checked with 50,000 to 100,000 Alert Groups under light load and through an upgrade with
+  migrations at about 65,000 (the starting value `160m` lost PostgreSQL processes to the OOM killer at 50,000); the
+  nightly load test reports the footprint of NFR-3 with them (P-43) and fails when the kernel kills a PostgreSQL
+  process. `.env.example` holds the master key placeholder
   that S-007 refuses and the bootstrap Admin; `make compose-check` runs `docker compose config`.
 - **Trivy** (C-01.FR-11): CI builds the image with goreleaser's snapshot mode and scans it; high and critical
   vulnerabilities with a fix fail the job.
@@ -140,7 +141,7 @@ cp deploy/compose/.env.example deploy/compose/.env
 docker compose -f deploy/compose/docker-compose.yml up -d postgres
 docker compose -f deploy/compose/docker-compose.yml exec postgres \
   psql -U muster -Atc "SHOW shared_buffers; SHOW work_mem; SHOW maintenance_work_mem; SHOW max_connections"
-# 96MB
+# 32MB
 # 2MB
 # 32MB
 # 30
@@ -187,8 +188,10 @@ The GitHub release lists the four archives, the checksums, and an SBOM per archi
 - `operator_attention: true` — GHCR permissions, the first tag and the kind cluster for the install check, and a
   GitHub App for release-please (variable `RELEASE_PLEASE_APP_CLIENT_ID`, secret `RELEASE_PLEASE_APP_PRIVATE_KEY`),
   because a tag created with `GITHUB_TOKEN` starts no workflow.
-- The compose memory values are provisional (P-43); S-004's nightly load test measures the footprint, and a change
-  updates the compose file and closes P-43.
+- How the footprint is measured stays provisional (P-43): S-004's nightly load test reports it with the compose
+  example's values. The values themselves were sized against a dataset of 50,000 to 100,000 Alert Groups, not
+  against that footprint; changing them changes the compose file, the expected values of CI's compose-check job and
+  the database page of the install guide together.
 
 ## Coverage
 
