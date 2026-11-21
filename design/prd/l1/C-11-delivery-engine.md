@@ -136,7 +136,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   where the messenger provides one), waiting for a Broken Destination, Not delivered, deleted in the messenger, Thread
   not attached, withheld (never posted there: the Alert Group resolved while a Storm summary stood for it or while the
   Destination was Broken), and retired (no longer updated there after its final edit, because the Destination left the
-  Route or was deleted) — is available through the API; the Alert Group page shows it from C-13 on.
+  Route or was deleted) — is available through the API until `retention.alert_details` after the resolution
+  (C-09.FR-16); the Alert Group page shows it from C-13 on.
 - **C-11.FR-17** Delivery exports the metrics listed for C-11 in the [metrics
   catalogue](reference.md#metrics-catalogue); `muster_delivery_latency_seconds{destination}` measures from webhook
   receipt to the messenger API call and is the service-level indicator of NFR-2.
