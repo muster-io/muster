@@ -3412,14 +3412,16 @@ and counts as an attempt; a session that ends voids its codes.</dd>
 <dl>
 <dt>Per person</dt>
 <dd>5 within an hour.</dd>
-<dt>Per contact</dt>
-<dd>3 within an hour for one contact, as typed and trimmed, whoever asks.</dd>
+<dt>Per person and contact</dt>
+<dd>3 within an hour from one person for one contact, as typed and trimmed.</dd>
 </dl>
 <p>A request beyond them answers <code>429</code> <code>contact_code_requests_exceeded</code> with <code>Retry-After</code>; a request whose code the
-gateway could not deliver still counts. The code is sent on the interactive path, since the person waits for it: when
-no rate-limit token of the gateway is free within <code>delivery.interactive_budget</code>, the answer is <code>503</code> with
-<code>Retry-After</code>, and when the gateway refuses the notification, <code>502</code> <code>gateway_refused</code> with its <code>gateway_class</code>. The
-contact stays, unconfirmed, and a new code can be asked for.</p>
+gateway could not deliver still counts. What others ask for never refuses a person's request: a contact receives at
+most 10 codes within an hour whoever asks, and a request beyond them is answered as if its code were sent, but nothing
+is sent, so that the answer never tells of other people's requests. The code is sent on the interactive path, since
+the person waits for it: when no rate-limit token of the gateway is free within <code>delivery.interactive_budget</code>, the
+answer is <code>503</code> with <code>Retry-After</code>, and when the gateway refuses the notification, <code>502</code> <code>gateway_refused</code> with its
+<code>gateway_class</code>. The contact stays, unconfirmed, and a new code can be asked for.</p>
 <h3 id="change-a-contact">Change a contact<a class="headerlink" href="#change-a-contact" title="Permanent link">&para;</a></h3>
 <p>Add the new contact for the same gateway. Until it is confirmed, the confirmed contact stays the one called, and both
 are listed, the new one naming the confirmed one in <code>replaces</code>; confirming the new contact replaces the old one, so
