@@ -303,6 +303,20 @@ func TestDoctorBridge(t *testing.T) {
 	}
 }
 
+// TestDoctorBridgeShortPushSecret: muster doctor passes a Bridge Connection in push mode whose stored push secret is
+// shorter than bridge.MinPushSecretBytes with a hint to replace it, and one of 24 bytes or more without one.
+func TestDoctorBridgeShortPushSecret(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	e.createFakeBridge(t, f, "push", fakebridge.Token, connections.EventDeliveryPush)
+	short := e.createFakeBridge(t, f, "short", fakebridge.Token, connections.EventDeliveryPush)
+	e.storeShortPushSecret(t, short)
+	want := "connection push: ok\nconnection short: warning: " + connections.HintPushSecretTooShort
+	if got := findings(t, e.svc, e.store); got != want {
+		t.Errorf("findings:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestDoctorSlack is C-02.FR-14 and C-24.FR-2, FR-3 for Slack: muster doctor checks each Slack Connection with the
 // steps of its check — token, scopes and in socket mode app_token — and each Slack Destination with conversations.info,
 // in the background class at once, never on the interactive path; a failing one names the step or the item channel

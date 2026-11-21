@@ -742,8 +742,9 @@
       "pollHint": "Muster polls the bridge; the bridge needs no address of Muster",
       "pushHint": "The bridge pushes events to Muster's ingest address",
       "pushSecret": "Push secret",
-      "pushSecretFormat": "Enter the push secret as whsec_ followed by base64.",
-      "pushSecretHint": "The bridge signs every event with this secret, in the Standard Webhooks form: whsec_ followed by base64.",
+      "pushSecretFormat": "Enter the push secret as whsec_ followed by the base64 of at least 24 bytes.",
+      "pushSecretHint": "The bridge signs every event with this secret, in the Standard Webhooks form: whsec_ followed by the base64 of at least 24 random bytes, such as the output of openssl rand -base64 32.",
+      "pushSecretTooShort": "The stored push secret is shorter than 24 bytes and can be guessed. Events signed with it are still accepted: set a new push secret of at least 24 bytes here and in the bridge.",
       "token": "Token",
       "tokenForNewBaseUrl": "Enter the token again: the stored token is sent only to the bridge it was entered for.",
       "useProposal": "Use the proposal"

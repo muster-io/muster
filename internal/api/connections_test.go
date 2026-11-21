@@ -781,6 +781,7 @@ func TestBridgeConnectionAPI(t *testing.T) {
 		m["push_secret_status"].(map[string]any)["set"] != true ||
 		m["callback_url"] != "http://localhost:8081/api/v1/callbacks/bridge/CNAAAAAAAAAAA9" ||
 		!strings.Contains(string(a.body), `"info":null`) || !strings.Contains(string(a.body), `"info_read_at":null`) ||
+		!strings.Contains(string(a.body), `"warnings":[]`) ||
 		strings.Contains(string(a.body), pushSecretValue) || strings.Contains(string(a.body), `"push_secret"`) {
 		t.Fatalf("create = %d %s", a.status, a.body)
 	}
@@ -810,14 +811,16 @@ func TestBridgeConnectionAPI(t *testing.T) {
 		Name: "checked", BridgeBaseURL: "https://bridge.example.org/prefix", EventDelivery: connections.EventDeliveryPoll,
 		BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0}, PushSecret: keyring.SecretStatus{UpdatedAt: &t0},
 		BridgeInfo: []byte(bridgeInfoJSON), BridgeInfoReadAt: &read,
-		Limiter: connections.Limiter{Limit: 10, PerSeconds: 1}, CreatedAt: t0, Version: 4})
+		Warnings: []string{connections.WarningPushSecretTooShort},
+		Limiter:  connections.Limiter{Limit: 10, PerSeconds: 1}, CreatedAt: t0, Version: 4})
 	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAB1", "")
 	var b gen.BridgeConnection
 	decodeInto(t, a, &b)
 	info, err := b.Info.Get()
 	if a.status != http.StatusOK || err != nil || info.ProtocolVersion != "1" || info.Messenger.Name != "Example chat" ||
 		!b.InfoReadAt.MustGet().Equal(read) || b.PushSecretStatus.Set || *b.Etag != `"4"` ||
-		b.BaseUrl != "https://bridge.example.org/prefix" {
+		b.BaseUrl != "https://bridge.example.org/prefix" ||
+		!slices.Equal(b.Warnings, []gen.BridgeConnectionWarnings{gen.PushSecretTooShort}) {
 		t.Fatalf("get = %d %s", a.status, a.body)
 	}
 	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections?type=bridge", "")

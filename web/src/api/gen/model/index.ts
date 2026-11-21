@@ -82,6 +82,7 @@ export * from './bridgeConnectionDraftType';
 export * from './bridgeConnectionInput';
 export * from './bridgeConnectionInputType';
 export * from './bridgeConnectionType';
+export * from './bridgeConnectionWarningsItem';
 export * from './bridgeDestination';
 export * from './bridgeDestinationInput';
 export * from './bridgeDestinationInputType';

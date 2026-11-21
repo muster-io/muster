@@ -42,6 +42,8 @@ const (
 	pushSecret  = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 	// otherPushSecret is a push secret in the Standard Webhooks form that replaces pushSecret.
 	otherPushSecret = "whsec_c2Vjb25kIHB1c2ggc2VjcmV0IG9mIHRoZSBicmlkZ2U="
+	// shortPushSecret is a push secret in the Standard Webhooks form whose key has 23 bytes, one short of the minimum.
+	shortPushSecret = "whsec_dHdlbnR5LXRocmVlLWJ5dGUta2V5ISE="
 )
 
 // standIn is a bridge that answers getInfo, for the checks: an info with every feature and a field Muster does not
@@ -125,7 +127,8 @@ func newBridgeEnv(t *testing.T) (*env, *standIn) {
 	e := newEnv(t)
 	b := startStandIn(t)
 	t.Cleanup(func() {
-		for _, s := range []string{bridgeToken, pushSecret, otherPushSecret, strings.TrimPrefix(pushSecret, "whsec_")} {
+		for _, s := range []string{bridgeToken, pushSecret, otherPushSecret, shortPushSecret,
+			strings.TrimPrefix(pushSecret, "whsec_")} {
 			if strings.Contains(e.log.String(), s) {
 				t.Errorf("a Bridge secret reached the log: %s", e.log.String())
 			}
@@ -251,6 +254,8 @@ func TestBridgeValidation(t *testing.T) {
 		{"not base64", connections.EventDeliveryPush, keyring.Replace("whsec_not base64 at all!"), "/push_secret",
 			connections.CodeInvalidFormat},
 		{"empty", connections.EventDeliveryPush, keyring.Replace(""), "/push_secret", connections.CodeInvalidFormat},
+		{"a key of 23 bytes", connections.EventDeliveryPush, keyring.Replace(shortPushSecret), "/push_secret",
+			connections.CodeInvalidFormat},
 	} {
 		in := bridgeInput("br-"+tc.name, "http://bridge.example.org", tc.mode)
 		in.PushSecret = tc.secret
@@ -275,6 +280,78 @@ func TestBridgeValidation(t *testing.T) {
 	}
 	if len(e.store.rows) != 1 {
 		t.Errorf("%d rows", len(e.store.rows))
+	}
+}
+
+// storeShortPushSecret stores shortPushSecret on the Bridge Connection c, as a version from before the minimum of
+// bridge.MinPushSecretBytes may have saved it.
+func (e *env) storeShortPushSecret(t *testing.T, c connections.Connection) {
+	t.Helper()
+	s, _, err := e.keys.ApplySecret("connections.bridge_push_secret", keyring.StoredSecret{},
+		keyring.Replace(shortPushSecret), e.business.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := e.store.rows[c.ID]
+	r.row.BridgePushSecretCiphertext = s.Ciphertext
+	r.row.BridgePushSecretKeyID = pgtype.Text{String: s.KeyID, Valid: true}
+	r.row.Version++
+}
+
+// TestBridgeShortStoredPushSecret: a push secret whose key is shorter than bridge.MinPushSecretBytes is refused on
+// every save, while one stored before the minimum keeps working: the Connection reports it with
+// WarningPushSecretTooShort, a save that keeps it succeeds, its push callback still finds the Connection, and a save
+// with a new push secret of 24 bytes or more ends the warning.
+func TestBridgeShortStoredPushSecret(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	c := e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPush)
+	if len(c.Warnings) != 0 {
+		t.Fatalf("a push secret of 24 bytes is reported: %q", c.Warnings)
+	}
+	e.storeShortPushSecret(t, c)
+	stored := e.store.rows[c.ID].row.BridgePushSecretCiphertext
+	want := []string{connections.WarningPushSecretTooShort}
+	if got, err := e.svc.Get(ctx, c.PublicID); err != nil || !slices.Equal(got.Warnings, want) {
+		t.Errorf("get = %q, %v", got.Warnings, err)
+	}
+	if page, err := e.svc.List(ctx, connections.ListFilter{}); err != nil || len(page.Connections) != 1 ||
+		!slices.Equal(page.Connections[0].Warnings, want) {
+		t.Errorf("list = %+v, %v", page, err)
+	}
+	if conn, _, err := e.svc.PushConnection(ctx, c.PublicID); err != nil || conn.Client == nil {
+		t.Errorf("the push callback lost the Connection: %+v, %v", conn, err)
+	}
+
+	keep := bridgeInput("br-2", b.srv.URL, connections.EventDeliveryPush)
+	keep.BotToken, keep.PushSecret = keyring.Keep, keyring.Keep
+	got, err := e.svc.Update(ctx, by, c.PublicID, nil, keep)
+	if err != nil || got.Name != "br-2" || !slices.Equal(got.Warnings, want) ||
+		!bytes.Equal(e.store.rows[c.ID].row.BridgePushSecretCiphertext, stored) {
+		t.Fatalf("a save that keeps the short push secret = %+v, %v", got, err)
+	}
+	n := len(e.store.audit)
+	if got, err := e.svc.Update(ctx, by, c.PublicID, nil, keep); err != nil || len(e.store.audit) != n ||
+		!slices.Equal(got.Warnings, want) {
+		t.Errorf("a save that changes nothing = %q, %v", got.Warnings, err)
+	}
+
+	short := keep
+	short.PushSecret = keyring.Replace(shortPushSecret)
+	if fe := fieldError(e.update(t, c.PublicID, short)); fe == nil || fe.Pointer != "/push_secret" ||
+		fe.Code != connections.CodeInvalidFormat || strings.Contains(fe.Error(), shortPushSecret) {
+		t.Errorf("a new push secret of 23 bytes = %v", fe)
+	}
+
+	renewed := keep
+	renewed.PushSecret = keyring.Replace(otherPushSecret)
+	if got, err := e.svc.Update(ctx, by, c.PublicID, nil, renewed); err != nil || len(got.Warnings) != 0 {
+		t.Errorf("a new push secret of 32 bytes = %q, %v", got.Warnings, err)
+	}
+
+	poll := e.createBridge(t, "br-poll", b.srv.URL, connections.EventDeliveryPoll)
+	if got, err := e.svc.Get(ctx, poll.PublicID); err != nil || len(got.Warnings) != 0 {
+		t.Errorf("poll = %q, %v", got.Warnings, err)
 	}
 }
 

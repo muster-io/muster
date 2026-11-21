@@ -33,7 +33,11 @@ Choose how the bridge reports **events** — the presses of buttons and the mess
 - **`push`** when the bridge can reach `MUSTER_INGEST_URL`. The bridge posts each event to the Connection's callback
   address, `https://ingest.muster.example.org/api/v1/callbacks/bridge/CN…`, which the Connection shows in
   `callback_url`, signed with a **push secret** that you configure on both sides. The push secret has the Standard
-  Webhooks form, `whsec_` followed by base64, and is write-only like the token.
+  Webhooks form, `whsec_` followed by the base64 of at least 24 random bytes, and is write-only like the token. The
+  callback is authenticated by this signature alone, so Muster refuses a shorter key with `invalid_format`. Generate
+  one with `printf 'whsec_%s\n' "$(openssl rand -base64 32)"`. A Connection saved with a shorter push secret before
+  Muster required 24 bytes keeps working; the API's `warnings` lists `push_secret_too_short`, and the form and
+  `muster doctor` warn about it, until you save a new push secret here and in the bridge.
 
 A Connection also has a **proxy**, for a bridge that Muster reaches only through one, and a **limiter**: 10 requests
 per second by default, shared by all its Destinations. When the bridge answers that it is rate-limited, Muster waits

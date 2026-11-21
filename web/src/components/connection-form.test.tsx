@@ -447,12 +447,27 @@ describe("the checks before a save", () => {
         undefined,
       ),
     ).toEqual({ "/push_secret": PUSH_SECRET_FORMAT });
+    // A key of 24 bytes or more, as the server requires; a shorter one is refused before the save.
     expect(
       connectionErrors(
-        { ...valid, event_delivery: "push", push_secret: { mode: "replace", value: "whsec_AA==" } },
+        {
+          ...valid,
+          event_delivery: "push",
+          push_secret: { mode: "replace", value: "whsec_dHdlbnR5LWZvdXItYnl0ZS1rZXkhISEh" },
+        },
         undefined,
       ),
     ).toEqual({});
+    expect(
+      connectionErrors(
+        {
+          ...valid,
+          event_delivery: "push",
+          push_secret: { mode: "replace", value: "whsec_dHdlbnR5LXRocmVlLWJ5dGUta2V5ISE=" },
+        },
+        undefined,
+      ),
+    ).toEqual({ "/push_secret": PUSH_SECRET_FORMAT });
     // A stored push secret is kept; one never stored is not.
     const stored = connectionValues(BRIDGE);
     expect(connectionErrors(stored, BRIDGE)).toEqual({});
@@ -572,7 +587,7 @@ describe("the checks before a save", () => {
       "Enter an absolute http or https URL without user information, query or fragment, such as https://bridge.example.org. A path prefix is allowed.",
     );
     expect(connectionErrorText(i18n.t, PUSH_SECRET_FORMAT)).toBe(
-      "Enter the push secret as whsec_ followed by base64.",
+      "Enter the push secret as whsec_ followed by the base64 of at least 24 bytes.",
     );
   });
 

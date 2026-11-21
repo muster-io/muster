@@ -57,8 +57,12 @@ func TestBridgeCheckUsage(t *testing.T) {
 		{"large token file", "--token-file: the file is larger than 64 KiB", []string{"http://a", "--token-file",
 			secretFile(t, "large", strings.Repeat("x", maxSecretFile+1)), "--channel", "c"}},
 		{"directory", "--token-file: read ", []string{"http://a", "--token-file", t.TempDir(), "--channel", "c"}},
-		{"malformed push secret", "--push-secret-file does not hold whsec_ followed by base64", []string{"http://a",
-			"--token-file", token, "--channel", "c", "--push-secret-file", secretFile(t, "push", malformed)}},
+		{"malformed push secret", "--push-secret-file does not hold whsec_ followed by base64 of at least 24 bytes",
+			[]string{"http://a", "--token-file", token, "--channel", "c", "--push-secret-file",
+				secretFile(t, "push", malformed)}},
+		{"short push secret", "--push-secret-file does not hold whsec_ followed by base64 of at least 24 bytes",
+			[]string{"http://a", "--token-file", token, "--channel", "c", "--push-secret-file",
+				secretFile(t, "short", "whsec_dHdlbnR5LXRocmVlLWJ5dGUta2V5ISE=\n")}},
 		{"unreadable push secret", "--push-secret-file: open ", []string{"http://a", "--token-file", token,
 			"--channel", "c", "--push-secret-file", missing}},
 	} {
@@ -157,7 +161,7 @@ func TestBridgeCheckInterrupted(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := BridgeCheckCommand(ctx, []string{"http://127.0.0.1:1", "--token-file",
 		secretFile(t, "token", "t"), "--channel", "c", "--push-secret-file",
-		secretFile(t, "push", "whsec_YQ==\n")}, &stdout, &stderr)
+		secretFile(t, "push", "whsec_aW50ZXJydXB0ZWQtY2hlY2stcHVzaC1zZWNyZXQtMzI=\n")}, &stdout, &stderr)
 	if code != exitFailure || stdout.Len() != 0 || stderr.String() != "muster bridge check: interrupted\n" {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}

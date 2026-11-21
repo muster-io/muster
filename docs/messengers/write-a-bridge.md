@@ -2433,7 +2433,7 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
 :   Where the bridge reaches the push listener, the listener's own address by default.
 
 `--push-secret-file <file>`
-:   The push secret, `whsec_` and base64, instead of a generated one.
+:   The push secret, `whsec_` and the base64 of at least 24 bytes, instead of a generated one.
 
 `--no-interactive`
 :   Skip `press`, `push` and `notification_acknowledged`, which need a person.

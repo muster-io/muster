@@ -1852,7 +1852,8 @@ const (
 // the Connection with getInfo and its Destination with checkChannel, the Bridge delivery, its deletion, and a client
 // with an unsupported proxy.
 func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
-	logger := logging.New(log, logging.LevelInfo)
+	var logged bytes.Buffer
+	logger := logging.New(io.MultiWriter(log, &logged), logging.LevelInfo)
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
 	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
 	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
@@ -1997,6 +1998,11 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 		channelAnswer.Store(a)
 		doctorRun()
 	}
+	shortErrs, err := probeShortPushSecret(ctx, svc, store, k, secrets[1][:16], now)
+	if err != nil {
+		return err
+	}
+	errs = append(errs, shortErrs...)
 	check()
 	for _, a := range []int32{bridgeProblem, bridgeUnauthorized, bridgeForbidden} {
 		messageAnswer.Store(a)
@@ -2026,7 +2032,76 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 	_, err = bridge.NewClient(bridge.Network(network), bridge.Settings{BaseURL: "http://" + ln.Addr().String(),
 		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
 			Password: logging.Secret(secrets[2])}})
-	return errors.Join(append(errs, err)...)
+	errs = append(errs, err)
+	// The short push secret is no planted secret: its key is part of one, which CheckProbe does not find, so the
+	// probe looks for the key itself, in any form, the whsec_ value included.
+	returned := strings.Join(errorTexts(errors.Join(errs...), 0), "\n")
+	var leaks []string
+	for _, f := range leakForms(secrets[1][:16]) {
+		if strings.Contains(logged.String(), f.text) {
+			leaks = append(leaks, "the key of a short push secret reached the log output")
+		}
+		if strings.Contains(returned, f.text) {
+			leaks = append(leaks, "the key of a short push secret reached the returned error")
+		}
+	}
+	if len(leaks) > 0 {
+		slices.Sort(leaks)
+		errs = append(errs, &probeLeak{what: slices.Compact(leaks)})
+	}
+	return errors.Join(errs...)
+}
+
+// probeShortPushSecret stores on the push-mode Connection of store a push secret whose key, key, is shorter than
+// bridge.MinPushSecretBytes, as a version before that minimum saved it, and reads it as the warnings of Get, List and
+// muster doctor open it; then once more with a ciphertext that cannot be opened, whose error those reads swallow or
+// report; then it restores the stored row. It returns what each read returned, and a probeIncomplete when the short
+// push secret was not reported.
+func probeShortPushSecret(ctx context.Context, svc *connections.Service, store *probeConnections, k *keyring.Keyring,
+	key string, now time.Time) ([]error, error) {
+	short := logging.Secret("whsec_" + base64.StdEncoding.EncodeToString([]byte(key)))
+	sealed, _, err := k.ApplySecret("connections.bridge_push_secret", keyring.StoredSecret{}, keyring.Replace(short),
+		now)
+	if err != nil {
+		return nil, err
+	}
+	saved := *store.row
+	var errs []error
+	reported := map[string]bool{}
+	read := func() {
+		store.row.Version++
+		c, err := svc.Get(ctx, store.row.PublicID)
+		errs = append(errs, err, errors.New(strings.Join(c.Warnings, " ")))
+		reported["get"] = reported["get"] || slices.Contains(c.Warnings, connections.WarningPushSecretTooShort)
+		page, err := svc.List(ctx, connections.ListFilter{})
+		errs = append(errs, err)
+		for _, c := range page.Connections {
+			errs = append(errs, errors.New(strings.Join(c.Warnings, " ")))
+			reported["list"] = reported["list"] || slices.Contains(c.Warnings, connections.WarningPushSecretTooShort)
+		}
+		found, err := svc.Doctor(ctx, store, 2*time.Second)
+		errs = append(errs, err)
+		for _, f := range found {
+			errs = append(errs, errors.New(f.Message), errors.New(f.Warning))
+			reported["doctor"] = reported["doctor"] || f.Warning == connections.HintPushSecretTooShort
+		}
+	}
+	store.row.BridgePushSecretCiphertext = sealed.Ciphertext
+	store.row.BridgePushSecretKeyID = pgtype.Text{String: sealed.KeyID, Valid: true}
+	read()
+	broken := bytes.Clone(sealed.Ciphertext)
+	broken[len(broken)-1] ^= 1
+	store.row.BridgePushSecretCiphertext = broken
+	read()
+	version := store.row.Version + 1
+	*store.row = saved
+	store.row.Version = version
+	for _, r := range []string{"get", "list", "doctor"} {
+		if !reported[r] {
+			errs = append(errs, &probeIncomplete{"the short push secret was not reported by " + r})
+		}
+	}
+	return errs, nil
 }
 
 // probeBridgeAdapter posts, edits and replies through the Bridge delivery to the Destination 2 of the Connection on the

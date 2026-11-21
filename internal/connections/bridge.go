@@ -5,7 +5,6 @@ package connections
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -48,11 +47,16 @@ const (
 	StepEventDelivery = "event_delivery"
 )
 
-const (
-	fieldPushSecret = "connections.bridge_push_secret"
-	// pushSecretPrefix starts a push secret in the Standard Webhooks form, followed by base64.
-	pushSecretPrefix = "whsec_"
-)
+// WarningPushSecretTooShort is the warning of a Bridge Connection in push mode whose stored push secret has a key
+// shorter than bridge.MinPushSecretBytes, saved before Muster refused one: it keeps working, and a new push secret ends
+// the warning.
+const WarningPushSecretTooShort = "push_secret_too_short"
+
+// HintPushSecretTooShort is what muster doctor says of a Bridge Connection with WarningPushSecretTooShort.
+const HintPushSecretTooShort = "the push secret is shorter than 24 bytes: set a new one, whsec_ followed by the " +
+	"base64 of 24 to 64 random bytes, on the Connection and on the bridge"
+
+const fieldPushSecret = "connections.bridge_push_secret"
 
 // bridgeEventLockClass is the first key of the transaction advisory lock of the claim of one Bridge event, whose second
 // key is hashtext of the Connection's id and the event id: HandleEventOnce holds it while the event is handled, so
@@ -88,8 +92,10 @@ func checkBridgeAddress(in *Input) error {
 }
 
 // checkPushSecret validates the push secret of the Bridge Connection in, saved over stored (nil on a creation): push
-// event delivery needs one, sent now or stored, in the Standard Webhooks form, whsec_ followed by base64; poll takes
-// none, and its save clears the stored one. The detail never shows the value.
+// event delivery needs one, sent now or stored, in the Standard Webhooks form, whsec_ followed by the base64 of at
+// least bridge.MinPushSecretBytes; poll takes none, and its save clears the stored one. Only a push secret sent now is
+// checked: a stored one shorter than the minimum, saved before it, is kept and reported with
+// WarningPushSecretTooShort. The detail never shows the value.
 func checkPushSecret(in Input, stored *Connection) error {
 	p := in.PushSecret
 	if in.EventDelivery != EventDeliveryPush {
@@ -103,20 +109,38 @@ func checkPushSecret(in Input, stored *Connection) error {
 	case p.Null, !p.Given && (stored == nil || !stored.PushSecret.Set):
 		return &FieldError{Pointer: "/push_secret", Code: CodeRequired,
 			Detail: "Push event delivery needs a push secret."}
-	case p.Given && !validPushSecret(p.Value):
+	case p.Given && !bridge.ValidPushSecret(p.Value):
 		return &FieldError{Pointer: "/push_secret", Code: CodeInvalidFormat,
-			Detail: "The push secret is not whsec_ followed by base64."}
+			Detail: "The push secret is not whsec_ followed by base64 of at least 24 bytes."}
 	}
 	return nil
 }
 
-func validPushSecret(v logging.Secret) bool {
-	rest, ok := strings.CutPrefix(string(v), pushSecretPrefix)
-	if !ok {
-		return false
+// withBridgeWarnings adds WarningPushSecretTooShort to the Bridge Connection c of row in push mode when its stored
+// push secret is shorter than bridge.MinPushSecretBytes. A push secret that cannot be opened adds nothing here: the
+// check, muster doctor and the push callback report it.
+func (s *Service) withBridgeWarnings(c Connection, row dbgen.GetConnectionRow) Connection {
+	if row.Type != TypeBridge || row.BridgeEventDelivery.String != EventDeliveryPush || s.cfg.Keyring == nil {
+		return c
 	}
-	key, err := base64.StdEncoding.DecodeString(rest)
-	return err == nil && len(key) > 0
+	if short, err := s.pushSecretTooShort(row); err == nil && short {
+		c.Warnings = append(c.Warnings, WarningPushSecretTooShort)
+	}
+	return c
+}
+
+// pushSecretTooShort reports whether the stored push secret of the Bridge Connection row is set and shorter than
+// bridge.MinPushSecretBytes.
+func (s *Service) pushSecretTooShort(row dbgen.GetConnectionRow) (bool, error) {
+	stored := storedPushSecret(row)
+	if !stored.Set() {
+		return false, nil
+	}
+	v, err := s.cfg.Keyring.OpenSecret(fieldPushSecret, stored)
+	if err != nil {
+		return false, fmt.Errorf("open the push secret of the connection %s: %w", row.PublicID, err)
+	}
+	return !bridge.ValidPushSecret(v), nil
 }
 
 // pushSecret applies the push secret of in to the stored one at now: the one sent in push event delivery, none
