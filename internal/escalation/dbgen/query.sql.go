@@ -89,7 +89,7 @@ func (q *Queries) DeleteSteps(ctx context.Context, arg DeleteStepsParams) error 
 }
 
 const getChain = `-- name: GetChain :one
-SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.owning_team_id,
+SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.managed_by, c.owning_team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted
 FROM escalation_chains c
@@ -109,6 +109,7 @@ type GetChainRow struct {
 	Description  string
 	CreatedAt    time.Time
 	Version      int64
+	ManagedBy    pgtype.Text
 	OwningTeamID pgtype.Int8
 	TeamPublicID pgtype.Text
 	TeamName     pgtype.Text
@@ -127,6 +128,7 @@ func (q *Queries) GetChain(ctx context.Context, arg GetChainParams) (GetChainRow
 		&i.Description,
 		&i.CreatedAt,
 		&i.Version,
+		&i.ManagedBy,
 		&i.OwningTeamID,
 		&i.TeamPublicID,
 		&i.TeamName,
@@ -297,8 +299,13 @@ func (q *Queries) GetTeamWorkingHours(ctx context.Context, arg GetTeamWorkingHou
 }
 
 const insertChain = `-- name: InsertChain :one
-INSERT INTO escalation_chains (org_id, public_id, name, description, owning_team_id, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5::bigint, $6, $6)
+INSERT INTO escalation_chains (
+    org_id, public_id, name, description, owning_team_id, managed_by, created_at, updated_at
+)
+VALUES (
+    $1, $2, $3, $4, $5::bigint, $6::text, $7,
+    $7
+)
 RETURNING id
 `
 
@@ -308,6 +315,7 @@ type InsertChainParams struct {
 	Name         string
 	Description  string
 	OwningTeamID pgtype.Int8
+	ManagedBy    pgtype.Text
 	Now          time.Time
 }
 
@@ -319,6 +327,7 @@ func (q *Queries) InsertChain(ctx context.Context, arg InsertChainParams) (int64
 		arg.Name,
 		arg.Description,
 		arg.OwningTeamID,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -757,7 +766,7 @@ func (q *Queries) ListChainSources(ctx context.Context, arg ListChainSourcesPara
 }
 
 const listChains = `-- name: ListChains :many
-SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.owning_team_id,
+SELECT c.id, c.public_id, c.name, c.description, c.created_at, c.version, c.managed_by, c.owning_team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted, lower(c.name)::text AS sort_name
 FROM escalation_chains c
@@ -787,6 +796,7 @@ type ListChainsRow struct {
 	Description  string
 	CreatedAt    time.Time
 	Version      int64
+	ManagedBy    pgtype.Text
 	OwningTeamID pgtype.Int8
 	TeamPublicID pgtype.Text
 	TeamName     pgtype.Text
@@ -820,6 +830,7 @@ func (q *Queries) ListChains(ctx context.Context, arg ListChainsParams) ([]ListC
 			&i.Description,
 			&i.CreatedAt,
 			&i.Version,
+			&i.ManagedBy,
 			&i.OwningTeamID,
 			&i.TeamPublicID,
 			&i.TeamName,
@@ -2123,14 +2134,15 @@ func (q *Queries) StopRuns(ctx context.Context, arg StopRunsParams) ([]StopRunsR
 const updateChain = `-- name: UpdateChain :exec
 UPDATE escalation_chains
 SET name = $1, description = $2, owning_team_id = $3::bigint,
-    updated_at = $4, version = version + 1
-WHERE org_id = $5 AND id = $6
+    managed_by = $4::text, updated_at = $5, version = version + 1
+WHERE org_id = $6 AND id = $7
 `
 
 type UpdateChainParams struct {
 	Name         string
 	Description  string
 	OwningTeamID pgtype.Int8
+	ManagedBy    pgtype.Text
 	Now          time.Time
 	OrgID        int64
 	ID           int64
@@ -2142,6 +2154,7 @@ func (q *Queries) UpdateChain(ctx context.Context, arg UpdateChainParams) error 
 		arg.Name,
 		arg.Description,
 		arg.OwningTeamID,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

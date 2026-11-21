@@ -94,12 +94,14 @@ Names in the form `area.setting` and `MUSTER_*` refer to rows of [defaults.md](d
   Timeline entries for open Alert Groups are C-09.FR-18.
 - **C-02.FR-13** Muster exports `muster_clock_skew_seconds` (replica clock against the database clock) and logs a
   warning when the skew exceeds `process.clock_skew_warning`.
-- **C-02.FR-14** `muster doctor` only reads. It checks database reachability, the PostgreSQL version, the pooler mode of
-  both connections, whether each connection uses TLS, the key canary, the Keyring status (which keys are still needed),
-  clock skew and — once they exist (C-13, C-14) — the check of every Connection and every Destination that has one; it
-  prints one line per check and exits non-zero if any fails. Because `prefer` falls back to an unencrypted connection
-  without an error, the TLS line names the mode in effect and warns, without failing, when a connection is unencrypted;
-  at startup Muster logs the same as a registered event, at WARN when a connection is unencrypted.
+- **C-02.FR-14** `muster doctor` only reads. It checks database reachability, the PostgreSQL version, the schema version
+  against the binary's migrations (failing on a dirty schema or one newer than the binary knows, warning on an older
+  one), the pooler mode of both connections, whether each connection uses TLS, the key canary, the Keyring status
+  (which keys are still needed), clock skew and — once they exist (C-13, C-14) — the check of every Connection and
+  every Destination that has one; it prints one line per check and exits non-zero if any fails. Because `prefer` falls
+  back to an unencrypted connection without an error, the TLS line names the mode in effect and warns, without
+  failing, when a connection is unencrypted; at startup Muster logs the same as a registered event, at WARN when a
+  connection is unencrypted.
 - **C-02.FR-15** The CLI offers only emergency, bootstrap and diagnostic subcommands: `muster migrate` and
   `muster doctor` here; `muster admin reset-password` and `muster admin reset-totp` (C-03); `muster ingest replay`
   (C-06); `muster secrets rotate-key --activate <id>` (C-20). Those that change data on a person's request require

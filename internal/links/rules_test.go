@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/muster-io/muster/internal/links/dbgen"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/publicid"
 )
 
@@ -29,6 +30,82 @@ func webhook(labels string) []byte {
 	return []byte(`{"status":"firing","receiver":"lab","groupLabels":{"alertname":"HighLatency"},"alerts":[` +
 		`{"status":"firing","labels":` + labels + `,"annotations":{},"startsAt":"2026-10-08T11:00:00Z",` +
 		`"generatorURL":"http://prometheus:9090/graph?g0.expr=up%3D%3D0","fingerprint":"f1"}]}`)
+}
+
+// TestManagedBy is C-33.FR-11 for Lookup tables and Link rules: a creation stores the mark or none, an update that
+// leaves it out keeps it, null clears it, and each change is in the Audit log diff; the built-in "Explore" rule takes
+// the mark like any rule (C-33.FR-14).
+func TestManagedBy(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	s, _ := newService(t, f)
+	cleared := `[{"pointer":"/managed_by","before":"terraform"}]`
+	tin := grafana()
+	tin.ManagedBy = managedby.Set("terraform")
+	table, err := s.CreateTable(ctx, by, tin)
+	if err != nil || table.ManagedBy == nil || *table.ManagedBy != "terraform" {
+		t.Fatalf("create a marked table = %v, %v", table.ManagedBy, err)
+	}
+	tin.Name, tin.ManagedBy = "grafana-2", managedby.Input{}
+	if kept, err := s.UpdateTable(ctx, by, table.PublicID, nil, tin); err != nil || kept.ManagedBy == nil ||
+		*kept.ManagedBy != "terraform" || kept.Name != "grafana-2" || kept.Version != table.Version+1 {
+		t.Errorf("rename a table without the mark = %+v, %v", kept, err)
+	}
+	tables, err := s.ListTables(ctx, ListFilter{Limit: 10})
+	if err != nil || len(tables.Tables) != 1 || tables.Tables[0].ManagedBy == nil ||
+		*tables.Tables[0].ManagedBy != "terraform" {
+		t.Errorf("list marked tables = %+v, %v", tables, err)
+	}
+	tin.ManagedBy = managedby.Clear
+	if got, err := s.UpdateTable(ctx, by, table.PublicID, nil, tin); err != nil || got.ManagedBy != nil ||
+		string(f.audit[len(f.audit)-1].Diff) != cleared {
+		t.Errorf("update a table with null = %v, %v, %s", got.ManagedBy, err, f.audit[len(f.audit)-1].Diff)
+	}
+	rin := dashboard()
+	rin.ManagedBy = managedby.Set("terraform")
+	rule, err := s.CreateRule(ctx, by, rin)
+	if err != nil || rule.ManagedBy == nil || *rule.ManagedBy != "terraform" {
+		t.Fatalf("create a marked rule = %v, %v", rule.ManagedBy, err)
+	}
+	rin.Name, rin.ManagedBy = "Dashboard 2", managedby.Input{}
+	if kept, err := s.UpdateRule(ctx, by, rule.PublicID, nil, rin); err != nil || kept.ManagedBy == nil ||
+		*kept.ManagedBy != "terraform" || kept.Name != "Dashboard 2" || kept.Version != rule.Version+1 {
+		t.Errorf("rename a rule without the mark = %+v, %v", kept, err)
+	}
+	rules, err := s.ListRules(ctx, ListFilter{Limit: 10})
+	if i := slices.IndexFunc(rules.Rules, func(r Rule) bool { return r.PublicID == rule.PublicID }); err != nil ||
+		i < 0 || rules.Rules[i].ManagedBy == nil || *rules.Rules[i].ManagedBy != "terraform" {
+		t.Errorf("list marked rules = %+v, %v", rules, err)
+	}
+	rin.ManagedBy = managedby.Clear
+	if got, err := s.UpdateRule(ctx, by, rule.PublicID, nil, rin); err != nil || got.ManagedBy != nil ||
+		string(f.audit[len(f.audit)-1].Diff) != cleared {
+		t.Errorf("update a rule with null = %v, %v, %s", got.ManagedBy, err, f.audit[len(f.audit)-1].Diff)
+	}
+	tables, err = s.ListTables(ctx, ListFilter{Limit: 10})
+	if err != nil || len(tables.Tables) != 1 || tables.Tables[0].ManagedBy != nil {
+		t.Errorf("list cleared tables = %+v, %v", tables, err)
+	}
+
+	// The built-in rule takes the mark with its own name and scope, and loses it with null.
+	if err := EnsureExplore(ctx, f, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(f.rules, func(r *ruleRow) bool { return r.Builtin })
+	if i < 0 {
+		t.Fatal("no built-in rule")
+	}
+	explore := RuleInput{Name: ExploreName, Matchers: []Matcher{}, Scope: Scope{Type: ScopeAlertGroup},
+		URLTemplate: ExploreTemplate, ManagedBy: managedby.Set("terraform")}
+	got, err := s.UpdateRule(ctx, by, f.rules[i].PublicID, nil, explore)
+	if err != nil || !got.Builtin || got.ManagedBy == nil || *got.ManagedBy != "terraform" {
+		t.Fatalf("mark the built-in rule = %+v, %v", got, err)
+	}
+	explore.ManagedBy = managedby.Clear
+	if got, err := s.UpdateRule(ctx, by, f.rules[i].PublicID, nil, explore); err != nil || !got.Builtin ||
+		got.ManagedBy != nil || string(f.audit[len(f.audit)-1].Diff) != cleared {
+		t.Errorf("clear the mark of the built-in rule = %+v, %v", got, err)
+	}
 }
 
 // TestLinkRules: a rule is created, read, listed, updated and deleted with its Matchers and scope, each change with
@@ -130,6 +207,7 @@ func TestLinkRuleChecks(t *testing.T) {
 		line          int
 	}{
 		{with(func(in *RuleInput) { in.Name = "" }), "/name", CodeInvalidFormat, 0},
+		{with(func(in *RuleInput) { in.ManagedBy = managedby.Set("") }), "/managed_by", CodeInvalidFormat, 0},
 		{with(func(in *RuleInput) { in.Matchers = []Matcher{{Label: "", Op: "=", Value: "x"}} }),
 			"/matchers/0/label", CodeInvalidFormat, 0},
 		{with(func(in *RuleInput) { in.Matchers = []Matcher{{Label: "a", Op: "==", Value: "x"}} }),

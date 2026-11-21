@@ -315,7 +315,7 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
        s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count,
        r.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name, t.slug AS owning_team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label,
-       r.deliver_to_teams, r.run_team_chains
+       r.deliver_to_teams, r.run_team_chains, r.managed_by
 FROM routes r
 JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
@@ -370,6 +370,7 @@ type GetRouteRow struct {
 	TeamLabel                      string
 	DeliverToTeams                 bool
 	RunTeamChains                  bool
+	ManagedBy                      pgtype.Text
 }
 
 // GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error, its
@@ -419,6 +420,7 @@ func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow
 		&i.TeamLabel,
 		&i.DeliverToTeams,
 		&i.RunTeamChains,
+		&i.ManagedBy,
 	)
 	return i, err
 }
@@ -568,7 +570,7 @@ INSERT INTO routes (
     template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
     reminders_cap_seconds, auto_unacknowledge, owning_team_id, message_labels, deliver_to_teams, run_team_chains,
-    created_at, updated_at
+    managed_by, created_at, updated_at
 )
 SELECT $1, $2, $3, $4,
        coalesce((SELECT CASE WHEN $5::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
@@ -581,7 +583,7 @@ SELECT $1, $2, $3, $4,
        $18, $19, $20,
        $21, $22, $23,
        $24::bigint, $25::text[], $26, $27,
-       $28, $28
+       $28::text, $29, $29
 RETURNING id
 `
 
@@ -613,6 +615,7 @@ type InsertRouteParams struct {
 	MessageLabels                  []string
 	DeliverToTeams                 bool
 	RunTeamChains                  bool
+	ManagedBy                      pgtype.Text
 	Now                            time.Time
 }
 
@@ -647,6 +650,7 @@ func (q *Queries) InsertRoute(ctx context.Context, arg InsertRouteParams) (int64
 		arg.MessageLabels,
 		arg.DeliverToTeams,
 		arg.RunTeamChains,
+		arg.ManagedBy,
 		arg.Now,
 	)
 	var id int64
@@ -1409,7 +1413,7 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
        s.alert_group_count AS storm_alert_group_count, r.owning_team_id, t.public_id AS owning_team_public_id,
        t.name AS owning_team_name, t.slug AS owning_team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label,
-       r.deliver_to_teams, r.run_team_chains
+       r.deliver_to_teams, r.run_team_chains, r.managed_by
 FROM routes r
 JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
@@ -1459,6 +1463,7 @@ type ListRoutesRow struct {
 	TeamLabel                      string
 	DeliverToTeams                 bool
 	RunTeamChains                  bool
+	ManagedBy                      pgtype.Text
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -1516,6 +1521,7 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 			&i.TeamLabel,
 			&i.DeliverToTeams,
 			&i.RunTeamChains,
+			&i.ManagedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -1919,8 +1925,8 @@ SET name = $1, description = $2, minimum_severity = $3,
     reminders_cap_seconds = $19, auto_unacknowledge = $20,
     owning_team_id = $21::bigint, message_labels = $22::text[],
     deliver_to_teams = $23, run_team_chains = $24,
-    updated_at = $25, version = version + 1
-WHERE org_id = $26 AND id = $27
+    managed_by = $25::text, updated_at = $26, version = version + 1
+WHERE org_id = $27 AND id = $28
 `
 
 type UpdateRouteParams struct {
@@ -1948,6 +1954,7 @@ type UpdateRouteParams struct {
 	MessageLabels                  []string
 	DeliverToTeams                 bool
 	RunTeamChains                  bool
+	ManagedBy                      pgtype.Text
 	Now                            time.Time
 	OrgID                          int64
 	ID                             int64
@@ -1981,6 +1988,7 @@ func (q *Queries) UpdateRoute(ctx context.Context, arg UpdateRouteParams) error 
 		arg.MessageLabels,
 		arg.DeliverToTeams,
 		arg.RunTeamChains,
+		arg.ManagedBy,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

@@ -357,7 +357,8 @@ func (s *Server) DeleteScheduleOverride(ctx context.Context, req gen.DeleteSched
 // scheduleInputOf is a Schedule as internal/schedules takes it.
 func scheduleInputOf(b gen.ScheduleInput) schedules.Input {
 	in := schedules.Input{TeamID: b.TeamId, Name: b.Name, TimeZone: b.TimeZone, Main: b.Main,
-		RotationLayers: make([]schedules.RotationLayerInput, len(b.RotationLayers))}
+		RotationLayers: make([]schedules.RotationLayerInput, len(b.RotationLayers)),
+		ManagedBy:      managedByIn(b.ManagedBy)}
 	if b.GapAlert != nil {
 		gapAlert := string(*b.GapAlert)
 		in.GapAlert = &gapAlert
@@ -402,7 +403,7 @@ func scheduleOf(sc schedules.Schedule) gen.Schedule {
 		Team: gen.TeamRef{Id: sc.Team.PublicID, Name: sc.Team.Name, Slug: sc.Team.Slug, Deleted: sc.Team.Deleted},
 		Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main, GapAlert: gen.ScheduleGapAlert(sc.GapAlert),
 		GapAlertActive: &active, CreatedAt: sc.CreatedAt.UTC(), Etag: &tag,
-		RotationLayers: make([]gen.RotationLayer, len(sc.RotationLayers))}
+		RotationLayers: make([]gen.RotationLayer, len(sc.RotationLayers)), ManagedBy: managedByOf(sc.ManagedBy)}
 	out.NextGap.SetNull()
 	if g := sc.NextGap; g != nil {
 		out.NextGap.Set(gen.ScheduleGap{Start: g.Start.UTC(), End: g.End.UTC()})

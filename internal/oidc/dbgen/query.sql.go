@@ -414,7 +414,7 @@ SELECT org_id, enabled, display_name, issuer_url, client_id, client_secret_ciphe
        client_secret_updated_at, client_secret_expires_on, scopes, groups_claim, group_mappings, unmatched_role,
        sync_role, skip_totp_with_idp_mfa, proxy, proxy_password_ciphertext, proxy_password_key_id,
        proxy_password_updated_at, groups_claim_missing_since, version, updated_at, groups_claim_seen_at, role_mappings,
-       claims_seen, claims_missing, claims_supported
+       claims_seen, claims_missing, claims_supported, managed_by
 FROM oidc_settings
 WHERE org_id = $1
 `
@@ -453,6 +453,7 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (OidcSetting, er
 		&i.ClaimsSeen,
 		&i.ClaimsMissing,
 		&i.ClaimsSupported,
+		&i.ManagedBy,
 	)
 	return i, err
 }

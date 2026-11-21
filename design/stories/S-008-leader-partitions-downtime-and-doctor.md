@@ -130,6 +130,7 @@ issue: 8
   |---|---|---|
   | `database` | the main or the session connection is unreachable | |
   | `postgresql_version` | older than 14 | |
+  | `schema` | dirty, or newer than the binary knows | older than the binary knows |
   | `session_connection` | advisory locks or `LISTEN` do not work (a transaction pooler) | |
   | `tls_main`, `tls_session` | never | the connection is unencrypted; the line names the mode in effect |
   | `key_canary` | the canary does not decrypt with the environment's Keyring | |

@@ -6,7 +6,7 @@
 -- name: ListIntegrations :many
 SELECT i.id, i.public_id, i.name, i.description, i.builtin, i.connection_mode, i.static_labels,
        i.duplicate_window_seconds, i.heartbeat_enabled, i.heartbeat_timeout_seconds, i.heartbeat_state,
-       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version
+       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version, i.managed_by
 FROM integrations i
 WHERE i.org_id = @org_id AND i.deleted_at IS NULL
   AND (sqlc.narg('after_id')::bigint IS NULL OR i.id > sqlc.narg('after_id')::bigint)
@@ -17,7 +17,7 @@ LIMIT @page_size;
 -- name: GetIntegration :one
 SELECT i.id, i.public_id, i.name, i.description, i.builtin, i.connection_mode, i.static_labels,
        i.duplicate_window_seconds, i.heartbeat_enabled, i.heartbeat_timeout_seconds, i.heartbeat_state,
-       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version
+       i.heartbeat_last_signal_at, i.heartbeat_lost_since, i.snapshot_count, i.created_at, i.version, i.managed_by
 FROM integrations i
 WHERE i.org_id = @org_id AND i.public_id = @public_id AND i.deleted_at IS NULL;
 
@@ -51,13 +51,13 @@ WHERE org_id = @org_id AND name = @name AND deleted_at IS NULL;
 -- name: InsertIntegration :one
 INSERT INTO integrations (
     org_id, public_id, name, description, connection_mode, static_labels, duplicate_window_seconds,
-    heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at, updated_at
+    heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, managed_by, created_at, updated_at
 )
 VALUES (
     @org_id, @public_id, @name, @description, @connection_mode, @static_labels, @duplicate_window_seconds,
     @heartbeat_enabled::boolean, @heartbeat_timeout_seconds,
-    CASE WHEN @heartbeat_enabled::boolean THEN 'waiting' ELSE 'not_configured' END, @now::timestamptz,
-    @now::timestamptz
+    CASE WHEN @heartbeat_enabled::boolean THEN 'waiting' ELSE 'not_configured' END, sqlc.narg('managed_by')::text,
+    @now::timestamptz, @now::timestamptz
 )
 RETURNING id;
 
@@ -73,7 +73,7 @@ SET name = @name, description = @description, static_labels = @static_labels,
                            WHEN heartbeat_state = 'not_configured' THEN 'waiting'
                            ELSE heartbeat_state END,
     heartbeat_lost_since = CASE WHEN @heartbeat_enabled::boolean THEN heartbeat_lost_since END,
-    updated_at = @now::timestamptz, version = version + 1
+    managed_by = sqlc.narg('managed_by')::text, updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- DeleteIntegration marks an Integration deleted; its row, its tokens and its Stored Snapshots stay.

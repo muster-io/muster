@@ -81,6 +81,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 - **C-12.FR-5** Saving a template parses it and dry-runs it against the most recent Stored Snapshots that the Route took
   (`template.dry_run_sample`; a built-in example when there are none); a template that fails is not saved, and the
   editor shows the rendered preview.
+  _Revised for L2 (2026-11-21, #375):_ from C-38 a preview of a Root message also takes an unsaved message layout and a
+  Destination, and returns the messenger payload, the number of Slack blocks and the blocks shortening cut
+  (C-38.FR-10 to C-38.FR-12).
 - **C-12.FR-6** If a message template fails at runtime, the Fallback template — every label, under Muster's heading,
   footer and buttons — is used, `muster_template_errors_total{route,destination,template}` grows, the Route shows a
   template error, the Timeline records it and the Internal alert `MusterTemplateError` is raised; it resolves when the

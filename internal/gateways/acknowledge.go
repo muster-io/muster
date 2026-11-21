@@ -17,22 +17,34 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
 )
 
 // The reasons of gateway_acknowledge_refused: action data that is not Muster's signature of a call, data signed with a
-// key that left the Keyring, a call that is not one of the Connection that reported it, and a person the call was for
-// who is disabled or deleted.
+// key that left the Keyring, a call that is not one of the Connection that reported it, a call the gateway never
+// accepted, an event whose notification_id is not the one the gateway accepted the call under, a call that ended more
+// than AckWindow ago, and a person the call was for who is disabled or deleted.
 const (
-	AckNotVerified = "not_verified"
-	AckExpired     = "expired"
-	AckUnknownCall = "unknown_call"
-	AckDisabled    = "disabled"
-	AckDeleted     = "deleted"
+	AckNotVerified          = "not_verified"
+	AckExpired              = "expired"
+	AckUnknownCall          = "unknown_call"
+	AckNotAccepted          = "not_accepted"
+	AckNotificationMismatch = "notification_mismatch"
+	AckStaleCall            = "stale_call"
+	AckDisabled             = "disabled"
+	AckDeleted              = "deleted"
 )
+
+// AckWindow is how long after a call ended — when the gateway accepted it — an acknowledgement of it is still acted
+// on, by the business clock that ended_at is written by: bridge.event_max_age, the age at which the report of an
+// acknowledgement is dropped, plus as long again for the call to ring or be retried by the gateway after it was
+// accepted. It is keyring.CallKeyWindow, the time the Keyring keeps the key that signed the call's action data.
+const AckWindow = keyring.CallKeyWindow
 
 // statusDisabled is the status of a disabled User.
 const statusDisabled = "disabled"
@@ -60,7 +72,9 @@ type Acknowledgements struct {
 	Roles auth.Roles
 	// Keys verify the action data: the Keyring.
 	Keys buttons.Keys
-	Log  *logging.Logger
+	// Business dates the end of a call against AckWindow: the business clock, which ended_at is written by.
+	Business clock.Clock
+	Log      *logging.Logger
 }
 
 var _ bridge.Acknowledgements = (*Acknowledgements)(nil)
@@ -75,9 +89,10 @@ func NewAckQueries(d DBTX) AckQueries { return dbgen.New(d) }
 // of the call — those it carried from its first attempt, also one whose chain stopped meanwhile — the dispatcher runs
 // Acknowledge with the Transport gateway, whose precondition refuses an Alert Group that someone owns or that is
 // resolved (groups.acknowledge); a person without the Permission is refused by the dispatcher, as for a press
-// (C-18.FR-8). Data that does not verify, a call of another Connection, and a disabled or deleted person run nothing,
-// are logged as gateway_acknowledge_refused and answered so. An error — a read that failed, or a Command that failed
-// otherwise than by its refusal — fails the event, so that it comes again.
+// (C-18.FR-8). Data that does not verify, a call of another Connection, an event about another notification than the
+// one the gateway accepted the call under, a call never accepted or that ended more than AckWindow ago (bound), and a
+// disabled or deleted person run nothing, are logged as gateway_acknowledge_refused and answered so. An error — a read
+// that failed, or a Command that failed otherwise than by its refusal — fails the event, so that it comes again.
 func (a *Acknowledgements) Acknowledged(ctx context.Context, c bridge.Conn, ev bridge.Event) (string, error) {
 	act, reason := a.verify(ev.Data)
 	if reason == AckExpired {
@@ -95,6 +110,13 @@ func (a *Acknowledgements) Acknowledged(ctx context.Context, c bridge.Conn, ev b
 		return "", fmt.Errorf("read the call %s: %w", act.PublicID, err)
 	}
 	lang := language(call.UserLanguage)
+	switch reason := a.bound(call, ev); reason {
+	case "":
+	case AckStaleCall:
+		return a.refuse(ctx, c, call.PublicID, reason, lang, "gatewayAck.expired"), nil
+	default:
+		return a.refuse(ctx, c, call.PublicID, reason, lang, "gatewayAck.notVerified"), nil
+	}
 	switch call.UserStatus {
 	case statusDisabled:
 		return a.refuse(ctx, c, call.PublicID, AckDisabled, lang, "gatewayAck.disabled"), nil
@@ -142,6 +164,29 @@ func (a *Acknowledgements) verify(data string) (buttons.Action, string) {
 		return buttons.Action{}, AckNotVerified
 	}
 	return act, ""
+}
+
+// bound tells why the event ev cannot acknowledge the call, empty when it can: the action data verifies, yet it stays
+// the same for every retry of the call and carries no time, so the event must also be about the notification the
+// gateway accepted the call under, and come within AckWindow of the call's end. A call is accepted only once the
+// gateway answered with its notification_id, which ended it; a call waiting, Not delivered or dropped was never
+// accepted. A call being sent — its attempt under way, whose answer is not back yet, or retried after one that ended
+// without an answer Muster could take, a Transient error or a timeout — may have been taken by the gateway and rung
+// the person: it acts without a notification_id to compare, which Muster has not got, its freshness bounded by the
+// state itself, since a call stays being sent only within delivery.transient_budget. The end is compared with the
+// business clock, which wrote it.
+func (a *Acknowledgements) bound(call dbgen.GetAcknowledgedCallRow, ev bridge.Event) string {
+	switch {
+	case call.State == CallSending:
+		return ""
+	case call.State != CallAccepted:
+		return AckNotAccepted
+	case !call.NotificationID.Valid || call.NotificationID.String != ev.NotificationID:
+		return AckNotificationMismatch
+	case !call.EndedAt.Valid || a.Business.Now().Sub(call.EndedAt.Time) > AckWindow:
+		return AckStaleCall
+	}
+	return ""
 }
 
 // refuse logs gateway_acknowledge_refused of the call publicID with reason and returns the answer key in lang.

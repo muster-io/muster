@@ -105,9 +105,10 @@ func ReadStatus(ctx context.Context, q StatusQueries, held []string, now time.Ti
 // until its Alert Group resolves. It was active before when it is the active key, when it is the before or after value
 // of /active_key_id in a keyring.key_activated Audit entry, or when it is needed: only the active key encrypts or
 // signs. A call through a Notification gateway whose action data the key signed needs it too while the gateway may
-// still report an acknowledgement of it: waiting or being sent, or accepted or Not delivered after an attempt within
-// CallKeyWindow before business while any of its Alert Groups is open, its gateway and its person not deleted.
-// It is removable when it was active before and is neither active nor needed.
+// still report an acknowledgement of it: waiting or being sent — an acknowledgement of a call being sent acts — or
+// accepted within CallKeyWindow before business, while any of its Alert Groups is open, its gateway and its person not
+// deleted. A call Not delivered after an attempt keeps it as long, though internal/gateways refuses an acknowledgement
+// of a call it never accepted. It is removable when it was active before and is neither active nor needed.
 func ReadStatusAt(ctx context.Context, q StatusQueries, held []string, now, business time.Time) (Status,
 	error) {
 	active, err := q.GetActiveKeyID(ctx)

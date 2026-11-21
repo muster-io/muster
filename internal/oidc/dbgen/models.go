@@ -38,4 +38,5 @@ type OidcSetting struct {
 	ClaimsSeen              []byte
 	ClaimsMissing           []string
 	ClaimsSupported         []string
+	ManagedBy               pgtype.Text
 }
