@@ -1155,7 +1155,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Clocks: p.clocks, Log: p.log,
 		Acknowledgements: &gateways.Acknowledgements{OrgID: orgID,
 			Queries: gateways.NewAckQueries(p.db.AccountLinksDB()), Commands: p.groups, Roles: roles,
-			Keys: p.keyring, Log: p.log}}
+			Keys: p.keyring, Business: p.clocks.Business, Log: p.log}}
 	p.bridgePoller = &bridge.Poller{Source: conns, Events: p.bridgeEvents, Log: p.log}
 	// The presses of Slack Connections reach one handler, which runs their Commands as the linked Users through the
 	// dispatcher and answers the people who pressed on the interactive path (C-24.FR-10, FR-11).
