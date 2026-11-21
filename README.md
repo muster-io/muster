@@ -28,7 +28,7 @@ change. People link their messenger accounts to their User themselves, with
 
 ## Install
 
-The first release, L1, is Muster `0.1.x`. [Requirements and tested versions](docs/install/versions.md) lists what
+L1 is Muster `0.1.x` and L2 is Muster `0.2.x`. [Requirements and tested versions](docs/install/versions.md) lists what
 Muster needs and explains its version numbers and image tags.
 
 - [Quick start](docs/quick-start.md): Docker Compose on one machine, beside its own PostgreSQL, in about five minutes.

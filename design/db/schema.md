@@ -129,6 +129,13 @@
   kind `notification_rule_action` whose subject is the rule run, `timers.notification_rule_run_id`, the Thread replies
   of Pages and the Team mention or token and the importance of a Page in the Timeline, C-32.FR-3, FR-8 to FR-10,
   FR-19, C-31.FR-3, S-155),
+  [`0050_assignees`](../../internal/db/migrations/0050_assignees.up.sql)
+  (the Assignees of Alert Groups, `alert_group_assignees`, the Assignees after a change in the Timeline and the run
+  step of the Pages and the runs of Notification rules, C-32.FR-12),
+  [`0051_gateway_pages`](../../internal/db/migrations/0051_gateway_pages.up.sql)
+  (the Pages through Notification gateways: the Page, the run and the rule run of each Alert Group of a call, the
+  gateway and the call of a Page of the kind call and the reasons of a call, C-32.FR-3, FR-10, FR-12, C-31.FR-3,
+  C-30.FR-4),
   [`0052_thread_replies_page_pending_index`](../../internal/db/migrations/0052_thread_replies_page_pending_index.up.sql)
   (`thread_replies_page_pending_idx`, the Page replies still to be sent that the delivery worker drops in Broken
   Destinations, C-32.FR-10),
@@ -1968,10 +1975,13 @@ stored `info` declares the role `gateway`; it has no table of its own.
   connection_id)` finds the contacts of a gateway, `gateway_contacts_user_idx` on `(org_id, user_id)` those of a
   person. Removing a contact, and deleting its User (C-03.FR-13), is a `DELETE`; the Audit log keeps its entries and
   shows `/contact` as `[erased]` once the User is deleted. The codes of a removed contact stay, for the limits.
-- **`gateway_contact_codes`** — the codes of `gateway.contact_code`: the SHA-256 of the code bound to its contact's
-  `public_id` (`code_hash`), the web session that asked for it (`session_id`, `ON DELETE CASCADE`: the code is checked
-  only in that session, ADR-0013), `attempts`, `expires_at` on the business clock, `sent_at` once the gateway accepted
-  its notification — only the newest sent code of a contact is checked, so that a code still being sent, or one whose
+- **`gateway_contact_codes`** — the codes of `gateway.contact_code`: the HMAC-SHA256 of the code bound to its
+  contact's `public_id` (`code_hash`), made with the active key's Keyring sub-key `gateway-contact-code` and checked
+  with every key of the Keyring, so that the value checks nothing without a master key (codes stored before as the
+  plain SHA-256 are still accepted until they expire), the web session that asked for it (`session_id`, `ON DELETE
+  CASCADE`: the code is checked only in that session, ADR-0013), `attempts`, `expires_at` on the business clock,
+  `sent_at` once the gateway accepted its notification — only the newest sent code of a contact is checked, so that a
+  code still being sent, or one whose
   sending failed, never hides an earlier valid one — `used_at` once it confirmed its contact and `voided_at` once the
   last attempt was wrong, a newer code of the contact was sent or its own sending failed. `user_id` and `contact_hash`,
   the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User and per User

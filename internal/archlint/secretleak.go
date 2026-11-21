@@ -2334,7 +2334,8 @@ func (g *gatewayRecords) texts() []string {
 // (C-30.FR-3, FR-10, C-23.FR-3 revised for L2): the first secret is the bridge's token, the second the contact. Through
 // the API of the web session it adds the contact, whose code the stand-in gateway answers by echoing the request; types
 // two wrong codes, the third secret among them, and the right one; asks for new codes, which the stand-in refuses with
-// a problem and a text that echo the request; and removes the contact. Neither the log lines — the Audit log's copies
+// a problem and a text that echo the request; and removes the contact. The codes are signed and checked with a
+// Keyring, as the server stores them. Neither the log lines — the Audit log's copies
 // included — nor the problems the API answers, nor the records of the Request log, may carry the contact or a code; as
 // in probeBridgeLinks, the probe looks for the codes it saw itself.
 func probeGatewayContacts(ctx context.Context, secrets []string, log io.Writer) error {
@@ -2389,8 +2390,20 @@ func probeGatewayContacts(ctx context.Context, secrets []string, log io.Writer) 
 	if err != nil {
 		return err
 	}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
 	store := &probeContactStore{}
-	svc := gateways.New(gateways.Config{OrgID: 1, Store: store, Audit: audit.NewWriter(logger, business),
+	svc := gateways.New(gateways.Config{OrgID: 1, Store: store, Keys: k, Audit: audit.NewWriter(logger, business),
 		Business: business, Log: logger, Path: deliverytest.Unlimited(1, clocks),
 		Gateway: &bridge.Adapter{Targets: gatewayTargets{conn: bridge.Conn{ID: 1, PublicID: "CNAAAAAAAAAAG1",
 			Version: 1, Client: c}}, Log: logger}})

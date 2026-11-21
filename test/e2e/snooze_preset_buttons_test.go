@@ -282,6 +282,18 @@ func TestSnoozePresetButtons(t *testing.T) {
 		nl, postL := e.number(gl), e.rootPost(gl)
 		waitStyles(t, "the mattermost root message", mmFiring, func() string { return mmButtons(t, e.root(nl)) })
 		waitStyles(t, "the telegram root message", tgFiring, func() string { return e.tgPostStyles(postL) })
+		// The buttons as they are now: the Route's change re-renders the Root messages without them, so the stale
+		// presses below are made with the saved data, not by label, whichever comes first.
+		var mmContext map[string]string
+		for _, x := range e.root(nl).attachment(t).Actions {
+			if x.ID == "snoozetomorrow" {
+				mmContext = x.Integration.Context
+			}
+		}
+		if mmContext == nil {
+			t.Fatal("no snoozetomorrow action on the mattermost root message")
+		}
+		tgData := e.callbackData(faketelegram.ChannelID, postL, "Until Monday 09:00")
 		a := e.api.do(http.MethodGet, "/api/v1/routes/"+route, "")
 		var rt map[string]any
 		decode(t, a, &rt)
@@ -291,12 +303,16 @@ func TestSnoozePresetButtons(t *testing.T) {
 			"group_key": rt["group_key"], "destination_ids": rt["destination_ids"], "policy": policy})
 		e.api.json(http.MethodPut, "/api/v1/routes/"+route, string(body), http.StatusOK, "If-Match", a.header.Get("ETag"))
 
+		waitStyles(t, "the re-rendered mattermost root message", "ack=Ack:primary, resolve=Resolve:success",
+			func() string { return mmButtons(t, e.root(nl)) })
+		waitStyles(t, "the re-rendered telegram root message", "[Ack:primary, Resolve:success]",
+			func() string { return e.tgPostStyles(postL) })
+
 		before := snoozes()
-		if res := e.mm.press(e.root(nl).ID, "snoozetomorrow", fakemattermost.BobUserID); string(res.Answer) !=
-			pressAnswer(textNotVerified) {
-			t.Errorf("the mattermost press %s", res.Answer)
-		}
-		if a := e.press(postL, 5001, "Until Monday 09:00", ""); a.Text != textNotVerified {
+		press, _ := json.Marshal(map[string]any{"user_id": fakemattermost.BobUserID,
+			"channel_id": fakemattermost.ChannelAlerts, "post_id": e.root(nl).ID, "context": mmContext})
+		e.callback(http.MethodPost, e.mmConn, string(press), pressAnswer(textNotVerified))
+		if a := e.press(postL, 5001, "x", fmt.Sprintf(`,"data":%q`, tgData)); a.Text != textNotVerified {
 			t.Errorf("the telegram press %+v", a)
 		}
 		if s, _ := e.ownerOf(gl); s != "firing" || snoozes() != before {
