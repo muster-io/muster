@@ -300,6 +300,12 @@ func TestSkips(t *testing.T) {
 			if got := e.skips(); !slices.Equal(got, c.skips) {
 				t.Errorf("skips %v, want %v", got, c.skips)
 			}
+			// A skipped step has its reason, a made one none (escalation_run_steps_reason_check).
+			for _, r := range e.q.recorded {
+				if r.Reason.Valid != (r.Outcome == OutcomeSkipped) || r.Reason.Valid && r.Reason.String == "" {
+					t.Errorf("step %d %s recorded with the reason %+v", r.Number, r.Outcome, r.Reason)
+				}
+			}
 			for _, p := range e.groups.progress {
 				for _, s := range p.Skips {
 					// A person who is not there at all is skipped without being named.
@@ -556,6 +562,34 @@ func TestPosition(t *testing.T) {
 		if got != c.want {
 			t.Errorf("index %d %s: %q, want %q", c.index, c.state, got, c.want)
 		}
+	}
+	// A chain that ends with a wait: the run waits it out past its last step.
+	if p := position(steps[:2], 2, RunRunning); p == nil || *p != (StepPosition{Number: 2, Kind: KindWait}) {
+		t.Errorf("waiting out the last step: %+v", p)
+	}
+}
+
+// TestSeqOfWebhooksAndPages is C-32.FR-12 and FR-13: the webhooks and the Pages of one firing are numbered in the
+// order of their steps, so that the dispatcher records them in that order.
+func TestSeqOfWebhooksAndPages(t *testing.T) {
+	e := newRunsEnv(t)
+	e.runs.pages = &recordingPages{made: func(st StepRef) StepMade {
+		return StepMade{Pages: []groups.StepPage{{ChainEntry: groups.ChainEntry{Step: st.Number}, People: []int64{21}}}}
+	}}
+	e.chain(1, "devops", false, webhookStep(41), people(21), webhookStep(41))
+	e.source(1, 0, ConditionAny)
+	e.start(t, groups.ChainStart{All: true})
+	e.fire(t, e.q.runs[0].id)
+	p := e.groups.progress[len(e.groups.progress)-1]
+	var got []string
+	for _, w := range p.Webhooks {
+		got = append(got, "webhook "+strconv.Itoa(w.Step)+"#"+strconv.Itoa(w.Seq))
+	}
+	for _, pg := range p.Pages {
+		got = append(got, "page "+strconv.Itoa(pg.Step)+"#"+strconv.Itoa(pg.Seq))
+	}
+	if want := []string{"webhook 1#0", "webhook 3#2", "page 2#1"}; !slices.Equal(got, want) {
+		t.Errorf("seqs %v, want %v", got, want)
 	}
 }
 
