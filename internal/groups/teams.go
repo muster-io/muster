@@ -118,6 +118,7 @@ func joinTeams(ctx context.Context, q Queries, orgID int64, g *Group, brought ma
 	if len(brought) == 0 {
 		return 0, nil
 	}
+	g.noTeams = false
 	p := dbgen.AddGroupTeamsParams{OrgID: orgID, AlertGroupID: g.ID, JoinedAt: now}
 	for _, id := range slices.Sorted(maps.Keys(brought)) {
 		t := brought[id]

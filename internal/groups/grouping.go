@@ -814,7 +814,7 @@ func (e *engine) create(ctx context.Context, s *slot) error {
 	g := &Group{PublicID: publicid.New(publicid.AlertGroup), Number: number, RouteID: s.route.ID,
 		KeyLabels: s.route.Key, KeyValues: s.values, KeySHA: s.sha, Title: title, TitleFromKey: fromKey,
 		CommonLabels: first.Labels, CommonAnnots: first.Annotations, Severity: organization.SeverityInfo,
-		CreatedAt: e.now, LastChangedAt: e.now}
+		CreatedAt: e.now, LastChangedAt: e.now, noTeams: true}
 	if e.source != nil {
 		g.FiringAgainAfterID = &e.source.ID
 	}
