@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
@@ -55,6 +56,8 @@ type DB struct {
 	pool        querier
 	connect     func(context.Context) (conn, error)
 	newMigrator func(context.Context, *logging.Logger, conn) (migrator, error)
+	// real is the real clock, which times the ANALYZE after migrations.
+	real clock.Clock
 }
 
 // conn is a session connection that the caller closes.
@@ -91,7 +94,7 @@ func Open(ctx context.Context, main, session config.Database) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the main database connection: %w", err)
 	}
-	d := &DB{Pool: pool, main: main, session: session, sessionConfig: sessionConfig, pool: pool}
+	d := &DB{Pool: pool, main: main, session: session, sessionConfig: sessionConfig, pool: pool, real: clock.Real{}}
 	d.connect = func(ctx context.Context) (conn, error) { return d.ConnectSession(ctx) }
 	d.newMigrator = newMigrate
 	return d, nil

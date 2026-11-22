@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -50,6 +51,8 @@ func (r stubRow) Scan(dest ...any) error {
 			*p = r.values[i].(bool)
 		case *int64:
 			*p = r.values[i].(int64)
+		case *[]string:
+			*p = r.values[i].([]string)
 		default:
 			return errors.New("stubRow: unsupported destination")
 		}
@@ -635,8 +638,21 @@ func fakeDB() (*DB, *stubConn, *stubConn) {
 		session: config.Database{SSLMode: "prefer"},
 		pool:    pool,
 		connect: func(context.Context) (conn, error) { return session, nil },
+		real:    &steppingClock{now: time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC), step: 250 * time.Millisecond},
 	}
 	return d, pool, session
+}
+
+// steppingClock moves forward by step at every reading, so that a duration between two readings is step.
+type steppingClock struct {
+	now  time.Time
+	step time.Duration
+}
+
+func (c *steppingClock) Now() time.Time {
+	t := c.now
+	c.now = c.now.Add(c.step)
+	return t
 }
 
 func decode(t *testing.T, out *bytes.Buffer) []map[string]any {
@@ -835,6 +851,7 @@ func TestMigrate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d, _, session := fakeDB()
+			session.rows["SELECT current_schema()"] = stubRow{values: []any{"public", []string{"alerts"}}}
 			d.newMigrator = func(context.Context, *logging.Logger, conn) (migrator, error) { return tt.m, nil }
 			var out bytes.Buffer
 			err := d.Migrate(t.Context(), logging.New(&out, logging.LevelInfo))
@@ -848,8 +865,71 @@ func TestMigrate(t *testing.T) {
 				t.Errorf("ups %d, migrator closed %v, session closed %v", tt.m.ups, tt.m.closed, session.closed)
 			}
 			want := []string{"SELECT pg_advisory_lock($1)", "SELECT pg_advisory_unlock($1)"}
+			if strings.Contains(tt.wantLine, "migrations_applied") {
+				want = slices.Insert(want, 1, `ANALYZE (SKIP_LOCKED) "public"."alerts"`)
+			}
 			if strings.Join(session.execs, "|") != strings.Join(want, "|") {
-				t.Errorf("statements %q, want the lock and its release", session.execs)
+				t.Errorf("statements %q, want %q", session.execs, want)
+			}
+		})
+	}
+}
+
+// TestMigrateAnalyze: once migrations were applied, from no version too, ANALYZE names every table listed in the
+// current schema, quoted and qualified, under the migration lock, and logs schema_analyzed with the time on the real
+// clock; a schema already current analyzes nothing. A failed listing or ANALYZE is a warning and Migrate succeeds.
+func TestMigrateAnalyze(t *testing.T) {
+	listed := stubRow{values: []any{"muster", []string{"alerts", `odd"name`, "stored_snapshots"}}}
+	const analyze = `ANALYZE (SKIP_LOCKED) "muster"."alerts", "muster"."odd""name", "muster"."stored_snapshots"`
+	tests := []struct {
+		name      string
+		versions  []uint
+		upErr     error
+		list      stubRow
+		analyzeEr error
+		wantExecs []string
+		wantLine  string
+		notLogged string
+	}{
+		{name: "new database", versions: []uint{0, 56}, list: listed, wantExecs: []string{analyze},
+			wantLine: `"level":"INFO","event":"schema_analyzed","tables":3,"duration_ms":250`},
+		{name: "upgrade", versions: []uint{55, 56}, list: listed, wantExecs: []string{analyze},
+			wantLine: `"level":"INFO","event":"schema_analyzed","tables":3,"duration_ms":250`},
+		{name: "current", versions: []uint{56, 56}, upErr: migrate.ErrNoChange, list: listed,
+			wantLine: `"event":"migrations_current"`, notLogged: `"event":"schema_analy`},
+		{name: "no tables", versions: []uint{0, 56}, list: stubRow{values: []any{"muster", []string{}}},
+			wantLine: `"event":"migrations_applied"`, notLogged: `"event":"schema_analy`},
+		{name: "listing fails", versions: []uint{0, 56}, list: stubRow{err: errors.New("permission denied")},
+			wantLine: `"level":"WARN","event":"schema_analyze_failed","tables":0,` +
+				`"error":"list the tables of the schema: permission denied"`, notLogged: `"event":"schema_analyzed"`},
+		{name: "analyze fails", versions: []uint{0, 56}, list: listed, analyzeEr: errors.New("canceling statement"),
+			wantExecs: []string{analyze},
+			wantLine:  `"level":"WARN","event":"schema_analyze_failed","tables":3,"error":"canceling statement"`,
+			notLogged: `"event":"schema_analyzed"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d, _, session := fakeDB()
+			session.rows["SELECT current_schema()"] = tt.list
+			if tt.analyzeEr != nil {
+				session.execErrs = map[string]error{"ANALYZE": tt.analyzeEr}
+			}
+			m := &fakeMigrator{versions: tt.versions, upErr: tt.upErr}
+			d.newMigrator = func(context.Context, *logging.Logger, conn) (migrator, error) { return m, nil }
+			var out bytes.Buffer
+			if err := d.Migrate(t.Context(), logging.New(&out, logging.LevelInfo)); err != nil {
+				t.Fatalf("Migrate: %v", err)
+			}
+			if !strings.Contains(out.String(), tt.wantLine) {
+				t.Errorf("logged %s, want %s", out.String(), tt.wantLine)
+			}
+			if tt.notLogged != "" && strings.Contains(out.String(), tt.notLogged) {
+				t.Errorf("logged %s, want no %s", out.String(), tt.notLogged)
+			}
+			want := slices.Concat([]string{"SELECT pg_advisory_lock($1)"}, tt.wantExecs,
+				[]string{"SELECT pg_advisory_unlock($1)"})
+			if !slices.Equal(session.execs, want) {
+				t.Errorf("statements %q, want %q", session.execs, want)
 			}
 		})
 	}

@@ -201,7 +201,49 @@ func (d *DB) migrate(ctx context.Context, log *logging.Logger, c conn) error {
 		return nil
 	}
 	log.Log(ctx, logging.MigrationsApplied, logging.F("from", from), logging.F("to", to))
+	d.analyze(ctx, log, c)
 	return nil
+}
+
+// schemaTablesQuery lists the current schema, the one the migrations ran in, and its tables that are not partitions,
+// sorted: ANALYZE of a partitioned table also analyzes its partitions. Other schemas of the database are never listed.
+const schemaTablesQuery = `SELECT current_schema()::text,
+       coalesce(array_agg(c.relname::text ORDER BY c.relname), '{}')
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = current_schema()
+   AND c.relkind IN ('r', 'p')
+   AND NOT c.relispartition`
+
+// analyze runs ANALYZE on the tables of the current schema over c, still under the migration lock, so that the
+// planner has statistics after migrations at once instead of after autovacuum's first pass; a replica that waited for
+// the lock finds the schema current and analyzes nothing. SKIP_LOCKED skips a table that another session holds in a
+// conflicting lock, such as a VACUUM or an index build, instead of holding up the start behind it. A failure is a
+// warning: the migrations committed, and autovacuum analyzes the tables as they change.
+func (d *DB) analyze(ctx context.Context, log *logging.Logger, c conn) {
+	started := d.real.Now()
+	var (
+		schema string
+		tables []string
+	)
+	if err := c.QueryRow(ctx, schemaTablesQuery).Scan(&schema, &tables); err != nil {
+		log.Log(ctx, logging.SchemaAnalyzeFailed, logging.F("tables", 0),
+			logging.F("error", fmt.Sprintf("list the tables of the schema: %v", err)))
+		return
+	}
+	if len(tables) == 0 {
+		return
+	}
+	names := make([]string, len(tables))
+	for i, t := range tables {
+		names[i] = pgx.Identifier{schema, t}.Sanitize()
+	}
+	if _, err := c.Exec(ctx, "ANALYZE (SKIP_LOCKED) "+strings.Join(names, ", ")); err != nil {
+		log.Log(ctx, logging.SchemaAnalyzeFailed, logging.F("tables", len(tables)), logging.F("error", err.Error()))
+		return
+	}
+	log.Log(ctx, logging.SchemaAnalyzed, logging.F("tables", len(tables)),
+		logging.F("duration_ms", d.real.Now().Sub(started).Milliseconds()))
 }
 
 // newMigrate is golang-migrate with the embedded migrations, run over c, which holds the migration lock.

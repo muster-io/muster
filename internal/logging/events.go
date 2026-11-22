@@ -87,6 +87,21 @@ var MigrationRetried = newEvent("migration_retried", LevelWarn, "C-02",
 		"not run again. attempt is the attempt that failed, of three; when the third fails, the migration fails.",
 	"version", "attempt", "sqlstate")
 
+// SchemaAnalyzed is logged when ANALYZE ran on the tables of the schema after migrations were applied.
+var SchemaAnalyzed = newEvent("schema_analyzed", LevelInfo, "C-02",
+	"Migrations were applied, so ANALYZE ran on the tables of Muster's schema under the migration lock, partitioned "+
+		"tables with their partitions: the planner has statistics at once instead of after autovacuum's first pass. "+
+		"tables is the number of tables named, duration_ms how long it took; a table that another session held "+
+		"locked is skipped.",
+	"tables", "duration_ms")
+
+// SchemaAnalyzeFailed is logged when ANALYZE after migrations failed; the migrations stay applied.
+var SchemaAnalyzeFailed = newEvent("schema_analyze_failed", LevelWarn, "C-02",
+	"ANALYZE of the tables of Muster's schema after migrations failed, with the error; the migrations stay applied "+
+		"and the process goes on, and autovacuum analyzes the tables as they change. tables is the number of tables "+
+		"named, 0 when they could not be listed.",
+	"tables", "error")
+
 // SchemaTooNew is logged when the database schema is newer than the binary knows; the process refuses to run.
 var SchemaTooNew = newEvent("schema_too_new", LevelError, "C-02",
 	"The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that "+
