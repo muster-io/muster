@@ -831,6 +831,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			out = s.withBridgeWarnings(before, row)
 			return nil
 		}
+		// secret == "" is defensive: every Connection in the webhook mode has its secret token, so a new one comes only
+		// with a change the diff already shows.
 		if managedby.Only(diff) && secret == "" {
 			out, err = s.saveMark(ctx, q, r, row, after.ManagedBy, diff, now)
 			return err

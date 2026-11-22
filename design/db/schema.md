@@ -2221,7 +2221,9 @@ the specification the tools are built from.
   goes back, so an ETag read before a save never matches after it. A save of the mark with any other field is saved as
   any other save. 0057 is expand only: a replica without it saves the mark alone through `UpdateConnection` with a new
   `version` and gives the ETag `version` alone, so during a rolling update a client may get one `412` after a save of
-  the mark alone on the other kind of replica and read again.
+  the mark alone on the other kind of replica and read again. A replica without 0057 also lets some stale ETags pass:
+  its ETag is `version`, which a save of the mark alone does not move, so a tag read on it before such a save still
+  passes on it after.
 
 ## 5. Queues and claims
 

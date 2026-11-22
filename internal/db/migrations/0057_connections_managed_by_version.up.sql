@@ -9,9 +9,11 @@
 -- Expand only: a replica without this migration that still runs during a rolling update neither reads nor writes the
 -- column; its saves of the mark alone move version as before, and its ETag and its check of If-Match are version alone.
 -- Once a Connection's mark alone was saved on a replica with this migration, a client that read it on one kind of
--- replica gets 412 on the other until the rollout ends, and reads it again; and a replica without it may take an ETag
--- that a later save made stale when that save moved version by as much as the counter. One transaction: a NOT NULL
--- column with a constant default is a change of the catalog only.
+-- replica gets 412 on the other until the rollout ends, and reads it again. A replica without it also takes some stale
+-- ETags without a 412: its ETag is version, which a save of the mark alone on a replica with this migration does not
+-- move, so a tag read on it before such a save still passes on it after; and it may take an ETag of a replica with
+-- this migration that a later save made stale, when that save moved version by as much as the counter. One
+-- transaction: a NOT NULL column with a constant default is a change of the catalog only.
 
 BEGIN;
 

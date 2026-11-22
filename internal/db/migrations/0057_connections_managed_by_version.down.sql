@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
 -- Reverts 0057_connections_managed_by_version.up.sql. Only the counter is lost: the marks stay, and the ETag of a
--- Connection whose mark alone was saved goes back to its version, so a client holding an ETag read before gets one
--- 412 and reads again. Up again works.
+-- Connection whose mark alone was saved goes back to its version, so a client holding an ETag read before gets 412
+-- until it reads again. Up again works.
 
 BEGIN;
 
