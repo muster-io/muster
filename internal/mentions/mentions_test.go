@@ -796,9 +796,10 @@ func resolveFake() *fakeQueries {
 // order — the On-call of the Teams from the label at the time of the event and nobody in a gap, everyone with its
 // word, a Team by its Team mention for the Connection and nobody without one, never its On-call, a group by its name, a
 // linked person by their Account link — and nobody that the Connection cannot mention; a person without an Account
-// link in the identity space and a deleted User are left out, and each person and group is mentioned once; the first
-// publication of a Storm summary takes the Teams of the Alert Groups the Storm counts. The Owner and the previous
-// Owner are named as L1 named them, at their places among the symbolic Mentions.
+// link in the identity space and a deleted User are left out, each person and group is mentioned once and each word of
+// everyone its entries name is mentioned; the first publication of a Storm summary takes the Teams of the Alert Groups
+// the Storm counts. The Owner and the previous Owner are named as L1 named them, at their places among the symbolic
+// Mentions.
 func TestResolve(t *testing.T) {
 	ctx := t.Context()
 	f := resolveFake()
@@ -812,6 +813,8 @@ func TestResolve(t *testing.T) {
 	later := mm
 	later.At = t0.Add(2 * time.Hour)
 	storm := Request{DestinationID: 10, DestinationType: TypeMattermost, ConnectionID: conn(3), StormID: 9, At: t0}
+	f.entries[11] = []EntryInput{everyone(EveryoneChannel, KindReopen), everyone(EveryoneHere, KindReopen),
+		everyone(EveryoneAll, KindReopen)}
 	for _, tc := range []struct {
 		name     string
 		r        Request
@@ -822,6 +825,8 @@ func TestResolve(t *testing.T) {
 		{"a new alert group", mm, 0, []string{KindNewAlertGroup},
 			"user:alice.mm,everyone:here,group:payments_team,group:oncall"},
 		{"its reopen", mm, 0, []string{KindReopen}, "user:alice.mm,group:payments_team"},
+		{"every word of everyone", Request{DestinationID: 11, DestinationType: TypeMattermost, ConnectionID: conn(3),
+			At: t0}, 0, []string{KindReopen}, "everyone:channel,everyone:here,everyone:all"},
 		{"new alerts: each person once, unlinked and deleted ones left out", mm, 0, []string{KindNewAlerts},
 			"user:alice.mm,group:payments_team"},
 		{"in a gap of the schedule", later, 0, []string{KindNewAlertGroup},
@@ -987,7 +992,7 @@ func TestTargetsForTheAdapters(t *testing.T) {
 // a Storm summary at the Storm's start — so that a send the limiter delayed past a change of Shift, or a retry, still
 // mentions the On-call of the event; without such a record, the business clock's now. The On-call and the Team
 // mentions are read through the transaction of the resolution. A Slack user group is mentioned once whatever handle
-// names it.
+// names it. A message that mentions no Loud event reads no time of its event.
 func TestResolveEventTime(t *testing.T) {
 	ctx := t.Context()
 	f := resolveFake()
@@ -1053,6 +1058,16 @@ func TestResolveEventTime(t *testing.T) {
 		same(Target{Kind: TargetGroup, Group: "a"}, Target{Kind: TargetGroup, Group: "a", GroupID: "S1"}) {
 		t.Error("same groups")
 	}
+
+	// A reply that mentions only the Owner and the previous Owner takes no On-call: it reads no time of its event.
+	f.owners[21] = dbgen.GetEventOwnersRow{OwnerUserID: pgtype.Int8{Int64: 3, Valid: true},
+		PreviousOwnerUserID: pgtype.Int8{Int64: 1, Valid: true}}
+	f.reads = nil
+	got, err = targetsOf(s.Resolve(ctx, tx, orgID, Request{DestinationID: 10, DestinationType: TypeMattermost,
+		ConnectionID: &conn, AlertGroupID: 5, Seq: 21, Mentions: []string{Owner, PreviousOwner}}))
+	if err != nil || describe(got) != "user:Carol,user:alice.mm" || slices.Contains(f.reads, "event at") {
+		t.Errorf("the owners alone = %q %v, reads %v", describe(got), err, f.reads)
+	}
 }
 
 // targetsOf are the targets of a resolution.
@@ -1082,7 +1097,8 @@ func people(r Result) string {
 // Account link in the Destination's identity space, or sent by the plain name with bridge_cannot_mention_people through
 // a bridge whose info does not declare native_mentions — or Mentioned, each with the entry's id,
 // position and target and the first Loud event of the message the entry applies to; a person named by two entries is
-// recorded for each and mentioned once; the Owner, an outgoing webhook and a message without entries record nothing.
+// recorded for each and mentioned once; one entry that names two people records each, and a person it names twice
+// once; the Owner, an outgoing webhook and a message without entries record nothing.
 func TestResolveUndelivered(t *testing.T) {
 	ctx := t.Context()
 	f := resolveFake()
@@ -1162,6 +1178,19 @@ func TestResolveUndelivered(t *testing.T) {
 	}
 	if e := got.Undelivered[0].Entry; e.ID != 5102 || e.Target != (EntryTarget{Kind: TargetUser, UserID: alice}) {
 		t.Errorf("the entry of the undelivered mention = %+v", e)
+	}
+	// One entry whose Teams have two linked On-calls, alice On-call of two of them, mentions each once for it; the next
+	// entry, alice herself, mentions her again for that entry.
+	f.users[2].links["mattermost:3"], f.users[2].externals["mattermost:3"] = "carol.mm", "u-carol"
+	f.groupTeams[7] = []int64{11, 13, 15}
+	f.entries[23] = []EntryInput{ent(TargetOnCallOfTeamsFromLabel), person(alice)}
+	s.Wire(&fakeOnCalls{onCall: map[int64]int64{11: 1, 13: 3, 15: 1}, until: t0.Add(time.Hour)},
+		&fakeTeamMentions{}, clock.NewManual(t0))
+	got, err = s.Resolve(ctx, nil, orgID, Request{DestinationID: 23, DestinationType: TypeMattermost,
+		ConnectionID: conn(3), AlertGroupID: 7, At: t0, Mentions: []string{KindNewAlertGroup}})
+	if err != nil || describe(got.Targets) != "user:alice.mm,user:carol.mm" || people(got) != "mentioned "+
+		"1/0/new_alert_group,mentioned 3/0/new_alert_group,mentioned 1/1/new_alert_group" {
+		t.Errorf("one entry, two on-calls = %q %q %v", describe(got.Targets), people(got), err)
 	}
 }
 
