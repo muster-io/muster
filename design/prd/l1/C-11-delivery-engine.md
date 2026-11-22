@@ -85,6 +85,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   and each pair of Route and Destination has a Storm summary of its own that counts only the Alert Groups sent to that
   Destination; its first publication mentions the entries for `storm_started` (C-28.FR-7); a Storm summary starts no
   Escalation chain, and the chains of an Alert Group it stands for start at its own Publication (C-32.FR-5).
+  _Revised for L2 (2026-11-22):_ an Alert Group created while a Maintenance window keeps it back counts toward no Storm
+  threshold and is in no Storm summary; the end of a window never starts a Storm, and a Storm still active then holds
+  the Publications of the end as it holds any Alert Group that is not Urgent (C-34.FR-12, C-34.FR-18).
 - **C-11.FR-7** Loudness follows the lifecycle event tables (C-09.FR-22) and the
   [Loud/Quiet table](reference.md#loud-and-quiet) of delivery events. A Loud event is always a new message — a Root
   message or a Thread reply; an edit is always Quiet, since an edit notifies nobody in either messenger

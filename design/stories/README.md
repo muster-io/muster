@@ -282,8 +282,8 @@ deployment, `docs` documentation. A story for another repository names it after 
 | L2 Statistics | the statistics by people and by Team that L2 adds to C-09 | S-174 – S-176 | 3 |
 | **L2 core** | 8 | | **68** |
 | L2 Terraform provider | C-33 | S-179 – S-189 | 11 |
-| L2 0.2.x | C-34, C-36, C-37, C-38, C-39, C-40, C-41, C-42 | S-190 – S-239 | 50 |
-| **L2** | 17 | | **129** |
+| L2 0.2.x | C-34, C-36, C-37, C-38, C-39, C-40, C-41, C-42, S-240 of C-33 | S-190 – S-240 | 51 |
+| **L2** | 17 | | **130** |
 
 ### Foundation
 
@@ -803,6 +803,7 @@ Registries resolve.
 | [S-237](S-237-the-step-by-step-test-on-the-destination-page-with-its-steps-requests-the-people-a-step-would-mention-and-the-presses-fe.md) | C-42 | The step-by-step test on the Destination page with its steps, requests, the people a step would mention and the presses (FE) | fe | S-231, S-232, S-233, S-234, S-048, S-090 |
 | [S-238](S-238-the-escalation-chains-timeline-of-the-destination-page-with-the-chains-offered-the-start-and-play-fe.md) | C-42 | The Escalation chains timeline of the Destination page with the chains offered, the start and "Play" (FE) | fe | S-236, S-235, S-237, S-158, S-135 |
 | [S-239](S-239-documentation-testing-a-destination.md) | C-42 | Documentation: testing a Destination — the Test message, the step-by-step test and the accelerated run of the chains | docs | S-237, S-238, S-234, S-233, S-232 |
+| [S-240](S-240-terraform-provider-maintenance-windows-and-the-message-layout-of-routes.md) | C-33 | muster_maintenance_window and the Route's message_layout in the Terraform provider (BE) — in `muster-io/terraform-provider-muster` | be | S-187, S-190, S-210 |
 
 The stories of "L2 0.2.x" specify the items of [L2 §1.5](../prd/L2.md#15-specified-later-in-l2) that the maintainer
 settled after the core: C-34, C-36, C-37, C-38, C-39, C-40, C-41 and C-42, written in four batches. All of them start
@@ -885,6 +886,12 @@ with the running engine, proved through the operation for named chains, and S-23
 would Page in and the one timeline of all of them. S-237 is the step-by-step panel, which follows the four backend
 stories that make its steps, and S-238 the timeline of the chains, after S-236; S-239 is the new page on testing a
 Destination, linked from the messengers' and the webhooks' pages.
+
+S-240 is a story of C-33 that the maintainer added with the review of these stories (journal D764): C-34.FR-23 and
+C-38.FR-15 have the Terraform provider manage windows and a Route's layout, and S-182 to S-188 have neither. It is
+worked in `muster-io/terraform-provider-muster` once a release of Muster carries S-190 and S-210, whose specification
+it pins: the resource `muster_maintenance_window`, with windows that end and are pruned by retention, and
+`own_message_layout` and `message_layout` on the Route resources of S-187.
 
 Migrations are ten, and an eleventh if the measurements of S-224 call for indexes; each takes the number the
 orchestrator assigns at dispatch, with each replaced CHECK re-versioned in the order the stories merge: C-34's three, in

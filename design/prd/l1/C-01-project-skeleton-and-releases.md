@@ -68,6 +68,10 @@ first story, so every later capability lands behind the same gates.
 - **C-01.FR-15** The docker-compose example caps PostgreSQL's memory: a container memory limit and PostgreSQL settings
   that fit inside it (`shared_buffers`, `work_mem`, `max_connections`), sized so that the footprint of NFR-3 can hold;
   the nightly load test measures the footprint with these settings (_provisional_, P-43).
+  _Revised for L2 (2026-11-22, #695):_ from 0.2.0 the limit and the settings — `maintenance_work_mem` among them — are
+  sized for evaluation and small installations of at least 100,000 Alert Groups rather than for the footprint; the
+  nightly load test measures the footprint of NFR-3 with these settings and fails when the kernel kills a PostgreSQL
+  process for memory (_provisional_, P-43).
 
 ## UI
 

@@ -90,8 +90,8 @@ issue: null
   state), S-192 (delivery), S-193 (chains, Notification rules, calls, the ack timeout and Reminders). Until S-191 the
   handlers of the timer rows decide nothing and log a count of 0.
 - The `kept_back` filter and fields of Alert Groups: S-191. The metrics: S-191 and S-192.
-- The pages: S-194 and S-195. The documentation: S-196. The Terraform resource: specified with the Terraform provider
-  (L2 §1.5).
+- The pages: S-194 and S-195. The documentation: S-196. The Terraform resource `muster_maintenance_window`: S-240, in
+  the provider's repository.
 
 ## Contracts
 
