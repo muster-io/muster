@@ -14,8 +14,8 @@ story file says whether it covers an ID fully or in part; this page joins them.
   Every ID of L1, of the core of L2, of C-33, of C-34, of C-36, of C-37, of C-38, of C-39, of C-40, of C-41 and of C-42
   is complete. The sections of L2 follow the non-functional requirements of L1, and the requirements of L1 that L2
   revises have a section of their own at the end.
-  [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 has a
-  row here.
+  [L2 §7](../prd/L2.md#7-retired-and-moved-ids) retires and moves no ID, so every ID of the capability files of L2 that
+  have stories has a row here; C-43, which has none yet, gets its section with its stories.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
   verifies it — the one in which its dependency appears — and why ([L1 conventions](../prd/L1.md#2-conventions)).
 
@@ -1513,7 +1513,9 @@ contracts were written against the open pull request that adds the capability fi
 
 The requirements of L1 that [L2 §6](../prd/L2.md#6-revisions-to-l1) revises, and those it adds to L1 files, with the
 L2 stories that carry the revision. Their rows in the L1 sections above stay as they were, for L1; a row here is
-complete when the revision is. Every L1 ID of L2 §6 has its row, and every row is complete.
+complete when the revision is. Every L1 ID of L2 §6 has its row, and every row is complete for the capabilities that
+have stories; C-43, which has none yet, also revises C-11.FR-2 and C-11.FR-3, and its stories add themselves to those
+rows.
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|

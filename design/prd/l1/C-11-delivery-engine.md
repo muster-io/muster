@@ -40,6 +40,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   _Revised for L2 (2026-10-26):_ a Page by Mention is a Thread reply that the delivery worker sends (C-32.FR-9); calls
   through a Notification gateway have a sender of their own, outside reconciliation (C-30.FR-4), and with the
   interactive path are the only callers of the gateway; Muster sends no direct messages to Page people.
+  _Revised for L2 (2026-11-22):_ from C-43 a Page by direct message is sent and edited by the delivery worker from the
+  table `direct_messages`, never reconciled (C-43.FR-9); the interactive path still serves only what a person waits
+  for, the direct messages of Account links and the answers to presses among them.
 - **C-11.FR-3** Each Destination and each Connection has a limiter; a delivery waits for both (outgoing webhooks have
   only the Destination's). Every call takes one token, a send and an edit alike, since Telegram counts both against one
   budget per chat (C-14.FR-2). The limiters are shared by all replicas: their token buckets live in PostgreSQL, so
@@ -66,6 +69,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Root-message work of both. Configuration edits that are not Urgent wait as long as the work before them uses up the
   limiter, which in a Telegram chat at 10 calls a minute is about three Alert Groups a minute that resolve and reopen;
   none is dropped, and one that waits is carried by the next change of its Alert Group.
+  _Revised for L2 (2026-11-22):_ from C-43 the sends of direct messages that Page a person, which take only the
+  Connection's limiter, are a rank after the Root-message work of Urgent Alert Groups and before their configuration
+  edits, critical Alert Groups first within it; their final edits share the rank of the Thread replies (C-43.FR-9).
 - **C-11.FR-4** New Alerts are sent to the Thread with a leading and a trailing edge: the first immediately, opening the
   Thread batching window (`route.thread_batching_window`, a Route policy field added here); everything else that arrives
   within the window as one reply when it closes. After a quiet period longer than the window, the next one is again

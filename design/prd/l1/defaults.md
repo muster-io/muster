@@ -245,6 +245,7 @@ Other lifecycle values:
 | `organization.working_hours` | Monday to Friday, from `organization.workday_start` to 18:00, in `organization.time_zone`; the end is later than the start on the same day, so Working hours never span midnight (P-63, confirmed by S-115), and 0.2.0 sets the end to 23:59 where the start was 18:00 or later, and the start to 23:58 where it was 23:59, the latest time with no later end | Organization | C-25 | decided |
 | `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention; a User follows them "As in the Organization" until they choose "Call" or "Don't call", which keep the rules as they were then, or custom rules are set through the API or by an Admin (C-31.FR-2) | Organization | C-31 | decided |
 | `organization.instance_labels` | `pod`, `instance`, `container`, `endpoint` | Organization | C-09, C-20 | decided |
+| `organization.direct_messages` | on: the Notification rule action "Direct message" is offered and sent; when off, it is never sent, and the stored actions are skipped with `direct_messages_disabled` (C-43.FR-23) | Organization | C-43 | decided |
 | `retention.stored_snapshots` | 14 days | Organization | C-05, C-20 | decided |
 | `retention.alert_details` | 90 days (Alerts in Alert Groups, Timeline entries, delivery events and, from L2, the steps of the runs of Escalation chains and the delivery state of each Destination; never Notes) | Organization | C-09, C-20, C-32 | decided |
 | `retention.alert_group_summaries` | 2 years (summary rows with their Notes); at least `retention.alert_details`, otherwise `422` | Organization | C-09, C-20 | decided |
@@ -267,6 +268,8 @@ Other lifecycle values:
 | `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | decided |
 | `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | decided |
 | `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | decided |
+| `direct_message.person_spacing` | 1 s between the direct messages that Page one person through one Connection, sent in the order of C-43.FR-9 and never dropped for waiting; edits are not paced by it | built in | C-43 | P-98 |
+| `direct_message.title` | the Alert Group's title in a direct message, cut to 200 characters | built in | C-43 | P-99 |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
 | `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per User and contact text; 10 per hour per contact text across Users, beyond which a request is answered as sent and nothing is sent | built in | C-30 | P-86 |
 | `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the Pages that come due after it go together in the next call, no sooner than this after the previous call ended, accepted or Not delivered | built in | C-30 | P-87 |

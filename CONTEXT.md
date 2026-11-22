@@ -312,14 +312,14 @@ step may be limited to Working hours and to some Severity levels.
 _Avoid_: Escalation rule
 
 **Page**:
-A call for attention made by an Escalation step: a Mention in the Alert Group's Thread, or a call through a
-Notification gateway.
+A call for attention made by an Escalation step: a Mention in the Alert Group's Thread, a direct message from the bot,
+or a call through a Notification gateway.
 _Avoid_: Alert (as a verb)
 
 **Notification rules**:
 A person's own two sequences, normal and important, that say how to Page them, such as a Mention in the Thread
-together with a call through a Notification gateway, and the Mention again five minutes later. An Escalation step Pages
-a person by one of the two.
+together with a direct message or a call through a Notification gateway, and the Mention again five minutes later. An
+Escalation step Pages a person by one of the two.
 _Avoid_: Notification policy, Contact method
 
 **Notification gateway**:
