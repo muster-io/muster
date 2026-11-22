@@ -313,7 +313,7 @@ func (f *fakeRuns) GetChainID(_ context.Context, arg dbgen.GetChainIDParams) (in
 
 func (f *fakeRuns) ListChainRuns(_ context.Context, arg dbgen.ListChainRunsParams) ([]dbgen.ListChainRunsRow, error) {
 	var out []dbgen.ListChainRunsRow
-	for i := len(f.runs) - 1; i >= 0; i-- {
+	for i := len(f.runs) - 1; i >= 0 && len(out) < int(arg.PageSize); i-- {
 		r := f.runs[i]
 		if r.ChainID != arg.ChainID || (arg.AfterID.Valid && r.id >= arg.AfterID.Int64) {
 			continue
@@ -327,9 +327,6 @@ func (f *fakeRuns) ListChainRuns(_ context.Context, arg dbgen.ListChainRunsParam
 			row.UserName, row.UserLogin = pgtype.Text{String: "Ivan", Valid: true}, pgtype.Text{String: "ivan", Valid: true}
 		}
 		out = append(out, row)
-		if len(out) == int(arg.PageSize) {
-			break
-		}
 	}
 	return out, f.fail["ListChainRuns"]
 }
@@ -681,6 +678,43 @@ func TestStopRuns(t *testing.T) {
 	}
 }
 
+// TestRanOut is C-32.FR-7: the runs of the current start ran out once every one of them did, and not while one still
+// runs; a start in which no chain started has no run that ran out.
+func TestRanOut(t *testing.T) {
+	e := newRunsEnv(t)
+	e.chain(1, "devops", false, page(schedMain))
+	e.chain(2, "payments", false, page(schedMain), wait(600), page(schedMain))
+	e.source(1, 0, ConditionAny)
+	e.source(2, 0, ConditionAny)
+	e.start(t, groups.ChainStart{All: true})
+	ranOut := func(want bool) {
+		t.Helper()
+		if got, err := e.runs.RanOut(t.Context(), nil, e.g); err != nil || got != want {
+			t.Errorf("ran out %v, want %v: %v", got, want, err)
+		}
+	}
+	devops, payments := e.q.runs[0], e.q.runs[1]
+	e.fire(t, devops.id)
+	e.fire(t, payments.id)
+	if devops.state != RunRanOut || payments.state != RunRunning {
+		t.Fatalf("states %s %s", devops.state, payments.state)
+	}
+	ranOut(false)
+	e.clock.Set(t0.Add(10 * time.Minute))
+	e.fire(t, payments.id)
+	if payments.state != RunRanOut {
+		t.Fatalf("payments %s", payments.state)
+	}
+	ranOut(true)
+	// A start-over where no chain applies any more starts no run.
+	e.q.sources = nil
+	e.g.ChainGeneration = 2
+	if n := e.start(t, groups.ChainStart{All: true}); n != 0 {
+		t.Fatalf("%d started", n)
+	}
+	ranOut(false)
+}
+
 // TestRunKeepsItsSteps is C-32.FR-16, C-32.AC-16 and P-73: a run keeps the steps its chain had when it started; a
 // change of the chain while it runs leaves it on its old steps, and the next run takes the new ones.
 func TestRunKeepsItsSteps(t *testing.T) {
@@ -769,7 +803,7 @@ func TestChainRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(page1.Runs) != 1 || page1.Runs[0].State != RunRunning || page1.Runs[0].StoppedBy != nil ||
-		page1.Next == nil || len(page1.Runs[0].Steps) != 0 {
+		page1.Next == nil || page1.Next.ID != e.q.runs[1].id || len(page1.Runs[0].Steps) != 0 {
 		t.Fatalf("first page %+v", page1)
 	}
 	page2, err := e.runs.ChainRuns(t.Context(), e.q.chains[1].PublicID, page1.Next, 1)
@@ -969,6 +1003,13 @@ func TestStepOfPage(t *testing.T) {
 		{Number: 1, At: t0, Outcome: OutcomeMade, seq: 7},
 		{Number: 1, At: t0.Add(10 * time.Minute), Outcome: OutcomeMade, seq: 8},
 	}
+	// A retention pass stopped after a batch that deleted the first of three steps, which DeleteExpiredRunSteps takes
+	// in no order, and retention.alert_details was raised before the next pass: the steps left keep their seqs, 2 and
+	// 3.
+	trimmed := []RunStepView{
+		{Number: 2, At: t0, Outcome: OutcomeMade, seq: 2},
+		{Number: 3, At: t0, Outcome: OutcomeMade, seq: 3},
+	}
 	for _, c := range []struct {
 		name  string
 		steps []RunStepView
@@ -979,6 +1020,7 @@ func TestStepOfPage(t *testing.T) {
 	}{
 		{"at its place", steps, 1, 3, 0, 3},
 		{"seqs from 7", shifted, 1, 7, 15 * time.Minute, 7},
+		{"its place taken by the next step", trimmed, 2, 2, 0, 2},
 		{"an unknown run step", steps, 1, 9, 5 * time.Minute, 1},
 		{"a run step past the steps", steps, 1, 4, 15 * time.Minute, 3},
 		{"no step of its number", steps, 4, 0, 0, 0},

@@ -598,3 +598,59 @@ func TestChainTeamOfPage(t *testing.T) {
 		}
 	}
 }
+
+// TestPageColumns: a Page by Mention and a Page by a call write the rule run of a Notification rule's action, the
+// Schedule of a page_on_call step, the Team "Chain of the Team" names, the wait until the next Mention and the run step
+// whose Page it is (C-32.FR-12), each null when the step has none.
+func TestPageColumns(t *testing.T) {
+	type columns struct {
+		kind                         string
+		ruleRun, schedule, chainTeam pgtype.Int8
+		again, runStep               pgtype.Int4
+	}
+	set8 := func(v int64) pgtype.Int8 { return pgtype.Int8{Int64: v, Valid: true} }
+	set4 := func(v int32) pgtype.Int4 { return pgtype.Int4{Int32: v, Valid: true} }
+	for _, c := range []struct {
+		name string
+		page StepPage
+		call bool
+		want columns
+	}{
+		{"the first Mentions of a page_on_call step of a chain of a Team",
+			StepPage{OwningTeam: 4, Schedule: 8, AgainSeconds: 300, RunStepSeq: 2}, false,
+			columns{kind: PageKindMention, schedule: set8(8), chainTeam: set8(4), again: set4(300), runStep: set4(2)}},
+		{"a later Mention of a rule of a page_people step of a chain of the Route",
+			StepPage{RuleRun: 71, Again: true}, false,
+			columns{kind: PageKindMention, ruleRun: set8(71)}},
+		{"a call action of a rule run that a page_on_call step of a chain of a Team started",
+			StepPage{OwningTeam: 4, Schedule: 8, RuleRun: 71, RunStepSeq: 2}, true,
+			columns{kind: PageKindCall, ruleRun: set8(71), schedule: set8(8), chainTeam: set8(4), runStep: set4(2)}},
+		{"a call step of people of a chain of the Route", StepPage{RunStepSeq: 3}, true,
+			columns{kind: PageKindCall, runStep: set4(3)}},
+		{"a later call action of a rule of a chain of the Route", StepPage{RuleRun: 71}, true,
+			columns{kind: PageKindCall, ruleRun: set8(71)}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, g, targets, _ := pageHarness(t)
+			targets.targets = []PageTarget{{DestinationID: 11, Source: PageSourceRoute, Linked: []int64{owner}}}
+			p := c.page
+			p.ChainEntry, p.People, p.Sources = paymentsStep, []int64{owner}, []PageSource{{Kind: PageSourceRoute}}
+			if c.call {
+				q := &fakeQueue{call: 501}
+				p.Call = &StepCall{Gateway: PageGateway{ID: gatewayID}, Queue: q.queue}
+			}
+			if err := h.step(t, g, ChainProgress{Pages: []StepPage{p}}); err != nil {
+				t.Fatal(err)
+			}
+			if len(h.db.pages.list) != 1 {
+				t.Fatalf("%d pages written", len(h.db.pages.list))
+			}
+			r := h.db.pages.list[0]
+			got := columns{kind: r.Kind, ruleRun: r.NotificationRuleRunID, schedule: r.ScheduleID,
+				chainTeam: r.ChainTeamID, again: r.AgainSeconds, runStep: r.RunStepSeq}
+			if got != c.want {
+				t.Errorf("columns %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}

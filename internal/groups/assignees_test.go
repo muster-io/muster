@@ -361,6 +361,57 @@ func TestAssigneesWithoutRunStep(t *testing.T) {
 	}
 }
 
+// TestAssigneesByRunStep is C-32.FR-12 for a run whose Assignees run step 3 made: a reach by a greater run step
+// replaces them, recording assignees_changed when it removes or adds someone and none when it reaches exactly them; a
+// reach by run step 3 adds to them; a reach by a smaller run step changes nothing.
+func TestAssigneesByRunStep(t *testing.T) {
+	name := map[int64]string{owner: "alice", bobID: "bob", carolID: "carol"}
+	for _, c := range []struct {
+		name    string
+		seq     int
+		reached []int64
+		want    []string
+		changes []string
+		deletes int
+	}{
+		{"a greater run step reaching someone new replaces them", 4, []int64{carolID}, []string{"carol:4"},
+			[]string{"carol"}, 1},
+		{"a greater run step reaching one of them removes the other", 4, []int64{owner}, []string{"alice:4"},
+			[]string{"alice"}, 1},
+		{"a greater run step reaching exactly them records nothing", 4, []int64{owner, bobID},
+			[]string{"alice:4", "bob:4"}, nil, 1},
+		{"the run step that made them adds", 3, []int64{carolID}, []string{"alice:3", "bob:3", "carol:3"},
+			[]string{"alice,bob,carol"}, 0},
+		{"a smaller run step changes nothing", 2, []int64{carolID}, []string{"alice:3", "bob:3"}, nil, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, g, _ := assigneeHarness(t)
+			seeded := func(user int64, seq int32) *fakeAssignee {
+				return &fakeAssignee{group: g.ID, run: runID, user: user, step: seq,
+					seq: pgtype.Int4{Int32: seq, Valid: true}, team: pgtype.Int8{Int64: payTeam, Valid: true}, since: t0}
+			}
+			h.db.pages.assignees = []*fakeAssignee{seeded(owner, 3), seeded(bobID, 3)}
+			id := h.pageAt(t, g, runID, c.seq, c.seq, 0, c.reached...)
+			deletes := h.db.calls["DeleteRunAssigneesExcept"]
+			h.reach(t, g, id, c.reached...)
+			var got []string
+			for _, a := range h.db.pages.assignees {
+				got = append(got, fmt.Sprintf("%s:%d", name[a.user], a.seq.Int32))
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("assignees %v, want %v", got, c.want)
+			}
+			if got := h.assigneeChanges(t, g); !slices.Equal(got, c.changes) {
+				t.Errorf("assignees_changed %q, want %q", got, c.changes)
+			}
+			if n := h.db.calls["DeleteRunAssigneesExcept"] - deletes; n != c.deletes {
+				t.Errorf("%d replacements, want %d", n, c.deletes)
+			}
+		})
+	}
+}
+
 // TestAssigneesByMessenger is C-32.FR-11 and FR-12 for the Destinations of Pages beyond Mattermost and Slack: a person
 // a reply only names by the plain name, as a bridge without native_mentions does (PageTarget.Named), is reached
 // nowhere and never becomes an Assignee, while a person a delivered reply reaches — a Telegram comment, a bridge's
@@ -813,6 +864,26 @@ func TestAssigneesByCalls(t *testing.T) {
 		}
 		delete(h.db.fail, name)
 		h.db.pages.byID(id).State = PageDelivered
+	}
+}
+
+// TestCallNotDeliveredToNobody is C-30.FR-7 and C-32.FR-10: a call that ended Not delivered for a person who no longer
+// exists records no page_not_delivered, which would name nobody, and the Page still ends not_delivered with the reason
+// of the call.
+func TestCallNotDeliveredToNobody(t *testing.T) {
+	h, g, _ := assigneeHarness(t)
+	id := h.callStep(t, g, 1, &fakeQueue{call: 501}, carolID)
+	p := h.db.pages.byID(id)
+	delete(h.db.users, carolID)
+	h.settleCall(t, CallOutcome{Call: 501, Reason: PageCallRefused, Groups: []int64{g.ID},
+		User: PagedUser{ID: carolID}, Gateway: PageGateway{ID: gatewayID}})
+	for _, e := range h.entriesOf(g) {
+		if e.Event.String == string(EventPageNotDelivered) {
+			t.Errorf("page_not_delivered %+v", e.InsertTimelineEntryParams)
+		}
+	}
+	if p.State != PageNotDelivered || p.Reason.String != PageCallRefused {
+		t.Errorf("the page %+v", p.InsertPageParams)
 	}
 }
 
