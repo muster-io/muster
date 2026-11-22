@@ -136,9 +136,10 @@ None.
   the pollers do not start again. A Mattermost, Telegram, Bridge or Slack Destination's save runs no Destination
   check and calls no messenger since that fix — it is saved while the channel is unreachable, and a Broken one stays
   Broken — and writes the mark with a new version; an outgoing webhook, which has no Destination check, is saved as
-  before. Neither requests a re-render; the Organization's requests no re-render of the open Root messages; the Outbound address policy's sends
-  no `NOTIFY` on `muster_outbound_policy`, runs no hook and logs no `outbound_policy_updated`, since the policy every
-  replica applies is the same; the OIDC settings' keep the claims sign-ins carried.
+  before. Neither requests a re-render; the Organization's requests no re-render of the open Root messages; the
+  Outbound address policy's sends no `NOTIFY` on `muster_outbound_policy`, runs no hook and logs no
+  `outbound_policy_updated`, since the policy every replica applies is the same; the OIDC settings' keep the claims
+  sign-ins carried.
 - Beyond the kinds' own files, `files_touched` has `internal/api/middleware.go` and `internal/api/problem.go` (the
   request validation above, which reads the 2020-12 validator's messages through one helper), `api/README.md` (its
   `x-unprocessable` row says the middleware reads the variants of a `oneOf` body, which must agree), and

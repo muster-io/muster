@@ -2218,10 +2218,10 @@ the specification the tools are built from.
   `StoreBridgeEventsCursor`, `RecordSocketHello`, `SetSlackIdentity`, `SetGroupsRead`) follow `version`, so no socket
   reconnects, no poller starts again and nothing is forgotten, the last `hello` included. The ETag of a Connection, and
   the `If-Match` of its update and deletion, is `version + managed_by_version`: each save moves one of them and neither
-  goes back, so an ETag read before a save never matches after it. A save of the mark with any other field is saved as any other
-  save. 0057 is expand only: a replica without it saves the mark alone through `UpdateConnection` with a new `version`
-  and gives the ETag `version` alone, so during a rolling update a client may get one `412` after a save of the mark
-  alone on the other kind of replica and read again.
+  goes back, so an ETag read before a save never matches after it. A save of the mark with any other field is saved as
+  any other save. 0057 is expand only: a replica without it saves the mark alone through `UpdateConnection` with a new
+  `version` and gives the ETag `version` alone, so during a rolling update a client may get one `412` after a save of
+  the mark alone on the other kind of replica and read again.
 
 ## 5. Queues and claims
 

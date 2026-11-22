@@ -173,8 +173,8 @@ func assertMarkWritten(t *testing.T, w *saveWriter, id int64, mark string) {
 	}
 }
 
-// TestMarkOnlySaveFailures: a save of the mark alone of a Destination that is gone since it was read is ErrNotFound, and
-// one whose lock, write or Audit log entry fails is that error; none of them runs the Destination check.
+// TestMarkOnlySaveFailures: a save of the mark alone of a Destination that is gone since it was read is ErrNotFound,
+// and one whose lock, write or Audit log entry fails is that error; none of them runs the Destination check.
 func TestMarkOnlySaveFailures(t *testing.T) {
 	k := markOnlyKinds()[0]
 	for _, tc := range []struct {

@@ -65,13 +65,15 @@ type memRow struct {
 // memStore is the connections table in memory, with the Destinations counted per Connection, the Audit log and the
 // hints; a transaction is undone when its function fails. fail makes a query fail by its name.
 type memStore struct {
-	rows      map[int64]*memRow
-	next      int64
-	dests     map[int64]int64
-	audit     []auditdb.InsertAuditEntryParams
-	hints     []db.Hint
-	updates   []dbgen.UpdateConnectionParams
+	rows    map[int64]*memRow
+	next    int64
+	dests   map[int64]int64
+	audit   []auditdb.InsertAuditEntryParams
+	hints   []db.Hint
+	updates []dbgen.UpdateConnectionParams
+	// marks are the writes of the mark alone; onMark, when set, runs after each on the row written.
 	marks     []dbgen.SetConnectionMarkParams
+	onMark    func(r *memRow)
 	bots      []dbgen.SetBotIdentityParams
 	infos     []dbgen.SetBridgeInfoParams
 	slackIDs  []dbgen.SetSlackIdentityParams
@@ -364,6 +366,9 @@ func (s *memStore) SetConnectionMark(_ context.Context, a dbgen.SetConnectionMar
 	}
 	r.row.ManagedBy = a.ManagedBy
 	r.row.ManagedByVersion++
+	if s.onMark != nil {
+		s.onMark(r)
+	}
 	return nil
 }
 
@@ -1191,9 +1196,9 @@ func markOf(c connections.Connection) string {
 // TestManagedBy is C-33.FR-11 on Connections: a creation stores the mark or none, a read and the list carry it, an
 // update that omits it keeps it, null clears it, and a value outside the format is refused at /managed_by before
 // anything is written; the Audit log diff shows each change. A save that changes only the mark writes it alone: it
-// keeps the version, moves the ETag (Tag) and is recorded, and keeps the bot token and what the last check learned; the webhook of a Telegram Connection, the info
-// of a Bridge and the secrets of a Slack Connection stay as they are, and nothing is called. A demo renamed at start
-// keeps its mark.
+// keeps the version, moves the ETag (Tag) and is recorded, and keeps the bot token and what the last check learned;
+// the webhook of a Telegram Connection, the info of a Bridge and the secrets of a Slack Connection stay as they are,
+// and nothing is called. A demo renamed at start keeps its mark.
 func TestManagedBy(t *testing.T) {
 	e := newTGEnv(t)
 	ctx := t.Context()

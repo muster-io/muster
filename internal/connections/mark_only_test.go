@@ -113,6 +113,18 @@ func TestMarkOnlySaveIfMatch(t *testing.T) {
 		t.Errorf("a failed write of the mark = %v", err)
 	}
 	delete(e.store.fail, "SetConnectionMark")
+	// A read after the write that fails, or that reads a row it cannot decode, undoes the save.
+	for name, after := range map[string]func(r *memRow){
+		"read":   func(*memRow) { e.store.fail["GetConnection"] = errBoom },
+		"decode": func(r *memRow) { r.row.Proxy = []byte("{") },
+	} {
+		e.store.onMark = after
+		if _, err := e.svc.Update(ctx, by, c.PublicID, nil, in); err == nil {
+			t.Errorf("a failed %s after the write of the mark = nil", name)
+		}
+		delete(e.store.fail, "GetConnection")
+	}
+	e.store.onMark = nil
 	if got, _ := e.svc.Get(ctx, c.PublicID); got.Tag() != c.Tag() || got.ManagedBy != nil || len(e.store.audit) != 1 {
 		t.Errorf("a failed write of the mark wrote: tag %d, mark %s, %d entries", got.Tag(), markOf(got),
 			len(e.store.audit))
