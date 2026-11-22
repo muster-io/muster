@@ -1505,15 +1505,17 @@ func (q *Queries) MarkConnectionDeleted(ctx context.Context, arg MarkConnectionD
 }
 
 const pruneBridgeEventsSeen = `-- name: PruneBridgeEventsSeen :execrows
+WITH doomed AS MATERIALIZED (
+    SELECT s.connection_id, s.event_id
+    FROM bridge_events_seen s
+    WHERE s.org_id = $1 AND s.seen_at < $2::timestamptz
+    ORDER BY s.seen_at
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
 DELETE FROM bridge_events_seen e
-WHERE e.org_id = $1
-  AND (e.connection_id, e.event_id) IN (
-      SELECT s.connection_id, s.event_id
-      FROM bridge_events_seen s
-      WHERE s.org_id = $1 AND s.seen_at < $2::timestamptz
-      ORDER BY s.seen_at
-      LIMIT $3
-      FOR UPDATE SKIP LOCKED)
+USING doomed d
+WHERE e.org_id = $1 AND e.connection_id = d.connection_id AND e.event_id = d.event_id
 `
 
 type PruneBridgeEventsSeenParams struct {
@@ -1523,7 +1525,9 @@ type PruneBridgeEventsSeenParams struct {
 }
 
 // PruneBridgeEventsSeen deletes at most @batch_size records of Bridge event ids seen before @before, skipping rows
-// another transaction holds.
+// another transaction holds. The batch is chosen once, in a materialized CTE, as PruneLinkRequests does: a subquery
+// that a plan scans again for each deleted row skips the rows the statement already deleted, as locked by itself, and
+// takes more than the batch.
 func (q *Queries) PruneBridgeEventsSeen(ctx context.Context, arg PruneBridgeEventsSeenParams) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneBridgeEventsSeen, arg.OrgID, arg.Before, arg.BatchSize)
 	if err != nil {

@@ -670,14 +670,16 @@ func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) er
 }
 
 const prunePasswordSetups = `-- name: PrunePasswordSetups :execrows
-DELETE FROM password_setups p
-WHERE p.org_id = $1 AND p.id IN (
+WITH doomed AS MATERIALIZED (
     SELECT o.id FROM password_setups o
     WHERE o.org_id = $1 AND o.expires_at < $2::timestamptz
     ORDER BY o.id
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
+DELETE FROM password_setups p
+USING doomed d
+WHERE p.org_id = $1 AND p.id = d.id
 `
 
 type PrunePasswordSetupsParams struct {
@@ -687,7 +689,9 @@ type PrunePasswordSetupsParams struct {
 }
 
 // PrunePasswordSetups deletes up to batch_size links that expired before @before, used and superseded ones included.
-// A link being used is skipped and taken at the next run.
+// A link being used is skipped and taken at the next run. The batch is chosen once, in a materialized CTE, as
+// PruneLinkRequests does: a subquery that a plan scans again for each deleted row skips the rows the statement already
+// deleted, as locked by itself, and takes more than the batch.
 func (q *Queries) PrunePasswordSetups(ctx context.Context, arg PrunePasswordSetupsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, prunePasswordSetups, arg.OrgID, arg.Before, arg.BatchSize)
 	if err != nil {

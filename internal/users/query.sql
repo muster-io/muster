@@ -193,16 +193,20 @@ SET used_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND used_at IS NULL AND superseded_at IS NULL;
 
 -- PrunePasswordSetups deletes up to batch_size links that expired before @before, used and superseded ones included.
--- A link being used is skipped and taken at the next run.
+-- A link being used is skipped and taken at the next run. The batch is chosen once, in a materialized CTE, as
+-- PruneLinkRequests does: a subquery that a plan scans again for each deleted row skips the rows the statement already
+-- deleted, as locked by itself, and takes more than the batch.
 -- name: PrunePasswordSetups :execrows
-DELETE FROM password_setups p
-WHERE p.org_id = @org_id AND p.id IN (
+WITH doomed AS MATERIALIZED (
     SELECT o.id FROM password_setups o
     WHERE o.org_id = @org_id AND o.expires_at < @before::timestamptz
     ORDER BY o.id
     LIMIT @batch_size
     FOR UPDATE SKIP LOCKED
-);
+)
+DELETE FROM password_setups p
+USING doomed d
+WHERE p.org_id = @org_id AND p.id = d.id;
 
 -- RoleSyncOn reports whether the identity provider decides the Role of OIDC accounts: OIDC and oidc.sync_role are both
 -- on.
