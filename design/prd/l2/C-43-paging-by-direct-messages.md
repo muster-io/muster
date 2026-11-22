@@ -15,8 +15,9 @@ messenger where they have an Account link — Telegram, Mattermost, Slack, and B
 instead of, or besides, a Mention in the Thread and a call through a Notification gateway. A Mention in a Thread reaches
 a person only if the messenger pushes Thread replies and only in the chats of the Alert Group's Destinations; a direct
 message needs neither a Root message nor a Destination, and a direct message notifies by default in the messengers' own
-settings (to be verified on phones, see the facts below). The message carries what the person needs to decide and, where the messenger allows it, the buttons Acknowledge
-and Snooze, so that a person who acknowledges from the lock screen acknowledges the Alert Group as themselves. Muster
+settings (to be verified on phones, see the facts below). The message carries what the person needs to decide and,
+where the messenger allows it, the buttons Acknowledge and Snooze, so that a person who acknowledges from the lock
+screen acknowledges the Alert Group as themselves. Muster
 still ships no gateway and calls or texts nobody by itself; a direct message is one more way to Page, in the same rules.
 
 Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md); the settings of this capability are
@@ -60,7 +61,8 @@ under "Settings", and its provisional values are P-98 and P-99 of
   least one), and rules stay within `notification_rule.limits`. An action in the sequence may be placed anywhere among
   the Mentions, the calls and the waits: they run in order and a wait delays what follows, as for the others (C-31.FR-3).
   Each direct-message action that runs, a repeat of the same action included, sends a new message and never edits or
-  deletes an earlier one, since an edit notifies nobody in Telegram and Mattermost (FR-8).
+  deletes an earlier one, since an edit notifies nobody in Telegram and Mattermost (FR-8); only overdue actions of one
+  run through one Account link collapse into one message (FR-5).
 - **C-43.FR-2** A direct message goes through an Account link: the action names the link — the Connection of a
   Telegram, Mattermost, Slack or Bridge account of the person — when the person has more than one Account link in a
   messenger that can receive Pages by direct message, as the call names its gateway when there is more than one
@@ -120,12 +122,11 @@ under "Settings", and its provisional values are P-98 and P-99 of
 - **C-43.FR-9** A direct message is a row of a table of its own, `direct_messages` (one per Page, person and Account
   link), written in the dispatcher's transaction with its Page and sent by the delivery worker, as ADR-0005 as amended
   says of who calls messenger APIs. The row has a `public_id` of its own, which the button data names (FR-14). The row
-  keeps what
-  is needed to send, edit and bind a press — the Connection, the messenger's chat and message ids once sent, the
-  Alert Group, the person and the Page — and never the text, which is built at the send from the person's language and
-  the Alert Group, and again at the edit. The delivery worker claims due rows with a lease on any replica, takes a token
-  of the Connection's limiter, sends in the delivery client class and classifies the answer as it does for Thread replies
-  (C-11.FR-8): Transient answers are retried within `delivery.transient_backoff` and `delivery.transient_budget`,
+  keeps what is needed to send, edit and bind a press — the Connection, the messenger's chat and message ids once sent,
+  the Alert Group, the person and the Page — and never the text, which is built at the send from the person's language
+  and the Alert Group, and again at the edit. The delivery worker claims due rows with a lease on any replica, takes a
+  token of the Connection's limiter, sends in the delivery client class and classifies the answer as it does for Thread
+  replies (C-11.FR-8): Transient answers are retried within `delivery.transient_backoff` and `delivery.transient_budget`,
   Fatal ones end the message Not delivered. Critical Alert Groups go first within the rank of direct messages. This adds
   a rank to the order of C-11.FR-3, recorded there as a revision: the sends of direct messages come after the first
   rank (the Root-message work of Urgent Alert Groups) and before the configuration edits of Urgent Alert Groups, so
@@ -148,8 +149,8 @@ under "Settings", and its provisional values are P-98 and P-99 of
   Fatal answers end it `direct_refused`, unknown ones `direct_unknown`, and Transient answers past the budget
   `direct_budget_used`. A Broken Destination of the same Connection withholds nothing here. A Connection-wide Fatal
   answer, such as a revoked token or a deleted bot, adds nothing new: each direct message through that Connection ends
-  `direct_refused`, and the Connection's Destinations become Broken as they do today and raise
-  `MusterDestinationBroken`. A Connection-level Broken state is not added; it waits until installations show
+  `direct_refused`, and the Connection's Destinations become Broken through their own deliveries, as they do today, and
+  raise `MusterDestinationBroken`. A Connection-level Broken state is not added; it waits until installations show
   Connections that only Page by direct message.
 - **C-43.FR-13** How each messenger is reached, as far as the facts say (the rest is under "Facts to verify"):
   - **Telegram:** `sendMessage` to the private chat whose id is the Account link's Telegram user id, with an inline
@@ -367,9 +368,10 @@ chats is above the Connection's 15 and needs no setting.
 
 ## What changes elsewhere
 
-Made with this capability (journal D764): ADR-0018, ADR-0005 and ADR-0017 as below, each with an "Amended" line;
-C-11.FR-2 and C-11.FR-3; the texts of C-31 and C-32 that said that Muster sends no direct messages; CONTEXT.md's
-Page and Notification rules; L2.md §1.4, §1.5, §4, §5.3 and §6; and the rows of "Settings" in defaults.md. The rest
+Made with this capability (journal D764): ADR-0018, ADR-0005 and ADR-0017 as below, each with an "Amended" line, and
+their summaries in the ADR index; C-11.FR-2 and C-11.FR-3; the texts of C-31 and C-32 that said that Muster sends no
+direct messages; CONTEXT.md's Page and Notification rules; L2.md §1.4, §1.5, §4, §5.1, §5.3 and §6; and the rows of
+"Settings" in defaults.md. The rest
 of this list is changed by the stories of this capability, each in the pull request that needs it, as for every
 story: the specification first, the schema by a new migration, the fake servers, the lints and the other texts.
 
@@ -391,12 +393,12 @@ story: the specification first, the schema by a new migration, the fake servers,
   new line; and the rejected alternative "Direct messages for Pages" is revised as in ADR-0018.
 - **ADR-0017**, the line that says direct messages go through the interactive path: they still do for Account link codes
   and answers, and a Page by direct message through a bridge is sent by the delivery worker.
-- **C-11.FR-2** gains: "_Revised for L2 (date):_ a Page by direct message is sent and edited by the delivery worker from
-  the table `direct_messages` (C-43.FR-9); the interactive path still serves only what a person waits for." The Account
-  link messages, answers and system messages stay on the interactive path.
-- **C-11.FR-3** gains "_Revised for L2 (date):_" with the rank of C-43.FR-9: the sends of direct messages after the
-  Root-message work of Urgent Alert Groups and before the configuration edits of Urgent Alert Groups; their final edits
-  with the Thread replies.
+- **C-11.FR-2** (made) gained "_Revised for L2 (2026-11-22):_": a Page by direct message is sent and edited by the
+  delivery worker from the table `direct_messages` (C-43.FR-9); the interactive path still serves only what a person
+  waits for. The Account link messages, answers and system messages stay on the interactive path.
+- **C-11.FR-3** (made) gained "_Revised for L2 (2026-11-22):_" with the rank of C-43.FR-9: the sends of direct
+  messages after the Root-message work of Urgent Alert Groups and before the configuration edits of Urgent Alert
+  Groups; their final edits with the Thread replies.
 - **C-13, C-14, C-22, C-24, response mappings.** Each adds the rows for a direct message: Telegram's `403` "bot was
   blocked by the user" to `bot_blocked`, "user is deactivated" and a missing chat to `account_unavailable`, "can't
   initiate conversation" to `direct_messages_not_accepted`; Slack's `messages_tab_disabled` and `cannot_dm_bot` to
@@ -405,12 +407,11 @@ story: the specification first, the schema by a new migration, the fake servers,
   existing mapping of Telegram's "bot was kicked" to Fatal stays for chats of Destinations. C-22.FR-12, which binds a
   press to a Root message or a Thread reply of a Destination, also binds it to a direct message; C-14.FR-7's holds name
   the person's chat.
-- **C-31:** the goal drops "Muster sends no direct messages to Page anyone (ADR-0018)" and says "a normal and an
-  important rule, each a short sequence of Mentions in the Thread, direct messages from the bot and calls through a
-  Notification gateway"; FR-1 adds "Direct message" to the actions and says the Organization's rules cannot hold it;
-  FR-3 adds it to the run; FR-6 says that a Mention reaches a person only through an Account link in the Identity space
-  of the Destination's Connection and a direct message through any qualifying Account link; the UI line "Muster sends no
-  direct messages." is deleted; scenarios and AC-1 keep their defaults.
+- **C-31:** made — the goal and the UI got `_Revised for L2 (2026-11-22):_` markers: a rule may hold direct messages,
+  only the person's own rules hold them, and the UI drops "Muster sends no direct messages."; by the stories — FR-1 adds
+  "Direct message" to the actions and says the Organization's rules cannot hold it; FR-3 adds it to the run; FR-6 says
+  that a Mention reaches a person only through an Account link in the Identity space of the Destination's Connection
+  and a direct message through any qualifying Account link; scenarios and AC-1 keep their defaults.
 - **C-32:** the goal and FR-3's list of steps are unchanged; the table of FR-11 gains a row, "Direct message — a message
   from the bot in a private chat, with buttons — the person has an Account link in a messenger that qualifies and the
   messenger can reach them"; FR-10 adds that a direct message that ends Not delivered records `page_not_delivered` with
@@ -420,17 +421,23 @@ story: the specification first, the schema by a new migration, the fake servers,
 - **C-41:** FR-2 adds the action to the list; FR-3 the availability of C-43.FR-4; FR-4's check text "A rule needs a
   Mention or a call" gains the direct message; FR-5 the preview line "a direct message in {messenger}"; AC-1 and AC-3 a
   case each; FR-8 is unaffected, and FR-9's Organization editor does not offer the action.
+- **C-40:** FR-6's "Who was Paged" counts direct messages too — a count of its own beside "Paged" and "Calls", and
+  "Pages of both kinds" becomes "Pages of every kind" — through S-223 and S-224 or a story of C-43.
+- **C-42:** FR-8's accelerated run names a direct message as it names the other actions of a rule: "would send a
+  direct message to @{login} in {messenger}", or why it would not.
 - **C-27.FR-8 / S-164:** the warnings of FR-19 and FR-20.
 - **C-18:** FR-4 notes that an Account link is also where a direct message goes, FR-6 that unlinking stops the editing of
   its messages, and the profile lists an unreachable link; `direct_unreachable_at` and `direct_unreachable_reason` are
   columns of the Account link.
 - **C-20:** `organization.direct_messages` joins the Organization's settings.
-- **L2.md:** §1.4's table and §1.5's list gain C-43; §3 NFR-12 names the additive bridge capability and NFR-7 the
-  messages to people's private chats, which carry alert titles; §4 "Removed from the plans of L2" loses "Paging by
-  direct messages" and keeps "messages about Shifts and Overrides"; §5.1 gains the spike; §5.3 gains P-97 to P-99; §6
-  lists the revisions above.
+- **L2.md:** made — §1.4's table and §1.5's list gained C-43; §4 "Removed from the plans of L2" no longer removes
+  "Paging by direct messages" and keeps "messages about Shifts and Overrides"; §5.1 gained the spike; §5.3 gained P-98
+  and P-99, and P-97 is among the decided ones; §6 names C-11.FR-2 and C-11.FR-3. By the stories: §3 NFR-12 names the
+  additive bridge capability and NFR-7 the messages to people's private chats, which carry alert titles, and §6 the
+  other revisions above.
 - **reference.md:** the rows of `paged` and `page_not_delivered` of the L2 lifecycle events name the direct message;
-  `muster_pages_total`'s `kind` gains `direct_message`.
+  `muster_pages_total`'s `kind` gains `direct_message`; the Route form's warning for a chain and no Destination reads as
+  in FR-20.
 - **`api/openapi.yaml`:** the `EscalationSkipReason` enum gains the skip reasons of FR-5; the Page kinds and reasons;
   the action of `NotificationRuleSet`; `organization.direct_messages`; the account link read.
 - **CONTEXT.md:** see "Glossary changes". **AGENTS.md:** the lint-3 row names the direct message as a send that only the

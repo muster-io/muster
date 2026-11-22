@@ -26,8 +26,9 @@
   its limiter
 - Amended: 2026-11-22 — with the L2 PRD of Paging by direct messages (C-43, journal D764): the delivery worker also
   sends the direct messages that Page a person, from a table of their own, and edits each once when its Alert Group
-  stops being firing; like Thread replies they are not reconciled to a Desired state, they go through the Connection's
-  limiter only and make nothing Broken; direct messages of Account links and answers stay on the interactive path
+  stops being firing; like Thread replies they are not reconciled to a Desired state; unlike them, they take only the
+  Connection's limiter, since they name no Destination, and make nothing Broken; direct messages of Account links and
+  answers stay on the interactive path
 
 ## Context
 
@@ -74,11 +75,12 @@ calls through a gateway only from that sender and the interactive path. A gatewa
 probed through its `info` and raises an Internal alert; its failures never make a Destination Broken, not even one of
 the same bridge when it also has the role `messenger`, whose own deliveries decide that. In L2's core Muster sent no
 direct messages to Page people: a Page in a messenger was a Mention in a Thread reply (journal D503, D505, D532). From
-C-43 a Page may also be a direct message, the other send that is not reconciled: the delivery worker sends it from its
-row, through the Connection's limiter, and edits it once (journal D764).
+C-43 a Page may also be a direct message, another send that is not reconciled, as Thread replies are not: the delivery
+worker sends it from its row, through the Connection's limiter, and edits it once (journal D764).
 
 **Rate limiting.** Each Destination has a limiter, and each Connection has one too, because a messenger limits a bot as
-a whole as well as each chat; a delivery waits for both. The limiters are shared by all replicas: their token buckets
+a whole as well as each chat; a delivery waits for both, and a direct message of C-43, which names no Destination,
+for the Connection's alone. The limiters are shared by all replicas: their token buckets
 live in PostgreSQL, so adding a replica never raises the rate a messenger sees. A call on the interactive path takes a
 token from the same limiters ahead of every waiting delivery, never queues, and fails fast — the person is told — when
 no token is free within its budget of a few seconds (ADR-0015). Limits default to half of the messenger's documented

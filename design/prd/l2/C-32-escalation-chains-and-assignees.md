@@ -224,7 +224,8 @@ steps and the acknowledgement that stopped the chain. Route form: "Escalation ch
 Group page, list and Home as FR-18.
 _Revised for L2 (2026-11-22):_ from C-43 "Normal and important" no longer says "Muster sends no direct messages": a
 Page is a Mention in the Thread, a call through a Notification gateway or a direct message, as each person's rules
-say; and the Pages of "How it went" include direct messages (C-43.FR-18).
+say; the Route form's hint no longer says that a chain Pages only in the Threads of the Route's Destinations, since a
+direct message needs no Thread (C-43.FR-20); and the Pages of "How it went" include direct messages (C-43.FR-18).
 
 ## API surface
 

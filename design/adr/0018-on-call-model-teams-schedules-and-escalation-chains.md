@@ -25,8 +25,9 @@
   message from the bot is an action of a Notification rule that the person chooses, beside a Mention in the Thread and a
   call through a Notification gateway; the action names the person's Account link, the delivery worker sends it from a
   table of its own and edits it once when the Alert Group stops being firing, a person who blocked the bot is a reason
-  of the Page, and no Escalation step and no default rule of the Organization names a direct message. Direct messages
-  about Shifts and Overrides stay rejected
+  of the Page, and no Escalation step and no default rule of the Organization names a direct message; the warning of a
+  Route with a chain and no Destinations names direct messages beside Notification gateways. Direct messages about
+  Shifts and Overrides stay rejected
 
 ## Context
 
@@ -183,7 +184,7 @@ Mention is a Thread reply that delivery sends like any other (ADR-0005). A Menti
 to, or whose Thread reply ends Not delivered or is held back, records in the Timeline that the Page was not delivered
 and does not make the person an Assignee. Steps through a Notification gateway do not depend on a Root message and keep
 working while a messenger is unreachable. A Route with a chain and no Destinations carries a warning that only a
-Notification gateway can reach anyone (journal D528).
+Notification gateway or, from C-43, a direct message can reach anyone (journal D528, D764).
 
 **Pages by Mention, by call and by direct message.** Muster Pages a person by a Mention in the Alert Group's Thread, by
 a call through a Notification gateway, or by a direct message from the bot, as the person's Notification rules say; the
@@ -300,9 +301,10 @@ one table (journal D513).
   messengers, and a rule for a person who blocked the bot (journal D503). C-43 answers each (journal D764): the delivery
   worker sends it from a table of its own with the limiters and classification it has, the action of the person's rule
   names the Account link, and a blocked bot is a reason of the Page that the profile and the Schedule show.
-- **Direct messages about Shifts and Overrides, and a bot command that says who is on call.** The messages need the same
-  third path; a command needs setup on every Mattermost server, another Slack scope and new Telegram update types. The
-  UI and the iCal feed show the same (journal D504, D515, D534).
+- **Direct messages about Shifts and Overrides, and a bot command that says who is on call.** The messages are about no
+  Alert Group and no Page, so neither delivery nor the Pages of C-43 carry them, and a person would get them whatever
+  their Notification rules say; a command needs setup on every Mattermost server, another Slack scope and new Telegram
+  update types. The UI and the iCal feed show the same (journal D504, D515, D534, D764).
 - **Backup Destinations on a Route**, used while its Destinations are Broken. The Internal alert
   `MusterDestinationBroken`, routed to another messenger, already reaches people, and gateway steps work without a
   messenger (journal D495).
