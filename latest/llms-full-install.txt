@@ -639,7 +639,14 @@ line is `WARN` while migrations remain, `OK` once `muster migrate` or a replica'
 while the schema is still dirty.
 
 0.2.0
-:   The `route.urgent` setting of a Route and the Organization's "critical is Urgent"
+:   **0.1.x can crash-loop on a Route with a line template.** On 0.1.4 and earlier, Muster panics when it re-renders
+    the Root message of an Alert Group that has no Alerts to list on a Route with a
+    [line template](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#what-you-can-change-and-what-you-cannot), for example at
+    the end of a Grace period after a person resolved an Alert Group whose Alerts still fired. The timer fires again
+    at every start, so the replica crash-loops. 0.2.0 fixes it: upgrade. Until you can, remove the line template from
+    such Routes.
+
+    The `route.urgent` setting of a Route and the Organization's "critical is Urgent"
     (`organization.critical_is_urgent`) no longer act: an Alert Group is Urgent exactly when its Severity level is
     critical, and a Route raises the level of its Alert Groups with its
     [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity).

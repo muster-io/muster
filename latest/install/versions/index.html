@@ -3301,6 +3301,12 @@ while the schema is still dirty.</p>
 <dl>
 <dt>0.2.0</dt>
 <dd>
+<p><strong>0.1.x can crash-loop on a Route with a line template.</strong> On 0.1.4 and earlier, Muster panics when it re-renders
+the Root message of an Alert Group that has no Alerts to list on a Route with a
+<a href="../../configure/messages-and-templates/#what-you-can-change-and-what-you-cannot">line template</a>, for example at
+the end of a Grace period after a person resolved an Alert Group whose Alerts still fired. The timer fires again
+at every start, so the replica crash-loops. 0.2.0 fixes it: upgrade. Until you can, remove the line template from
+such Routes.</p>
 <p>The <code>route.urgent</code> setting of a Route and the Organization's "critical is Urgent"
 (<code>organization.critical_is_urgent</code>) no longer act: an Alert Group is Urgent exactly when its Severity level is
 critical, and a Route raises the level of its Alert Groups with its
