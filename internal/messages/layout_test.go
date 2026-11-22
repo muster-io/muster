@@ -5,6 +5,7 @@ package messages
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -145,6 +146,28 @@ func TestLoadTeams(t *testing.T) {
 	f.group.Teams = nil
 	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.Teams == nil || len(src.Teams) != 0 {
 		t.Errorf("no teams %#v, %v", src.Teams, err)
+	}
+}
+
+// TestLoadFooterUsers is C-12.FR-12 in the read of a message: the users of the footer are read for an Alert Group
+// whose footer names one — acknowledged, snoozed or resolved — and not for a firing one, whose footer names nobody.
+func TestLoadFooterUsers(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 1)}
+	r := withFake(t, f)
+	r.names = fakeNames{fail: errBoom}
+	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.FooterUsers != nil {
+		t.Errorf("firing: %+v, %v", src.FooterUsers, err)
+	}
+	for _, status := range []string{"acknowledged", "snoozed", "resolved"} {
+		f.group.Status = status
+		r.names = fakeNames{fail: errBoom}
+		if _, err := r.Load(t.Context(), nil, 9); !errors.Is(err, errBoom) {
+			t.Errorf("%s: %v", status, err)
+		}
+		r.names = fakeNames{}
+		if src, err := r.Load(t.Context(), nil, 9); err != nil || len(src.FooterUsers) != 2 {
+			t.Errorf("%s: %+v, %v", status, src.FooterUsers, err)
+		}
 	}
 }
 

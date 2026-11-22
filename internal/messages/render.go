@@ -258,7 +258,8 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 	if err := r.withLinks(ctx, db, src); err != nil {
 		return nil, err
 	}
-	if r.names != nil {
+	// The footer of a firing Alert Group names no user.
+	if r.names != nil && src.Status != ColourFiring {
 		if src.FooterUsers, err = r.names.FooterUsers(ctx, db, groupID); err != nil {
 			return nil, err
 		}

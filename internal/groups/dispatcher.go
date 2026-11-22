@@ -583,12 +583,18 @@ type snapshotRef struct {
 	read bool
 }
 
-// withSnapshot marks ctx as the transaction of the Stored Snapshot id.
-func withSnapshot(ctx context.Context, id int64) context.Context {
+// withSnapshot marks ctx as the transaction of the Stored Snapshot id, received at receivedAt; a zero receivedAt
+// leaves it to be read.
+func withSnapshot(ctx context.Context, id int64, receivedAt time.Time) context.Context {
 	if id == 0 {
 		return ctx
 	}
-	return context.WithValue(ctx, snapshotKey{}, &snapshotRef{id: id})
+	ref := &snapshotRef{id: id}
+	if !receivedAt.IsZero() {
+		at := receivedAt.UTC()
+		ref.at, ref.read = &at, true
+	}
+	return context.WithValue(ctx, snapshotKey{}, ref)
 }
 
 // receivedAt is the receipt time of the Stored Snapshot behind the changes of ctx, read once per transaction; nil

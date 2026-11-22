@@ -1293,7 +1293,7 @@ func TestRerender(t *testing.T) {
 	})
 	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
 	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "job": "j2"})
-	ctx := withSnapshot(t.Context(), 77)
+	ctx := withSnapshot(t.Context(), 77, time.Time{})
 	for _, id := range []int64{a, b} {
 		routed, err := h.svc.AlertChanges(ctx, nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: id,
 			StoredSnapshotID: 77}})
@@ -1339,7 +1339,16 @@ func TestRerender(t *testing.T) {
 		StoredSnapshotID: 78}}); !errors.Is(err, errBoom) {
 		t.Errorf("unread snapshot = %v", err)
 	}
-	if withSnapshot(t.Context(), 0) != t.Context() {
+	// A change that carries when its Snapshot was received is not read.
+	got = nil
+	at := received.Add(time.Second)
+	carried := h.alert(3, "warning", map[string]string{"alertname": "C", "cluster": "z"})
+	if _, err := h.svc.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeFired,
+		AlertID: carried, StoredSnapshotID: 78, ReceivedAt: at}}); err != nil || len(got) != 1 || got[0].ReceivedAt == nil ||
+		!got[0].ReceivedAt.Equal(at) {
+		t.Errorf("a carried receipt = %v, renderings %+v", err, got)
+	}
+	if withSnapshot(t.Context(), 0, at) != t.Context() {
 		t.Error("a change without a snapshot carries one")
 	}
 }

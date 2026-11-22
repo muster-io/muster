@@ -109,7 +109,7 @@ func (s *Service) routePublicID(ctx context.Context, q Queries, id int64) (strin
 func (s *Service) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []ingest.AlertChange) (ingest.Routed,
 	error) {
 	if len(changes) > 0 {
-		ctx = withSnapshot(ctx, changes[0].StoredSnapshotID)
+		ctx = withSnapshot(ctx, changes[0].StoredSnapshotID, changes[0].ReceivedAt)
 	}
 	q := s.queries(tx)
 	e := s.newEngine(q, tx)

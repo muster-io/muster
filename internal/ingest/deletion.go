@@ -38,8 +38,8 @@ func (p *Processor) applyDeletion(ctx context.Context, q ProcessQueries, tx dbge
 	for i, r := range rows {
 		ids[i] = r.ID
 		out.Changes[i] = AlertChange{Kind: ChangeResolved, AlertID: r.ID, Fingerprint: r.Fingerprint,
-			Episode: r.Episode, StoredSnapshotID: in.StoredSnapshotID, Reason: ResolveIntegrationDeleted,
-			ReasonText: text}
+			Episode: r.Episode, StoredSnapshotID: in.StoredSnapshotID, ReceivedAt: in.ReceivedAt,
+			Reason: ResolveIntegrationDeleted, ReasonText: text}
 	}
 	if len(ids) > 0 {
 		if err := q.EndPresences(ctx, dbgen.EndPresencesParams{OrgID: p.orgID, AlertIds: ids}); err != nil {

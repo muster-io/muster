@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/muster-io/muster/internal/ingest/dbgen"
 )
@@ -29,13 +30,15 @@ const (
 	ChangeListed ChangeKind = "listed"
 )
 
-// AlertChange is one change of an Alert, made by the Stored Snapshot StoredSnapshotID.
+// AlertChange is one change of an Alert, made by the Stored Snapshot StoredSnapshotID, which was received at
+// ReceivedAt; both are zero for a change no Snapshot made.
 type AlertChange struct {
 	Kind             ChangeKind
 	AlertID          int64
 	Fingerprint      string
 	Episode          int64
 	StoredSnapshotID int64
+	ReceivedAt       time.Time
 	// Reason and ReasonText are set on a ChangeResolved.
 	Reason     string
 	ReasonText string
