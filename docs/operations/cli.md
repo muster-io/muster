@@ -102,9 +102,9 @@ the database, a pooler or the keys.
 muster migrate
 ```
 
-Applies the migrations under a session advisory lock and logs the versions it applied. It refuses to run on a schema
-newer than the binary knows and names both versions. The Helm chart runs it in an init container. See
-[Upgrades](upgrades.md#migrations).
+Applies the migrations under a session advisory lock and logs the versions it applied. When it applied any, it then
+analyzes the tables of Muster's schema, logged as `schema_analyzed`. It refuses to run on a schema newer than the binary
+knows and names both versions. The Helm chart runs it in an init container. See [Upgrades](upgrades.md#migrations).
 
 ## `muster admin`
 
