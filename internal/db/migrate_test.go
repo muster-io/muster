@@ -36,7 +36,12 @@ func TestMain(m *testing.M) {
 
 func openFresh(t *testing.T, s dbtest.Server) *DB {
 	t.Helper()
-	u := s.NewDatabase(t)
+	return openURL(t, s.NewDatabase(t))
+}
+
+// openURL opens the database at u for both connections.
+func openURL(t *testing.T, u string) *DB {
+	t.Helper()
 	d, err := Open(t.Context(), config.Database{URL: logging.Secret(u), SSLMode: "disable"},
 		config.Database{URL: logging.Secret(u), SSLMode: "disable"})
 	if err != nil {
@@ -2836,112 +2841,196 @@ func TestIntegrationConcurrentMigrate(t *testing.T) {
 	})
 }
 
-// TestIntegrationMigrateAnalyze: migrating a new database analyzes every table of the current schema and no table of
-// another schema of the same database; a second Migrate, which applies nothing, analyzes nothing. An upgrade of a
-// database with a partition that holds a row analyzes the partition through its partitioned table, which gets
-// statistics of its own.
+// TestIntegrationMigrateAnalyze: migrating analyzes every table of the current schema, the first schema of the
+// search_path, and no table of another schema of the same database; a Migrate that applies nothing analyzes nothing.
+// An upgrade analyzes a partition that holds a row through its partitioned table, which gets statistics of its own,
+// and skips a table that another session holds locked instead of waiting for it.
+//
+// reltuples tells whether a table was analyzed: it is -1 until a table's first ANALYZE or VACUUM, an index build on an
+// empty table leaves it at -1, the migrations create every table empty, and autovacuum leaves an empty table alone.
+// It is transactional, so it shows the ANALYZE at once on every version. A partitioned table without partitions, as
+// every one is on a new database, keeps -1: there is nothing to sample.
 func TestIntegrationMigrateAnalyze(t *testing.T) {
 	known, err := KnownVersion()
 	if err != nil {
 		t.Fatal(err)
 	}
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
-		d := openFresh(t, s)
-		ctx := t.Context()
-		for _, stmt := range []string{"CREATE SCHEMA other", "CREATE TABLE other.bystander (id bigint)"} {
-			if _, err := d.Pool.Exec(ctx, stmt); err != nil {
-				t.Fatalf("%s: %v", stmt, err)
-			}
-		}
-		var out bytes.Buffer
-		log := logging.New(&out, logging.LevelInfo)
-		if err := d.Migrate(ctx, log); err != nil {
-			t.Fatalf("Migrate: %v", err)
-		}
-		var named int
-		if err := d.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p') AND NOT c.relispartition`).
-			Scan(&named); err != nil {
+		major, err := strconv.Atoi(s.Version)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if want := fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`, named); named == 0 ||
-			!strings.Contains(out.String(), want) {
-			t.Errorf("%d tables; logged %s, want %s", named, out.String(), want)
-		}
 
-		// reltuples is -1 until a table's first ANALYZE or VACUUM, and an index build on an empty table leaves it at
-		// -1; the migrations create every table empty, and autovacuum leaves an empty table alone. It is
-		// transactional, so it shows the ANALYZE at once on every version. A partitioned table without partitions, as
-		// every one is on a new database, keeps -1: there is nothing to sample.
-		if left := relations(t, d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`); len(left) > 0 {
-			t.Errorf("tables of the schema not analyzed: %v", left)
-		}
-		if left := relations(t, d, `n.nspname = 'other' AND c.reltuples < 0`); !slices.Equal(left, []string{"bystander"}) {
-			t.Errorf("the tables of another schema not analyzed are %v, want bystander", left)
-		}
-		// last_analyze is what an operator reads. PostgreSQL 14's statistics collector receives the ANALYZE's report
-		// over a socket, after the statement returned, so its view can lag by a moment; from 15 on the report is in
-		// shared memory at once. The poll waits only for that report, which reltuples above proved was made.
-		var analyzed map[string]time.Time
-		eventually(t, "last_analyze of every table of the schema", func() bool {
-			analyzed = lastAnalyze(t, d)
-			return analyzed["schema_migrations"] != (time.Time{}) &&
-				!slices.Contains(slices.Collect(maps.Values(analyzed)), time.Time{})
+		t.Run("new database", func(t *testing.T) {
+			d := openFresh(t, s)
+			execAll(t, d, "CREATE SCHEMA other", "CREATE TABLE other.bystander (id bigint)")
+			var out bytes.Buffer
+			log := logging.New(&out, logging.LevelInfo)
+			if err := d.Migrate(t.Context(), log); err != nil {
+				t.Fatalf("Migrate: %v", err)
+			}
+			named := tablesNamed(t, d, "current_schema()")
+			if want := fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`, named); named == 0 ||
+				!strings.Contains(out.String(), want) {
+				t.Errorf("%d tables; logged %s, want %s", named, out.String(), want)
+			}
+			if left := relations(t, d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`); len(left) > 0 {
+				t.Errorf("tables of the schema not analyzed: %v", left)
+			}
+			if left := relations(t, d, `n.nspname = 'other' AND c.reltuples < 0`); !slices.Equal(left, []string{"bystander"}) {
+				t.Errorf("the tables of another schema not analyzed are %v, want bystander", left)
+			}
+			// last_analyze, what an operator reads, is in shared memory as soon as the ANALYZE ends from PostgreSQL 15
+			// on; 14's statistics collector receives the report over a socket after the statement returned, so it is
+			// read only from 15 on.
+			var analyzed map[string]time.Time
+			if major >= 15 {
+				analyzed = lastAnalyze(t, d)
+				if len(analyzed) == 0 || slices.Contains(slices.Collect(maps.Values(analyzed)), time.Time{}) {
+					t.Errorf("last_analyze %v", analyzed)
+				}
+			}
+
+			execAll(t, d, "CREATE TABLE probe (id bigint)")
+			out.Reset()
+			if err := d.Migrate(t.Context(), log); err != nil {
+				t.Fatalf("Migrate again: %v", err)
+			}
+			if strings.Contains(out.String(), `"event":"schema_analy`) ||
+				!strings.Contains(out.String(), `"event":"migrations_current"`) {
+				t.Errorf("Migrate again logged %s", out.String())
+			}
+			// An ANALYZE would have set the reltuples of the new table to 0.
+			left := relations(t, d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`)
+			if !slices.Equal(left, []string{"probe"}) {
+				t.Errorf("after Migrate again the tables not analyzed are %v, want probe", left)
+			}
+			if major >= 15 {
+				want := maps.Clone(analyzed)
+				want["probe"] = time.Time{}
+				if again := lastAnalyze(t, d); !maps.Equal(again, want) {
+					t.Errorf("last_analyze changed from %v to %v", want, again)
+				}
+			}
 		})
 
-		if _, err := d.Pool.Exec(ctx, "CREATE TABLE probe (id bigint)"); err != nil {
-			t.Fatal(err)
-		}
-		out.Reset()
-		if err := d.Migrate(ctx, log); err != nil {
-			t.Fatalf("Migrate again: %v", err)
-		}
-		if strings.Contains(out.String(), `"event":"schema_analy`) ||
-			!strings.Contains(out.String(), `"event":"migrations_current"`) {
-			t.Errorf("Migrate again logged %s", out.String())
-		}
-		// An ANALYZE would have set the reltuples of the new table to 0.
-		left := relations(t, d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`)
-		if !slices.Equal(left, []string{"probe"}) {
-			t.Errorf("after Migrate again the tables not analyzed are %v, want probe", left)
-		}
-		want := maps.Clone(analyzed)
-		want["probe"] = time.Time{}
-		if again := lastAnalyze(t, d); !maps.Equal(again, want) {
-			t.Errorf("last_analyze changed from %v to %v", want, again)
-		}
-
-		e := newMigrationEnv(t, s, known-1)
-		e.exec(t, `CREATE TABLE stored_snapshots_p20261005 PARTITION OF stored_snapshots
-			FOR VALUES FROM ('2026-10-05 00:00:00+00') TO ('2026-10-06 00:00:00+00')`)
-		e.exec(t, `INSERT INTO stored_snapshots (org_id, public_id, integration_id, source, received_at, body_day,
-			body_sha256, size_bytes, state)
-			SELECT id, 'SS0000000000AA', 1, 'webhook', '2026-10-05 12:00:00+00', '2026-10-05', sha256('x'), 1, 'pending'
-			FROM organizations`)
-		out.Reset()
-		if err := e.d.Migrate(ctx, log); err != nil {
-			t.Fatalf("Migrate from version %d: %v", known-1, err)
-		}
-		for _, line := range []string{
-			fmt.Sprintf(`"event":"migrations_applied","from":%d,"to":%d`, known-1, known),
-			fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`, named),
-		} {
-			if !strings.Contains(out.String(), line) {
-				t.Errorf("Migrate from version %d logged %s, want %s", known-1, out.String(), line)
+		// The schema of a search_path that the URL sets, as docs/install/database.md shows it, and not public.
+		t.Run("search path", func(t *testing.T) {
+			u := s.NewDatabase(t)
+			execAll(t, openURL(t, u), "CREATE SCHEMA muster", "CREATE TABLE public.bystander (id bigint)")
+			sep := "?"
+			if strings.Contains(u, "?") {
+				sep = "&"
 			}
-		}
-		if left := relations(t, e.d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`); len(left) > 0 {
-			t.Errorf("tables of the schema not analyzed on the upgrade: %v", left)
-		}
-		if n := e.count(t, `SELECT reltuples::integer FROM pg_class
-			WHERE oid = 'stored_snapshots_p20261005'::regclass`); n != 1 {
-			t.Errorf("the partition has reltuples %d, want 1", n)
-		}
-		if n := e.count(t, `SELECT count(*) FROM pg_stats WHERE schemaname = current_schema()
-			AND tablename = 'stored_snapshots' AND inherited`); n == 0 {
-			t.Error("the partitioned table stored_snapshots has no statistics of its own")
-		}
+			d := openURL(t, u+sep+"options=-c%20search_path%3Dmuster")
+			var out bytes.Buffer
+			if err := d.Migrate(t.Context(), logging.New(&out, logging.LevelInfo)); err != nil {
+				t.Fatalf("Migrate: %v", err)
+			}
+			named := tablesNamed(t, d, "'muster'")
+			if want := fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`, named); named == 0 ||
+				!strings.Contains(out.String(), want) {
+				t.Errorf("%d tables in muster; logged %s, want %s", named, out.String(), want)
+			}
+			if left := relations(t, d, `n.nspname = 'muster' AND c.relkind = 'r' AND c.reltuples < 0`); len(left) > 0 {
+				t.Errorf("tables of the schema muster not analyzed: %v", left)
+			}
+			if left := relations(t, d, `n.nspname = 'public' AND c.reltuples < 0`); !slices.Equal(left, []string{"bystander"}) {
+				t.Errorf("the tables of public not analyzed are %v, want bystander", left)
+			}
+		})
+
+		t.Run("upgrade", func(t *testing.T) {
+			e := newMigrationEnv(t, s, known-1)
+			e.exec(t, `CREATE TABLE stored_snapshots_p20261005 PARTITION OF stored_snapshots
+				FOR VALUES FROM ('2026-10-05 00:00:00+00') TO ('2026-10-06 00:00:00+00')`)
+			e.exec(t, `INSERT INTO stored_snapshots (org_id, public_id, integration_id, source, received_at, body_day,
+				body_sha256, size_bytes, state)
+				SELECT id, 'SS0000000000AA', 1, 'webhook', '2026-10-05 12:00:00+00', '2026-10-05', sha256('x'), 1,
+				       'pending'
+				FROM organizations`)
+			var out bytes.Buffer
+			if err := e.d.Migrate(t.Context(), logging.New(&out, logging.LevelInfo)); err != nil {
+				t.Fatalf("Migrate from version %d: %v", known-1, err)
+			}
+			for _, line := range []string{
+				fmt.Sprintf(`"event":"migrations_applied","from":%d,"to":%d`, known-1, known),
+				fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`, tablesNamed(t, e.d, "current_schema()")),
+			} {
+				if !strings.Contains(out.String(), line) {
+					t.Errorf("Migrate from version %d logged %s, want %s", known-1, out.String(), line)
+				}
+			}
+			if left := relations(t, e.d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`); len(left) > 0 {
+				t.Errorf("tables of the schema not analyzed on the upgrade: %v", left)
+			}
+			if n := e.count(t, `SELECT reltuples::integer FROM pg_class
+				WHERE oid = 'stored_snapshots_p20261005'::regclass`); n != 1 {
+				t.Errorf("the partition has reltuples %d, want 1", n)
+			}
+			if n := e.count(t, `SELECT count(*) FROM pg_stats WHERE schemaname = current_schema()
+				AND tablename = 'stored_snapshots' AND inherited`); n == 0 {
+				t.Error("the partitioned table stored_snapshots has no statistics of its own")
+			}
+		})
+
+		// SKIP_LOCKED: a table that another session holds in a lock that ANALYZE waits for is skipped, and the rest
+		// are analyzed while the lock is still held.
+		t.Run("table locked", func(t *testing.T) {
+			e := newMigrationEnv(t, s, known-1)
+			ctx := t.Context()
+			tx, err := e.d.Pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+			if _, err := tx.Exec(ctx, "LOCK TABLE alerts IN SHARE UPDATE EXCLUSIVE MODE"); err != nil {
+				t.Fatal(err)
+			}
+			// The deadline only stops a Migrate that waits for the lock, which never ends while the lock is held; it is
+			// no bound of the behaviour under test.
+			mctx, cancel := context.WithTimeout(ctx, time.Minute)
+			defer cancel()
+			var out bytes.Buffer
+			if err := e.d.Migrate(mctx, logging.New(&out, logging.LevelInfo)); err != nil || mctx.Err() != nil {
+				t.Fatalf("Migrate with alerts locked: %v, deadline %v", err, mctx.Err())
+			}
+			want := fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`,
+				tablesNamed(t, e.d, "current_schema()"))
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("Migrate with alerts locked logged %s, want %s", out.String(), want)
+			}
+			left := relations(t, e.d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`)
+			if !slices.Equal(left, []string{"alerts"}) {
+				t.Errorf("with alerts locked the tables not analyzed are %v, want alerts", left)
+			}
+			if err := tx.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
 	})
+}
+
+// execAll runs each statement on the main pool of d.
+func execAll(t *testing.T, d *DB, stmts ...string) {
+	t.Helper()
+	for _, stmt := range stmts {
+		if _, err := d.Pool.Exec(t.Context(), stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+}
+
+// tablesNamed is the number of tables of the schema that schema, an SQL expression, names, partitions left out: the
+// tables a run of ANALYZE after migrations names.
+func tablesNamed(t *testing.T, d *DB, schema string) int {
+	t.Helper()
+	var n int
+	if err := d.Pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = `+schema+` AND c.relkind IN ('r', 'p') AND NOT c.relispartition`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // relations names the tables, partitioned or not, that pass where, an expression over pg_class c and pg_namespace n,
@@ -2994,20 +3083,6 @@ func lastAnalyze(t *testing.T, d *DB) map[string]time.Time {
 		t.Fatal(err)
 	}
 	return out
-}
-
-// eventually polls cond until it holds. The deadline only stops a test that hangs; it is no bound of the behaviour
-// under test.
-func eventually(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	const deadline = 30 * time.Second
-	begin := time.Now()
-	for !cond() {
-		if time.Since(begin) > deadline {
-			t.Fatalf("%s did not happen within %v", what, deadline)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 func TestIntegrationVersions(t *testing.T) {
