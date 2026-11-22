@@ -48,8 +48,8 @@ schema under the same lock, so that the planner has statistics for new tables, c
 after autovacuum's first pass. A partitioned table is analyzed with its partitions; a table that another session holds
 locked, as a `VACUUM` does, is skipped. The run is logged as
 [`schema_analyzed`](../reference/log-events.md#schema_analyzed) with its duration: under a tenth of a second on a new
-database, about five seconds on one of 1 GB with a million rows. The migration lock is held meanwhile, so a replica
-that waits for it starts that much later. A failure is logged as
+database, about five seconds, with a warm cache, on one of 1 GB with a million rows. The migration lock is held
+meanwhile, so a replica that waits for it starts that much later. A failure is logged as
 [`schema_analyze_failed`](../reference/log-events.md#schema_analyze_failed), a warning: the migrations stay applied,
 and autovacuum analyzes the tables as they change. Nothing is analyzed when the schema was already current.
 
