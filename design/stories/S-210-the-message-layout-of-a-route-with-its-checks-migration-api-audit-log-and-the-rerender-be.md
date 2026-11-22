@@ -56,7 +56,8 @@ issue: null
   (the bridge's `layout` and `order`). Until S-211 merges the layout is stored, read and re-rendered with no visible
   change.
 - The preview and the Destination test that take an unsaved layout: S-215, S-216. The editor: S-217, S-218.
-- A Terraform attribute `message_layout` of `muster_route`: see Open questions.
+- The Terraform attributes `own_message_layout` and `message_layout` of `muster_route`: S-240, in the provider's
+  repository.
 
 ## Contracts
 
@@ -161,12 +162,10 @@ migration test (a Route that exists before the migration reads the default).
 
 ## Open questions
 
-- **The Terraform provider.** C-38.FR-15 says a client such as the Terraform provider reads and writes the layout like
-  any other Route setting, but no story of C-33 (S-187) names `message_layout` among the attributes of `muster_route`,
-  and the provider is released on its own. Does the maintainer want a story in `muster-io/terraform-provider-muster`
-  for `own_message_layout` and `message_layout`, after this story merges? Until then a configuration cannot own a
-  layout, and a Route the provider manages keeps whatever an Admin saved in the UI, which the provider's plan shows
-  as a drift only if its schema lists the attribute.
+- **The Terraform provider** (settled). C-38.FR-15 says a client such as the Terraform provider reads and writes the
+  layout like any other Route setting, but no story of C-33 (S-187) named `message_layout` among the attributes of
+  `muster_route`, and the provider is released on its own. The maintainer added S-240 to C-33 (journal D764), worked
+  in `muster-io/terraform-provider-muster` after this story merges, for `own_message_layout` and `message_layout`.
 - **The shape of `RouteMessageLayout`.** The PRD fixes the content of the layout and the names `own_message_layout` and
   `message_layout` but not the property names inside it; this story names them as above. Say if the review wants
   others before the generated clients carry them.

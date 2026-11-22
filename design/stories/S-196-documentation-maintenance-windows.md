@@ -22,7 +22,7 @@ files_touched:
   - web/e2e/docs-links-forms.spec.ts
 acceptance:
   - "[C-34.FR-23] Concepts → Maintenance windows, in the navigation, describes the three objects, the rule of every Team and of every Integration with the worked example of scenario 3 (`KubePodCrashLooping` with Alerts of payments and analytics is not kept back by the window of payments), Urgent Alert Groups and `maintenance.urgent_passes`, what happens at the end (published with the mark, the Thread reply, chains starting over, resolved ones never posted), the Internal alerts of an Integration, and that time to acknowledge includes the window."
-  - "[C-34.FR-23] The page has a CI example that opens a window with a Service account token of the Role Responder before a deploy and closes it after, with `curl` against `createMaintenanceWindow` and `endMaintenanceWindow`, and says that windows do not repeat and that the Terraform provider has no resource for them yet (the provider story that adds `muster_maintenance_window` is a question for the maintainer, Open question 1)."
+  - "[C-34.FR-23] The page has a CI example that opens a window with a Service account token of the Role Responder before a deploy and closes it after, with `curl` against `createMaintenanceWindow` and `endMaintenanceWindow`, and says that windows do not repeat and, until a release of the provider carries `muster_maintenance_window` (S-240), that the Terraform provider has no resource for them yet (Open question 1)."
   - "[C-34.FR-23] \"Guide\" beside the title of the page \"Maintenance windows\" and the link of \"Let Urgent Alert Groups through\" open the page and its section `#urgent-alert-groups`; `make docs-check` passes, including `docslinkcheck`, every image has its alternative text and every link and anchor resolves."
   - "[C-34.FR-23] The page has screenshots of the Team's section with the banner and of the Alert Group page with its banner, taken by `make docs-screenshots GUIDES=maintenance-windows` with the development clock."
 verify: "make docs-check"
@@ -46,7 +46,7 @@ issue: null
 **OUT**
 
 - The behaviour and the pages: S-190 to S-195. The API reference, which `make docs` renders from the spec. The Terraform
-  resource `muster_maintenance_window` and its guide: no story has it (Open question 1).
+  resource `muster_maintenance_window` and its documentation: S-240, in the provider's repository (Open question 1).
 
 ## Contracts
 
@@ -89,12 +89,11 @@ issue: null
 
 ## Open questions
 
-1. **The Terraform resource for windows (non-blocking: this story documents that there is none yet).** C-34.FR-23 says the
-   Terraform provider manages windows with a resource that "its own capability, specified later in L2 (§1.5), adds". The
-   stories of C-33 (S-182 to S-189) cover the provider's skeleton and its resources for the Organization, Integrations,
-   Connections, Destinations, Teams, Schedules, Escalation chains and Routes, and none for windows. A provider story in
-   `muster-io/terraform-provider-muster` for `muster_maintenance_window` (after S-187, on the resource `maintenance-windows`
-   of S-190) is needed; the maintainer decides whether it belongs to a story of C-33 or to a later one.
+1. **The Terraform resource for windows (settled).** C-34.FR-23 says the Terraform provider manages windows with a
+   resource that "its own capability, specified later in L2 (§1.5), adds". The stories S-182 to S-189 of C-33 have none
+   for windows, so the maintainer added S-240 to C-33 (journal D764): `muster_maintenance_window`, worked in
+   `muster-io/terraform-provider-muster` after S-187 and S-190. This page shows the API, which exists without the
+   provider; a sentence that names the resource can follow once the provider's release carries it.
 
 ## Notes
 
@@ -106,4 +105,4 @@ issue: null
 
 | ID | Covered | Note |
 |---|---|---|
-| C-34.FR-23 | full | the page and its CI example; the statistics half is a property of the existing statistics, which counts kept-back Alert Groups like any other (S-191 to S-193 change nothing there); the Terraform resource `muster_maintenance_window` is in no story of the provider (S-182 to S-189), a question for the maintainer (Open question 1) |
+| C-34.FR-23 | partial | the page and its CI example; the statistics half is a property of the existing statistics, which counts kept-back Alert Groups like any other (S-191 to S-193 change nothing there); with S-240, the Terraform resource `muster_maintenance_window`, complete |

@@ -213,10 +213,11 @@ creates it again on its next run.". The Russian texts follow the translations of
 Muster's part is checked against `muster dev`; the provider's in its own repository, with acceptance tests against
 `muster dev` from Muster's image and its fake servers.
 
-- **C-33.AC-1** With `MUSTER_ENDPOINT` and `MUSTER_TOKEN` set, a configuration with only the provider block plans;
-  against Muster 0.1.4 it stops with "Muster 0.1.4 is older than 0.2.0, the oldest version this provider works with";
-  a wrong token names `MUSTER_TOKEN`; a Responder's token says that the Admin Role is needed; a development build
-  plans with a warning.
+- **C-33.AC-1** With `MUSTER_ENDPOINT` and `MUSTER_TOKEN` set, a configuration with only the provider block plans; a
+  configuration that reads a resource or data source of the provider — Terraform and OpenTofu never configure a
+  provider that nothing uses — stops against Muster 0.1.4 with "Muster 0.1.4 is older than 0.2.0, the oldest version
+  this provider works with"; a wrong token names `MUSTER_TOKEN`; a Responder's token says that the Admin Role is
+  needed; a development build plans with a warning.
 - **C-33.AC-2** An example configuration that uses every resource and data source applies; a second plan shows no
   change; `terraform destroy` deletes every object it created, leaves the Organization's settings, the Outbound
   address policy, the OIDC settings and the Default route as they were, and clears their `managed_by`.

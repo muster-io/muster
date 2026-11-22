@@ -90,6 +90,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   `bridge.event_dedup_window` never makes the person an Owner again.
   _Revised for L2 (2026-11-21):_ an acknowledgement for an attached Alert Group is answered as one for an Alert Group
   that someone owns (C-37.FR-9).
+  _Revised for L2 (2026-11-22, #664):_ such an event runs Acknowledge only when it is about the notification the
+  gateway accepted the call as (its `notification_id`) and the call was accepted at most twice `bridge.event_max_age`
+  before, by the business clock, which writes the time a call is accepted, or the call is still being sent, so that
+  Muster has no `notification_id` of it yet; an event about another notification, about a call the gateway never
+  accepted — waiting, Not delivered or dropped — or about a call accepted longer ago runs nothing, whatever its
+  `occurred_at`, and is logged as `gateway_acknowledge_refused` with the reason `notification_mismatch`, `not_accepted`
+  or `stale_call`; the person is answered that the call could not be verified, or, for a call accepted longer ago,
+  that it has expired.
 - **C-30.FR-7** A call the person does not acknowledge lets the Escalation chain and the Notification rules go on. A
   call that ends Not delivered — refused, an unknown answer, or the retry budget used up — records the lifecycle event
   `page_not_delivered` naming the person and the gateway.
