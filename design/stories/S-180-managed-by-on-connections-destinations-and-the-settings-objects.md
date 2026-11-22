@@ -71,7 +71,8 @@ issue: 698
   errors of the JSON Schema 2020-12 validator that kin-openapi uses for a body schema it can compile, such as
   `OutboundPolicy`, so that `Terraform` is the `422` `invalid_format` at `/managed_by` on each of them.
 - **Tables**: `connections`, `destinations`, `organizations`, `outbound_policies` and `oidc_settings`, the columns of
-  migration 0056 (S-179); no migration of its own.
+  migration 0056 (S-179); no migration of its own. The fix of #736 adds `connections.managed_by_version` (migration
+  0057, Notes).
 - **Writes**: as in S-179 — create stores the value or null, an update keeps it when left out and clears it on null,
   the Audit log diff includes it; `internal/managedby.Validate` checks it. The operations of Secrets
   (`setDestinationSecret`, `deleteDestinationSecret`) and Signing secrets do not take the field and keep it. Nothing
@@ -127,11 +128,15 @@ None.
 - Ships in 0.2.0 with S-179 and S-181, as the maintainer decided (C-33.FR-4).
 - The Organization's settings span several pages of the web UI but are one object with one ETag, so they carry one
   mark; the Outbound address policy and the OIDC settings have ETags of their own and carry their own.
-- A save that changes only the mark moves the version (a new ETag) and is recorded with `/managed_by` alone in its
-  diff, and keeps every secret: a Connection's save sets or deletes no Telegram webhook, forgets no bot, info or Slack
-  workspace and reads no bridge info, and its new version makes the Leader's poller or socket of the Connection pick
-  it up as after any save; a Destination's save runs its Destination check as every save does and requests no
-  re-render; the Organization's requests no re-render of the open Root messages; the Outbound address policy's sends
+- A save that changes only the mark gives a new ETag and is recorded with `/managed_by` alone in its diff, and keeps
+  every secret. A Connection's save sets or deletes no Telegram webhook, forgets no bot, info, Slack workspace or last
+  Socket Mode `hello` and reads no bridge info; since the fix of #736 it writes the mark alone and moves
+  `managed_by_version` (migration 0057), which the ETag adds to `version`, instead of `version`, which the Leader's
+  socket and pollers, the cached clients and the version-guarded writes follow, so the socket does not reconnect and
+  the pollers do not start again. A Mattermost, Telegram, Bridge or Slack Destination's save runs no Destination
+  check and calls no messenger since that fix — it is saved while the channel is unreachable, and a Broken one stays
+  Broken — and writes the mark with a new version; an outgoing webhook, which has no Destination check, is saved as
+  before. Neither requests a re-render; the Organization's requests no re-render of the open Root messages; the Outbound address policy's sends
   no `NOTIFY` on `muster_outbound_policy`, runs no hook and logs no `outbound_policy_updated`, since the policy every
   replica applies is the same; the OIDC settings' keep the claims sign-ins carried.
 - Beyond the kinds' own files, `files_touched` has `internal/api/middleware.go` and `internal/api/problem.go` (the
