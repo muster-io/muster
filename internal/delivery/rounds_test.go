@@ -9,8 +9,12 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
@@ -1679,6 +1683,191 @@ func TestConnectionRefusalThenMove(t *testing.T) {
 			if s := callsOn(e, destMM, marks); !strings.HasPrefix(s, strings.Repeat("U", u)) {
 				t.Errorf("calls in Destination 11 %q, want the %d Urgent edits first", s, u)
 			}
+		})
+	}
+}
+
+// concurrentBeginner begins transactions of the fake database that count nothing, so that the attempts of a round
+// made at once may begin theirs; the fake database guards its own state.
+type concurrentBeginner struct{}
+
+func (concurrentBeginner) Begin(context.Context) (pgx.Tx, error) { return fakeTx{}, nil }
+
+// TestRoundServesALineInTheOrderOfThePreparations is C-11.FR-3 with attempts made at once: two edits of rank 3 and two
+// Thread replies of rank 4, of four Root messages in Destination 11, take turns on the line of its Connection in the
+// order the round prepared them, though the goroutines of their attempts reach the line the other way round. Without
+// the place a delivery's or a reply's preparation reserves on the line, a call would take one on arrival, and the
+// reply prepared last, or the edits after the replies, would go first.
+func TestRoundServesALineInTheOrderOfThePreparations(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e := newEnv(t)
+		e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+		var gs []*groups.Group
+		for i := range 4 {
+			gs = append(gs, newGroup(e, i, "g"))
+			e.enqueue(t, gs[i], groups.System, created())
+		}
+		e.round(t)
+		// New Alerts of the last two: an edit and a Thread reply at once; then, within the Thread batching window, an
+		// edit at once and a reply when the window closes.
+		for seq, fp := range []string{"fp2", "fp3"} {
+			for _, g := range gs[2:] {
+				e.enqueue(t, g, groups.System, alertsAdded(int64(seq+2), groups.StatusFiring, fp))
+			}
+			e.round(t)
+		}
+		for i := range 2 {
+			e.enqueue(t, newGroup(e, i, "annotated"), groups.System, annotatedEvent())
+		}
+		e.business.Advance(time.Minute)
+		e.rec.Reset()
+		now := e.business.Now()
+		var due []int64
+		for _, d := range e.db.deliveries {
+			if d.state == "pending" && !d.next.After(now) {
+				due = append(due, d.group)
+			}
+		}
+		for _, r := range e.db.replies {
+			if (r.state == "collecting" || r.state == "pending") && !r.next.After(now) {
+				due = append(due, r.group)
+			}
+		}
+		if want := []int64{gs[0].ID, gs[1].ID, gs[2].ID, gs[3].ID}; !slices.Equal(due, want) {
+			t.Fatalf("due: the edits and the replies of Alert Groups %v, want %v", due, want)
+		}
+
+		e.w.Concurrency = delivery.Concurrency
+		e.w.Store = delivery.NewTestStore(concurrentBeginner{}, e.db)
+		var mu sync.Mutex
+		var prepared []int64
+		held := map[int64]chan struct{}{}
+		hold := func(id int64) chan struct{} {
+			mu.Lock()
+			defer mu.Unlock()
+			if held[id] == nil {
+				held[id] = make(chan struct{})
+			}
+			return held[id]
+		}
+		ctx := delivery.WithRoundHook(t.Context(), func(event string, id int64) {
+			switch event {
+			case delivery.RoundPrepared:
+				mu.Lock()
+				prepared = append(prepared, id)
+				mu.Unlock()
+			case delivery.RoundRuns:
+				<-hold(id)
+			}
+		})
+		done := make(chan error, 1)
+		go func() {
+			_, err := e.w.Round(ctx)
+			done <- err
+		}()
+		synctest.Wait()
+		mu.Lock()
+		order := slices.Clone(prepared)
+		mu.Unlock()
+		if len(order) != 4 || len(e.rec.Calls()) != 0 {
+			t.Fatalf("prepared %v and called %+v before the attempts ran", order, e.rec.Calls())
+		}
+		// The attempts reach the line in the reverse order of their preparations.
+		for _, id := range slices.Backward(order) {
+			close(hold(id))
+			synctest.Wait()
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		var want, got []string
+		for _, id := range order {
+			if d := e.db.delivery(id); d != nil {
+				want = append(want, deliverytest.MethodUpdate+" "+*d.messageID)
+			} else {
+				want = append(want, deliverytest.MethodReply+" "+*e.db.delivery(e.db.reply(id).delivery).messageID)
+			}
+		}
+		for _, c := range e.rec.Calls() {
+			got = append(got, c.Method+" "+c.MessageID)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("calls %q, want the order of the preparations %q", got, want)
+		}
+	})
+}
+
+// TestRoundMakesAttemptsAtOnceWithABacklog: a round of the default Concurrency makes one attempt at a time until a
+// second claim comes back full — without a backlog, more at once would only end the round sooner and start the next
+// one, with the claims of every rank, for fewer rows — and up to delivery.Concurrency at once from then on: with eight
+// Publications due, the first two attempts free and the rest held, short claims of ten and full claims of four prepare
+// a third and wait for it, while full claims of two prepare four more at once from the second, and so does a round
+// whose Concurrency is set from a short claim.
+func TestRoundMakesAttemptsAtOnceWithABacklog(t *testing.T) {
+	for _, c := range []struct {
+		title       string
+		batch       int32
+		concurrency int
+		want        int
+	}{
+		{"short claims", 0, 0, 3},
+		{"one full claim", 4, 0, 3},
+		{"two full claims", 2, 0, 6},
+		{"short claims, Concurrency set", 0, delivery.Concurrency, 6},
+	} {
+		t.Run(c.title, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				e := newEnv(t)
+				e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+				var first []int64
+				for i := range 8 {
+					g := newGroup(e, i, "g")
+					e.enqueue(t, g, groups.System, created())
+					if i < 2 {
+						first = append(first, g.ID)
+					}
+				}
+				// The deliveries of the first two Alert Groups, claimed first, run free; the others are held.
+				free := map[int64]bool{}
+				for _, d := range e.db.deliveries {
+					if slices.Contains(first, d.group) {
+						free[d.id] = true
+					}
+				}
+				e.w.Batch, e.w.Concurrency = c.batch, c.concurrency
+				e.w.Store = delivery.NewTestStore(concurrentBeginner{}, e.db)
+				release := make(chan struct{})
+				var mu sync.Mutex
+				prepared := 0
+				ctx := delivery.WithRoundHook(t.Context(), func(event string, id int64) {
+					switch event {
+					case delivery.RoundPrepared:
+						mu.Lock()
+						prepared++
+						mu.Unlock()
+					case delivery.RoundRuns:
+						if !free[id] {
+							<-release
+						}
+					}
+				})
+				done := make(chan error, 1)
+				go func() {
+					_, err := e.w.Round(ctx)
+					done <- err
+				}()
+				synctest.Wait()
+				mu.Lock()
+				atOnce := prepared
+				mu.Unlock()
+				close(release)
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if n := e.rec.Count(deliverytest.MethodPublish); atOnce != c.want || n != 8 {
+					t.Fatalf("%d prepared while the attempts were held, want %d; %d of 8 published", atOnce, c.want, n)
+				}
+			})
 		})
 	}
 }
