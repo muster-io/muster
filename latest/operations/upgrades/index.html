@@ -3247,6 +3247,15 @@ single replica nothing else is needed.</p>
 <p>Migrations are SQL files built into the binary. They run through <code>muster migrate</code> or, when
 <code>MUSTER_MIGRATE_ON_START</code> is <code>true</code>, at server start, in both cases under a session advisory lock and with the
 applied versions in the log.</p>
+<p>When a run applies at least one migration, on a new database too, Muster then runs <code>ANALYZE</code> on the tables of its
+schema under the same lock, so that the planner has statistics for new tables, columns and indexes at once instead of
+after autovacuum's first pass. A partitioned table is analyzed with its partitions; a table that another session holds
+locked, as a <code>VACUUM</code> does, is skipped. The run is logged as
+<a href="../../reference/log-events/#schema_analyzed"><code>schema_analyzed</code></a> with its duration: under a tenth of a second on a new
+database, about five seconds, with a warm cache, on one of 1 GB with a million rows. The migration lock is held
+meanwhile, so a replica that waits for it starts that much later. A failure is logged as
+<a href="../../reference/log-events/#schema_analyze_failed"><code>schema_analyze_failed</code></a>, a warning: the migrations stay applied,
+and autovacuum analyzes the tables as they change. Nothing is analyzed when the schema was already current.</p>
 <p>A transaction of a migration that PostgreSQL ends on a deadlock or a lock timeout, as it can with the replicas of the
 previous version during a rolling update, is rolled back and runs again after one second, then after two, each retry
 logged as <a href="../../reference/log-events/#migration_retried"><code>migration_retried</code></a>; the transactions of the migration that

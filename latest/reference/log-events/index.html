@@ -4076,6 +4076,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#schema_analyze_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>schema_analyze_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schema_analyzed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>schema_analyzed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#schema_dirty" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -5830,6 +5852,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#schema_analyze_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>schema_analyze_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schema_analyzed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>schema_analyzed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#schema_dirty" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -6555,6 +6599,12 @@ the event.</p>
 <h3 id="schedule_gap_detected"><code>schedule_gap_detected</code><a class="headerlink" href="#schedule_gap_detected" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>schedule</code>, <code>team</code>, <code>gap_start</code> · C-27</p>
 <p>A Schedule whose gap alert is active has a gap now or one that starts within schedule.gap_alert_horizon, so the Leader's gap scan raises MusterScheduleGap: schedule is the public_id of the Schedule, team that of its Team and gap_start when the nearest gap starts. Logged once per raise.</p>
+<h3 id="schema_analyze_failed"><code>schema_analyze_failed</code><a class="headerlink" href="#schema_analyze_failed" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>tables</code>, <code>error</code> · C-02</p>
+<p>ANALYZE of the tables of Muster's schema after migrations failed, with the error; the migrations stay applied and the process goes on, and autovacuum analyzes the tables as they change. tables is the number of tables named, 0 when they could not be listed.</p>
+<h3 id="schema_analyzed"><code>schema_analyzed</code><a class="headerlink" href="#schema_analyzed" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>tables</code>, <code>duration_ms</code> · C-02</p>
+<p>Migrations were applied, so ANALYZE ran on the tables of Muster's schema under the migration lock, partitioned tables with their partitions: the planner has statistics at once instead of after autovacuum's first pass. tables is the number of tables named, duration_ms how long it took; a table that another session held locked is skipped.</p>
 <h3 id="schema_dirty"><code>schema_dirty</code><a class="headerlink" href="#schema_dirty" title="Permanent link">&para;</a></h3>
 <p>ERROR · fields: <code>database_version</code> · C-02</p>
 <p>A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations.</p>

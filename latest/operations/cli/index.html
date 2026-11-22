@@ -3394,9 +3394,9 @@ the database, a pooler or the keys.</p>
 <h2 id="muster-migrate"><code>muster migrate</code><a class="headerlink" href="#muster-migrate" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>muster migrate
 </code></pre></div>
-<p>Applies the migrations under a session advisory lock and logs the versions it applied. It refuses to run on a schema
-newer than the binary knows and names both versions. The Helm chart runs it in an init container. See
-<a href="../upgrades/#migrations">Upgrades</a>.</p>
+<p>Applies the migrations under a session advisory lock and logs the versions it applied. When it applied any, it then
+analyzes the tables of Muster's schema, logged as <code>schema_analyzed</code>. It refuses to run on a schema newer than the binary
+knows and names both versions. The Helm chart runs it in an init container. See <a href="../upgrades/#migrations">Upgrades</a>.</p>
 <h2 id="muster-admin"><code>muster admin</code><a class="headerlink" href="#muster-admin" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>muster admin reset-password --actor &lt;name&gt; &lt;login&gt;
 muster admin reset-totp --actor &lt;name&gt; &lt;login&gt;

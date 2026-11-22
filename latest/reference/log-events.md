@@ -656,6 +656,18 @@ WARN · fields: `schedule`, `team`, `gap_start` · C-27
 
 A Schedule whose gap alert is active has a gap now or one that starts within schedule.gap_alert_horizon, so the Leader's gap scan raises MusterScheduleGap: schedule is the public_id of the Schedule, team that of its Team and gap_start when the nearest gap starts. Logged once per raise.
 
+### `schema_analyze_failed`
+
+WARN · fields: `tables`, `error` · C-02
+
+ANALYZE of the tables of Muster's schema after migrations failed, with the error; the migrations stay applied and the process goes on, and autovacuum analyzes the tables as they change. tables is the number of tables named, 0 when they could not be listed.
+
+### `schema_analyzed`
+
+INFO · fields: `tables`, `duration_ms` · C-02
+
+Migrations were applied, so ANALYZE ran on the tables of Muster's schema under the migration lock, partitioned tables with their partitions: the planner has statistics at once instead of after autovacuum's first pass. tables is the number of tables named, duration_ms how long it took; a table that another session held locked is skipped.
+
 ### `schema_dirty`
 
 ERROR · fields: `database_version` · C-02
