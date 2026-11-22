@@ -355,6 +355,48 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+// TestNamedByTeamsOnly is C-32.FR-2: a chain that two Teams name and no Route is refused with chain_in_use naming
+// both Teams, and a rename sends the hint team of each of them.
+func TestNamedByTeamsOnly(t *testing.T) {
+	svc, store := newService(t)
+	ctx := t.Context()
+	c, err := svc.Create(ctx, by, Input{Name: "payments", OwningTeamID: ptr(teamPay)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.teamRefs = []fakeTeamRef{{chain: c.ID, team: 2, condition: ConditionCritical},
+		{chain: c.ID, team: 1, condition: ConditionAny}}
+	use, ok := errors.AsType[*InUseError](svc.Delete(ctx, by, c.PublicID, nil))
+	if !ok || !slices.Equal(use.Holders, []Holder{{Type: HolderTeam, PublicID: teamDev, Name: "devops"},
+		{Type: HolderTeam, PublicID: teamPay, Name: "payments"}}) {
+		t.Fatalf("a chain two Teams name: %+v", use)
+	}
+	from := len(store.hints)
+	if _, err := svc.Update(ctx, by, c.PublicID, nil, Input{Name: "payments-main"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.hints[from:]; !slices.Equal(got, []db.Hint{{OrgID: orgID, Type: Hint, ID: c.PublicID},
+		{OrgID: orgID, Type: hintTeam, ID: teamDev}, {OrgID: orgID, Type: hintTeam, ID: teamPay}}) {
+		t.Errorf("hints of a rename %+v", got)
+	}
+}
+
+// TestLengthLimits: a name of MaxNameLength characters and a description of MaxDescriptionLength characters are
+// accepted, counted in characters rather than bytes.
+func TestLengthLimits(t *testing.T) {
+	svc, _ := newService(t)
+	ctx := t.Context()
+	for name, in := range map[string]Input{
+		"name":        {Name: strings.Repeat("я", MaxNameLength)},
+		"description": {Name: "payments", Description: ptr(strings.Repeat("ё", MaxDescriptionLength))},
+	} {
+		c, err := svc.Create(ctx, by, in)
+		if err != nil || c.Name != in.Name || in.Description != nil && c.Description != *in.Description {
+			t.Errorf("%s at its limit: %+v, %v", name, c, err)
+		}
+	}
+}
+
 // TestFailures: a failing query fails the save, which writes nothing.
 func TestFailures(t *testing.T) {
 	svc, store := newService(t)
