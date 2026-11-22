@@ -505,6 +505,73 @@ func TestFilterByTeam(t *testing.T) {
 	}
 }
 
+// TestTeamsReadWhenBrought is C-25.FR-6 and FR-7 with the reads a Snapshot skips: an Alert that fired in it without a
+// Team and without a value of the Team label that names no Team brings nothing, so its Teams are not read, and an
+// Alert Group that it creates without a Team has no Teams to read for its re-render; an Alert with a Team or a value, a
+// listed Alert grouped late, an Alert Group a Team joined and one read from the database are read as before.
+func TestTeamsReadWhenBrought(t *testing.T) {
+	rendered := func(h *harness) *[][]int64 {
+		var teams [][]int64
+		h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+			teams = append(teams, r.Teams)
+			return nil
+		})
+		return &teams
+	}
+	t.Run("none", func(t *testing.T) {
+		h := newHarness(t)
+		h.withTeams()
+		teams := rendered(h)
+		h.db.fail["ListAlertTeams"], h.db.fail["ListGroupTeamIDs"] = errBoom, errBoom
+		a := h.teamAlert("x", "")
+		h.changes(t, ingest.ChangeFired, a)
+		if len(*teams) != 1 || (*teams)[0] == nil || len((*teams)[0]) != 0 || h.teamEntries(h.groupOf(t, a)) != nil {
+			t.Errorf("rendered with teams %v, entries %v", *teams, h.teamEntries(h.groupOf(t, a)))
+		}
+		// The Alert Group is read from the database now: its Teams are read for the re-render.
+		if _, err := h.apply(ingest.ChangeFired, h.teamAlert("x", "")); !errors.Is(err, errBoom) {
+			t.Errorf("a join to an alert group read from the database: %v", err)
+		}
+		h.db.fail["ListGroupTeamIDs"] = nil
+		h.changes(t, ingest.ChangeFired, h.teamAlert("x", ""))
+		if h.db.calls["ListAlertTeams"] != 0 || h.db.calls["ListGroupTeamIDs"] == 0 {
+			t.Errorf("queries %v", h.db.calls)
+		}
+	})
+	for name, alert := range map[string]func(h *harness) int64{
+		"team":  func(h *harness) int64 { return h.teamAlert("x", "", byLabel(payments)) },
+		"value": func(h *harness) int64 { return h.teamAlert("x", "Payments") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.withTeams()
+			h.db.fail["ListAlertTeams"] = errBoom
+			if _, err := h.apply(ingest.ChangeFired, alert(h)); !errors.Is(err, errBoom) {
+				t.Errorf("not read: %v", err)
+			}
+		})
+	}
+	t.Run("listed", func(t *testing.T) {
+		h := newHarness(t)
+		h.withTeams()
+		a := h.teamAlert("x", "")
+		h.db.fail["ListAlertTeams"] = errBoom
+		if _, err := h.apply(ingest.ChangeListed, a); !errors.Is(err, errBoom) {
+			t.Errorf("a listed alert grouped late: %v", err)
+		}
+	})
+	t.Run("joined", func(t *testing.T) {
+		h := newHarness(t)
+		h.withTeams()
+		teams := rendered(h)
+		a := h.teamAlert("x", "", byLabel(payments))
+		h.changes(t, ingest.ChangeFired, a)
+		if len(*teams) != 1 || !slices.Equal((*teams)[0], []int64{payments}) || h.db.calls["ListGroupTeamIDs"] != 1 {
+			t.Errorf("rendered with teams %v, queries %v", *teams, h.db.calls)
+		}
+	})
+}
+
 // TestTeamsFailures: a failed read or write of the Teams fails the Snapshot's change or the read, and changes nothing.
 func TestTeamsFailures(t *testing.T) {
 	for _, q := range []string{"ListAlertTeams", "AddGroupTeams", "AddUnknownTeamValues"} {

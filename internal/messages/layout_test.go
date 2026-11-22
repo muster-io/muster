@@ -132,6 +132,22 @@ func TestLoadAssignees(t *testing.T) {
 	}
 }
 
+// TestLoadTeams is C-25.FR-6 in the read of a message: the names of the Teams come with the Alert Group, in the order
+// they joined, and an Alert Group without a Team has none, an empty list as the read of the Teams gave.
+func TestLoadTeams(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 1)}
+	f.group.Teams = []string{"Search", "Payments"}
+	r := withFake(t, f)
+	src, err := r.Load(t.Context(), nil, 9)
+	if err != nil || !slices.Equal(src.Teams, []string{"Search", "Payments"}) {
+		t.Errorf("teams %q, %v", src.Teams, err)
+	}
+	f.group.Teams = nil
+	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.Teams == nil || len(src.Teams) != 0 {
+		t.Errorf("no teams %#v, %v", src.Teams, err)
+	}
+}
+
 // TestHasLayout is C-29.FR-8 and C-29.FR-5: only a Root message of Muster's compact default content has a layout; a
 // Route's own root_message template or line template, the Fallback template and a Desired state stored before the compact layout have
 // content that only the body holds, and so have none, nor does a Thread reply or a Storm summary; the preview of a
