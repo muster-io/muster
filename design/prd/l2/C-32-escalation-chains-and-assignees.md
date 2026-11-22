@@ -222,6 +222,9 @@ Page is a Mention in the Thread of the Root message."; "How it went": the recent
 steps and the acknowledgement that stopped the chain. Route form: "Escalation chains" with their conditions and the hint
 "Pages only in the Threads of the Route's Destinations. The Teams from the label Page with their own chains." Alert
 Group page, list and Home as FR-18.
+_Revised for L2 (2026-11-22):_ from C-43 "Normal and important" no longer says "Muster sends no direct messages": a
+Page is a Mention in the Thread, a call through a Notification gateway or a direct message, as each person's rules
+say; and the Pages of "How it went" include direct messages (C-43.FR-18).
 
 ## API surface
 

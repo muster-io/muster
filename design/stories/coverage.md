@@ -1511,7 +1511,8 @@ contracts were written against the open pull request that adds the capability fi
 
 The requirements of L1 that [L2 §6](../prd/L2.md#6-revisions-to-l1) revises, and those it adds to L1 files, with the
 L2 stories that carry the revision. Their rows in the L1 sections above stay as they were, for L1; a row here is
-complete when the revision is. Every L1 ID of L2 §6 has its row, and every row is complete.
+complete when the revision is. Every L1 ID of L2 §6 has its row, and every row is complete. C-43, which has no stories
+yet, also revises C-11.FR-2 and C-11.FR-3: its stories add themselves to those rows.
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|

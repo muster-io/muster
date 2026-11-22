@@ -41,6 +41,10 @@
 - Amended: 2026-11-17 — group mentions through bridges: a Team mention and a group entry of a Destination are `mentions`
   entries of the kind `group`, placed by a marker, and a bridge never refuses a Mention entry for its kind, since
   Muster decides from a copy of `info` that may be older than the bridge's own
+- Amended: 2026-11-22 — with the L2 PRD of Paging by direct messages (C-43, journal D764): the direct messages of
+  Account link codes and the answers stay interactive calls, and a Page by direct message through a bridge that
+  declares the Page support of `direct_messages` is sent and edited by the delivery worker; the additions to the
+  protocol are additive in version 1
 
 ## Context
 
@@ -226,8 +230,9 @@ queue of their own (ADR-0005), and the confirmation code of a contact goes out t
 D542).
 
 **Placement in Muster.** Bridge delivery implements the delivery adapter interface, so posts, edits and Thread replies
-through a bridge are made only by the delivery worker and the interactive path; answers and direct messages are
-interactive calls. As for Mattermost and Telegram, lint 3 (ADR-0016) checks the calls of the adapter's methods, not the
+through a bridge are made only by the delivery worker and the interactive path; answers and the direct messages of
+Account links are interactive calls, and from C-43 the delivery worker also sends and edits the direct messages that
+Page a person. As for Mattermost and Telegram, lint 3 (ADR-0016) checks the calls of the adapter's methods, not the
 protocol client beneath them. The one exception is `muster bridge check`: a person runs it against a bridge they name,
 outside any Muster installation and without a database, Desired state or delivery row, so the rule of ADR-0005 that only
 delivery and the interactive path send has nothing to protect there. The command posts, edits and replies through the

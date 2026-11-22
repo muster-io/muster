@@ -1,14 +1,14 @@
 # C-43. Paging by direct messages
 
-[L2 index](../L2.md) · Release: a 0.2.x release after 0.2.0 (proposed) · UI: yes · Depends on: C-09, C-10, C-11, C-13,
+[L2 index](../L2.md) · Release: a 0.2.x patch release after 0.2.0 · UI: yes · Depends on: C-09, C-10, C-11, C-13,
 C-14, C-18, C-20, C-22, C-23, C-24, C-27, C-30, C-31, C-32, C-41
 
-> **DRAFT for the maintainer's decision.** This capability reverses the decision recorded in ADR-0018 ("Pages, not
-> direct messages" and the rejected alternative "Paging by direct messages"), which ADR-0005 (who calls messenger
-> APIs), ADR-0017, C-11.FR-2, the goal of C-31 and C-32 repeat. Nothing here is binding until the maintainer accepts it; "What changes elsewhere" lists, as proposed
-> text, every document that would change, and none of them is changed by this file. Open questions and facts to verify
-> are at the end; each open question carries a recommendation, and the requirements below are written as if the
-> recommendations were accepted.
+This capability reverses what L2's core decided in ADR-0018 ("Pages, not direct messages" and the rejected alternative
+"Paging by direct messages"), which ADR-0005 (who calls messenger APIs), ADR-0017, C-11.FR-2, the goal of C-31 and
+C-32 repeated. The questions of the draft were decided by the maintainer in its review (#711; journal D764), who
+accepted every recommendation and amended ADR-0018; ADR-0005, ADR-0017, C-11.FR-2 and FR-3, C-31, C-32, CONTEXT.md and
+L2.md changed with it, and "What changes elsewhere" lists what the stories change. The facts at the end are checked by
+a spike before the stories that rely on them.
 
 **Goal.** A person can choose, in their Notification rules, to be Paged by a direct message from the bot in every
 messenger where they have an Account link — Telegram, Mattermost, Slack, and Bridges that declare the capability —
@@ -19,10 +19,9 @@ settings (to be verified on phones, see the facts below). The message carries wh
 and Snooze, so that a person who acknowledges from the lock screen acknowledges the Alert Group as themselves. Muster
 still ships no gateway and calls or texts nobody by itself; a direct message is one more way to Page, in the same rules.
 
-Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md); the settings this draft proposes
-are described under "Settings", with provisional numbers P-97 to P-99 (P-96 is the highest used on master and in the
-open drafts) for the table of [L2 §5.3](../L2.md#53-provisional-values-and-behaviours), and are not added to those
-files.
+Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md); the settings of this capability are
+under "Settings", and its provisional values are P-98 and P-99 of
+[L2 §5.3](../L2.md#53-provisional-values-and-behaviours).
 
 ## Scenarios
 
@@ -60,6 +59,8 @@ files.
   Connection in which they have an Account link (C-18). The action counts as one that Pages (C-31.FR-1: a rule has at
   least one), and rules stay within `notification_rule.limits`. An action in the sequence may be placed anywhere among
   the Mentions, the calls and the waits: they run in order and a wait delays what follows, as for the others (C-31.FR-3).
+  Each direct-message action that runs, a repeat of the same action included, sends a new message and never edits or
+  deletes an earlier one, since an edit notifies nobody in Telegram and Mattermost (FR-8).
 - **C-43.FR-2** A direct message goes through an Account link: the action names the link — the Connection of a
   Telegram, Mattermost, Slack or Bridge account of the person — when the person has more than one Account link in a
   messenger that can receive Pages by direct message, as the call names its gateway when there is more than one
@@ -117,18 +118,19 @@ files.
 ### Sending
 
 - **C-43.FR-9** A direct message is a row of a table of its own, `direct_messages` (one per Page, person and Account
-  link), written in the dispatcher's transaction with its Page and sent by the delivery worker: ADR-0005 changes where it says who calls messenger APIs
-  (see "What changes elsewhere"). The row has a `public_id` of its own, which the button data names (FR-14). The row keeps what
+  link), written in the dispatcher's transaction with its Page and sent by the delivery worker, as ADR-0005 as amended
+  says of who calls messenger APIs. The row has a `public_id` of its own, which the button data names (FR-14). The row
+  keeps what
   is needed to send, edit and bind a press — the Connection, the messenger's chat and message ids once sent, the
   Alert Group, the person and the Page — and never the text, which is built at the send from the person's language and
   the Alert Group, and again at the edit. The delivery worker claims due rows with a lease on any replica, takes a token
   of the Connection's limiter, sends in the delivery client class and classifies the answer as it does for Thread replies
   (C-11.FR-8): Transient answers are retried within `delivery.transient_backoff` and `delivery.transient_budget`,
-  Fatal ones end the message Not delivered. Critical Alert Groups go first within the rank of direct messages. This adds a rank to the order of
-  C-11.FR-3, proposed as a `_Revised for L2_` change of it: the sends of direct messages come after the first rank (the
-  Root-message work of Urgent Alert Groups) and before the configuration edits of Urgent Alert Groups, so that a Page
-  is not held behind non-urgent work; their final edits (FR-8) share the rank of Thread replies. A direct message is never reconciled
-  to a Desired state: a Root message is, a direct message has one send and one edit (FR-8).
+  Fatal ones end the message Not delivered. Critical Alert Groups go first within the rank of direct messages. This adds
+  a rank to the order of C-11.FR-3, recorded there as a revision: the sends of direct messages come after the first
+  rank (the Root-message work of Urgent Alert Groups) and before the configuration edits of Urgent Alert Groups, so
+  that a Page is not held behind non-urgent work; their final edits (FR-8) share the rank of Thread replies. A direct
+  message is never reconciled to a Desired state: a Root message is, a direct message has one send and one edit (FR-8).
 - **C-43.FR-10** Direct messages are not combined: each Alert Group has its own message with its own buttons, as every
   Alert Group has its own Thread. To keep a burst of Pages — many Alert Groups Paging one person — within
   what the messenger accepts, direct messages to one person through one Connection go at most one per
@@ -144,12 +146,19 @@ files.
   (CONTEXT.md), and a direct message has neither. Answers that name the person — the bot is blocked, the account is
   unavailable, the messenger or workspace does not accept direct messages — end it with their reason (FR-17); other
   Fatal answers end it `direct_refused`, unknown ones `direct_unknown`, and Transient answers past the budget
-  `direct_budget_used`. A Broken Destination of the same Connection withholds nothing here. What a Connection-wide
-  Fatal answer, such as a revoked token, should do is an open question.
+  `direct_budget_used`. A Broken Destination of the same Connection withholds nothing here. A Connection-wide Fatal
+  answer, such as a revoked token or a deleted bot, adds nothing new: each direct message through that Connection ends
+  `direct_refused`, and the Connection's Destinations become Broken as they do today and raise
+  `MusterDestinationBroken`. A Connection-level Broken state is not added; it waits until installations show
+  Connections that only Page by direct message.
 - **C-43.FR-13** How each messenger is reached, as far as the facts say (the rest is under "Facts to verify"):
   - **Telegram:** `sendMessage` to the private chat whose id is the Account link's Telegram user id, with an inline
     keyboard, and no `disable_notification`, since a Page is meant to ring ([F-012](../../facts.md#notifications)). A person can
-    be reached only after they pressed Start in the bot, which linking requires (C-18.FR-2).
+    be reached only after they pressed Start in the bot, which linking requires (C-18.FR-2). A person's private chat
+    with the bot that an Admin makes a Destination (L2 §1.5, #371) stays a Destination, apart from this: it receives
+    Root messages and Thread replies, while a direct message is a Page of one person; the two share Telegram's budget
+    of that chat under their own limiters, which the spike measures, and the story of that Destination says that its
+    person can also have the rule.
   - **Mattermost:** `POST /api/v4/channels/direct` with the bot's and the person's ids, then a post with an interactive
     attachment; a bot can write to a person who never wrote to it ([F-028](../../facts.md#threads-and-direct-messages)).
   - **Slack:** `chat.postMessage` with `channel` set to the person's `U…` id or to the `D…` channel of
@@ -341,23 +350,28 @@ buttons and take scripted faults, and a virtual clock.
 
 ## Settings
 
-Proposed rows for [defaults.md](../l1/defaults.md), described here and not added:
+Rows of [defaults.md](../l1/defaults.md):
 
-| ID | Setting | Value | Where |
+| Status | Setting | Value | Where |
 |---|---|---|---|
-| P-97 | `organization.direct_messages` | on: the action "Direct message" is offered and sent; off: never sent, stored actions skipped | Organization |
+| decided (P-97) | `organization.direct_messages` | on: the action "Direct message" is offered and sent; off: never sent, stored actions skipped | Organization |
 | P-98 | `direct_message.person_spacing` | 1 s between direct messages to one person through one Connection (Telegram's documented limit for one chat is about one message a second; Slack's for one channel is one a second; verify, [F-016](../../facts.md#limits) measured only a group) | built in |
 | P-99 | `direct_message.title` | the Alert Group's title, cut to 200 characters | built in |
 
-The three are proposed rows for the table of [L2 §5.3](../L2.md#53-provisional-values-and-behaviours), confirmed by
-the test environment and the maintainer. The limiters of the Connections stay as they are (`connection.telegram.limiter` 15 messages/s, `connection.mattermost.limiter`
+P-98 and P-99 are in the table of [L2 §5.3](../L2.md#53-provisional-values-and-behaviours), confirmed by the test
+environment; P-97, the default of the switch, was decided by the maintainer with this capability. The limiters of the
+Connections stay as they are (`connection.telegram.limiter` 15 messages/s, `connection.mattermost.limiter`
 5 requests/s, [F-030](../../facts.md#rate-limit-and-server-settings), `connection.slack.limiter` 50 requests/min,
 [F-099](../../facts.md#rate-limits), `connection.bridge.limiter`); Telegram's documented 30 messages a second across
 chats is above the Connection's 15 and needs no setting.
 
 ## What changes elsewhere
 
-Proposed text for the maintainer; none of it is made by this file.
+Made with this capability (journal D764): ADR-0018, ADR-0005 and ADR-0017 as below, each with an "Amended" line;
+C-11.FR-2 and C-11.FR-3; the texts of C-31 and C-32 that said that Muster sends no direct messages; CONTEXT.md's
+Page and Notification rules; L2.md §1.4, §1.5, §4, §5.3 and §6; and the rows of "Settings" in defaults.md. The rest
+of this list is changed by the stories of this capability, each in the pull request that needs it, as for every
+story: the specification first, the schema by a new migration, the fake servers, the lints and the other texts.
 
 - **ADR-0018.** "Pages, not direct messages" becomes "Pages by Mention, by call and by direct message": "Muster Pages a
   person by a Mention in the Alert Group's Thread, by a call through a Notification gateway, or by a direct message from
@@ -444,7 +458,9 @@ Proposed text for the maintainer; none of it is made by this file.
 
 ### Glossary changes
 
-Proposed for `CONTEXT.md`:
+For `CONTEXT.md`: the extensions of Page and Notification rules, naming direct messages, are made with this
+capability; the term Direct message joins it with the first story of C-43, which also writes it as a term where the
+documents name it.
 
 - **Direct message**: A message that Muster's bot sends to one person in a private chat of a messenger — to Page them,
   as their Notification rules say, or to answer an Account link; never a Root message or a Thread reply. _Avoid_: DM,
@@ -480,70 +496,11 @@ through the API.
 - **FE** — the action in the editors and the profile, the Account link states, the Organization's switch, the Timeline.
 - **docs** — the pages and the revisions above.
 
-## Open questions
-
-Each with options and a recommendation; the requirements assume the recommendations.
-
-1. **Do the default rules change?** (a) No: the Organization's default stays a Mention, and people or Admins add the
-   action to their own rules; (b) the important default adds a direct message at once. *Recommendation: (a).* A default
-   that messages people by a way they never chose repeats what ADR-0018 rejected; C-31's switch is not extended.
-2. **A person with several Account links.** (a) All of them; (b) the first linked; (c) the messenger of the Alert Group's
-   Destination; (d) the action names the link, as a call names its gateway. *Recommendation: (d)* (FR-2): it needs no
-   ordering rule, and (a) is two actions at the same moment; (b) hides which one wakes the person and (c) makes a Page
-   depend on a Destination, which the direct message exists to avoid.
-3. **Re-render on status change.** (a) None; (b) one edit when the Alert Group stops being firing for it; (c) an edit on
-   every change like a Root message. *Recommendation: (b)* (FR-8): buttons that stay after an Acknowledge invite a stale
-   press, a sequence of edits is not wanted in a personal chat, and an edit notifies nobody in Telegram and Mattermost
-   (Slack to verify).
-4. **Which sender.** (a) The delivery worker with a table of its own; (b) a queue of its own like gateway calls with a
-   sender of its own. *Recommendation: (a)* (FR-9). Calls need what a direct message does not — combining, contacts, a
-   window between calls, a gateway's Broken state — while a direct message needs what delivery already has: the
-   Connection's limiter and classification, edits and the Request log; ADR-0005 already lets delivery send non-reconciled
-   rows (Thread replies). (b) would add a second worker that copies those and a fourth send path in lint 3. It costs
-   the new rank in C-11.FR-3.
-5. **May a chain step name a direct message?** (a) Only through the person's rule; (b) a step "Page by direct message".
-   *Recommendation: (a)* (FR-21): the rule is the person's choice and the place of the Account link, and a step that
-   names a messenger would put people's links into chains and bring the question of who has none back to Admins.
-6. **The Organization's switch.** (a) None; (b) on by default; (c) off by default. *Recommendation: (b)* (FR-23): the
-   action is already opt-in per rule, the switch exists for installations that must keep alert titles out of personal
-   chats, and an off default would make the feature invisible after upgrade.
-7. **Viewers and disabled Users pressing in a direct message.** (a) Refuse with the texts of C-18.FR-8; (b) allow
-   Acknowledge. *Recommendation: (a)* (FR-15): the same Permissions as every press; a Viewer is not Paged by a chain, so
-   a Viewer holding a message means their Role changed after it was sent.
-8. **What the message shows.** (a) The title only; (b) the title and the summary; (c) a setting of the Route.
-   *Recommendation: (a)* (FR-6, FR-22): a summary is a free annotation that may carry data; add a Route setting only
-   after use shows the need.
-9. **A burst of Pages.** (a) One message per Alert Group paced per person (FR-10); (b) a digest of many into one after a
-   number. *Recommendation: (a)* for the first release, collecting real counts: a digest brings the combining, the
-   signed data for several Alert Groups and the stop checks that calls need (C-30.FR-4) and drops the buttons per Alert
-   Group.
-10. **Retention and erasure.** (a) Muster deletes the messages from the chat on unlink or User deletion; (b) it only
-    stops editing them, and its rows follow the Alert Group. *Recommendation: (b)* (FR-24): deleting messages from a
-    person's chat is a surprise and needs a delete permission Mattermost and Slack do not always give; the text is never
-    stored in Muster.
-11. **Do repeats edit the earlier message?** (a) Each action makes a new message; (b) a repeat edits or deletes the
-    previous one. *Recommendation: (a)* (FR-1, FR-8): an edit notifies nobody in Telegram and Mattermost, so a repeat as
-    an edit would not wake the person again.
-12. **Telegram's private chat as a Destination** (specified later, #371). A person's private chat with the bot may be a
-    Destination chosen by an Admin, and a direct message to the same chat shares Telegram's per-chat budget with it under
-    different limiters. *Recommendation:* keep them apart, as ADR-0018 does: a Destination receives Root messages and
-    Thread replies for an Alert Group, a direct message is a Page of one person; the story of that Destination says
-    that its person can also have the rule, and the spike measures the shared budget.
-13. **May the Organization's default rules hold the action?** (a) No, `422` (FR-3); (b) yes, as a form that names a
-    messenger and is resolved to the person's link of that messenger when the rule runs, with `no_account_link` where
-    there is none, and the editor and the API validating it. *Recommendation: (a):* the simplest form, consistent with
-    question 1, and an Admin who wants it for someone edits that User's rules; revisit when people ask for a default.
-14. **What should a Connection-wide Fatal answer do** — a revoked token, a deleted bot — when only direct messages go
-    through it? Nothing but Broken exists for Destinations and gateways today. (a) Nothing new: each message ends
-    `direct_refused`, and the Connection's Destinations raise Broken as they do now; (b) a Connection-level Broken state
-    with its own Internal alert, which needs a glossary change and an amendment of ADR-0005 and ADR-0018. *Recommendation:
-    (a)* (FR-12): a Connection that only Pages by direct message is rare, and every Connection with a Destination
-    already raises `MusterDestinationBroken`; take (b) if installations show Connections without Destinations.
-
 ## Facts to verify
 
-Verified facts are cited; the rest are checked on the test stands, with a person's phone where it matters, before the
-stories that rely on them, and recorded in [facts.md](../../facts.md) (the Pending list gains them).
+Verified facts are cited; the rest are checked by the spike that comes first in the story split, on the test stands
+with a person's phone where it matters, before the stories that rely on them, and recorded in
+[facts.md](../../facts.md) (the Pending list gains them).
 
 **Telegram.**
 - Verified: `disable_notification` still pushes without sound, an edit never pushes
