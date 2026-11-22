@@ -189,10 +189,10 @@ type Source struct {
 	// ChainsStopped whether its acknowledgement stopped running chains, which item 7 says after it.
 	Assignees     []SourceAssignee
 	ChainsStopped bool
-	// teamNames are the names of its Teams and assigned whether it has Assignees, as the read of the Alert Group found
-	// them; Load takes the Teams and reads the Assignees only then.
-	teamNames []string
-	assigned  bool
+	// teamNames are the names of its Teams and hasAssignees whether it has Assignees, as the read of the Alert Group
+	// found them; Load takes the Teams and reads the Assignees only then.
+	teamNames    []string
+	hasAssignees bool
 }
 
 // SourceAssignee is an Assignee of an Alert Group: the User by id and display name, the name of the owning Team of
@@ -273,7 +273,7 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 // withAssignees reads the Assignees of src through db while it is firing and has any, each with their Account links,
 // once per person and Team.
 func (r *Renderer) withAssignees(ctx context.Context, db DBTX, src *Source) error {
-	if src.Status != ColourFiring || !src.assigned {
+	if src.Status != ColourFiring || !src.hasAssignees {
 		return nil
 	}
 	rows, err := r.q(db).ListRenderAssignees(ctx, dbgen.ListRenderAssigneesParams{OrgID: r.orgID,
@@ -341,7 +341,7 @@ func (r *Renderer) loadGroup(ctx context.Context, db DBTX, groupID int64) (*Sour
 			Line: textOf(g.TemplateLine), AckTimeoutNotice: textOf(g.TemplateAckTimeoutNotice),
 			ErrorTemplate: g.TemplateErrorTemplate.String,
 			MessageLabels: routing.MessageLabels(g.MessageLabels, g.RouteGroupKey, g.SeverityLabel, g.TeamLabel)},
-		teamNames: g.TeamNames, assigned: g.HasAssignees}
+		teamNames: g.TeamNames, hasAssignees: g.HasAssignees}
 	if src.teamNames == nil {
 		src.teamNames = []string{}
 	}
