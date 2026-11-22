@@ -12,6 +12,10 @@
 - Amended: 2026-10-26 — for L2 (journal D517): the contact a person gives a Notification gateway is personal data, not a
   Secret: readable by that person and Admins, masked in the Request log and erased when the User is deleted; the token
   of a person's iCal feed is issued by Muster, so it is hashed, with a prefix of its own, shown once and revocable
+- Amended: 2026-11-22 — two more sub-key purposes, each never stored (#669, #665): `mattermost-callback` derives the
+  callback secret of each Mattermost button, which authenticates a press (ADR-0013), and `gateway-contact-code` signs
+  the confirmation codes of gateway contacts as they are stored, so that a stored code cannot be checked without a key
+  of the Keyring
 
 ## Context
 
@@ -41,11 +45,20 @@ key's id is derived from the key material itself, so the same key has the same i
 configured. All keys in the list form the Keyring; **which key is active is stored in the database**, not in the
 environment. On a new database the first key in the list becomes active. The active key encrypts and signs; every key
 in the Keyring can still decrypt and verify. From each master key Muster derives a separate sub-key per purpose —
-**encryption**, **button signatures** and **CSRF tokens** of web sessions — so material used for one purpose is never
-used for another.
+**encryption**, **button signatures**, **CSRF tokens** of web sessions, the **callback secrets** of Mattermost buttons
+and the **confirmation codes** of gateway contacts — so material used for one purpose is never used for another.
 
 **Signed buttons.** A button carries only an opaque action id with an HMAC made with the button-signature sub-key, plus
 the key id. A press is accepted if the signature verifies with the key it names, provided that key is in the Keyring.
+A Mattermost button also carries a callback secret in its integration data: an HMAC with the `mattermost-callback`
+sub-key of the key that signed its action id, over the Connection and the action id, which the Mattermost server keeps
+from clients and returns with a press, so that only that server can make the press (ADR-0013). It is derived, never
+stored, and a rotation, which re-signs the buttons of open Root messages, changes it.
+
+**Gateway contact codes.** The confirmation code that a person receives through a Notification gateway is stored as an
+HMAC with the `gateway-contact-code` sub-key of the active key, never as the code or its plain hash; a code is checked
+against every key of the Keyring, so that one sent just before a rotation still confirms. After a rotation, the retired
+key stays in `MUSTER_SECRET_KEYS` at least as long as a code is valid (`gateway.contact_code`).
 
 **Rotation.**
 

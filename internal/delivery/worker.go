@@ -119,8 +119,8 @@ const (
 // that are due, claims the due deliveries of healthy Destinations, Urgent first, and the due Thread replies with FOR
 // UPDATE SKIP LOCKED and a lease, re-reads each in a short transaction, takes the limiter tokens, calls the adapter
 // outside any transaction in the delivery client class, and records the outcome by its rule (outcomes.go) in another
-// short transaction. It is woken by NOTIFY, by the earliest due time and, in development mode, by a move of the
-// development clock.
+// short transaction, up to Concurrency attempts at once with a backlog (Round). It is woken by NOTIFY, by the earliest
+// due time and, in development mode, by a move of the development clock.
 type Worker struct {
 	Store *Store
 	// Lease names this replica in lease_owner and carries the clocks: due times and limiters on the business clock,
@@ -139,9 +139,12 @@ type Worker struct {
 	TeamMentions mentions.TeamMentions
 	Pages        PageSettler
 	Log          *logging.Logger
-	// MaxWait bounds the wait between rounds, and Batch the rows one claim takes; zero is the default.
-	MaxWait time.Duration
-	Batch   int32
+	// MaxWait bounds the wait between rounds, Batch the rows one claim takes, and Concurrency the attempts a round makes
+	// at once; zero is the default, and a round with the default Concurrency makes one attempt at a time until a
+	// second of its claims comes back full (Round), while one set makes that many at once from the start.
+	MaxWait     time.Duration
+	Batch       int32
+	Concurrency int
 	// Wait waits for d or until a wake arrives; nil waits on the real clock.
 	Wait func(ctx context.Context, d time.Duration, wake <-chan struct{})
 	// Random is uniform in [0, 1) and jitters delivery.transient_backoff; nil is math/rand/v2.
@@ -215,6 +218,13 @@ func (w *Worker) batch() int32 {
 		return Batch
 	}
 	return w.Batch
+}
+
+func (w *Worker) concurrency() int {
+	if w.Concurrency <= 0 {
+		return Concurrency
+	}
+	return w.Concurrency
 }
 
 func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
@@ -326,6 +336,46 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // Destination at 10 calls a minute, as a Telegram chat allows: 9 refused takes per message sent, and one round per
 // token for Urgent edits, two for the others, when nothing else wakes the worker, against 169 and 611 refused takes and
 // a round every MinWait when the memo lasted one round and the skipped rows kept the worker awake.
+//
+// Attempts at once. A round makes up to Concurrency attempts at once (batchOnce). Its own goroutine claims and
+// prepares the claimed rows one after another in the order of the claim, and only the preparation takes tokens and
+// notes a refusal in the memo, so the ranks, the memo and the order of the tokens above are those of one attempt at a
+// time, and so are the takes counted above. The call, the record of its outcome and what runs once that committed —
+// the mark of a first Publication, the settling of a Page — go on in a goroutine of their own beside the preparation of
+// the next rows; the next claim follows once every row of a batch was prepared, without waiting for their calls. Every
+// claim and attempt holds one of Concurrency slots until it ends, and each holds at most one connection of the main
+// pool at a time. A round of the default Concurrency starts narrow, with one slot: it makes one attempt at a time, and
+// each claim waits for the attempt before it, until a second of its claims comes back full — a backlog, more due than
+// two batches — and from then on, to its end, up to Concurrency at once (flight.narrow, backlogClaims). Without a
+// backlog, attempts made at once only end each round sooner, and the next round, which a NOTIFY starts at once, claims
+// fewer rows with the claims of every rank: measured on the L1 load test (one Mattermost Destination, 50 Snapshots a
+// second), four at once from the start made 4.7 times the rounds and 4 times the claims of one at a time for the same
+// attempts, read 38 % more buffers and made the processing of a Snapshot, which shares PostgreSQL with them, 6 %
+// slower. A row waits, before its preparation, until no attempt of its Root message — the delivery's own or one of its
+// Thread replies — or, for a webhook event, of its Alert Group in that outgoing webhook is in flight: the replies of
+// one delivery go one after another, each with the `thread_ref` the one before it stored, an edit never overtakes
+// another of its Root message, and a row whose lease ran out during a slow call is never attempted twice at once.
+// Attempts of one round meet in PostgreSQL as those of several replicas do, in the lock order above; so the marks
+// of the first Publications of one Alert Group in two Destinations may now run at once in one replica too, where the
+// dispatcher's lock of the Alert Group lets the first to commit date it and the second change nothing (MarkPublished).
+// The calls through one Connection, or to one Destination without one, take turns in the order of their preparations,
+// and a RetryAfter answer — the pointer reply of a republication's included — holds the limiter it names from the moment
+// it arrives until the end of its wait (gate): an attempt prepared before its record held the bucket makes no call when
+// its turn comes, and the RetryAfter of the hold is its outcome, recorded as that answer, so that within one replica the
+// next call to any Destination the answer covers waits exactly as asked (C-11.FR-8), as with one attempt at a time;
+// across replicas it is likely but not strict, as the order of the tokens is. The end of a hold is measured once, when
+// the answer arrives: the row that got it, unless it was a pointer reply, which is never retried, and the rows it held
+// are due at that end plus TokenMargin, and their records hold the bucket until it, however late they came, so that
+// they keep the order of their ranks (C-11.FR-3). A call sends the state its preparation read, as old as the wait for
+// its turn: at most the calls of Concurrency − 1 attempts before it on its line. A turn that comes with less left of
+// the lease than its call may take — callRequests requests within outbound.CallTimeout and one more, 40 s of the Lease
+// — renews it first, guarded by it, and an attempt whose lease ran out makes no call and records nothing, as another
+// replica may hold the row (renewLate). The events of outgoing webhooks take no turn: their own RetryAfter holds only
+// the event, and they only look whether a request of their Destination's Root messages holds its limiter; so an event
+// of a Destination in the mode both may be on the wire beside a Root request. A failure that makes a Destination Broken
+// stops its claims, and the rows claimed before it are still prepared and called, as the rest of a claimed batch was
+// with one attempt at a time. The reconcile of an Organization returns once every attempt it started ended, also when
+// ctx ends, so that the probes, the Pages the round settles and its next due time never overlap them.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
@@ -350,22 +400,30 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	return next, errors.Join(errs...)
 }
 
-// reconcile works the due deliveries, Thread replies and webhook events of the Organization in the order of Round.
+// reconcile works the due deliveries, Thread replies and webhook events of the Organization in the order of Round, up
+// to Concurrency attempts at once; it returns once every attempt it started ended.
 func (w *Worker) reconcile(ctx context.Context, org int64) error {
 	start := w.Lease.Clocks.Business.Now()
 	memo, memoErr := w.memoOf(ctx, org, start)
 	defer w.keepMemo(org, memo)
 	ctx = context.WithValue(ctx, refusedKey{}, memo)
+	f := newFlight(w.concurrency())
+	if w.Concurrency <= 0 {
+		f.narrow()
+	}
+	defer f.wait()
+	ctx = withGate(ctx, f.gate)
 	type pass struct {
-		claim func(ctx context.Context, org int64) ([]int64, error)
-		work  func(ctx context.Context, org, id int64)
+		claim claimFunc
+		work  workFunc
 	}
 	// Ranks 3 to 6, due by the start.
-	passes := []pass{{w.claimDeliveries(false, false, start, start), w.deliver}, {w.claimReplies(start), w.reply},
-		{w.claimEvents(start), w.sendEvent}, {w.claimDeliveries(false, true, start, start), w.deliver}}
+	passes := []pass{{w.claimDeliveries(false, false, start, start), w.startDelivery},
+		{w.claimReplies(start), w.startReply}, {w.claimEvents(start), w.startEvent},
+		{w.claimDeliveries(false, true, start, start), w.startDelivery}}
 	// Ranks 3, 4 and 5 again, due now: one batch of each between two batches of rank 6.
-	live := []pass{{w.claimDeliveries(false, false, time.Time{}, time.Time{}), w.deliver},
-		{w.claimReplies(time.Time{}), w.reply}, {w.claimEvents(time.Time{}), w.sendEvent}}
+	live := []pass{{w.claimDeliveries(false, false, time.Time{}, time.Time{}), w.startDelivery},
+		{w.claimReplies(time.Time{}), w.startReply}, {w.claimEvents(time.Time{}), w.startEvent}}
 	// The first error of each rank, rank 1's at 0, and the memo's: the loops may claim a rank many times.
 	errs := make([]error, 2+len(passes), 3+len(passes))
 	errs = append(errs, memoErr)
@@ -377,7 +435,7 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 	// now1 claims one batch of rank 1 due now, which skips a refused limiter only until its token is due, and says
 	// whether it was full.
 	now1 := func() bool {
-		n, err := w.batchOnce(ctx, org, w.claimDeliveries(true, false, time.Time{}, time.Time{}), w.deliver)
+		n, err := w.batchOnce(ctx, f, org, w.claimDeliveries(true, false, time.Time{}, time.Time{}), w.startDelivery)
 		keep(0, err)
 		return n == int(w.batch())
 	}
@@ -392,9 +450,9 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 		visitRefused(ctx)
 		for {
 			at := w.Lease.Clocks.Business.Now()
-			keep(0, w.drain(ctx, org, w.claimDeliveries(true, false, at, at), w.deliver))
+			keep(0, w.drain(ctx, f, org, w.claimDeliveries(true, false, at, at), w.startDelivery))
 			full := now1()
-			n, err := w.batchOnce(ctx, org, w.claimDeliveries(true, true, until, at), w.deliver)
+			n, err := w.batchOnce(ctx, f, org, w.claimDeliveries(true, true, until, at), w.startDelivery)
 			keep(1, err)
 			if n < int(w.batch()) {
 				if n > 0 || full {
@@ -407,7 +465,7 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 	// once claims one batch of p, rank i+1 of ranks 3 to 6, and visits the Urgent ranks again, due by now, when it
 	// claimed a row; it says whether the batch was full.
 	once := func(i int, p pass) bool {
-		n, err := w.batchOnce(ctx, org, p.claim, p.work)
+		n, err := w.batchOnce(ctx, f, org, p.claim, p.work)
 		keep(i, err)
 		if n > 0 {
 			urgent(w.Lease.Clocks.Business.Now())
@@ -647,38 +705,13 @@ func refusedUrgent(ctx context.Context, at time.Time, bounded, configurationOnly
 	return dests, conns
 }
 
-// drain claims Batch rows at a time with claim and works each with work until a claim comes back short.
-func (w *Worker) drain(ctx context.Context, org int64,
-	claim func(ctx context.Context, org int64) ([]int64, error), work func(ctx context.Context, org, id int64)) error {
-	for {
-		n, err := w.batchOnce(ctx, org, claim, work)
-		if err != nil || n < int(w.batch()) {
-			return err
-		}
-	}
-}
-
-// batchOnce claims one batch with claim and works each row with work; it returns how many rows the claim took.
-func (w *Worker) batchOnce(ctx context.Context, org int64,
-	claim func(ctx context.Context, org int64) ([]int64, error), work func(ctx context.Context, org, id int64)) (int,
-	error) {
-	ids, err := claim(ctx, org)
-	if err != nil {
-		return 0, err
-	}
-	for _, id := range ids {
-		work(ctx, org, id)
-	}
-	return len(ids), nil
-}
-
 // claimDeliveries is the claim of the due deliveries of an Organization of one rank — Urgent or not, configuration
 // edits or the rest — in the order of ClaimDueDeliveries: the earliest first, then the one delivered longest ago. A
 // non-zero until claims only the deliveries due by then; an Urgent claim skips the limiters of the memo as they stand
-// at at, the start of its step of the visit, or when it claims for a zero at.
-func (w *Worker) claimDeliveries(urgent, configurationOnly bool, until, at time.Time) func(ctx context.Context,
-	org int64) ([]int64, error) {
-	return func(ctx context.Context, org int64) ([]int64, error) {
+// at at, the start of its step of the visit, or when it claims for a zero at. A delivery's attempt is keyed by its Root
+// message.
+func (w *Worker) claimDeliveries(urgent, configurationOnly bool, until, at time.Time) claimFunc {
+	return func(ctx context.Context, org int64) ([]claimedRow, error) {
 		dests, conns := refusedOf(ctx)
 		if urgent {
 			dests, conns = refusedUrgent(ctx, cmp.Or(at, w.Lease.Clocks.Business.Now()), !until.IsZero(),
@@ -706,11 +739,11 @@ func (w *Worker) claimDeliveries(urgent, configurationOnly bool, until, at time.
 			}
 			return cmp.Or(a.LastDeliveredAt.Time.Compare(b.LastDeliveredAt.Time), cmp.Compare(a.ID, b.ID))
 		})
-		ids := make([]int64, len(rows))
+		out := make([]claimedRow, len(rows))
 		for i, r := range rows {
-			ids[i] = r.ID
+			out[i] = claimedRow{id: r.ID, key: attemptKey{id: r.ID}}
 		}
-		return ids, nil
+		return out, nil
 	}
 }
 
@@ -769,6 +802,10 @@ type attempt struct {
 	finalReply  bool
 	needsWindow bool
 	pointer     *Outcome
+	// leaseUntil is the end of the lease its preparation renewed (real clock), and turn its place on the line of its
+	// Connection in the round (gate).
+	leaseUntil time.Time
+	turn       ticket
 }
 
 // replayed reports whether the outcome out is a Publication the messenger replayed: the first result of its
@@ -834,19 +871,35 @@ func groupOf(row dbgen.GetLeasedDeliveryRow) *int64 {
 	return &id
 }
 
-// deliver attempts one claimed delivery; a failure is logged and the row is attempted again once its lease runs out. A
-// delivery whose rule needs its bridge's edit window is prepared again once the window was read.
+// deliver attempts one claimed delivery from start to end, as a probe does (startDelivery).
 func (w *Worker) deliver(ctx context.Context, org, id int64) {
+	if finish := w.startDelivery(ctx, org, id); finish != nil {
+		finish(ctx)
+	}
+}
+
+// startDelivery prepares one claimed delivery and returns the rest of its attempt, its call and the record of its
+// outcome, nil when there is nothing to call; a failure is logged and the row is attempted again once its lease runs
+// out. A delivery whose rule needs its bridge's edit window is prepared again once the window was read.
+func (w *Worker) startDelivery(ctx context.Context, org, id int64) func(ctx context.Context) {
 	a, ok, logs, err := w.prepare(ctx, org, id, nil)
 	if err == nil && a.needsWindow {
 		a, ok, logs, err = w.prepare(ctx, org, id, w.editWindow(ctx, a.destination))
 	}
-	if err == nil {
-		logs.run(ctx, w.Log)
+	if err != nil {
+		w.deliveryFailed(ctx, err)
+		return nil
 	}
-	if err == nil && ok {
-		err = w.call(ctx, org, a)
+	logs.run(ctx, w.Log)
+	if !ok {
+		return nil
 	}
+	a.turn = gateOf(ctx).reserve(a.destination)
+	return func(ctx context.Context) { w.deliveryFailed(ctx, w.call(ctx, org, a)) }
+}
+
+// deliveryFailed logs err, the failure of an attempt of a delivery, unless it is nil or ctx ended.
+func (w *Worker) deliveryFailed(ctx context.Context, err error) {
 	if err != nil && ctx.Err() == nil {
 		w.Log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", "delivery"), logging.F("error", err.Error()))
 	}
@@ -967,8 +1020,9 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 		if a.republish {
 			a.started = row.RepublicationStartedAt.Valid
 		}
+		a.leaseUntil = realNow.Add(w.Lease.Duration)
 		if err := q.RenewDeliveryLease(ctx, dbgen.RenewDeliveryLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-			LeaseUntil: realNow.Add(w.Lease.Duration)}); err != nil {
+			LeaseUntil: a.leaseUntil}); err != nil {
 			return fmt.Errorf("renew the lease of the delivery: %w", err)
 		}
 		if a.republish && a.idempotent {
@@ -1052,7 +1106,11 @@ func publicationLoudness(loud pgtype.Bool, summary bool) (groups.Loudness, []gro
 // the key of its number, the same for every retry of it; a replayed one observes no latency, as its message shows the
 // state of an earlier attempt. A Publication that carries the final edit is Quiet. A republication past the edit
 // window is a Publication as its row of the Loud/Quiet table says, followed, once accepted, by the pointer reply under
-// the old Root message; a final edit past the window is a Thread reply with its own key.
+// the old Root message; a final edit past the window is a Thread reply with its own key. In a round the call waits for
+// its turn on the line of its Connection, and is not made while a RetryAfter holds its limiter (gate): the RetryAfter
+// of the hold is then its outcome, recorded as that answer, neither counted nor logged as an attempt. The call sends the
+// state its preparation read, which is as old as the wait for its turn; a change made meanwhile goes in the next call,
+// prepared once this attempt ended (C-11.FR-1). A turn that came late renews the lease first (renewLate).
 func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 	ctx = outbound.WithLinks(ctx, linksOf(a.destination, a.group()))
 	c := Call{Class: outbound.ClassDelivery, Destination: a.destination, Loudness: groups.Quiet}
@@ -1079,30 +1137,56 @@ func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 				messages.Args{"link": w.link(a.row.AlertGroupPublicID)})
 		}
 	}
+	g := gateOf(ctx)
+	held, leave, err := g.enter(ctx, a.turn, a.destination, w.Lease.Clocks.Business.Now)
+	if err != nil {
+		return err
+	}
+	if held == nil {
+		lost, err := w.renewLate(a.leaseUntil, func(now, until time.Time) (int64, error) {
+			return w.Store.q().RenewHeldDeliveryLease(ctx, dbgen.RenewHeldDeliveryLeaseParams{OrgID: org,
+				ID: a.row.ID, Owner: w.Lease.Owner, Now: now, LeaseUntil: until})
+		})
+		if lost || err != nil {
+			leave()
+			return err
+		}
+	}
 	start := w.Lease.Clocks.Real.Now()
-	out := w.send(ctx, a, c)
+	var out Outcome
 	var rejected *Outcome
-	if out.Kind == OutcomeMarkupRejected {
-		first := out
-		rejected = &first
-		w.attempted(ctx, a.destination, a.row.Number, kind, out, a.row.Attempts+1, w.Lease.Clocks.Real.Now().Sub(start))
-		c.Plain = true
-		out = plain(func() Outcome { return w.send(ctx, a, c) })
+	if held != nil {
+		out = *held
+	} else {
+		out = w.send(ctx, a, c)
+		if out.Kind == OutcomeMarkupRejected {
+			first := out
+			rejected = &first
+			w.attempted(ctx, a.destination, a.row.Number, kind, out, a.row.Attempts+1,
+				w.Lease.Clocks.Real.Now().Sub(start))
+			c.Plain = true
+			out = plain(func() Outcome { return w.send(ctx, a, c) })
+		}
+		out.heldUntil = g.answered(a.destination, out, w.Lease.Clocks.Business.Now())
 	}
 	took := w.Lease.Clocks.Real.Now().Sub(start)
 	if a.republish && out.Kind == OutcomeOK {
 		p := w.pointer(ctx, a, out)
+		p.heldUntil = g.answered(a.destination, p, w.Lease.Clocks.Business.Now())
 		a.pointer = &p
 	}
+	leave()
 	recorded := false
 	var logs after
-	err := w.Store.inTx(ctx, func(q queries) error {
+	err = w.Store.inTx(ctx, func(q queries) error {
 		logs = nil
 		var err error
 		recorded, err = w.record(ctx, q, org, a, c, out, rejected, &logs)
 		return err
 	})
-	w.attempted(ctx, a.destination, a.row.Number, kind, out, a.row.Attempts+1, took)
+	if held == nil {
+		w.attempted(ctx, a.destination, a.row.Number, kind, out, a.row.Attempts+1, took)
+	}
 	if err == nil {
 		logs.run(ctx, w.Log)
 	}
@@ -1111,6 +1195,33 @@ func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 			max(a.at.Sub(a.row.DesiredReceivedAt.Time).Seconds(), 0))
 	}
 	return err
+}
+
+// The budget of a call at its turn: each request of an adapter's client takes at most outbound.CallTimeout, and an
+// attempt makes at most callRequests of them — its call, the same again without markup or without its Thread's reply
+// link, and a republication's pointer reply. A turn renews the lease when less than turnBudget is left: those requests
+// and one more as a margin, 40 s, two thirds of the 60 s Lease.
+const (
+	callRequests = 3
+	turnBudget   = (callRequests + 1) * outbound.CallTimeout
+)
+
+// renewLate renews, with renew, the lease of an attempt whose preparation renewed it until leaseUntil when its turn came
+// with less than turnBudget left on the real clock — the wait behind the calls before it on its line was long — so that
+// its call, at most callRequests requests, is made under the lease. The statement is guarded by the lease: lost says
+// that it ran out meanwhile, so that another replica may hold the row and send a newer state, and the call is then not
+// made and nothing is recorded, as when a replica loses a lease during its call. A turn that came early renews nothing.
+func (w *Worker) renewLate(leaseUntil time.Time, renew func(now, until time.Time) (int64, error)) (lost bool,
+	err error) {
+	now := w.Lease.Clocks.Real.Now().UTC()
+	if leaseUntil.Sub(now) >= turnBudget {
+		return false, nil
+	}
+	n, err := renew(now, now.Add(w.Lease.Duration))
+	if err != nil {
+		return false, fmt.Errorf("renew the lease at the turn of the call: %w", err)
+	}
+	return n == 0, nil
 }
 
 // send is one adapter call of a prepared delivery: a Publication, an edit, or the final edit of a Root message past

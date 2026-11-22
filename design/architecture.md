@@ -363,8 +363,8 @@ flowchart LR
 - **audit** records configuration changes with a before/after diff, security events and every command of people and
   automation, and copies each entry to the log ([C-03].FR-14).
 - **keyring** holds the master keys from `MUSTER_SECRET_KEYS`, derives a sub-key per purpose (encryption, button
-  signatures), encrypts every secret field, checks the key canary at startup and records which keys the replica holds
-  ([ADR-0011], [C-20]).
+  signatures, CSRF tokens, Mattermost callback secrets, gateway contact codes), encrypts every secret field, checks
+  the key canary at startup and records which keys the replica holds ([ADR-0011], [C-20]).
 - **account links** starts every link in the signed-in web session ([ADR-0013], [C-18]).
 
 ### 3.3 Platform
@@ -514,7 +514,9 @@ Alert ([C-06].FR-15). The delivery side of the flow is [flow d](#d-delivery-reco
 ### b. Mattermost button press
 
 Mattermost does not sign its callbacks, so each button carries an opaque action id signed with the button-signature
-sub-key and its key id ([ADR-0011], [ADR-0013], [C-13].FR-4).
+sub-key and its key id, and, in its integration data, a callback secret derived with the `mattermost-callback`
+sub-key for that button of that Connection, which the Mattermost server keeps from clients and returns with a press
+([ADR-0011], [ADR-0013], [C-13].FR-4).
 
 ```mermaid
 sequenceDiagram
@@ -528,9 +530,9 @@ sequenceDiagram
     participant DW as delivery worker
 
     U->>MM: presses Ack on the Root message
-    MM->>IN: POST to the action callback at MUSTER_INGEST_URL<br/>signed action id, key id, user_id, post_id, channel_id
-    IN->>IN: verify the signature with the key it names (must be in the Keyring)<br/>and that post_id and channel_id belong to the action id
-    alt signature or message does not match
+    MM->>IN: POST to the action callback at MUSTER_INGEST_URL<br/>signed action id, key id, callback secret, user_id, post_id, channel_id
+    IN->>IN: verify the callback secret and the signature with the key it names (must be in the Keyring)<br/>and that post_id and channel_id belong to the action id
+    alt secret, signature or message does not match
         IN->>IP: ephemeral error for the person who pressed
         IP->>MM: ephemeral post without root_id, shown in the channel
         IN-->>MM: 200 with an empty JSON object, nothing changes

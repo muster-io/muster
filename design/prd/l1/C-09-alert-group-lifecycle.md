@@ -42,6 +42,8 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   (C-32.FR-12).
   _Revised for L2 (2026-11-21):_ an Alert Group may be attached to a main Alert Group, whose status it then follows
   (C-37.FR-4, C-37.FR-5), and carries the main Alert Group it is attached to.
+  _Revised for L2 (2026-11-22):_ an Alert Group may be kept back by Maintenance windows, which its read names, while
+  its status changes as usual (C-34.FR-8, C-34.FR-10, C-34.FR-21).
 - **C-09.FR-2** `#N` is assigned per Organization without gaps in the transaction that creates the Alert Group;
   `public_id` is opaque and used in URLs, the API and signed buttons.
 - **C-09.FR-23** The title of an Alert Group is the `alertname` its Alerts share or, once Alerts with different
@@ -158,6 +160,10 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   _Revised for L2 (2026-11-21):_ the loudness of the rows that a Loud event governs follows the Route's Loud and Quiet
   settings; such a row made Quiet is recorded Quiet without Mentions (C-36.FR-2, C-36.FR-3), and every event of an
   attached Alert Group is Quiet (C-37.FR-7).
+  _Revised for L2 (2026-11-22):_ while a Maintenance window keeps an Alert Group back, its rows are recorded but
+  nothing new is delivered for them outside the events mode of outgoing webhooks, so no Mention reaches anyone, and
+  only its existing Root messages are edited, Quietly; `maintenance_started` and `maintenance_ended` record the start
+  and the end (C-34.FR-11 to C-34.FR-13).
 
 ### Alert Group list
 

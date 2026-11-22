@@ -143,7 +143,8 @@ type Offsets interface {
 // ParallelUpdates is telegram.parallel_updates (P-52): the most updates one process routes at a time, over all its
 // Telegram Connections and both update modes; the others wait for a slot. An update being routed holds a connection of
 // the main pool for its update lock while its handler takes one more at a time, so two take at most four of the
-// default ten (pool_max_conns), next to the half of the pool that the processing lanes may take.
+// default ten (pool_max_conns), next to the half of the pool that the processing lanes may take and the connections
+// of the delivery worker (delivery.Concurrency) and the gateway sender; at the peak the others wait in the pool's queue.
 const ParallelUpdates = 2
 
 // Router is the one entry of updates for both modes (C-14.FR-1): it ignores an update the Connection has already

@@ -40,7 +40,7 @@ const OperationEvent = "event"
 // The timeouts of a request and the largest answer read; only its status and the start of its text are used.
 const (
 	connectTimeout = 5 * time.Second
-	callTimeout    = 10 * time.Second
+	callTimeout    = outbound.CallTimeout
 	maxAnswerBytes = 64 << 10
 )
 

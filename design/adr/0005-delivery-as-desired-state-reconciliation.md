@@ -24,6 +24,11 @@
   entries with the Loud events they apply to, `storm_started` among them; the Loud/Quiet matrix becomes a Route setting,
   pre-filled by the Route profile Paging (formerly On-call) or Informational; Telegram Destinations in one chat share
   its limiter
+- Amended: 2026-11-22 — with the L2 PRD of Paging by direct messages (C-43, journal D764): the delivery worker also
+  sends the direct messages that Page a person, from a table of their own, and edits each once when its Alert Group
+  stops being firing; like Thread replies they are not reconciled to a Desired state; unlike them, they take only the
+  Connection's limiter, since they name no Destination, and make nothing Broken; direct messages of Account links and
+  answers stay on the interactive path
 
 ## Context
 
@@ -51,7 +56,8 @@ Retries are idempotent by construction, and after any wait the worker sends the 
 one. Delivery rows carry `next_attempt_at` and a lease (ADR-0006), and the HTTP call is made outside the database
 transaction, through the outbound HTTP client (ADR-0015).
 
-**Who calls messenger APIs.** Only the delivery worker sends or edits Root messages and Thread replies. Everything else
+**Who calls messenger APIs.** Only the delivery worker sends or edits Root messages and Thread replies, and, from C-43,
+the direct messages that Page a person, which it sends from a table of their own and edits once. Everything else
 a person waits for — answers to button presses (Telegram `answerCallbackQuery`, Mattermost ephemeral messages), the
 bot's messages during account linking (ADR-0013) and Destination test messages — goes through one named interactive
 path that calls the messenger at once, outside the delivery queue, and never touches a Root message or a Thread. A
@@ -67,11 +73,14 @@ budget like a delivery, through the gateway Connection's limiter, with critical 
 the confirmation code of a contact, which a person waits for, take the interactive path. The architecture lint allows
 calls through a gateway only from that sender and the interactive path. A gateway that keeps failing becomes Broken, is
 probed through its `info` and raises an Internal alert; its failures never make a Destination Broken, not even one of
-the same bridge when it also has the role `messenger`, whose own deliveries decide that. Muster sends no direct messages
-to Page people: a Page in a messenger is a Mention in a Thread reply (journal D503, D505, D532).
+the same bridge when it also has the role `messenger`, whose own deliveries decide that. In L2's core Muster sent no
+direct messages to Page people: a Page in a messenger was a Mention in a Thread reply (journal D503, D505, D532). From
+C-43 a Page may also be a direct message, another send that is not reconciled, as Thread replies are not: the delivery
+worker sends it from its row, through the Connection's limiter, and edits it once (journal D764).
 
 **Rate limiting.** Each Destination has a limiter, and each Connection has one too, because a messenger limits a bot as
-a whole as well as each chat; a delivery waits for both. The limiters are shared by all replicas: their token buckets
+a whole as well as each chat; a delivery waits for both, and a direct message of C-43, which names no Destination,
+for the Connection's alone. The limiters are shared by all replicas: their token buckets
 live in PostgreSQL, so adding a replica never raises the rate a messenger sees. A call on the interactive path takes a
 token from the same limiters ahead of every waiting delivery, never queues, and fails fast — the person is told — when
 no token is free within its budget of a few seconds (ADR-0015). Limits default to half of the messenger's documented
@@ -276,8 +285,9 @@ or `503` with `Retry-After` — `RetryAfter`; `408`, other `5xx`, timeouts and n
   own state machine or audit trail needs; reconciliation is kept for the template mode, which edits one message.
 - **Stop updating as soon as a Root message is deleted.** Leaves an Alert Group that is still firing without a visible
   message and tells nobody; one Quiet republication is the better default.
-- **Direct messages for Pages** (L2), as a third path beside delivery and the interactive path. It would need a queue of
-  its own, a choice of Connection for people linked in several messengers and a rule for a person who blocked the bot; a
-  Mention in the Thread is already a delivery (journal D503).
+- **Direct messages for Pages as a third path** beside delivery and the interactive path. It would need a queue and a
+  worker of its own, a choice of Connection for people linked in several messengers and a rule for a person who blocked
+  the bot (journal D503). C-43 sends them through the delivery worker instead, from a table of their own, with the
+  Account link named by the person's rule and a blocked bot as a reason of the Page (journal D764).
 - **Reconciling calls through a Notification gateway.** A call has no message to bring to a Desired state; a row per
   Page with retries is all it needs (journal D505).

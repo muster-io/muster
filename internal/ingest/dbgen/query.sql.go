@@ -1056,11 +1056,15 @@ SELECT a.id, a.fingerprint, a.labels, a.annotations, a.generator_url, a.static_l
        a.resolve_reason, a.resolve_reason_text
 FROM alerts a
 WHERE a.org_id = $1 AND a.integration_id = $2
-  AND (a.fingerprint = ANY($3::text[])
-       OR a.id IN (SELECT p.alert_id
-                   FROM alert_presences p
-                   WHERE p.org_id = $1 AND p.alertmanager_group_id = $4
-                     AND p.state IN ('listed', 'missed')))
+  AND a.id = ANY(ARRAY(SELECT f.id
+                       FROM alerts f
+                       WHERE f.org_id = $1 AND f.integration_id = $2
+                         AND f.fingerprint = ANY($3::text[])
+                       UNION
+                       SELECT p.alert_id
+                       FROM alert_presences p
+                       WHERE p.org_id = $1 AND p.alertmanager_group_id = $4
+                         AND p.state IN ('listed', 'missed')))
 ORDER BY a.id
 FOR NO KEY UPDATE OF a
 `
@@ -1093,7 +1097,7 @@ type ListSnapshotAlertsRow struct {
 
 // ListSnapshotAlerts reads the Alerts a Snapshot touches, and locks them until the Snapshot's transaction ends so that
 // the retention of the Alerts view skips them: those it lists by fingerprint and those with an active presence in its
-// groupKey.
+// groupKey. The ids are found first, each way by its own index, so that the Alerts of the Integration are not scanned.
 func (q *Queries) ListSnapshotAlerts(ctx context.Context, arg ListSnapshotAlertsParams) ([]ListSnapshotAlertsRow, error) {
 	rows, err := q.db.Query(ctx, listSnapshotAlerts,
 		arg.OrgID,

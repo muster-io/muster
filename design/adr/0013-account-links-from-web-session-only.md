@@ -13,6 +13,10 @@
   like an Account link: only that person sets it, from their signed-in web session, and confirms it with a code that
   Muster sends through the gateway itself; an Admin sees and removes contacts but never sets one; an acknowledgement
   through a gateway acts as the person the Page was for, taken from Muster's signature, not from the contact
+- Amended: 2026-11-22 — after #669: the authenticity of a Mattermost press rests on the per-button callback secret in
+  the integration data, which the Mattermost server keeps from clients, and on the signed action id; the action id
+  alone does not tell a press of the server from a forgery, because the same action id is in the Telegram, Slack and
+  bridge messages of the Alert Group
 
 ## Context
 
@@ -84,17 +88,19 @@ in the press's own answer instead (below).
 **Mattermost only through its REST API with a bot account.** Each Mattermost Connection uses the bot account's token for
 posting, editing, direct messages and ephemeral replies. Muster does not use Mattermost incoming webhooks and does not
 ship a Mattermost plugin. Button presses reach Muster at `MUSTER_INGEST_URL`, and each button carries only an opaque,
-signed action id (ADR-0011). If Muster has an internal address, it must be listed in Mattermost's
-`AllowedUntrustedInternalConnections`, because Mattermost calls integrations with its untrusted HTTP client; otherwise a
-press shows the person only a generic "Action integration error", and only the Mattermost server log says why. The
-documentation says so, and the Connection page reminds the admin. Muster answers a press with an empty JSON object and
-sends anything the person must read as a separate ephemeral post: an ephemeral text in the answer itself would appear
-only inside the Thread of the Root message, out of sight in the channel. That post needs the `create_post_ephemeral`
-permission, which only system admins hold by default, and the bot is meant to have the role Member. When the post is
-refused for it, or fails in any other way, the answer to the press carries the same text as `ephemeral_text` instead,
-which needs no permission: out of sight in the channel, but never lost (F-062, F-063, journal D284). The Connection
-check warns when the bot's roles lack the permission, so the admin can grant it — for example with the system admin
-role — or accept answers in the Thread.
+signed action id and, in its integration data, a callback secret derived for that button of that Connection
+(ADR-0011): Mattermost does not sign its requests to an integration, so a press is authentic when it returns the
+secret, which the Mattermost server keeps from clients, with a valid action id. If Muster has an internal address, it
+must be listed in Mattermost's `AllowedUntrustedInternalConnections`, because Mattermost calls integrations with its
+untrusted HTTP client; otherwise a press shows the person only a generic "Action integration error", and only the
+Mattermost server log says why. The documentation says so, and the Connection page reminds the admin. Muster answers a
+press with an empty JSON object and sends anything the person must read as a separate ephemeral post: an ephemeral
+text in the answer itself would appear only inside the Thread of the Root message, out of sight in the channel. That
+post needs the `create_post_ephemeral` permission, which only system admins hold by default, and the bot is meant to
+have the role Member. When the post is refused for it, or fails in any other way, the answer to the press carries the
+same text as `ephemeral_text` instead, which needs no permission: out of sight in the channel, but never lost (F-062,
+F-063, journal D284). The Connection check warns when the bot's roles lack the permission, so the admin can grant it —
+for example with the system admin role — or accept answers in the Thread.
 
 **Not in the first release:** linking through Mattermost OAuth or Telegram Login.
 

@@ -63,7 +63,9 @@ func zeroOf(t time.Time) time.Time {
 }
 
 // holdBucket holds the bucket that a RetryAfter of d names — d's own or its Connection's — until until: no token
-// before then, one at that time, so that the next call to any Destination it covers waits exactly as asked.
+// before then, one at that time, so that the next call to any Destination it covers waits exactly as asked; the calls
+// of the round that a preparation readied before the hold was recorded wait at its gate (Round). A longer hold in
+// place stays, so that recording the same hold again changes nothing.
 func holdBucket(ctx context.Context, q queries, orgID int64, d Destination, o Outcome, until time.Time) error {
 	kind, id := string(ScopeDestination), d.ID
 	if o.Scope == ScopeConnection && d.Connection != nil {

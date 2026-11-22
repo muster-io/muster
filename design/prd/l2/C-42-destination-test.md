@@ -150,8 +150,11 @@ Destination page → "Test": "Send test message" (C-16) and "Step-by-step test",
 To be specified in `api/openapi.yaml` by the backend story, each with `x-permission: destinations:test`:
 `destinations/{id}/test-runs` (create with the source and the Severity level → the run and the result of its first
 step); `destinations/{id}/test-runs/{run_id}` (read the run with its steps and presses; delete to end it);
-`destinations/{id}/test-runs/{run_id}/steps` (create → the next step's result); `destinations/{id}/chain-plays`
-(create with the source, the Severity level, the chains and the start → the computed timeline, nothing stored).
+`destinations/{id}/test-runs/{run_id}/steps` (create → the next step's result); `destinations/{id}/chain-play-offers`
+(`listDestinationChainPlayOffers`: read with the source and the Severity level → the chains of FR-7, each with its
+origin, the Route or the Team, and the Destinations its Pages would reach, nothing stored);
+`destinations/{id}/chain-plays` (create with the source, the Severity level, the chains and the start → the computed
+timeline, nothing stored).
 
 ## Acceptance
 

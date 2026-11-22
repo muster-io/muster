@@ -26,6 +26,11 @@ const (
 // Classes are the client classes, the closed set of the metric label client.
 var Classes = []Class{ClassDelivery, ClassInteractive, ClassBackground, ClassHeartbeat}
 
+// CallTimeout is the overall timeout (Config.Timeout) of each request that the clients of the messengers, the bridges
+// and the outgoing webhooks make in any class, a long poll excepted: the delivery worker sizes the lease of a call made
+// at a late turn by it.
+const CallTimeout = 10 * time.Second
+
 const (
 	// backoffBase and backoffCap bound the waits of the background class between attempts.
 	backoffBase = time.Second

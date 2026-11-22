@@ -721,6 +721,32 @@ func (f *fakeDB) RenewDeliveryLease(_ context.Context, arg dbgen.RenewDeliveryLe
 	return nil
 }
 
+func (f *fakeDB) RenewHeldDeliveryLease(_ context.Context, arg dbgen.RenewHeldDeliveryLeaseParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RenewHeldDeliveryLease"); err != nil {
+		return 0, err
+	}
+	if d := f.delivery(arg.ID); d.owner == arg.Owner && d.until.After(arg.Now) {
+		d.until = arg.LeaseUntil
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func (f *fakeDB) RenewHeldReplyLease(_ context.Context, arg dbgen.RenewHeldReplyLeaseParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RenewHeldReplyLease"); err != nil {
+		return 0, err
+	}
+	if r := f.reply(arg.ID); r.owner == arg.Owner && r.until.After(arg.Now) {
+		r.until = arg.LeaseUntil
+		return 1, nil
+	}
+	return 0, nil
+}
+
 func (f *fakeDB) RenewReplyLease(_ context.Context, arg dbgen.RenewReplyLeaseParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1114,7 +1140,7 @@ func (f *fakeDB) ClaimDueReplies(_ context.Context, arg dbgen.ClaimDueRepliesPar
 			break
 		}
 		r.owner, r.until, r.state = arg.Owner, arg.LeaseUntil, "pending"
-		out = append(out, dbgen.ClaimDueRepliesRow{ID: r.id, NextAttemptAt: r.next})
+		out = append(out, dbgen.ClaimDueRepliesRow{ID: r.id, NextAttemptAt: r.next, DeliveryID: r.delivery})
 	}
 	// The order of RETURNING is not guaranteed; the worker sorts.
 	slices.Reverse(out)
@@ -2062,7 +2088,9 @@ func newEnv(t *testing.T) *env {
 	logger := logging.New(e.log, logging.LevelInfo)
 	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: logger,
 		Renderer: stubRenderer{}})
-	e.w = &delivery.Worker{Store: e.store, Lease: db.Lease{Owner: "r1", Duration: delivery.Lease,
+	// One attempt at a time: the fake database, its transactions and the recorder's scripts, which answer in the order
+	// of the calls, are not made for attempts at once (TestFlight*, TestIntegrationConcurrentAttempts test those).
+	e.w = &delivery.Worker{Concurrency: 1, Store: e.store, Lease: db.Lease{Owner: "r1", Duration: delivery.Lease,
 		Clocks: clock.Clocks{Business: e.business, Real: e.real}},
 		Organizations: func(context.Context) ([]int64, error) { return []int64{orgID}, nil },
 		Adapters:      delivery.Adapters{delivery.TypeMattermost: e.rec, delivery.TypeWebhook: e.rec}, Log: logger,

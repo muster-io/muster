@@ -97,6 +97,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   collapsed reply threads, the default, it is seen only once the Thread is open. So the answer is never lost, and a
   bot with the permission shows it in the channel. A successful press gets an empty answer: the edited Root message
   shows its result. A press from an account without an Account link changes nothing.
+  _Revised for L2 (2026-11-22, #669):_ from 0.2.0 a press is authenticated by the callback secret of its button, which
+  Muster derives from the key that signed the action id, the Connection and the action id — an HMAC with the Keyring
+  sub-key `mattermost-callback`, never stored (ADR-0011) — and puts in the button's integration data, which the
+  Mattermost server keeps from clients and returns with a press; Muster checks it in constant time before anything acts
+  on the press. A press without it, or with another one — another Connection's, another button's or another key's —
+  changes nothing and is logged as not verified. A button posted before the upgrade carries no secret: the first press
+  on its Root message changes nothing, says that the buttons are being updated, and edits that Root message again,
+  Quietly, so that its buttons carry their secrets. The Request log masks the secret and the key id (C-23.FR-3).
 - **C-13.FR-5** Response mapping: `429` → RetryAfter for the whole Connection, for the seconds in `Retry-After`, because
   Mattermost counts requests per client address, not per channel (F-030); the body of that `429` is plain text, not
   JSON, so it is classified by its status and headers alone (F-031); `5xx` and timeouts → Transient; `401` and `403`
@@ -131,6 +139,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   text, a Loud Thread reply in its `message` (FR-3, F-056, F-113).
   _Revised for L2 (2026-10-26):_ a Mattermost Destination also mentions Mattermost groups, as `@` and the group's name,
   for its group entries and for the Team mentions of Teams (C-25.FR-8, C-28.FR-2).
+  _Revised for L2 (2026-11-22, #632):_ a Loud post of either kind, a Thread reply as well as a Root message, adds the
+  everyone and group Mention tokens of its own template output (`{{ mention "here" }}`, `"channel"`, `"all"`,
+  `"group"`) after the Mentions of the event, each once; in the text they stay non-notifying, and a Quiet post and an
+  edit carry none.
 - **C-13.FR-9** The shared Destination pages, reused by C-14 and C-15: the Destinations list (all types, with health,
   Routes and the Broken banner), the Destination page with its health, its Routes, the Mention and limiter sections and,
   for types that have a Destination check, "Check"; and the delivery state per Destination on the Alert Group page

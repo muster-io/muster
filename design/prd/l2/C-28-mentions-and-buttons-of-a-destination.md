@@ -76,6 +76,15 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   is dropped when its entry is removed from the Destination or its User is deleted; a disabled User keeps it. The first
   publication of a Storm summary records its undelivered Mentions without an Alert Group: they warn on the Destination
   only and appear in no Timeline (C-11.FR-21).
+  _Revised for L2 (2026-11-22, #591, #626, #690):_ a third case is a Mention that a bridge's line of Mentions left out
+  for length (C-12.FR-11), recorded with the reason `message_too_long` and warned about as "… the message had no room
+  for their Mention". A group, a Team mention or everyone in the chat that an entry named and such a line left out is
+  recorded the same way, "Mention not delivered" with the reason `message_too_long`, naming the group or the word in
+  place of the person, and warns on the Destination until a later Loud message carries it. A template's token left out
+  that no entry names is recorded with no entry and no event; it appears in the Timeline only. A Team mention or
+  everyone in the chat that a Page names and that its Thread reply's line of Mentions left out is recorded as "Mention
+  not delivered" with `message_too_long`, naming the group or the word and, in place of an entry, the Page — its step
+  and chain; it appears in the Timeline only and raises no warning.
 - **C-28.FR-4** The rules of L1 stay: Reminders and auto-unacknowledge mention the Owner and a Takeover the previous
   Owner, whatever the entries; a Reopen into acknowledged mentions only the Owner; Mentions are never added by an edit
   (ADR-0005); a Quiet new message carries none.

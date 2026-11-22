@@ -49,9 +49,11 @@ func (s *Service) ReminderReached(ctx context.Context, db groups.DBTX, groupID, 
 }
 
 // claimReplies is the claim of the due Thread replies of an Organization, in the order of ClaimDueReplies: the
-// earliest first. A non-zero until claims only the replies due by then.
-func (w *Worker) claimReplies(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
-	return func(ctx context.Context, org int64) ([]int64, error) {
+// earliest first. A non-zero until claims only the replies due by then. A reply's attempt is keyed by the Root message
+// of its delivery, so that the replies of one delivery go one after another, each prepared once the one before it
+// recorded its outcome and its `thread_ref` (Round).
+func (w *Worker) claimReplies(until time.Time) claimFunc {
+	return func(ctx context.Context, org int64) ([]claimedRow, error) {
 		dests, conns := refusedOf(ctx)
 		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
 			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueRepliesRow, error) {
@@ -65,11 +67,11 @@ func (w *Worker) claimReplies(until time.Time) func(ctx context.Context, org int
 		slices.SortFunc(rows, func(a, b dbgen.ClaimDueRepliesRow) int {
 			return cmp.Or(a.NextAttemptAt.Compare(b.NextAttemptAt), cmp.Compare(a.ID, b.ID))
 		})
-		ids := make([]int64, len(rows))
+		out := make([]claimedRow, len(rows))
 		for i, r := range rows {
-			ids[i] = r.ID
+			out[i] = claimedRow{id: r.ID, key: attemptKey{id: r.DeliveryID}}
 		}
-		return ids, nil
+		return out, nil
 	}
 }
 
@@ -93,23 +95,40 @@ type replyAttempt struct {
 	page MentionPage
 	// after is what its render left to run once the transaction that prepared it committed.
 	after []func(context.Context)
+	// leaseUntil is the end of the lease its preparation renewed (real clock), and turn its place on the line of its
+	// Connection in the round (gate).
+	leaseUntil time.Time
+	turn       ticket
 }
 
-// reply sends one claimed Thread reply; a failure is logged and the reply is attempted again once its lease runs out.
-// A reply that ended, sent or Not delivered, settles its Page; one attempted again does not, and a Page whose replies
-// end otherwise, dropped or withheld, is settled by the round (settlePages).
-func (w *Worker) reply(ctx context.Context, org, id int64) {
+// startReply prepares one claimed Thread reply and returns the rest of its attempt, nil when there is nothing to send:
+// the reply is sent and its outcome recorded; a reply that ended, sent or Not delivered, then settles its Page, and one
+// attempted again does not — a Page whose replies end otherwise, dropped or withheld, is settled by the round
+// (settlePages). A failure is logged and the reply is attempted again once its lease runs out.
+func (w *Worker) startReply(ctx context.Context, org, id int64) func(ctx context.Context) {
 	a, ok, err := w.prepareReply(ctx, org, id)
-	if err == nil && ok {
-		for _, f := range a.after {
-			f(ctx)
-		}
-		var ended bool
-		ended, err = w.sendReply(ctx, org, a)
+	if err != nil {
+		w.replyFailed(ctx, err)
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	for _, f := range a.after {
+		f(ctx)
+	}
+	a.turn = gateOf(ctx).reserve(a.destination)
+	return func(ctx context.Context) {
+		ended, err := w.sendReply(ctx, org, a)
 		if err == nil && ended {
 			w.settleReply(ctx, org, a.row)
 		}
+		w.replyFailed(ctx, err)
 	}
+}
+
+// replyFailed logs err, the failure of an attempt of a Thread reply, unless it is nil or ctx ended.
+func (w *Worker) replyFailed(ctx context.Context, err error) {
 	if err != nil && ctx.Err() == nil {
 		w.Log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", "thread_reply"), logging.F("error", err.Error()))
 	}
@@ -215,7 +234,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
 				Mentions: ms, Targets: resolved.Targets, Webhook: webhook},
 			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, resolved: resolved, paged: pr.paged,
-			page: pr.page, after: pending}
+			page: pr.page, after: pending, leaseUntil: realNow.Add(w.Lease.Duration)}
 		if idem, ok := w.idempotent(d.Type); ok {
 			a.call.Key = idem.ReplyKey(d, row.ID)
 		}
@@ -228,9 +247,25 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 // sendReply sends a prepared Thread reply outside any transaction and records its outcome by its rule (outcomes.go);
 // a markup the messenger rejects is sent again without markup, and a reply whose Thread is lost again without its reply
 // link, in the same attempt. ended says whether the reply ended, sent or Not delivered, rather than waiting for
-// another attempt.
+// another attempt. In a round the reply waits for its turn on the line of its Connection, and is not sent while a
+// RetryAfter holds its limiter, as a delivery's call is (gate).
 func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) (ended bool, err error) {
 	ctx = outbound.WithLinks(ctx, linksOf(a.destination, &a.row.AlertGroupID))
+	g := gateOf(ctx)
+	held, leave, err := g.enter(ctx, a.turn, a.destination, w.Lease.Clocks.Business.Now)
+	if err != nil {
+		return false, err
+	}
+	if held == nil {
+		lost, err := w.renewLate(a.leaseUntil, func(now, until time.Time) (int64, error) {
+			return w.Store.q().RenewHeldReplyLease(ctx, dbgen.RenewHeldReplyLeaseParams{OrgID: org, ID: a.row.ID,
+				Owner: w.Lease.Owner, Now: now, LeaseUntil: until})
+		})
+		if lost || err != nil {
+			leave()
+			return false, err
+		}
+	}
 	start := w.Lease.Clocks.Real.Now()
 	c := a.call
 	var lost *Outcome
@@ -246,16 +281,23 @@ func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) (ende
 		a.root, a.chain = Root{MessageID: a.root.MessageID}, true
 		return w.sendReplyCall(ctx, a, c)
 	}
-	out := send(c)
+	var out Outcome
 	var rejected *Outcome
-	if out.Kind == OutcomeMarkupRejected {
-		first := out
-		rejected = &first
-		w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1,
-			w.Lease.Clocks.Real.Now().Sub(start))
-		c.Plain = true
-		out = plain(func() Outcome { return send(c) })
+	if held != nil {
+		out = *held
+	} else {
+		out = send(c)
+		if out.Kind == OutcomeMarkupRejected {
+			first := out
+			rejected = &first
+			w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1,
+				w.Lease.Clocks.Real.Now().Sub(start))
+			c.Plain = true
+			out = plain(func() Outcome { return send(c) })
+		}
+		out.heldUntil = g.answered(a.destination, out, w.Lease.Clocks.Business.Now())
 	}
+	leave()
 	took := w.Lease.Clocks.Real.Now().Sub(start)
 	var logs after
 	err = w.Store.inTx(ctx, func(q queries) error {
@@ -264,7 +306,9 @@ func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) (ende
 		ended, recErr = w.recordReply(ctx, q, org, a, out, rejected, lost, &logs)
 		return recErr
 	})
-	w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1, took)
+	if held == nil {
+		w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1, took)
+	}
 	if err != nil {
 		return false, err
 	}
