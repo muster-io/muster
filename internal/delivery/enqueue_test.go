@@ -222,6 +222,23 @@ func TestEnqueue(t *testing.T) {
 	}
 }
 
+// TestEnqueueCreationReadsNoReach: the rendering of a creation publishes the Alert Group wherever it reaches without
+// reading the Destinations it reached before, which an Alert Group created in the transaction has none of; any other
+// rendering reads them.
+func TestEnqueueCreationReadsNoReach(t *testing.T) {
+	e := newEnv(t)
+	e.db.routeDests[routeID] = []int64{destMM}
+	e.db.fail["ListGroupDestinations"] = errBoom
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	if d := e.only(t); d == nil || e.db.calls["ListGroupDestinations"] != 0 {
+		t.Errorf("deliveries %+v, queries %v", e.db.deliveries, e.db.calls)
+	}
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring, "b"),
+		Actor: groups.System}); !errors.Is(err, errBoom) {
+		t.Errorf("a rendering after the creation: %v", err)
+	}
+}
+
 // TestTeamsEvaluatedIsQuiet is C-25.FR-13 and ADR-0018 in delivery: a rendering of the evaluation of the Teams on a
 // save, marked as a change of configuration and carrying its Quiet team_joined, that changes the Desired state of a
 // Not delivered Publication which was never published publishes it Quietly — the same rendering unmarked, as an Alert
