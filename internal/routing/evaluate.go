@@ -101,10 +101,11 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 	error) {
 	var ids, listed []int64
 	seen := make(map[int64]bool, len(changes))
-	fired := map[int64]bool{}
+	// first marks the Alerts whose row this Snapshot inserted: a fired change with Episode 1 (ingest.AlertChange).
+	fired, first := map[int64]bool{}, map[int64]bool{}
 	for _, c := range changes {
 		if c.Kind == ingest.ChangeFired && !seen[c.AlertID] {
-			seen[c.AlertID], fired[c.AlertID] = true, true
+			seen[c.AlertID], fired[c.AlertID], first[c.AlertID] = true, true, c.Episode == 1
 			ids = append(ids, c.AlertID)
 		}
 	}
@@ -177,8 +178,12 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 			}
 		}
 		c := classes.Classify(labels)
-		reset.Ids = append(reset.Ids, row.ID)
-		reset.UnknownValues = append(reset.UnknownValues, c.UnknownValue)
+		// The first firing of an Alert, whose row this Snapshot inserted (Episode 1, see ingest.AlertChange), has no
+		// Teams and no value of an earlier firing to replace: only a value that names no Team is written.
+		if !first[row.ID] || c.UnknownValue != "" {
+			reset.Ids = append(reset.Ids, row.ID)
+			reset.UnknownValues = append(reset.UnknownValues, c.UnknownValue)
+		}
 		for _, m := range c.Teams {
 			members.AlertIds = append(members.AlertIds, row.ID)
 			members.TeamIds = append(members.TeamIds, m.TeamID)
@@ -203,19 +208,20 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 }
 
 // recordTeams records the Teams of the Alerts that start firing, replacing those of their previous firing, and the
-// values of the Team label that name no Team (C-25.FR-5).
+// values of the Team label that name no Team (C-25.FR-5): reset are the Alerts whose previous firing is forgotten or
+// whose value is written, members the Teams of each.
 func (r *Router) recordTeams(ctx context.Context, q evalQueries, reset dbgen.ResetAlertTeamsParams,
 	members dbgen.InsertAlertTeamsParams) error {
-	if len(reset.Ids) == 0 {
-		return nil
-	}
-	reset.OrgID, members.OrgID = r.orgID, r.orgID
-	if err := q.ResetAlertTeams(ctx, reset); err != nil {
-		return fmt.Errorf("forget the teams of the alerts that start firing: %w", err)
+	if len(reset.Ids) > 0 {
+		reset.OrgID = r.orgID
+		if err := q.ResetAlertTeams(ctx, reset); err != nil {
+			return fmt.Errorf("forget the teams of the alerts that start firing: %w", err)
+		}
 	}
 	if len(members.AlertIds) == 0 {
 		return nil
 	}
+	members.OrgID = r.orgID
 	if err := q.InsertAlertTeams(ctx, members); err != nil {
 		return fmt.Errorf("record the teams of the alerts: %w", err)
 	}

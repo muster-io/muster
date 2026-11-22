@@ -445,7 +445,8 @@ func TestDeletionMarker(t *testing.T) {
 		t.Errorf("integration_deleted +%d", got)
 	}
 	if len(sink.changes) != 2 || sink.changes[1] != (AlertChange{Kind: ChangeResolved, AlertID: 2, Fingerprint: "b",
-		Episode: 3, StoredSnapshotID: 1, Reason: ResolveIntegrationDeleted, ReasonText: "Integration lab-eu deleted"}) {
+		Episode: 3, StoredSnapshotID: 1, ReceivedAt: t0, Reason: ResolveIntegrationDeleted,
+		ReasonText: "Integration lab-eu deleted"}) {
 		t.Errorf("changes %+v", sink.changes)
 	}
 	if len(store.ended) != 1 || !slices.Equal(store.ended[0].AlertIds, []int64{1, 2}) {

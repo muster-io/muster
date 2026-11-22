@@ -5,6 +5,9 @@
 **Goal.** Each person decides how a Page reaches them: a normal and an important rule, each a short sequence of Mentions
 in the Thread and calls through a Notification gateway with waits between them. An Escalation step Pages a person by one
 of the two. Muster sends no direct messages to Page anyone (ADR-0018).
+_Revised for L2 (2026-11-22):_ from C-43 a rule may also hold direct messages from the bot through one of the person's
+Account links, which only the person's own rules hold, never the Organization's defaults (C-43.FR-1 to C-43.FR-3;
+ADR-0018 as amended).
 
 Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md).
 
@@ -69,6 +72,8 @@ call" — with "to {contact}" and, with several gateways, the choice of one, "Co
 first." or "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)"; and the contact block of C-30.
 Users → a User's page: their rules, editable by Admins. Organization → Alert handling: the default rules, in words;
 in 0.2.0 they change only through the API.
+_Revised for L2 (2026-11-22):_ from C-43 "Muster sends no direct messages." is gone, "A Page is a Mention in the
+Thread" also names direct messages, and the rules offer the action "Direct message" with the texts of C-43's UI.
 
 ## API surface
 

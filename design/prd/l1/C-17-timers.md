@@ -35,6 +35,10 @@ FR-11.
   _Revised for L2 (2026-11-21):_ new Alerts that remove the acknowledgement, where the Route lets them, and a Detach
   that leaves the Alert Group firing are points of starting over too; an attached Alert Group has no ack timeout of its
   own (C-36.FR-7, C-37.FR-4, C-37.FR-8).
+  _Revised for L2 (2026-11-22):_ a delivered `created` event of an Alert Group that a Maintenance window keeps back is
+  not its Publication; its ack timeout stops when it becomes kept back and sends no notice while it is, and it starts
+  at the Publication when the window ends or, for one published before, starts over where no chain applies
+  (C-34.FR-12, C-34.FR-14, C-34.FR-15, C-34.FR-18, C-34.FR-19).
 - **C-17.FR-2** Notices come at doubling intervals from the Route's first interval F (`route.ack_timeout`) — F, 2F and
   4F, that is F, 3F and 7F after the start — and there are at most three. They are Loud Thread replies whose text is the
   Route's ack timeout template (C-12); Mentions follow each Destination's setting. The ack timeout can be turned off per
@@ -62,6 +66,8 @@ FR-11.
   Group with the reason "No answer to the last two Reminders": it becomes firing without an Owner, a Loud Thread reply
   gives the reason and mentions the Owner, and the ack timeout starts over. A Reminder that reached no Destination does
   not count as unanswered; for an outgoing webhook in events mode, a delivered `reminder` event counts as reaching it.
+  _Revised for L2 (2026-11-22):_ a Reminder that comes due while a Maintenance window keeps its Alert Group back is not
+  sent and does not count as unanswered (C-34.FR-15).
 - **C-17.FR-6** Buttons on Reminders are signed like Root message buttons but are not re-rendered after a key rotation;
   once the old key is removed they are answered privately with "This button has expired; use the buttons on the Alert
   Group's message".

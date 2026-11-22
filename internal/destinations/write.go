@@ -496,6 +496,7 @@ type writeQueries interface {
 	LockSlackConnection(ctx context.Context, arg dbgen.LockSlackConnectionParams) (int64, error)
 	InsertSlackDestination(ctx context.Context, arg dbgen.InsertSlackDestinationParams) (int64, error)
 	UpdateSlackDestination(ctx context.Context, arg dbgen.UpdateSlackDestinationParams) error
+	SetDestinationMark(ctx context.Context, arg dbgen.SetDestinationMarkParams) error
 	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
 	SetDestinationOwningTeam(ctx context.Context, arg dbgen.SetDestinationOwningTeamParams) error
 	InsertDestinationUpdate(ctx context.Context, arg dbgen.InsertDestinationUpdateParams) error
@@ -1168,7 +1169,8 @@ func created(d Destination, err error) (Destination, error) {
 // Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3,
 // C-24.FR-3); a non-nil version must be its current one (If-Match). Saving runs the Destination check as Create does,
 // limited by the Destination's Connection alone, since a check posts nothing; a passing check of a Broken Destination
-// ends its Broken state (C-13.FR-10, C-14.FR-14). An update that changes nothing writes nothing.
+// ends its Broken state (C-13.FR-10, C-14.FR-14). An update that changes nothing writes nothing, and one that changes
+// only the mark managed_by of a Destination with a Destination check runs none (saveMark).
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Destination,
 	error) {
 	d, err := s.update(ctx, r, publicID, version, in)
@@ -1189,6 +1191,11 @@ func (s *Service) update(ctx context.Context, r Requester, publicID string, vers
 	}
 	if err := checkOwner(&in); err != nil {
 		return Destination{}, err
+	}
+	if in.Type != TypeWebhook {
+		if d, saved, err := s.saveMark(ctx, r, before, in); saved || err != nil {
+			return d, err
+		}
 	}
 	switch in.Type {
 	case TypeWebhook:
@@ -1284,6 +1291,77 @@ func (s *Service) update(ctx context.Context, r Requester, publicID string, vers
 		return s.Get(ctx, publicID)
 	}
 	return d, nil
+}
+
+// planned is the Destination before as the validated input in of a Mattermost, Telegram, Bridge or Slack Destination
+// would save it, before its Destination check: what a check finds — the names of a Mattermost team and channel, the
+// chats and titles of a Telegram channel and its discussion group, the name of a Bridge or Slack channel — stays as
+// stored, and the owning Team is named by its public_id alone. Its view is what the save's Audit log diff compares.
+func planned(before Destination, in Input) Destination {
+	d := before
+	conn := connectionOf(in)
+	d.Name, d.Connection = in.Name, &conn
+	d.MentionEntries, d.LimiterLimit, d.LimiterPerSeconds = entriesOf(in), in.Limiter.Limit, in.Limiter.PerSeconds
+	switch {
+	case in.Mattermost != nil:
+		d.MattermostTeamID, d.MattermostChannelID = &in.Mattermost.TeamID, &in.Mattermost.ChannelID
+	case in.Telegram != nil:
+		d.TelegramChannelID = &in.Telegram.ChannelID
+	case in.Bridge != nil:
+		d.BridgeChannelID = &in.Bridge.ChannelID
+	case in.Slack != nil:
+		d.SlackChannelID = &in.Slack.ChannelID
+	}
+	withButtons(&d, in)
+	planOwner(in, &d)
+	planMark(in, &d)
+	return d
+}
+
+// saveMark saves the Mattermost, Telegram, Bridge or Slack Destination before when the validated input in changes its
+// mark managed_by and nothing else (C-33.FR-11), and reports saved; any other save is left to its type, unsaved. The
+// mark changes no behaviour, so the save runs no Destination check and calls no messenger — it is saved while its
+// channel is unreachable — writes nothing that a check finds, ends no Broken state, since nothing was checked, and
+// requests no re-render: in one transaction it writes the mark with a new version, under the lock of the Destination
+// at the version read, and records the change with its live hint.
+func (s *Service) saveMark(ctx context.Context, r Requester, before Destination, in Input) (Destination, bool,
+	error) {
+	old, err := viewOf(before)
+	if err != nil {
+		return Destination{}, false, err
+	}
+	next, err := viewOf(planned(before, in))
+	if err != nil {
+		return Destination{}, false, err
+	}
+	diff := audit.Diff(old, next)
+	if !managedby.Only(diff) {
+		return Destination{}, false, nil
+	}
+	d := before
+	planMark(in, &d)
+	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock the destination %s: %w", before.PublicID, err)
+		}
+		if lock.Version != before.Version {
+			return ErrVersionMismatch
+		}
+		if err := q.SetDestinationMark(ctx, dbgen.SetDestinationMarkParams{OrgID: s.orgID, ID: before.ID,
+			ManagedBy: managedby.Text(d.ManagedBy), Now: s.writer.Business.Now().UTC()}); err != nil {
+			return fmt.Errorf("mark the destination %s: %w", before.PublicID, err)
+		}
+		d.Version++
+		return s.record(ctx, q, r, ActionUpdated, d, diff)
+	})
+	if err != nil {
+		return Destination{}, true, err
+	}
+	return d, true, nil
 }
 
 // CheckResult is the result of checkDestination: whether every check passed, each check, the health after it, and the

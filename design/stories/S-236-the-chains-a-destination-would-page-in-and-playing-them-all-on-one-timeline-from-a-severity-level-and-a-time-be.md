@@ -126,11 +126,9 @@ make lint-arch
 
 ## Open questions
 
-- **Listing the offers.** C-42's API surface names four operations and none that lists the offered chains, which the UI
-  of C-42.FR-7 needs before "Play"; this story adds `listDestinationChainPlayOffers` as a read, with the same
-  Permission.
-  Say if the review prefers the offers inside the response of an empty play, or another path, before the generated
-  clients carry it.
+- **Listing the offers** (settled). C-42's API surface named four operations and none that lists the offered chains,
+  which the UI of C-42.FR-7 needs before "Play"; this story adds `listDestinationChainPlayOffers` as a read, with the
+  same Permission, and the maintainer accepted it, so C-42's API surface now names it (journal D764).
 
 ## Notes
 

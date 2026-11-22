@@ -21,6 +21,13 @@
   Alerts is in a window, as for Teams; the setting that lets Urgent Alert Groups through belongs to each window, off by
   default; an Alert Group that stops being kept back while firing and owned by nobody is published Loudly, whatever
   ended the keeping back, a change of configuration included
+- Amended: 2026-11-22 — with the L2 PRD of Paging by direct messages (C-43), by the maintainer (journal D764): a direct
+  message from the bot is an action of a Notification rule that the person chooses, beside a Mention in the Thread and a
+  call through a Notification gateway; the action names the person's Account link, the delivery worker sends it from a
+  table of its own and edits it once when the Alert Group stops being firing, a person who blocked the bot is a reason
+  of the Page, and no Escalation step and no default rule of the Organization names a direct message; the warning of a
+  Route with a chain and no Destinations names direct messages beside Notification gateways. Direct messages about
+  Shifts and Overrides stay rejected
 
 ## Context
 
@@ -37,7 +44,7 @@ The model has to fit what earlier decisions fixed:
 - An Alert Group belongs to one Route, chosen by first match, and has one status and one Owner (ADR-0003, ADR-0004).
 - Messenger messages change only through delivery: the delivery worker reconciles Root messages and sends Thread
   replies, and the interactive path answers people who wait (ADR-0005). A direct message that wakes a person is neither,
-  and nobody waits for it.
+  and nobody waits for it; from C-43 the delivery worker sends it from a table of its own, without reconciling it.
 - Roles are global and fixed — Admin, Responder and Viewer; custom Roles come later.
 - The default Group key is `alertname`, `severity`, `cluster`, without any team label, so one Alert Group often holds
   Alerts of several teams.
@@ -177,29 +184,33 @@ Mention is a Thread reply that delivery sends like any other (ADR-0005). A Menti
 to, or whose Thread reply ends Not delivered or is held back, records in the Timeline that the Page was not delivered
 and does not make the person an Assignee. Steps through a Notification gateway do not depend on a Root message and keep
 working while a messenger is unreachable. A Route with a chain and no Destinations carries a warning that only a
-Notification gateway can reach anyone (journal D528).
+Notification gateway or, from C-43, a direct message can reach anyone (journal D528, D764).
 
-**Pages, not direct messages.** Muster Pages a person only by a Mention in the Alert Group's Thread or through a
-Notification gateway, never by a direct message; direct messages stay for Account links and similar system messages
-(journal D503). The Schedule warns that its On-call is unreachable where the Destinations its Team's chains write to
-cannot mention them: they have no Account link in the Identity space of those Connections, a bridge there has no native
-mentions, an outgoing webhook there has no reply in a Thread, or they are not in the discussion group of a Telegram
-channel (journal D503, D528). Until the facts about push for Mentions in Threads are verified, the documentation says
-that at night only a Notification gateway is reliable (journal D532). A Telegram Destination may be a person's private
-chat with the bot (journal D554): that is a Destination like any other, chosen by an Admin, not a direct message that
-Pages.
+**Pages by Mention, by call and by direct message.** Muster Pages a person by a Mention in the Alert Group's Thread, by
+a call through a Notification gateway, or by a direct message from the bot, as the person's Notification rules say; the
+bot's direct messages also serve Account links and similar system messages (journal D503, D764). In L2's core a Page
+was never a direct message; C-43 adds the direct message as an action of a Notification rule, which names one of the
+person's Account links, so that it needs neither a Root message nor a Destination. The Schedule warns that its On-call
+is unreachable where the Destinations its Team's chains write to cannot mention them: they have no Account link in the
+Identity space of those Connections, a bridge there has no native mentions, an outgoing webhook there has no reply in a
+Thread, or they are not in the discussion group of a Telegram channel (journal D503, D528); a direct message through an
+Account link that qualifies reaches a person whom such a Mention does not. Until the facts about push for Mentions in
+Threads are verified, the documentation says that at night only a Notification gateway is reliable (journal D532). A
+Telegram Destination may be a person's private chat with the bot (journal D554): that is a Destination like any other,
+chosen by an Admin, not a direct message that Pages.
 
 **Notification rules.** How a person is Paged is up to their Notification rules: a normal and an important sequence of
-Mentions in the Thread and calls through a Notification gateway, with waits between them; a step that Pages the On-call
-or chosen people Pages each of them by one of the two. By default the normal rule is a Mention in the Thread and the
-important rule a Mention repeated after five minutes; the Organization sets the defaults, each person changes their own
-rules in the profile — in L2 by a switch that adds an immediate call to the important rule — and an Admin sees and may
-change them (journal D473, D490, D503, D567, D569). Rules and steps that call through a Notification gateway are offered
-only while a Bridge in the role `gateway` exists; otherwise the UI says that a gateway is needed and links to the
-documentation (journal D540). Calls through a gateway to the same person within a short window are combined into one
-call about several Alert Groups, whose signed data names the call that Muster keeps with its Alert Groups; Mentions are
-not combined, because every Alert Group has a Thread of its own (journal D507, D529). The push of a mobile app can later
-become one more way to Page in the same rules (journal D472, D473).
+Mentions in the Thread and calls through a Notification gateway, and from C-43 direct messages from the bot, with waits
+between them; a step that Pages the On-call or chosen people Pages each of them by one of the two. By default the
+normal rule is a Mention in the Thread and the important rule a Mention repeated after five minutes; the Organization
+sets the defaults, each person changes their own rules in the profile — in L2 by a switch that adds an immediate call
+to the important rule — and an Admin sees and may change them (journal D473, D490, D503, D567, D569). Rules and steps
+that call through a Notification gateway are offered only while a Bridge in the role `gateway` exists; otherwise the UI
+says that a gateway is needed and links to the documentation (journal D540). Calls through a gateway to the same
+person within a short window are combined into one call about several Alert Groups, whose signed data names the call
+that Muster keeps with its Alert Groups; Mentions are not combined, because every Alert Group has a Thread of its own
+(journal D507, D529). The push of a mobile app can later become one more way to Page in the same rules (journal D472,
+D473).
 
 **Notification gateways.** Calls and SMS come from bridges in the role `gateway`, called Notification gateways
 (ADR-0017; journal D505, D542). A person adds their contact for a gateway in the profile, from their own web session,
@@ -285,12 +296,15 @@ one table (journal D513).
   D509).
 - **An acknowledgement, Owner and status per Team.** Teams handling their parts of one problem apart is a change of the
   Alert Group's state machine; L2 keeps one status, and the per-Team state is planned for L3 (journal D508, D535).
-- **Paging by direct messages.** A direct message is neither a Root message nor a Thread reply, so it would need a third
-  send path with a queue of its own, a choice of Connection for people linked in several messengers, and a rule for a
-  person who blocked the bot; a Mention in the Thread uses delivery as it is (journal D503).
-- **Direct messages about Shifts and Overrides, and a bot command that says who is on call.** The messages need the same
-  third path; a command needs setup on every Mattermost server, another Slack scope and new Telegram update types. The
-  UI and the iCal feed show the same (journal D504, D515, D534).
+- **No Paging by direct messages**, as L2's core decided. A direct message is neither a Root message nor a Thread reply,
+  so it seemed to need a third send path with a queue of its own, a choice of Connection for people linked in several
+  messengers, and a rule for a person who blocked the bot (journal D503). C-43 answers each (journal D764): the delivery
+  worker sends it from a table of its own with the limiters and classification it has, the action of the person's rule
+  names the Account link, and a blocked bot is a reason of the Page that the profile and the Schedule show.
+- **Direct messages about Shifts and Overrides, and a bot command that says who is on call.** The messages are about no
+  Alert Group and no Page, so neither delivery nor the Pages of C-43 carry them, and a person would get them whatever
+  their Notification rules say; a command needs setup on every Mattermost server, another Slack scope and new Telegram
+  update types. The UI and the iCal feed show the same (journal D504, D515, D534, D764).
 - **Backup Destinations on a Route**, used while its Destinations are Broken. The Internal alert
   `MusterDestinationBroken`, routed to another messenger, already reaches people, and gateway steps work without a
   messenger (journal D495).

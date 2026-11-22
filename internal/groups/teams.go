@@ -62,11 +62,17 @@ type joiningTeam struct {
 // with one Quiet team_joined naming the Team and the rule, by the label when any of the Alerts belongs to it by the
 // label, and each value of the Team label that named no Team and that g has not recorded yet with one Quiet
 // unknown_team_value (C-25.FR-7). The Teams are those routing recorded on each Alert when it started firing, deleted
-// ones aside. g is locked, so the rows of its Teams change with it alone.
+// ones aside; an Alert known to bring none (alertRow.noTeams) is not read. g is locked, so the rows of its Teams
+// change with it alone.
 func (e *engine) teams(ctx context.Context, q Queries, g *Group, alerts []*alertRow, c *change) error {
-	ids := make([]int64, len(alerts))
-	for i, a := range alerts {
-		ids[i] = a.ID
+	ids := make([]int64, 0, len(alerts))
+	for _, a := range alerts {
+		if !a.noTeams {
+			ids = append(ids, a.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
 	}
 	slices.Sort(ids)
 	rows, err := q.ListAlertTeams(ctx, dbgen.ListAlertTeamsParams{OrgID: e.s.orgID, AlertIds: slices.Compact(ids)})
@@ -112,6 +118,7 @@ func joinTeams(ctx context.Context, q Queries, orgID int64, g *Group, brought ma
 	if len(brought) == 0 {
 		return 0, nil
 	}
+	g.noTeams = false
 	p := dbgen.AddGroupTeamsParams{OrgID: orgID, AlertGroupID: g.ID, JoinedAt: now}
 	for _, id := range slices.Sorted(maps.Keys(brought)) {
 		t := brought[id]

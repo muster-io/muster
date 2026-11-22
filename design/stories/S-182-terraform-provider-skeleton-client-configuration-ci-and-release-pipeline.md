@@ -226,11 +226,10 @@ None.
   was in fact built before the tag (muster-io/terraform-provider-muster#1), so `api/MUSTER_COMMIT` pins a commit of
   Muster's `master` until then; when `v0.2.0` exists, with `managed_by` and the MIT `info.license`, a pull request runs
   `make spec-sync VERSION=0.2.0`, which replaces it with `api/MUSTER_VERSION` `0.2.0`.
-- A question for the maintainer, non-blocking: the PRD's C-33.AC-1 says that with only the provider block a
-  configuration "stops" with "Muster 0.1.4 is older than 0.2.0 ...", which cannot be observed, since Terraform and
-  OpenTofu configure a provider that nothing uses never; that is why the acceptance probe exists (Contracts). The
-  maintainer is asked to amend the wording of C-33.AC-1 to "a configuration that reads a resource or data source of
-  the provider"; this story does not edit the PRD.
+- The PRD's C-33.AC-1 said that with only the provider block a configuration "stops" with "Muster 0.1.4 is older than
+  0.2.0 ...", which cannot be observed, since Terraform and OpenTofu never configure a provider that nothing uses;
+  that is why the acceptance probe exists (Contracts). The maintainer amended C-33.AC-1 to "a configuration that reads
+  a resource or data source of the provider" (journal D764).
 - Corrected after muster-io/terraform-provider-muster#1: the pin by commit until the tag, the test-only data source
   `muster_acceptance_probe` in place of the manual `terraform plan` checks, and the image tag `vX.Y.Z`.
 - **Maintainer** (operator attention): install on this repository the GitHub App that release-please uses in Muster's

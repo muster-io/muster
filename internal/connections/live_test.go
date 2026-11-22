@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"slices"
@@ -35,6 +36,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/managedby"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
@@ -175,7 +177,105 @@ func TestLive(t *testing.T) {
 		t.Run("bridgeCheckLimiter", e.bridgeCheckLimiter)
 		t.Run("slack", e.slack)
 		t.Run("slackCheckLimiter", e.slackCheckLimiter)
+		t.Run("markOnly", e.markOnly)
 	})
+}
+
+// markOnly is C-33.FR-11 on the real store. A save of the mark alone of a Slack Connection in socket mode writes the
+// mark and moves managed_by_version and keeps version, which the socket follows, and what its last hello counted, so a
+// hello of the socket read before the save is still recorded; its Audit log entry has /managed_by alone, and the ETag
+// read before the save is stale on an update and a deletion. A save of the mark alone of a Mattermost Destination
+// whose channel the server answers 404 is saved without a request: it writes the mark with a new version and keeps
+// what its check found; the same save with a new name runs the check and is refused.
+func (e *liveEnv) markOnly(t *testing.T) {
+	ctx := t.Context()
+	in := connections.Input{Type: connections.TypeSlack, Name: "live-mark", EventMode: connections.EventModeSocket,
+		BotToken: keyring.Replace(fakeslack.SecondBotToken), AppToken: keyring.Replace(fakeslack.SecondAppToken),
+		Limiter: connections.Limiter{Limit: 1000, PerSeconds: 1}}
+	c, err := e.conns.Create(ctx, by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socks, err := e.conns.SocketConnections(ctx)
+	i := slices.IndexFunc(socks, func(s slack.SocketConn) bool { return s.ID == c.ID })
+	if err != nil || i < 0 {
+		t.Fatalf("socket connections = %+v, %v", socks, err)
+	}
+	if err := e.conns.RecordSocketHello(ctx, socks[i], 1); err != nil {
+		t.Fatal(err)
+	}
+	in.BotToken, in.AppToken, in.ManagedBy = keyring.Keep, keyring.Keep, managedby.Set("terraform")
+	u, err := e.conns.Update(ctx, by, c.PublicID, new(c.Tag()), in)
+	if err != nil || u.Version != c.Version || u.ManagedByVersion != 1 || u.Tag() != c.Tag()+1 ||
+		u.SlackSocket == nil {
+		t.Fatalf("the mark alone = %+v, %v", u, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM connections WHERE id = $1 AND version = $2 AND managed_by_version = 1
+		AND managed_by = 'terraform' AND slack_socket_hello_at IS NOT NULL AND slack_socket_other_connections = 1`,
+		c.ID, c.Version); n != 1 {
+		t.Errorf("the stored Connection after the mark alone: %d rows", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_log WHERE resource_public_id = $1 AND action = 'connection.updated'
+		AND jsonb_array_length(diff) = 1 AND diff->0->>'pointer' = '/managed_by'
+		AND diff->0->>'after' = 'terraform'`, c.PublicID); n != 1 {
+		t.Errorf("%d Audit log entries of the mark alone", n)
+	}
+	if err := e.conns.RecordSocketHello(ctx, socks[i], 2); err != nil ||
+		e.count(t, `SELECT count(*) FROM connections WHERE id = $1 AND slack_socket_other_connections = 2`, c.ID) != 1 {
+		t.Errorf("the hello of the socket read before the save was not recorded: %v", err)
+	}
+	if _, err := e.conns.Update(ctx, by, c.PublicID, new(c.Tag()), in); !errors.Is(err,
+		connections.ErrVersionMismatch) {
+		t.Errorf("an update with the ETag before the mark = %v", err)
+	}
+	if err := e.conns.Delete(ctx, by, c.PublicID, new(c.Tag())); !errors.Is(err, connections.ErrVersionMismatch) {
+		t.Errorf("a deletion with the ETag before the mark = %v", err)
+	}
+	if err := e.conns.Delete(ctx, by, c.PublicID, new(u.Tag())); err != nil {
+		t.Errorf("a deletion with the ETag after the mark = %v", err)
+	}
+
+	mm := input("live-mark-mm", e.fake.URL())
+	mm.Limiter = connections.Limiter{Limit: 1000, PerSeconds: 1}
+	conn, err := e.conns.Create(ctx, by, mm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dby := destinations.Requester{Actor: by.Actor, Transport: by.Transport}
+	din := destinationInput("live-mark", conn.PublicID, fakemattermost.ChannelAlerts)
+	d, err := e.dests.Create(ctx, dby, din)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/v4/channels/" + fakemattermost.ChannelAlerts,
+		Status: http.StatusNotFound}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(e.fake.ResetFaults)
+	requests := len(e.fake.Requests())
+	din.ManagedBy = managedby.Set("terraform")
+	marked, err := e.dests.Update(ctx, dby, d.PublicID, new(d.Version), din)
+	if err != nil || marked.Version != d.Version+1 || marked.ManagedBy == nil || len(e.fake.Requests()) != requests {
+		t.Fatalf("the mark alone of the Destination = %+v, %v, %d requests", marked, err,
+			len(e.fake.Requests())-requests)
+	}
+	if n := e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND version = $2 AND managed_by = 'terraform'
+		AND mattermost_channel_name = $3 AND health = 'healthy'`, d.ID, d.Version+1,
+		*d.MattermostChannelName); n != 1 {
+		t.Errorf("the stored Destination after the mark alone: %d rows", n)
+	}
+	din.Name = "live-mark-2"
+	if _, err := e.dests.Update(ctx, dby, d.PublicID, nil, din); !errors.As(err,
+		new(*destinations.CheckFailedError)) {
+		t.Errorf("the mark and a new name while the channel is gone = %v", err)
+	}
+	e.fake.ResetFaults()
+	if err := e.dests.Delete(ctx, dby, d.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.conns.Delete(ctx, by, conn.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // slack is C-24.FR-3 on the real store against the fake Slack server: a checked Slack Connection's Destination is

@@ -80,7 +80,14 @@ line is `WARN` while migrations remain, `OK` once `muster migrate` or a replica'
 while the schema is still dirty.
 
 0.2.0
-:   The `route.urgent` setting of a Route and the Organization's "critical is Urgent"
+:   **0.1.x can crash-loop on a Route with a line template.** On 0.1.4 and earlier, Muster panics when it re-renders
+    the Root message of an Alert Group that has no Alerts to list on a Route with a
+    [line template](../configure/messages-and-templates.md#what-you-can-change-and-what-you-cannot), for example at
+    the end of a Grace period after a person resolved an Alert Group whose Alerts still fired. The timer fires again
+    at every start, so the replica crash-loops. 0.2.0 fixes it: upgrade. Until you can, remove the line template from
+    such Routes.
+
+    The `route.urgent` setting of a Route and the Organization's "critical is Urgent"
     (`organization.critical_is_urgent`) no longer act: an Alert Group is Urgent exactly when its Severity level is
     critical, and a Route raises the level of its Alert Groups with its
     [Minimum severity](../concepts/routes-and-group-keys.md#minimum-severity).
@@ -295,6 +302,13 @@ while the schema is still dirty.
       Destinations, the Organization's settings, the Outbound address policy and the OIDC settings, null on every
       object after the upgrade. It is a mark only and changes nothing else. It is expand only: a replica without it
       neither reads nor writes the mark, and keeps it on the objects it saves.
+    - Migration 0057 adds to Connections the count of the saves that changed only the mark, 0 after the upgrade. Such a
+      save gives the Connection a new ETag without a new configuration version, so its Slack socket does not reconnect
+      and its Telegram or Bridge poller does not start again. It is expand only: a replica without it saves the mark
+      as any change and gives the ETag of the version alone, so during the rollout a tool that read a Connection on one
+      kind of replica after a save of its mark alone may get `412` on the other; it reads the Connection again. A
+      replica without it also lets such a tool's stale ETag pass: its ETag is the version, which a save of the mark
+      alone does not move, so a tag read on it before such a save still passes on it after.
 
     **Breaking changes in 0.2.0.** Four changes can break an installation or a client that worked on 0.1; check them
     before you upgrade:
@@ -1135,6 +1149,10 @@ while the schema is still dirty.
 
     Going back below 0056 loses only the marks `managed_by`: every object stays as it was, and a tool marks the objects
     it manages again when it next writes them.
+
+    Going back below 0057 loses only the count of the saves of a Connection's mark alone: the marks stay, and the ETag
+    of a Connection whose mark alone was saved goes back to its version, so a tool holding an ETag read before gets
+    `412` until it reads the Connection again.
 
     **Going back to 0.1.** Nothing runs down migrations in an installation: `muster migrate` takes no arguments, and the
     "Going back below 00NN" sentences above describe what the down migrations drop, which only Muster's tests run;

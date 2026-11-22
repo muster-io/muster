@@ -317,9 +317,13 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 			return err
 		}
 	}
-	had, err := q.ListGroupDestinations(ctx, dbgen.ListGroupDestinationsParams{OrgID: s.orgID, AlertGroupID: g.ID})
-	if err != nil {
-		return fmt.Errorf("list the destinations alert group #%d reached: %w", g.Number, err)
+	// An Alert Group that this transaction created has reached no Destination yet: nothing is read.
+	var had []dbgen.ListGroupDestinationsRow
+	if !created {
+		if had, err = q.ListGroupDestinations(ctx, dbgen.ListGroupDestinationsParams{OrgID: s.orgID,
+			AlertGroupID: g.ID}); err != nil {
+			return fmt.Errorf("list the destinations alert group #%d reached: %w", g.Number, err)
+		}
 	}
 	// An Alert Group that has no delivery anywhere yet is published wherever it reaches, as its first Publication.
 	// The whole reach is published by a creation, a move, a first Publication and a rise; a Team that joined adds its

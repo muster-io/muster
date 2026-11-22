@@ -417,14 +417,14 @@ func (p *Processor) applySnapshot(ctx context.Context, q ProcessQueries, tx dbge
 	}
 	for i, c := range e.changes {
 		out.Changes[i] = AlertChange{Kind: c.kind, AlertID: c.alert.ID, Fingerprint: c.alert.Fingerprint,
-			Episode: c.alert.Episode, StoredSnapshotID: in.StoredSnapshotID, Reason: c.reason,
-			ReasonText: c.reasonText}
+			Episode: c.alert.Episode, StoredSnapshotID: in.StoredSnapshotID, ReceivedAt: in.ReceivedAt,
+			Reason: c.reason, ReasonText: c.reasonText}
 		if in.Internal && (c.kind == ChangeFired || c.kind == ChangeResolved) {
 			out.Internal = append(out.Internal, internalChangeOf(c.kind == ChangeResolved, c.alert.Fingerprint,
 				c.alert.Labels))
 		}
 	}
-	handed := append(slices.Clip(out.Changes), e.listed(in.StoredSnapshotID)...)
+	handed := append(slices.Clip(out.Changes), e.listed(in.StoredSnapshotID, in.ReceivedAt)...)
 	if p.sink != nil && len(handed) > 0 {
 		routed, err := p.sink.AlertChanges(ctx, tx, handed)
 		if err != nil {
@@ -437,7 +437,7 @@ func (p *Processor) applySnapshot(ctx context.Context, q ProcessQueries, tx dbge
 
 // listed are the firing Alerts the Snapshot lists that did not fire in it, as ChangeListed, so that routing and
 // grouping find one that has no Route or no Alert Group.
-func (e *engine) listed(storedSnapshotID int64) []AlertChange {
+func (e *engine) listed(storedSnapshotID int64, receivedAt time.Time) []AlertChange {
 	fired := map[int64]bool{}
 	for _, c := range e.changes {
 		if c.kind == ChangeFired {
@@ -448,7 +448,7 @@ func (e *engine) listed(storedSnapshotID int64) []AlertChange {
 	for _, a := range e.listedAlerts {
 		if a.Status == StatusFiring && a.ID != 0 && !fired[a.ID] {
 			out = append(out, AlertChange{Kind: ChangeListed, AlertID: a.ID, Fingerprint: a.Fingerprint,
-				Episode: a.Episode, StoredSnapshotID: storedSnapshotID})
+				Episode: a.Episode, StoredSnapshotID: storedSnapshotID, ReceivedAt: receivedAt})
 		}
 	}
 	return out

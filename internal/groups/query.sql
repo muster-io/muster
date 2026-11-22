@@ -11,12 +11,17 @@ SELECT instance_labels
 FROM organizations
 WHERE id = @org_id;
 
--- ListChangedAlerts reads the Alerts of a Snapshot's changes, with the Route and Severity level routing stamped.
+-- ListChangedAlerts reads the Alerts of a Snapshot's changes, with the Route and Severity level routing stamped, and
+-- whether routing recorded no Team and no value of the Team label that names no Team on each (no_teams).
 -- name: ListChangedAlerts :many
-SELECT id, integration_id, fingerprint, labels, annotations, static_label_conflicts, status, starts_at, episode,
-       route_id, severity_level
-FROM alerts
-WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+SELECT a.id, a.integration_id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status,
+       a.starts_at, a.episode, a.route_id, a.severity_level,
+       (a.unknown_team_value IS NULL
+        AND NOT EXISTS (SELECT 1
+                        FROM alert_teams t
+                        WHERE t.org_id = a.org_id AND t.alert_id = a.id))::boolean AS no_teams
+FROM alerts a
+WHERE a.org_id = @org_id AND a.id = ANY(@ids::bigint[]);
 
 -- ListFiringMemberships reads where the Alerts fire: an Alert lives in at most one Alert Group at a time.
 -- name: ListFiringMemberships :many

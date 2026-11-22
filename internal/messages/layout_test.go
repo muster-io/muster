@@ -5,6 +5,7 @@ package messages
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -125,10 +126,48 @@ func TestLoadAssignees(t *testing.T) {
 	if _, err := r.Load(t.Context(), nil, 9); err == nil {
 		t.Error("a failing read of the assignees")
 	}
-	delete(f.fail, "ListRenderAssignees")
 	f.group.Assignees = nil
+	// An Alert Group without Assignees does not read them: the failing read is not made.
 	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.Assignees != nil {
 		t.Errorf("none %+v %v", src.Assignees, err)
+	}
+}
+
+// TestLoadTeams is C-25.FR-6 in the read of a message: the names of the Teams come with the Alert Group, in the order
+// they joined, and an Alert Group without a Team has none, an empty list as the read of the Teams gave.
+func TestLoadTeams(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 1)}
+	f.group.Teams = []string{"Search", "Payments"}
+	r := withFake(t, f)
+	src, err := r.Load(t.Context(), nil, 9)
+	if err != nil || !slices.Equal(src.Teams, []string{"Search", "Payments"}) {
+		t.Errorf("teams %q, %v", src.Teams, err)
+	}
+	f.group.Teams = nil
+	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.Teams == nil || len(src.Teams) != 0 {
+		t.Errorf("no teams %#v, %v", src.Teams, err)
+	}
+}
+
+// TestLoadFooterUsers is C-12.FR-12 in the read of a message: the users of the footer are read for an Alert Group
+// whose footer names one — acknowledged, snoozed or resolved — and not for a firing one, whose footer names nobody.
+func TestLoadFooterUsers(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 1)}
+	r := withFake(t, f)
+	r.names = fakeNames{fail: errBoom}
+	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.FooterUsers != nil {
+		t.Errorf("firing: %+v, %v", src.FooterUsers, err)
+	}
+	for _, status := range []string{"acknowledged", "snoozed", "resolved"} {
+		f.group.Status = status
+		r.names = fakeNames{fail: errBoom}
+		if _, err := r.Load(t.Context(), nil, 9); !errors.Is(err, errBoom) {
+			t.Errorf("%s: %v", status, err)
+		}
+		r.names = fakeNames{}
+		if src, err := r.Load(t.Context(), nil, 9); err != nil || len(src.FooterUsers) != 2 {
+			t.Errorf("%s: %+v, %v", status, src.FooterUsers, err)
+		}
 	}
 }
 

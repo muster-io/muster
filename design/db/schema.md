@@ -148,10 +148,13 @@
   C-26.FR-9),
   [`0055_deliveries_retention_index`](../../internal/db/migrations/0055_deliveries_retention_index.up.sql)
   (`deliveries_retention_idx`, the deliveries of Alert Groups that are not pending by their last change, which the
-  retention of deliveries walks, C-09.FR-16) and
+  retention of deliveries walks, C-09.FR-16),
   [`0056_managed_by`](../../internal/db/migrations/0056_managed_by.up.sql)
   (`managed_by`, the tool that keeps an object as code, on the twelve kinds of configuration of C-33.FR-11,
-  [4.19](#419-managed-by)), in
+  [4.19](#419-managed-by)) and
+  [`0057_connections_managed_by_version`](../../internal/db/migrations/0057_connections_managed_by_version.up.sql)
+  (`connections.managed_by_version`, the count of the saves of a Connection's mark alone, which its ETag adds to
+  `version`, C-33.FR-11, [4.19](#419-managed-by)), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -218,8 +221,10 @@ they are hashed with argon2id (PHC string) instead.
 **Optimistic locking.** Configuration rows carry `version bigint` (default 1). The ETag is derived from it; an update is
 `... SET version = version + 1 WHERE id = $1 AND version = $2`, and zero updated rows is a `412`
 ([ADR-0008](../adr/0008-spec-first-openapi-and-api-conventions.md)). The Route list has its own
-`organizations.route_order_version`, because its ETag covers the order. Runtime columns on configuration rows (Heartbeat
-state, health, counters) never touch `version`.
+`organizations.route_order_version`, because its ETag covers the order. The ETag of a Connection is `version` plus
+`connections.managed_by_version`, which only a save of its mark `managed_by` alone moves, so that such a save keeps the
+`version` that the Leader's sockets and pollers and the version-guarded writes follow ([4.19](#419-managed-by)).
+Runtime columns on configuration rows (Heartbeat state, health, counters) never touch `version`.
 
 **Soft deletion** is used where history keeps pointing at a row: Integrations, Routes, Connections, Destinations,
 Service accounts (`deleted_at`) and Users (`status = 'deleted'`, pseudonymized). Unique names are partial indexes
@@ -965,7 +970,8 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   hold what the last Socket Mode `hello` counted — its time on the business clock and the connections it counted beyond
   those the Leader holds — written by the Leader from S-101 for the version its socket read, not a change of the
   configuration; a save that changes the Connection forgets both, since its socket starts again and counts at its next
-  `hello`; a save without changes writes nothing and keeps them.
+  `hello`; a save without changes writes nothing and keeps them, and a save of the mark `managed_by` alone keeps them
+  with its `version` ([4.19](#419-managed-by)).
   **Groups a Connection reads** (migration 0042, C-25.FR-8): `slack_usergroups_read` is whether the `x-oauth-scopes`
   of the last passing check of a Slack Connection named the optional scope `usergroups:read` (C-24.FR-1, FR-2), which
   its Team mentions and user group entries need; `mattermost_groups_read` is whether the last passing check of a
@@ -2189,18 +2195,37 @@ allocation are reference data of migration 0046, as in 0025.
 
 ### 4.19 Managed by
 
-Serves C-33.FR-11 (migration 0056); [ADR-0001](../adr/0001-agpl-license-cla-and-dependency-policy.md) for the
-specification the tools are built from.
+Serves C-33.FR-11 (migrations 0056 and 0057); [ADR-0001](../adr/0001-agpl-license-cla-and-dependency-policy.md) for
+the specification the tools are built from.
 
 - **`managed_by`** — a nullable `text` on `integrations`, `routes`, `teams`, `schedules`, `escalation_chains`,
   `lookup_tables`, `link_rules`, `connections`, `destinations`, `organizations`, `outbound_policies` and
   `oidc_settings`: the name of the tool that keeps the object as code, such as `terraform`, null when none does. It has
   no default, no CHECK and no index: the domain packages check its format (`internal/managedby`, 1 to 32 characters of
   `[a-z0-9._-]` starting with a letter or a digit), so that a later change of the format needs no migration, and no
-  query looks a row up by it. It is a mark only: the reads and writes of the object carry it, a change of it bumps the
-  object's `version` and is in the Audit log diff like any field, and nothing else reads it — routing, delivery, the
-  order of the Routes and the evaluation of the Teams ignore it. A create without it stores null; an update without it
-  keeps it, and null clears it. The Default route takes it like any Route.
+  query looks a row up by it. It is a mark only: the reads and writes of the object carry it, a change of it gives the
+  object a new ETag — a new `version`, on a Connection a new `managed_by_version` — and is in the Audit log diff like
+  any field, and nothing else reads it — routing, delivery, the order of the Routes and the evaluation of the Teams
+  ignore it. A create without it stores null; an update without it keeps it, and null clears it. The Default route
+  takes it like any Route.
+- **A save of the mark alone** — one whose Audit log diff is `/managed_by` and nothing else — changes no behaviour and
+  never refuses a write. On a Mattermost, Telegram, Bridge or Slack Destination it runs no Destination check and calls
+  no messenger, so that it is saved while the channel is unreachable: in one transaction under the lock of the
+  Destination at the version read, `SetDestinationMark` writes `managed_by`, `updated_at` and a new `version`, and what
+  the last check found and the health stay — a Broken Destination stays Broken, since nothing was checked; no re-render
+  is requested. An outgoing webhook, which has no Destination check, is saved as before. On a Connection,
+  `SetConnectionMark` writes `managed_by` and `updated_at` and moves **`connections.managed_by_version`** (migration
+  0057, `bigint NOT NULL DEFAULT 0`) instead of `version`: the Leader's Slack sockets, its Telegram and Bridge pollers,
+  the cached clients, the copy of a bridge's info and the writes guarded by `version` (`SetBridgeInfo`,
+  `StoreBridgeEventsCursor`, `RecordSocketHello`, `SetSlackIdentity`, `SetGroupsRead`) follow `version`, so no socket
+  reconnects, no poller starts again and nothing is forgotten, the last `hello` included. The ETag of a Connection, and
+  the `If-Match` of its update and deletion, is `version + managed_by_version`: each save moves one of them and neither
+  goes back, so an ETag read before a save never matches after it. A save of the mark with any other field is saved as
+  any other save. 0057 is expand only: a replica without it saves the mark alone through `UpdateConnection` with a new
+  `version` and gives the ETag `version` alone, so during a rolling update a client may get one `412` after a save of
+  the mark alone on the other kind of replica and read again. A replica without 0057 also lets some stale ETags pass:
+  its ETag is `version`, which a save of the mark alone does not move, so a tag read on it before such a save still
+  passes on it after.
 
 ## 5. Queues and claims
 

@@ -8,8 +8,10 @@
 -- templates, language, Snooze durations, template error, Group key and own "Labels in the message", the Organization's
 -- time zone, start of the working day and first day of the week, which the labels of the Snooze presets name, its
 -- severity and Team labels, from which the computed "Labels in the message" are made, and its Instance labels, and the
--- names of its Owner, of who snoozed it and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
--- before it commits.
+-- names of its Owner, of who snoozed it and of who resolved it; with them the names of its Teams, which its Root
+-- message shows in the field Teams (C-25.FR-6), in the order they joined, deleted ones included with their name, and
+-- whether it has Assignees, which ListRenderAssignees then lists. It reads through the caller's transaction, so that a
+-- change the dispatcher made is seen before it commits.
 -- name: GetRenderGroup :one
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.description, g.status, g.severity_level, g.urgent,
        g.group_key_labels,
@@ -26,7 +28,15 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.description, g.status,
         AND EXISTS (SELECT 1
                     FROM escalation_runs er
                     WHERE er.org_id = g.org_id AND er.alert_group_id = g.id AND er.generation = g.chain_generation
-                      AND er.stop_command = 'acknowledge'))::boolean AS chains_stopped
+                      AND er.stop_command = 'acknowledge'))::boolean AS chains_stopped,
+       ARRAY(SELECT t.name
+             FROM alert_group_teams gt
+             JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+             WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+             ORDER BY gt.joined_at, gt.team_id)::text[] AS team_names,
+       EXISTS (SELECT 1
+               FROM alert_group_assignees a
+               WHERE a.org_id = g.org_id AND a.alert_group_id = g.id)::boolean AS has_assignees
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -36,15 +46,6 @@ LEFT JOIN service_accounts ss ON ss.org_id = g.org_id AND ss.id = g.snoozed_by_s
 LEFT JOIN users ru ON ru.org_id = g.org_id AND ru.id = g.resolved_by_user_id
 LEFT JOIN service_accounts rs ON rs.org_id = g.org_id AND rs.id = g.resolved_by_service_account_id
 WHERE g.org_id = @org_id AND g.id = @id;
-
--- ListRenderTeams lists the names of the Teams of an Alert Group, which its Root message shows in the field Teams
--- (C-25.FR-6), in the order they joined, deleted ones included with their name.
--- name: ListRenderTeams :many
-SELECT t.name
-FROM alert_group_teams gt
-JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
-WHERE gt.org_id = @org_id AND gt.alert_group_id = @alert_group_id
-ORDER BY gt.joined_at, gt.team_id;
 
 -- ListRenderAssignees lists the Assignees of an Alert Group, which item 7 of its Root message names before an
 -- acknowledgement (C-29.FR-1, C-32.FR-12): each person by id and display name with the name of the owning Team of

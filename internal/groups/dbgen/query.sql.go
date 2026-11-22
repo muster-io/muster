@@ -2008,10 +2008,14 @@ func (q *Queries) ListCallPages(ctx context.Context, arg ListCallPagesParams) ([
 }
 
 const listChangedAlerts = `-- name: ListChangedAlerts :many
-SELECT id, integration_id, fingerprint, labels, annotations, static_label_conflicts, status, starts_at, episode,
-       route_id, severity_level
-FROM alerts
-WHERE org_id = $1 AND id = ANY($2::bigint[])
+SELECT a.id, a.integration_id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status,
+       a.starts_at, a.episode, a.route_id, a.severity_level,
+       (a.unknown_team_value IS NULL
+        AND NOT EXISTS (SELECT 1
+                        FROM alert_teams t
+                        WHERE t.org_id = a.org_id AND t.alert_id = a.id))::boolean AS no_teams
+FROM alerts a
+WHERE a.org_id = $1 AND a.id = ANY($2::bigint[])
 `
 
 type ListChangedAlertsParams struct {
@@ -2031,9 +2035,11 @@ type ListChangedAlertsRow struct {
 	Episode              int64
 	RouteID              pgtype.Int8
 	SeverityLevel        pgtype.Text
+	NoTeams              bool
 }
 
-// ListChangedAlerts reads the Alerts of a Snapshot's changes, with the Route and Severity level routing stamped.
+// ListChangedAlerts reads the Alerts of a Snapshot's changes, with the Route and Severity level routing stamped, and
+// whether routing recorded no Team and no value of the Team label that names no Team on each (no_teams).
 func (q *Queries) ListChangedAlerts(ctx context.Context, arg ListChangedAlertsParams) ([]ListChangedAlertsRow, error) {
 	rows, err := q.db.Query(ctx, listChangedAlerts, arg.OrgID, arg.Ids)
 	if err != nil {
@@ -2055,6 +2061,7 @@ func (q *Queries) ListChangedAlerts(ctx context.Context, arg ListChangedAlertsPa
 			&i.Episode,
 			&i.RouteID,
 			&i.SeverityLevel,
+			&i.NoTeams,
 		); err != nil {
 			return nil, err
 		}

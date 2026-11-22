@@ -377,6 +377,22 @@ func TestGetConnectionAPI(t *testing.T) {
 	}
 }
 
+// TestConnectionETagAPI: the ETag of a Connection names its Tag, the version plus the saves of its mark alone
+// (C-33.FR-11), in the header and the etag field of a read and in the list.
+func TestConnectionETagAPI(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	fc.list[0].ManagedByVersion = 2
+	a := x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections/"+connectionID, "")
+	if a.status != http.StatusOK || a.header.Get("ETag") != `"5"` || a.json(t)["etag"] != `"5"` {
+		t.Errorf("get = %d %s, ETag %s", a.status, a.body, a.header.Get("ETag"))
+	}
+	var list gen.ConnectionList
+	decodeInto(t, x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections", ""), &list)
+	if first, err := list.Items[0].AsMattermostConnection(); err != nil || *first.Etag != `"5"` {
+		t.Errorf("the list = %+v, %v", first, err)
+	}
+}
+
 // TestUpdateConnectionAPI is updateConnection: If-Match is required (428) and must be current (412); an omitted bot
 // token keeps the stored one.
 func TestUpdateConnectionAPI(t *testing.T) {

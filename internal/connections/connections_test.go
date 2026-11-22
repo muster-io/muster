@@ -65,12 +65,15 @@ type memRow struct {
 // memStore is the connections table in memory, with the Destinations counted per Connection, the Audit log and the
 // hints; a transaction is undone when its function fails. fail makes a query fail by its name.
 type memStore struct {
-	rows      map[int64]*memRow
-	next      int64
-	dests     map[int64]int64
-	audit     []auditdb.InsertAuditEntryParams
-	hints     []db.Hint
-	updates   []dbgen.UpdateConnectionParams
+	rows    map[int64]*memRow
+	next    int64
+	dests   map[int64]int64
+	audit   []auditdb.InsertAuditEntryParams
+	hints   []db.Hint
+	updates []dbgen.UpdateConnectionParams
+	// marks are the writes of the mark alone; onMark, when set, runs after each on the row written.
+	marks     []dbgen.SetConnectionMarkParams
+	onMark    func(r *memRow)
 	bots      []dbgen.SetBotIdentityParams
 	infos     []dbgen.SetBridgeInfoParams
 	slackIDs  []dbgen.SetSlackIdentityParams
@@ -155,13 +158,13 @@ func (s *memStore) InTx(_ context.Context, f func(connections.Queries) error) er
 	}
 	nAudit, nHints, nUpdates, nBots, nInfos, next := len(s.audit), len(s.hints), len(s.updates), len(s.bots),
 		len(s.infos), s.next
-	nSlack := len(s.slackIDs)
+	nSlack, nMarks := len(s.slackIDs), len(s.marks)
 	seen := maps.Clone(s.seen)
 	mentions, nBumps, nGroups := slices.Clone(s.mentions), len(s.bumps), len(s.groupsRead)
 	if err := f(s); err != nil {
 		s.rows, s.audit, s.hints, s.updates, s.bots, s.infos, s.next = rows, s.audit[:nAudit], s.hints[:nHints],
 			s.updates[:nUpdates], s.bots[:nBots], s.infos[:nInfos], next
-		s.seen, s.slackIDs = seen, s.slackIDs[:nSlack]
+		s.seen, s.slackIDs, s.marks = seen, s.slackIDs[:nSlack], s.marks[:nMarks]
 		s.mentions, s.bumps, s.groupsRead = mentions, s.bumps[:nBumps], s.groupsRead[:nGroups]
 		return err
 	}
@@ -248,8 +251,8 @@ func (s *memStore) LockConnection(_ context.Context, arg dbgen.LockConnectionPar
 	if r == nil {
 		return dbgen.LockConnectionRow{}, pgx.ErrNoRows
 	}
-	return dbgen.LockConnectionRow{ID: r.row.ID, PublicID: r.row.PublicID, Type: r.row.Type, Version: r.row.Version},
-		nil
+	return dbgen.LockConnectionRow{ID: r.row.ID, PublicID: r.row.PublicID, Type: r.row.Type, Version: r.row.Version,
+		ManagedByVersion: r.row.ManagedByVersion}, nil
 }
 
 func (s *memStore) FindConnectionByName(_ context.Context, arg dbgen.FindConnectionByNameParams) (int64, error) {
@@ -348,6 +351,24 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	}
 	r.SlackSocketHelloAt, r.SlackSocketOtherConnections = pgtype.Timestamptz{}, pgtype.Int4{}
 	r.Version++
+	return nil
+}
+
+// SetConnectionMark writes the mark alone and moves managed_by_version, as the query does.
+func (s *memStore) SetConnectionMark(_ context.Context, a dbgen.SetConnectionMarkParams) error {
+	if err := s.fail["SetConnectionMark"]; err != nil {
+		return err
+	}
+	s.marks = append(s.marks, a)
+	r := s.rows[a.ID]
+	if r == nil || r.deleted || a.OrgID != 1 {
+		return nil
+	}
+	r.row.ManagedBy = a.ManagedBy
+	r.row.ManagedByVersion++
+	if s.onMark != nil {
+		s.onMark(r)
+	}
 	return nil
 }
 
@@ -1174,10 +1195,10 @@ func markOf(c connections.Connection) string {
 
 // TestManagedBy is C-33.FR-11 on Connections: a creation stores the mark or none, a read and the list carry it, an
 // update that omits it keeps it, null clears it, and a value outside the format is refused at /managed_by before
-// anything is written; the Audit log diff shows each change. A save that changes only the mark moves the version and
-// is recorded, and keeps the bot token and what the last check learned; the webhook of a Telegram Connection, the info
-// of a Bridge and the secrets of a Slack Connection stay as they are, and nothing is called. A demo renamed at start
-// keeps its mark.
+// anything is written; the Audit log diff shows each change. A save that changes only the mark writes it alone: it
+// keeps the version, moves the ETag (Tag) and is recorded, and keeps the bot token and what the last check learned;
+// the webhook of a Telegram Connection, the info of a Bridge and the secrets of a Slack Connection stay as they are,
+// and nothing is called. A demo renamed at start keeps its mark.
 func TestManagedBy(t *testing.T) {
 	e := newTGEnv(t)
 	ctx := t.Context()
@@ -1248,15 +1269,20 @@ func TestManagedBy(t *testing.T) {
 		}
 	}
 
-	// A save of the mark alone keeps the secrets and what the check learned.
+	// A save of the mark alone writes the mark alone: it keeps the version, the secrets and what the check learned,
+	// and moves the ETag.
 	only := keep
 	only.ManagedBy = managedby.Set("opentofu")
-	version := e.store.rows[c.ID].row.Version
-	u, err := e.svc.Update(ctx, by, c.PublicID, nil, only)
+	got, err := e.svc.Get(ctx, c.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates := len(e.store.updates)
+	u, err := e.svc.Update(ctx, by, c.PublicID, new(got.Tag()), only)
 	row := e.store.rows[c.ID].row
-	last := e.store.updates[len(e.store.updates)-1]
-	if err != nil || markOf(u) != "opentofu" || u.Version != version+1 || u.BotUsername == nil ||
-		last.ForgetBot || last.ForgetUpdates || !bytes.Equal(row.BotTokenCiphertext, stored.BotTokenCiphertext) ||
+	if err != nil || markOf(u) != "opentofu" || u.Version != got.Version || u.Tag() != got.Tag()+1 ||
+		u.BotUsername == nil || len(e.store.updates) != updates || len(e.store.marks) != 1 ||
+		!bytes.Equal(row.BotTokenCiphertext, stored.BotTokenCiphertext) ||
 		!row.BotTokenUpdatedAt.Equal(stored.BotTokenUpdatedAt) {
 		t.Fatalf("mark only = %+v, %v", u, err)
 	}
@@ -1291,12 +1317,13 @@ func TestManagedBy(t *testing.T) {
 	calls := len(e.tg.Requests())
 	tgMark := e.input("tg", connections.ModeWebhook)
 	tgMark.BotToken, tgMark.ManagedBy = keyring.Keep, managedby.Set("terraform")
+	updates = len(e.store.updates)
 	if u, err := e.svc.Update(ctx, by, tg.PublicID, nil, tgMark); err != nil || markOf(u) != "terraform" ||
-		u.Version != tg.Version+1 {
+		u.Version != tg.Version || u.Tag() != tg.Tag()+1 {
 		t.Fatalf("mark the Telegram Connection = %+v, %v", u, err)
 	}
 	if _, again, _ := e.svc.Hooked(ctx, tg.PublicID); again != secret || len(e.tg.Requests()) != calls ||
-		e.store.updates[len(e.store.updates)-1].ForgetUpdates {
+		len(e.store.updates) != updates {
 		t.Errorf("a save of the mark alone called Telegram (%d calls) or changed the secret token",
 			len(e.tg.Requests())-calls)
 	}
@@ -1343,7 +1370,7 @@ func TestManagedByBridgeAndSlack(t *testing.T) {
 	if err != nil || markOf(u) != "terraform" || len(b.seen()) != requests || u.BridgeInfo == nil ||
 		!bytes.Equal(row.BotTokenCiphertext, stored.BotTokenCiphertext) ||
 		!bytes.Equal(row.BridgePushSecretCiphertext, stored.BridgePushSecretCiphertext) ||
-		e.store.updates[len(e.store.updates)-1].ForgetBot {
+		len(e.store.updates) != 0 || u.Version != br.Version {
 		t.Errorf("mark the Bridge = %s, %v, %d requests", markOf(u), err, len(b.seen())-requests)
 	}
 
