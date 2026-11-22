@@ -33,9 +33,14 @@ const (
 // AlertChange is one change of an Alert, made by the Stored Snapshot StoredSnapshotID, which was received at
 // ReceivedAt; both are zero for a change no Snapshot made.
 type AlertChange struct {
-	Kind             ChangeKind
-	AlertID          int64
-	Fingerprint      string
+	Kind        ChangeKind
+	AlertID     int64
+	Fingerprint string
+	// Episode counts the firings of the Alert's row: InsertAlerts writes 1 for a fingerprint without a row, and each
+	// firing again after a resolve adds 1 to the row's value, which nothing resets. A ChangeFired with Episode 1 is
+	// therefore always a row this Snapshot inserted, with no Teams and no Team label value of an earlier firing;
+	// routing relies on that to skip forgetting the Teams of such an Alert, so a change to this numbering must change
+	// routing too.
 	Episode          int64
 	StoredSnapshotID int64
 	ReceivedAt       time.Time

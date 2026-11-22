@@ -508,7 +508,8 @@ func TestFilterByTeam(t *testing.T) {
 // TestTeamsReadWhenBrought is C-25.FR-6 and FR-7 with the reads a Snapshot skips: an Alert that fired in it without a
 // Team and without a value of the Team label that names no Team brings nothing, so its Teams are not read, and an
 // Alert Group that it creates without a Team has no Teams to read for its re-render; an Alert with a Team or a value, a
-// listed Alert grouped late, an Alert Group a Team joined and one read from the database are read as before.
+// listed Alert grouped late, an Alert Group a Team joined and one read from the database are read as before, also when
+// the Alerts joining it bring only Teams it has.
 func TestTeamsReadWhenBrought(t *testing.T) {
 	rendered := func(h *harness) *[][]int64 {
 		var teams [][]int64
@@ -568,6 +569,19 @@ func TestTeamsReadWhenBrought(t *testing.T) {
 		h.changes(t, ingest.ChangeFired, a)
 		if len(*teams) != 1 || !slices.Equal((*teams)[0], []int64{payments}) || h.db.calls["ListGroupTeamIDs"] != 1 {
 			t.Errorf("rendered with teams %v, queries %v", *teams, h.db.calls)
+		}
+	})
+	t.Run("joined again", func(t *testing.T) {
+		h := newHarness(t)
+		h.withTeams()
+		teams := rendered(h)
+		h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(payments)),
+			h.teamAlert("x", "", byLabel(payments)))
+		// The Alert Group is read from the database now, and the Alert joining it brings no Team it lacks.
+		h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(payments)))
+		if len(*teams) != 2 || !slices.Equal((*teams)[0], []int64{payments}) ||
+			!slices.Equal((*teams)[1], []int64{payments}) {
+			t.Errorf("rendered with teams %v", *teams)
 		}
 	})
 }

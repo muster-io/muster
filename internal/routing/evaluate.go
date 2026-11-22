@@ -101,6 +101,7 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 	error) {
 	var ids, listed []int64
 	seen := make(map[int64]bool, len(changes))
+	// first marks the Alerts whose row this Snapshot inserted: a fired change with Episode 1 (ingest.AlertChange).
 	fired, first := map[int64]bool{}, map[int64]bool{}
 	for _, c := range changes {
 		if c.Kind == ingest.ChangeFired && !seen[c.AlertID] {
@@ -177,8 +178,8 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 			}
 		}
 		c := classes.Classify(labels)
-		// The first firing of an Alert, whose row this Snapshot inserted, has no Teams and no value of an earlier
-		// firing to replace: only a value that names no Team is written.
+		// The first firing of an Alert, whose row this Snapshot inserted (Episode 1, see ingest.AlertChange), has no
+		// Teams and no value of an earlier firing to replace: only a value that names no Team is written.
 		if !first[row.ID] || c.UnknownValue != "" {
 			reset.Ids = append(reset.Ids, row.ID)
 			reset.UnknownValues = append(reset.UnknownValues, c.UnknownValue)
