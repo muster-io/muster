@@ -337,6 +337,14 @@ UPDATE deliveries
 SET lease_until = @lease_until::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
+-- RenewHeldDeliveryLease renews, when the call of a prepared delivery gets its turn late in a round (Round), the lease
+-- this replica still holds at the real time @now, so that the call is made under a lease that outlasts it; no row when
+-- the lease ran out meanwhile, as another replica may have claimed the delivery, and the call is then not made.
+-- name: RenewHeldDeliveryLease :execrows
+UPDATE deliveries
+SET lease_until = @lease_until::timestamptz
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text AND lease_until > @now::timestamptz;
+
 -- MarkDelivered records that the actual message already shows the desired version, or that a bridge's Root message
 -- past its edit window takes no edit for it (@past_edit_window, C-22.FR-9): nothing to call. A delivered row starts
 -- the Transient budget afresh, as a delivered call does: the failures of an edit that is no longer due are not those of
@@ -812,7 +820,8 @@ WHERE org_id = @org_id AND subject_kind = @subject_kind AND subject_id = @subjec
 -- Destinations of @skip_destinations and of the Connections of @skip_connections as ClaimDueDeliveries does
 -- (ClaimDueDeliveries, Round). The choice is a materialized CTE, run once, as in ClaimDueDeliveries: planned as the
 -- inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up. The
--- skip lists are CASEs on NULL, as there.
+-- skip lists are CASEs on NULL, as there. Each reply comes back with its delivery, whose attempt in flight the worker
+-- waits for before it prepares the reply (Round).
 -- name: ClaimDueReplies :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -838,7 +847,7 @@ WITH due AS MATERIALIZED (
 UPDATE thread_replies r
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz, state = 'pending'
 WHERE r.org_id = @org_id AND r.id = ANY (ARRAY(SELECT due.id FROM due))
-RETURNING r.id, r.next_attempt_at;
+RETURNING r.id, r.next_attempt_at, r.delivery_id;
 
 -- RecordThreadRef stores the `thread_ref` a bridge returned for a Thread reply as the Thread anchor of its delivery,
 -- which the next reply sends (C-22.FR-6); a Root message published again meanwhile, with another message id, is left
@@ -882,6 +891,13 @@ FOR UPDATE OF r;
 UPDATE thread_replies
 SET lease_until = @lease_until::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
+
+-- RenewHeldReplyLease renews the lease of a prepared Thread reply whose call gets its turn late in a round, as
+-- RenewHeldDeliveryLease does; no row when it ran out meanwhile, and the reply is then not sent.
+-- name: RenewHeldReplyLease :execrows
+UPDATE thread_replies
+SET lease_until = @lease_until::timestamptz
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text AND lease_until > @now::timestamptz;
 
 -- RescheduleReply releases a Thread reply that waits for its limiter tokens until @at.
 -- name: RescheduleReply :exec
@@ -2151,7 +2167,8 @@ ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING;
 -- bucket with its Root requests, which a change of configuration can re-render. The choice is a materialized CTE, run
 -- once, as in ClaimDueDeliveries, and the skip list a CASE on NULL as there: with one webhook Destination, a generic
 -- plan expected `<> ALL` of the array it cannot see to keep no event, and probed the head of every due event before
--- sorting them.
+-- sorting them. Each event comes back with its Destination and Alert Group, whose event in flight the worker waits for
+-- before it prepares the next (Round).
 -- name: ClaimDueWebhookEvents :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -2173,7 +2190,7 @@ WITH due AS MATERIALIZED (
 UPDATE webhook_events e
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz
 WHERE e.org_id = @org_id AND e.id = ANY (ARRAY(SELECT due.id FROM due))
-RETURNING e.id, e.next_attempt_at;
+RETURNING e.id, e.next_attempt_at, e.destination_id, e.alert_group_id;
 
 -- GetLeasedWebhookEvent reads, and locks, a pending event whose lease this replica still holds at the real time now,
 -- with its Destination and its Alert Group, and whether the Alert Group still waits for its first Publication to be

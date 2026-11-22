@@ -30,7 +30,7 @@ import (
 const (
 	connectTimeout = 5 * time.Second
 	// CallTimeout bounds every call but a long poll; the dry probe names it when nothing answered within it.
-	CallTimeout    = 10 * time.Second
+	CallTimeout    = outbound.CallTimeout
 	maxAnswerBytes = 4 << 20
 )
 

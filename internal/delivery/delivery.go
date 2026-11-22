@@ -83,6 +83,20 @@ const (
 	PageSettleBatches = 4
 )
 
+// Concurrency is the attempts a round of the worker makes at once, its claims included, once a second of its claims
+// came back full; until then it makes one at a time (Round). An attempt waits for PostgreSQL most of its time — its
+// preparation's transaction, its record's and the work after a first Publication or a Page's reply, each statement a
+// round trip — and holds at most one connection of the main pool at a time, none
+// while the messenger answers, so a replica holds at most Concurrency connections for delivery, beside the half of a
+// pool of max(10, CPUs) that processing keeps to, the gateway sender's own and those of Telegram updates and bridge
+// events: at the peak more are asked for than the default pool holds, and the others wait in the pool's queue. Measured
+// on the L2 load scenario on 8 CPUs, a pool of 10: 0.2 to 0.9 s of waits for the pool in all over about 155,000
+// acquires in a run of about three minutes, against 0.1 to 0.5 s over about 106,000 with one attempt at a time. Four
+// keep busy the round's goroutine, which claims and prepares one row after another: the call, the record and the work
+// after it of an attempt take about three times as long as its preparation. The calls through one Connection, or to
+// one Destination without one, take turns (gate); the records and the work after them do not.
+const Concurrency = 4
+
 // The Destination types.
 const (
 	TypeMattermost = "mattermost"
@@ -178,6 +192,10 @@ type Outcome struct {
 	LeftOut         []string
 	LeftOutMentions []mentions.Target
 	Plain           []string
+	// heldUntil is set in a round on a RetryAfter — an answer, or the outcome that stands for a call the round's gate
+	// held (gate): the end of the hold the gate keeps, on the business clock, which its record takes as is instead of
+	// measuring the delay again, so that every row of one hold becomes due at the same time.
+	heldUntil time.Time
 }
 
 // Call is one adapter call: its client class (ADR-0015) — delivery for the worker, interactive for the interactive
@@ -415,6 +433,7 @@ type queries interface {
 	ClaimDueDeliveries(ctx context.Context, arg dbgen.ClaimDueDeliveriesParams) ([]dbgen.ClaimDueDeliveriesRow, error)
 	GetLeasedDelivery(ctx context.Context, arg dbgen.GetLeasedDeliveryParams) (dbgen.GetLeasedDeliveryRow, error)
 	RenewDeliveryLease(ctx context.Context, arg dbgen.RenewDeliveryLeaseParams) error
+	RenewHeldDeliveryLease(ctx context.Context, arg dbgen.RenewHeldDeliveryLeaseParams) (int64, error)
 	MarkDelivered(ctx context.Context, arg dbgen.MarkDeliveredParams) error
 	RescheduleDelivery(ctx context.Context, arg dbgen.RescheduleDeliveryParams) error
 	TryShareUpdateLock(ctx context.Context, arg dbgen.TryShareUpdateLockParams) (bool, error)
@@ -428,6 +447,7 @@ type queries interface {
 	LockReplyDelivery(ctx context.Context, arg dbgen.LockReplyDeliveryParams) error
 	GetLeasedReply(ctx context.Context, arg dbgen.GetLeasedReplyParams) (dbgen.GetLeasedReplyRow, error)
 	RenewReplyLease(ctx context.Context, arg dbgen.RenewReplyLeaseParams) error
+	RenewHeldReplyLease(ctx context.Context, arg dbgen.RenewHeldReplyLeaseParams) (int64, error)
 	RescheduleReply(ctx context.Context, arg dbgen.RescheduleReplyParams) error
 	RecordReplySent(ctx context.Context, arg dbgen.RecordReplySentParams) (int64, error)
 	RecordReplyRetry(ctx context.Context, arg dbgen.RecordReplyRetryParams) (dbgen.RecordReplyRetryRow, error)

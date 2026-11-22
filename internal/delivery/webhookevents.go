@@ -272,9 +272,10 @@ func (s *Service) PruneWebhookEvents(ctx context.Context, now time.Time) (int64,
 }
 
 // claimEvents is the claim of the due head events of an Organization, in the order of ClaimDueWebhookEvents: the
-// earliest first. A non-zero until claims only the events due by then.
-func (w *Worker) claimEvents(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
-	return func(ctx context.Context, org int64) ([]int64, error) {
+// earliest first. A non-zero until claims only the events due by then. An event's attempt is keyed by its Alert Group
+// in its Destination, whose events go in order; those of other Alert Groups do not wait for it (C-15.FR-2).
+func (w *Worker) claimEvents(until time.Time) claimFunc {
+	return func(ctx context.Context, org int64) ([]claimedRow, error) {
 		skip, _ := refusedOf(ctx)
 		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
 			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueWebhookEventsRow, error) {
@@ -288,11 +289,11 @@ func (w *Worker) claimEvents(until time.Time) func(ctx context.Context, org int6
 		slices.SortFunc(rows, func(a, b dbgen.ClaimDueWebhookEventsRow) int {
 			return cmp.Or(a.NextAttemptAt.Compare(b.NextAttemptAt), cmp.Compare(a.ID, b.ID))
 		})
-		ids := make([]int64, len(rows))
+		out := make([]claimedRow, len(rows))
 		for i, r := range rows {
-			ids[i] = r.ID
+			out[i] = claimedRow{id: r.ID, key: attemptKey{event: true, id: r.DestinationID, group: r.AlertGroupID}}
 		}
-		return ids, nil
+		return out, nil
 	}
 }
 
@@ -303,12 +304,29 @@ type eventAttempt struct {
 	at          time.Time
 }
 
-// sendEvent attempts one claimed event; a failure is logged and the event is attempted again once its lease runs out.
+// sendEvent attempts one claimed event from start to end, as a probe does (startEvent).
 func (w *Worker) sendEvent(ctx context.Context, org, id int64) {
-	a, ok, err := w.prepareEvent(ctx, org, id)
-	if err == nil && ok {
-		err = w.callEvent(ctx, org, a)
+	if finish := w.startEvent(ctx, org, id); finish != nil {
+		finish(ctx)
 	}
+}
+
+// startEvent prepares one claimed event and returns the rest of its attempt, its call and the record of its outcome,
+// nil when there is nothing to send; a failure is logged and the event is attempted again once its lease runs out.
+func (w *Worker) startEvent(ctx context.Context, org, id int64) func(ctx context.Context) {
+	a, ok, err := w.prepareEvent(ctx, org, id)
+	if err != nil {
+		w.eventFailed(ctx, err)
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) { w.eventFailed(ctx, w.callEvent(ctx, org, a)) }
+}
+
+// eventFailed logs err, the failure of an attempt of a webhook event, unless it is nil or ctx ended.
+func (w *Worker) eventFailed(ctx context.Context, err error) {
 	if err != nil && ctx.Err() == nil {
 		w.Log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", kindWebhookEvent), logging.F("error", err.Error()))
 	}
@@ -358,12 +376,20 @@ func (w *Worker) prepareEvent(ctx context.Context, org, id int64) (eventAttempt,
 	return a, ok, err
 }
 
-// callEvent sends a prepared event outside any transaction and records its outcome.
+// callEvent sends a prepared event outside any transaction and records its outcome. In a round an event is not sent
+// while a RetryAfter that a request of its Destination's Root messages got holds the Destination's limiter (gate):
+// the RetryAfter of the hold is then its outcome, recorded as that answer, neither counted nor logged as an attempt.
+// Its own RetryAfter holds only the event, so it holds nothing in the gate, and the events of other Alert Groups need
+// no turn on a line.
 func (w *Worker) callEvent(ctx context.Context, org int64, a eventAttempt) error {
 	ctx = outbound.WithLinks(ctx, linksOf(a.destination, &a.row.AlertGroupID))
 	start := w.Lease.Clocks.Real.Now()
+	held := gateOf(ctx).held(a.destination, w.Lease.Clocks.Business.Now())
 	out := Outcome{Kind: OutcomeUnknown, Error: "no sender for outgoing webhook events"}
-	if w.Events != nil {
+	switch {
+	case held != nil:
+		out = *held
+	case w.Events != nil:
 		out = w.Events.SendEvent(ctx, EventCall{Class: outbound.ClassDelivery, Destination: a.destination,
 			WebhookID: a.row.WebhookID, Body: a.row.Body})
 	}
@@ -376,7 +402,9 @@ func (w *Worker) callEvent(ctx context.Context, org int64, a eventAttempt) error
 		recorded, err = w.recordEvent(ctx, q, org, a, out, &logs)
 		return err
 	})
-	w.attempted(ctx, a.destination, a.row.Number, kindWebhookEvent, out, a.row.Attempts+1, took)
+	if held == nil {
+		w.attempted(ctx, a.destination, a.row.Number, kindWebhookEvent, out, a.row.Attempts+1, took)
+	}
 	if err == nil {
 		logs.run(ctx, w.Log)
 	}
@@ -469,8 +497,14 @@ func (w *Worker) recordEventOutcome(ctx context.Context, q queries, org int64, a
 		return true, nil
 	case OutcomeRetryAfter:
 		// Retried exactly as asked; unlike a messenger's, the answer holds back only this event, so that the events of
-		// other Alert Groups do not wait (C-15.AC-6).
-		_, ok, err := w.retryEvent(ctx, q, org, id, now.Add(out.RetryAfter), false, out, now)
+		// other Alert Groups do not wait (C-15.AC-6). An event that a round's gate held, as a request of its
+		// Destination's Root messages was answered RetryAfter, is due when the hold ends plus TokenMargin, as one that
+		// the held bucket refused, so that it does not take before that request the token the hold frees.
+		at := now.Add(out.RetryAfter)
+		if !out.heldUntil.IsZero() {
+			at = out.heldUntil.Add(TokenMargin)
+		}
+		_, ok, err := w.retryEvent(ctx, q, org, id, at, false, out, now)
 		return ok, err
 	case OutcomeTransient:
 		r, ok, err := w.retryEvent(ctx, q, org, id, now.Add(w.backoff(a.row.Attempts+1)), true, out, now)
