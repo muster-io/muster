@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -2833,6 +2834,142 @@ func TestIntegrationConcurrentMigrate(t *testing.T) {
 			t.Errorf("two concurrent migrations logged:\n%s", all)
 		}
 	})
+}
+
+// TestIntegrationMigrateAnalyze: migrating a new database analyzes every table of the current schema, the partitions
+// through their partitioned tables, and no table of another schema of the same database; a second Migrate, which
+// applies nothing, analyzes nothing.
+func TestIntegrationMigrateAnalyze(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		d := openFresh(t, s)
+		ctx := t.Context()
+		for _, stmt := range []string{"CREATE SCHEMA other", "CREATE TABLE other.bystander (id bigint)"} {
+			if _, err := d.Pool.Exec(ctx, stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+		var out bytes.Buffer
+		log := logging.New(&out, logging.LevelInfo)
+		if err := d.Migrate(ctx, log); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+		var named int
+		if err := d.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p') AND NOT c.relispartition`).
+			Scan(&named); err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`, named); named == 0 ||
+			!strings.Contains(out.String(), want) {
+			t.Errorf("%d tables; logged %s, want %s", named, out.String(), want)
+		}
+
+		// reltuples is -1 until a table's first ANALYZE or VACUUM, and an index build on an empty table leaves it at
+		// -1; the migrations create every table empty, and autovacuum leaves an empty table alone. It is
+		// transactional, so it shows the ANALYZE at once on every version, partitions and partitioned tables included.
+		if left := relations(t, d, `n.nspname = current_schema() AND c.relkind IN ('r', 'p') AND c.reltuples < 0`); len(left) > 0 {
+			t.Errorf("tables of the schema not analyzed: %v", left)
+		}
+		if left := relations(t, d, `n.nspname = 'other' AND c.reltuples < 0`); !slices.Equal(left, []string{"bystander"}) {
+			t.Errorf("the tables of another schema not analyzed are %v, want bystander", left)
+		}
+		// last_analyze is what an operator reads. PostgreSQL 14's statistics collector receives the ANALYZE's report
+		// over a socket, after the statement returned, so its view can lag by a moment; from 15 on the report is in
+		// shared memory at once. The poll waits only for that report, which reltuples above proved was made.
+		var analyzed map[string]time.Time
+		eventually(t, "last_analyze of every table of the schema", func() bool {
+			analyzed = lastAnalyze(t, d)
+			return analyzed["schema_migrations"] != (time.Time{}) &&
+				!slices.Contains(slices.Collect(maps.Values(analyzed)), time.Time{})
+		})
+
+		if _, err := d.Pool.Exec(ctx, "CREATE TABLE probe (id bigint)"); err != nil {
+			t.Fatal(err)
+		}
+		out.Reset()
+		if err := d.Migrate(ctx, log); err != nil {
+			t.Fatalf("Migrate again: %v", err)
+		}
+		if strings.Contains(out.String(), `"event":"schema_analy`) ||
+			!strings.Contains(out.String(), `"event":"migrations_current"`) {
+			t.Errorf("Migrate again logged %s", out.String())
+		}
+		// An ANALYZE would have set the reltuples of the new table to 0.
+		if left := relations(t, d, `n.nspname = current_schema() AND c.reltuples < 0`); !slices.Equal(left, []string{"probe"}) {
+			t.Errorf("after Migrate again the tables not analyzed are %v, want probe", left)
+		}
+		want := maps.Clone(analyzed)
+		want["probe"] = time.Time{}
+		if again := lastAnalyze(t, d); !maps.Equal(again, want) {
+			t.Errorf("last_analyze changed from %v to %v", want, again)
+		}
+	})
+}
+
+// relations names the tables, partitioned or not, that pass where, an expression over pg_class c and pg_namespace n,
+// sorted.
+func relations(t *testing.T, d *DB, where string) []string {
+	t.Helper()
+	var names []string
+	if err := d.Pool.QueryRow(t.Context(), `SELECT coalesce(array_agg(c.relname::text ORDER BY c.relname), '{}')
+		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p') AND `+where).
+		Scan(&names); err != nil {
+		t.Fatal(err)
+	}
+	return names
+}
+
+// lastAnalyze is the last_analyze of every table of the current schema that is not partitioned, partitions included,
+// read from a fresh snapshot of the statistics; the zero time is a table never analyzed.
+func lastAnalyze(t *testing.T, d *DB) map[string]time.Time {
+	t.Helper()
+	ctx := t.Context()
+	conn, err := d.Pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT pg_stat_clear_snapshot()"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := conn.Query(ctx, `SELECT s.relname, s.last_analyze
+		FROM pg_stat_user_tables s JOIN pg_class c ON c.oid = s.relid
+		WHERE s.schemaname = current_schema() AND c.relkind = 'r'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var (
+			name string
+			at   *time.Time
+		)
+		if err := rows.Scan(&name, &at); err != nil {
+			t.Fatal(err)
+		}
+		out[name] = time.Time{}
+		if at != nil {
+			out[name] = *at
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// eventually polls cond until it holds. The deadline only stops a test that hangs; it is no bound of the behaviour
+// under test.
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	const deadline = 30 * time.Second
+	begin := time.Now()
+	for !cond() {
+		if time.Since(begin) > deadline {
+			t.Fatalf("%s did not happen within %v", what, deadline)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestIntegrationVersions(t *testing.T) {
