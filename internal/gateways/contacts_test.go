@@ -983,7 +983,7 @@ func TestErrors(t *testing.T) {
 func TestPruner(t *testing.T) {
 	q := &fakePrune{}
 	p := Pruner{q: q}
-	if n, err := p.Codes(t.Context(), 1, t0, 50); err != nil || n != 3 || q.arg.Before != t0.Add(-CodePruneAfter) ||
+	if n, err := p.Codes(t.Context(), 1, t0, 50); err != nil || n != 3 || q.arg.Before != t0.Add(-24*time.Hour) ||
 		q.arg.BatchSize != 50 || q.arg.OrgID != 1 {
 		t.Errorf("Codes = %d, %v, %+v", n, err, q.arg)
 	}
