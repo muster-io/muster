@@ -88,6 +88,7 @@ func TestShape(t *testing.T) {
 			Step{Number: 1, Kind: KindCall, CallTarget: CallPeople, Condition: ConditionAny}},
 		"a day":       {0, StepInput{Kind: KindWait, WaitSeconds: ptr(86400)}, Step{Number: 1, Kind: KindWait, WaitSeconds: 86400}},
 		"ten repeats": {4, StepInput{Kind: KindRepeat, RepeatFrom: ptr(4), RepeatTimes: ptr(10)}, Step{Number: 5, Kind: KindRepeat, RepeatFrom: 4, RepeatTimes: 10}},
+		"one repeat":  {1, StepInput{Kind: KindRepeat, RepeatFrom: ptr(1), RepeatTimes: ptr(1)}, Step{Number: 2, Kind: KindRepeat, RepeatFrom: 1, RepeatTimes: 1}},
 		"webhook":     {0, StepInput{Kind: KindWebhook, DestinationID: ptr(destHook)}, Step{Number: 1, Kind: KindWebhook, Condition: ConditionAny}},
 	} {
 		got, err := shape(c.i, c.in, false)
