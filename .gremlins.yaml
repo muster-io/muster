@@ -7,11 +7,13 @@
 unleash:
   workers: 0 # one per CPU
   test-cpu: 0 # each test run may use every CPU
-  # A mutant times out after this multiple of the coverage run's duration; shared CI runners vary in speed.
-  timeout-coefficient: 5
+  # A mutant times out after this multiple of the coverage run's duration: about 150 s for a 1 s run with a warm build
+  # cache. gremlins has no absolute timeout, and a low multiple times out healthy mutants.
+  timeout-coefficient: 150
   integration: false
-  exclude-files: # generated code, as regular expressions
-    - '/dbgen/'
+  exclude-files: # generated code, as regular expressions on the path relative to the package, e.g. dbgen/query.sql.go
+    - '(^|/)dbgen/'
+    - '(^|/)gen/'
     - '\.gen\.go$'
   threshold:
     efficacy: 0
