@@ -128,6 +128,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   _Revised for L2 (2026-11-17, #583):_ through a bridge, the line of Mentions keeps, in their order, the whole Mentions
   that fit half of `limits.max_body_length`; a Mention that does not fit is left out with its entry, and the text of
   the message keeps the rest.
+  _Revised for L2 (2026-11-22, #591, #626, #690):_ the Timeline records "Mention not delivered" with the reason
+  `message_too_long` for each person, group, Team mention or mention of everyone left out, also in the Thread reply of
+  a Page (C-28.FR-3).
 - **C-12.FR-12** A Mention of a user with an Account link in the Destination's identity space uses the messenger's own
   form — `@username` in Mattermost, a `tg://user?id=` link whose text is the display name in Telegram, `<@U…>` in Slack,
   a Mention marker through a Bridge (C-22.FR-16) — and of a user without one the display name as text, which notifies

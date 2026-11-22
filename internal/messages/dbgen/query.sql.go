@@ -126,7 +126,15 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.description, g.status,
         AND EXISTS (SELECT 1
                     FROM escalation_runs er
                     WHERE er.org_id = g.org_id AND er.alert_group_id = g.id AND er.generation = g.chain_generation
-                      AND er.stop_command = 'acknowledge'))::boolean AS chains_stopped
+                      AND er.stop_command = 'acknowledge'))::boolean AS chains_stopped,
+       ARRAY(SELECT t.name
+             FROM alert_group_teams gt
+             JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+             WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+             ORDER BY gt.joined_at, gt.team_id)::text[] AS team_names,
+       EXISTS (SELECT 1
+               FROM alert_group_assignees a
+               WHERE a.org_id = g.org_id AND a.alert_group_id = g.id)::boolean AS has_assignees
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -186,6 +194,8 @@ type GetRenderGroupRow struct {
 	SnoozedByName            string
 	ResolvedByName           string
 	ChainsStopped            bool
+	TeamNames                []string
+	HasAssignees             bool
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -196,8 +206,10 @@ type GetRenderGroupRow struct {
 // templates, language, Snooze durations, template error, Group key and own "Labels in the message", the Organization's
 // time zone, start of the working day and first day of the week, which the labels of the Snooze presets name, its
 // severity and Team labels, from which the computed "Labels in the message" are made, and its Instance labels, and the
-// names of its Owner, of who snoozed it and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
-// before it commits.
+// names of its Owner, of who snoozed it and of who resolved it; with them the names of its Teams, which its Root
+// message shows in the field Teams (C-25.FR-6), in the order they joined, deleted ones included with their name, and
+// whether it has Assignees, which ListRenderAssignees then lists. It reads through the caller's transaction, so that a
+// change the dispatcher made is seen before it commits.
 func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) (GetRenderGroupRow, error) {
 	row := q.db.QueryRow(ctx, getRenderGroup, arg.OrgID, arg.ID)
 	var i GetRenderGroupRow
@@ -244,6 +256,8 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 		&i.SnoozedByName,
 		&i.ResolvedByName,
 		&i.ChainsStopped,
+		&i.TeamNames,
+		&i.HasAssignees,
 	)
 	return i, err
 }
@@ -508,41 +522,6 @@ func (q *Queries) ListRenderAssignees(ctx context.Context, arg ListRenderAssigne
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRenderTeams = `-- name: ListRenderTeams :many
-SELECT t.name
-FROM alert_group_teams gt
-JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
-WHERE gt.org_id = $1 AND gt.alert_group_id = $2
-ORDER BY gt.joined_at, gt.team_id
-`
-
-type ListRenderTeamsParams struct {
-	OrgID        int64
-	AlertGroupID int64
-}
-
-// ListRenderTeams lists the names of the Teams of an Alert Group, which its Root message shows in the field Teams
-// (C-25.FR-6), in the order they joined, deleted ones included with their name.
-func (q *Queries) ListRenderTeams(ctx context.Context, arg ListRenderTeamsParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listRenderTeams, arg.OrgID, arg.AlertGroupID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		items = append(items, name)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

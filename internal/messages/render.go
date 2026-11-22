@@ -86,7 +86,6 @@ type Renderer struct {
 // queries are the queries of the package and the Internal alerts it raises and resolves.
 type queries interface {
 	GetRenderGroup(ctx context.Context, arg dbgen.GetRenderGroupParams) (dbgen.GetRenderGroupRow, error)
-	ListRenderTeams(ctx context.Context, arg dbgen.ListRenderTeamsParams) ([]string, error)
 	ListRenderAssignees(ctx context.Context, arg dbgen.ListRenderAssigneesParams) ([]dbgen.ListRenderAssigneesRow,
 		error)
 	GetGroupIDByPublicID(ctx context.Context, arg dbgen.GetGroupIDByPublicIDParams) (int64, error)
@@ -190,6 +189,10 @@ type Source struct {
 	// ChainsStopped whether its acknowledgement stopped running chains, which item 7 says after it.
 	Assignees     []SourceAssignee
 	ChainsStopped bool
+	// teamNames are the names of its Teams and hasAssignees whether it has Assignees, as the read of the Alert Group
+	// found them; Load takes the Teams and reads the Assignees only then.
+	teamNames    []string
+	hasAssignees bool
 }
 
 // SourceAssignee is an Assignee of an Alert Group: the User by id and display name, the name of the owning Team of
@@ -251,15 +254,12 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 		}
 		src.Alerts = append(src.Alerts, sa)
 	}
-	q := r.q(db)
-	if src.Teams, err = q.ListRenderTeams(ctx, dbgen.ListRenderTeamsParams{OrgID: r.orgID,
-		AlertGroupID: groupID}); err != nil {
-		return nil, fmt.Errorf("read the teams of alert group #%d: %w", src.Number, err)
-	}
+	src.Teams = src.teamNames
 	if err := r.withLinks(ctx, db, src); err != nil {
 		return nil, err
 	}
-	if r.names != nil {
+	// The footer of a firing Alert Group names no user.
+	if r.names != nil && src.Status != ColourFiring {
 		if src.FooterUsers, err = r.names.FooterUsers(ctx, db, groupID); err != nil {
 			return nil, err
 		}
@@ -270,10 +270,10 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 	return src, nil
 }
 
-// withAssignees reads the Assignees of src through db while it is firing, each with their Account links, once per
-// person and Team.
+// withAssignees reads the Assignees of src through db while it is firing and has any, each with their Account links,
+// once per person and Team.
 func (r *Renderer) withAssignees(ctx context.Context, db DBTX, src *Source) error {
-	if src.Status != ColourFiring {
+	if src.Status != ColourFiring || !src.hasAssignees {
 		return nil
 	}
 	rows, err := r.q(db).ListRenderAssignees(ctx, dbgen.ListRenderAssigneesParams{OrgID: r.orgID,
@@ -340,7 +340,11 @@ func (r *Renderer) loadGroup(ctx context.Context, db DBTX, groupID int64) (*Sour
 			SnoozeDurations: g.SnoozeDurationsSeconds, RootMessage: textOf(g.TemplateRootMessage),
 			Line: textOf(g.TemplateLine), AckTimeoutNotice: textOf(g.TemplateAckTimeoutNotice),
 			ErrorTemplate: g.TemplateErrorTemplate.String,
-			MessageLabels: routing.MessageLabels(g.MessageLabels, g.RouteGroupKey, g.SeverityLabel, g.TeamLabel)}}
+			MessageLabels: routing.MessageLabels(g.MessageLabels, g.RouteGroupKey, g.SeverityLabel, g.TeamLabel)},
+		teamNames: g.TeamNames, hasAssignees: g.HasAssignees}
+	if src.teamNames == nil {
+		src.teamNames = []string{}
+	}
 	return src, nil
 }
 

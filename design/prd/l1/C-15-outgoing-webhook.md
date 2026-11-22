@@ -60,6 +60,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   _Revised for L2 (2026-11-21):_ `alert_group` also carries `attached_to`, the main Alert Group it is attached to, or
   null; the events of Attach and Detach are sent one to one (C-37.FR-15), and `notify` follows the Route's Loud and
   Quiet settings (C-36.FR-3).
+  _Revised for L2 (2026-11-22):_ events mode is not kept back by a Maintenance window: it receives every event,
+  `maintenance_started` and `maintenance_ended` included, and `alert_group` carries `kept_back`; the template mode is
+  kept back like a messenger (C-34.FR-12).
 - **C-15.FR-3** Template mode defines a "create" request (method, URL, headers, body) with extraction rules that pick
   values from the response (for example `$.data.id`); the values are stored per Alert Group and Destination. "Update"
   requests use them and run through reconciliation, so only the latest state is sent. Optional "open thread" runs once,

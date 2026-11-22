@@ -51,6 +51,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   Timeline or a metric (C-02.FR-20), and a key rotation re-encrypts both like every other Secret (C-20.FR-7). The
   Connection returns, read-only, the callback address of FR-11 for push and the last `info` it read. Deleting a Bridge
   Connection follows C-13.FR-6.
+  _Revised for L2 (2026-11-22, #671):_ from 0.2.0 the push secret is the Standard Webhooks `whsec_` form with a key of
+  at least 24 bytes; a shorter one is refused on save with `422` `invalid_format` at `/push_secret`, and by
+  `muster bridge check --push-secret-file` as a usage error, while one stored before that minimum keeps working, also
+  for the push callback, and is reported on the Connection (`warnings`: `push_secret_too_short`) and by
+  `muster doctor`.
 - **C-22.FR-2** The connection check (interactive) calls `getInfo` and shows, with the latency and path (direct or
   through the proxy) of the call, the bridge's name and version, the messenger's name, `protocol_version`, what the
   bridge offers, its limits, its kind of user lookup and its event delivery modes. It fails, naming the cause, when the
@@ -68,6 +73,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   which makes the Connection a Notification gateway (C-30.FR-1) — whether the bridge can mention groups, which Team
   mentions and group entries need (C-25.FR-8, C-28.FR-2), and which of the mentions of everyone in the chat — `channel`,
   `here`, `all`, `everyone` — its messenger has (ADR-0017); the check shows them.
+  _Revised for L2 (2026-11-22, #658):_ Muster also reads `info` on the interactive path once a save that creates a
+  Bridge Connection, or gives it a new base URL or bot token, has committed, and stores it as a check does, for the
+  version saved; a save of its other fields — name, proxy, event delivery mode, limiter — calls nothing. A read that
+  fails or gets no limiter token never fails the save, which then has no `info` until a check or a call that depends on
+  it reads it, and is logged as `bridge_info_read_failed`.
 - **C-22.FR-3** A Bridge Destination has a Connection, a channel id — the channel as its messenger names it, an opaque
   string — its Mention settings (C-12.FR-8) and its limiter (`destination.bridge.limiter`). Its Destination check calls
   `checkChannel`, which posts nothing, as its one check item `channel`: it passes when the bridge answers `200`, and

@@ -300,6 +300,10 @@ type Group struct {
 	// ChainGeneration is the current start of its Escalation chains, raised by each start and start-over, 0 before the
 	// first (C-32.FR-5).
 	ChainGeneration int64
+
+	// noTeams says that the Alert Group has no Team without reading them: this transaction created it, and no Team
+	// joined it since (joinTeams). An Alert Group read from the database has it unset.
+	noTeams bool
 }
 
 // groupOf reads a locked row.
@@ -579,12 +583,18 @@ type snapshotRef struct {
 	read bool
 }
 
-// withSnapshot marks ctx as the transaction of the Stored Snapshot id.
-func withSnapshot(ctx context.Context, id int64) context.Context {
+// withSnapshot marks ctx as the transaction of the Stored Snapshot id, received at receivedAt; a zero receivedAt
+// leaves it to be read.
+func withSnapshot(ctx context.Context, id int64, receivedAt time.Time) context.Context {
 	if id == 0 {
 		return ctx
 	}
-	return context.WithValue(ctx, snapshotKey{}, &snapshotRef{id: id})
+	ref := &snapshotRef{id: id}
+	if !receivedAt.IsZero() {
+		at := receivedAt.UTC()
+		ref.at, ref.read = &at, true
+	}
+	return context.WithValue(ctx, snapshotKey{}, ref)
 }
 
 // receivedAt is the receipt time of the Stored Snapshot behind the changes of ctx, read once per transaction; nil
@@ -731,9 +741,9 @@ func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Acto
 	if err != nil {
 		return nil, false, err
 	}
-	teams, err := q.ListGroupTeamIDs(ctx, dbgen.ListGroupTeamIDsParams{OrgID: d.orgID, AlertGroupID: g.ID})
+	teams, err := d.teamIDs(ctx, q, g)
 	if err != nil {
-		return nil, false, fmt.Errorf("read the teams of alert group #%d: %w", g.Number, err)
+		return nil, false, err
 	}
 	var failures []TemplateFailure
 	changed := false
@@ -744,6 +754,18 @@ func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Acto
 		return nil, false, err
 	}
 	return failures, changed, nil
+}
+
+// teamIDs reads the Teams of g by id, in id order; an Alert Group known to have none (Group.noTeams) is not read.
+func (d *dispatcher) teamIDs(ctx context.Context, q Queries, g *Group) ([]int64, error) {
+	if g.noTeams {
+		return []int64{}, nil
+	}
+	teams, err := q.ListGroupTeamIDs(ctx, dbgen.ListGroupTeamIDsParams{OrgID: d.orgID, AlertGroupID: g.ID})
+	if err != nil {
+		return nil, fmt.Errorf("read the teams of alert group #%d: %w", g.Number, err)
+	}
+	return teams, nil
 }
 
 // recordFallbacks records, as the system, one system entry fallback_template_used per Route template the re-render
@@ -922,9 +944,9 @@ func (d *dispatcher) joinDestinations(ctx context.Context, q Queries, g *Group, 
 		return fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
 	}
 	if toTeams {
-		teams, err := q.ListGroupTeamIDs(ctx, dbgen.ListGroupTeamIDsParams{OrgID: d.orgID, AlertGroupID: g.ID})
+		teams, err := d.teamIDs(ctx, q, g)
 		if err != nil {
-			return fmt.Errorf("read the teams of alert group #%d: %w", g.Number, err)
+			return err
 		}
 		if err := shareTeams(ctx, q, teams); err != nil {
 			return err
