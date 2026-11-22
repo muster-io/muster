@@ -12,18 +12,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/managedby"
+	"github.com/muster-io/muster/internal/mentions"
 )
 
 // markOnlyKind is a type of Destination with a Destination check for TestMarkOnlySave: the row of a Broken
-// Destination of it whose check fails, the input that saves it as stored, with the name given, and the count of its
-// checks.
+// Destination of it whose check fails, the input that saves it as stored, with the name given, the count of its
+// checks, and a change of the input to another channel whose check fails too.
 type markOnlyKind struct {
-	typ    string
-	row    func(store *fakeStore) *dbgen.GetDestinationRow
-	input  func(name string) Input
-	checks func(s *Service) int
+	typ     string
+	row     func(store *fakeStore) *dbgen.GetDestinationRow
+	input   func(name string) Input
+	checks  func(s *Service) int
+	channel func(in *Input)
 }
 
 func markOnlyKinds() []markOnlyKind {
@@ -37,7 +40,8 @@ func markOnlyKinds() []markOnlyKind {
 		}, func(name string) Input {
 			return Input{Type: TypeMattermost, Name: name, Limiter: Limiter{Limit: 30, PerSeconds: 60},
 				Mattermost: &MattermostInput{Connection: "cnaaaaaaaaaaa1", TeamID: "team", ChannelID: "ch-nobot"}}
-		}, func(s *Service) int { return len(s.writer.Mattermost.(*fakeChecker).calls) }},
+		}, func(s *Service) int { return len(s.writer.Mattermost.(*fakeChecker).calls) },
+			func(in *Input) { in.Mattermost.ChannelID = "revoked" }},
 		{TypeTelegram, func(store *fakeStore) *dbgen.GetDestinationRow {
 			r := &store.rows[1]
 			r.TelegramChannelID = txt("@revoked")
@@ -45,7 +49,8 @@ func markOnlyKinds() []markOnlyKind {
 		}, func(name string) Input {
 			return Input{Type: TypeTelegram, Name: name, Limiter: Limiter{Limit: 10, PerSeconds: 60},
 				Telegram: &TelegramInput{Connection: "cnaaaaaaaaaaa2", ChannelID: "@revoked"}}
-		}, func(s *Service) int { return len(s.writer.Telegram.(*fakeTelegram).calls) }},
+		}, func(s *Service) int { return len(s.writer.Telegram.(*fakeTelegram).calls) },
+			func(in *Input) { in.Telegram.ChannelID = "@no_comments" }},
 		{TypeBridge, func(store *fakeStore) *dbgen.GetDestinationRow {
 			store.rows = append(store.rows, bridgeRow())
 			r := &store.rows[len(store.rows)-1]
@@ -54,7 +59,8 @@ func markOnlyKinds() []markOnlyKind {
 		}, func(name string) Input {
 			return Input{Type: TypeBridge, Name: name, Limiter: Limiter{Limit: 30, PerSeconds: 60},
 				Bridge: &BridgeInput{Connection: "cnaaaaaaaaaaa3", ChannelID: "revoked"}}
-		}, func(s *Service) int { return len(s.writer.Bridge.(*fakeBridge).calls) }},
+		}, func(s *Service) int { return len(s.writer.Bridge.(*fakeBridge).calls) },
+			func(in *Input) { in.Bridge.ChannelID = "ch-nobot" }},
 		{TypeSlack, func(store *fakeStore) *dbgen.GetDestinationRow {
 			store.rows = append(store.rows, slackRow())
 			r := &store.rows[len(store.rows)-1]
@@ -63,7 +69,8 @@ func markOnlyKinds() []markOnlyKind {
 		}, func(name string) Input {
 			return Input{Type: TypeSlack, Name: name, Limiter: Limiter{Limit: 30, PerSeconds: 60},
 				Slack: &SlackInput{Connection: "cnaaaaaaaaaaa8", ChannelID: "CREVOKED"}}
-		}, func(s *Service) int { return len(s.writer.Slack.(*fakeSlack).calls) }},
+		}, func(s *Service) int { return len(s.writer.Slack.(*fakeSlack).calls) },
+			func(in *Input) { in.Slack.ChannelID = "C0FAKEARCH" }},
 	}
 }
 
@@ -76,8 +83,9 @@ func configWrites(w *saveWriter) int {
 // Bridge or Slack Destination that changes its mark managed_by and nothing else runs no Destination check, so it is
 // saved while the check fails; it writes the mark alone, moves the version, records /managed_by alone and requests no
 // re-render and no write of the Mention entries, the owning Team or what a check found; a Broken Destination stays
-// Broken, since nothing was checked. The same save with another field changed runs the check and is refused while it
-// fails, and a save of the mark alone over a stale version is refused.
+// Broken, since nothing was checked. The same save with any other field that its diff compares changed — the name,
+// the channel, the team of a Mattermost one, an own button set, the owning Team or the Mention entries — runs the check
+// and is refused while it fails, and a save of the mark alone over a stale version is refused.
 func TestMarkOnlySave(t *testing.T) {
 	for _, k := range markOnlyKinds() {
 		t.Run(k.typ, func(t *testing.T) {
@@ -132,19 +140,47 @@ func TestMarkOnlySave(t *testing.T) {
 				t.Errorf("the hints of the mark alone: %+v", w.hints[hints:])
 			}
 
-			// The mark together with a new name runs the check, which fails, and writes nothing.
-			entries = len(w.audit)
-			in = k.input(row.Name + "-2")
-			in.ManagedBy = managedby.Set("opentofu")
-			if _, err := s.Update(ctx, saver, row.PublicID, nil, in); !errors.As(err, new(*CheckFailedError)) {
-				t.Errorf("the mark and a new name while the check fails = %v, want a *CheckFailedError", err)
+			// The mark together with any field that the diff compares runs the check, which fails, and writes nothing:
+			// neither the mark alone nor anything else.
+			others := []struct {
+				name string
+				edit func(in *Input)
+			}{
+				{"name", func(in *Input) { in.Name += "-2" }},
+				{"channel_id", k.channel},
+				{"own button set", func(in *Input) {
+					in.Buttons = &ButtonSetInput{Own: true, Items: []buttons.ItemInput{{Button: buttons.ItemAcknowledge}}}
+				}},
+				{"owning_team_id", func(in *Input) { in.OwningTeamID = new("TM0000000000PA") }},
+				{"mention_entries", func(in *Input) {
+					in.MentionEntries = &[]mentions.EntryInput{entry(everyoneChannel, mentions.KindNewAlertGroup)}
+				}},
 			}
-			if got := k.checks(s); got != checks+1 {
-				t.Errorf("the mark and a new name ran the Destination check %d times, want once", got-checks)
+			if k.typ == TypeMattermost {
+				others = append(others, struct {
+					name string
+					edit func(in *Input)
+				}{"team_id", func(in *Input) { in.Mattermost.TeamID = "team-2" }})
 			}
-			if len(w.audit) != entries || configWrites(w) != writes {
-				t.Error("a save refused by its check wrote")
+			for _, o := range others {
+				t.Run("mark and "+o.name, func(t *testing.T) {
+					before, entries, marks := k.checks(s), len(w.audit), len(w.marks)
+					in := k.input(row.Name)
+					o.edit(&in)
+					in.ManagedBy = managedby.Set("opentofu")
+					if _, err := s.Update(ctx, saver, row.PublicID, nil, in); !errors.As(err, new(*CheckFailedError)) {
+						t.Errorf("the mark and %s while the check fails = %v, want a *CheckFailedError", o.name, err)
+					}
+					if got := k.checks(s); got != before+1 {
+						t.Errorf("the mark and %s ran the Destination check %d times, want once", o.name, got-before)
+					}
+					if len(w.marks) != marks || len(w.audit) != entries || configWrites(w) != writes {
+						t.Errorf("the mark and %s, refused by its check, wrote %d marks and %d entries", o.name,
+							len(w.marks)-marks, len(w.audit)-entries)
+					}
+				})
 			}
+			checks, entries = k.checks(s), len(w.audit)
 
 			// A save of the mark alone over a version that changed since it was read is refused.
 			w.versions[row.PublicID] = row.Version + 1
@@ -157,7 +193,7 @@ func TestMarkOnlySave(t *testing.T) {
 				ErrVersionMismatch) {
 				t.Errorf("the mark alone with a stale If-Match = %v, want ErrVersionMismatch", err)
 			}
-			if len(w.audit) != entries || k.checks(s) != checks+1 {
+			if len(w.audit) != entries || k.checks(s) != checks {
 				t.Error("a refused save of the mark alone wrote or checked")
 			}
 		})
