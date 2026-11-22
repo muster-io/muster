@@ -184,6 +184,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
        c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read, c.managed_by,
+       c.managed_by_version,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -251,6 +252,7 @@ type GetConnectionRow struct {
 	SlackUsergroupsRead             pgtype.Bool
 	MattermostGroupsRead            pgtype.Bool
 	ManagedBy                       pgtype.Text
+	ManagedByVersion                int64
 	DestinationCount                int64
 }
 
@@ -310,6 +312,7 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 		&i.SlackUsergroupsRead,
 		&i.MattermostGroupsRead,
 		&i.ManagedBy,
+		&i.ManagedByVersion,
 		&i.DestinationCount,
 	)
 	return i, err
@@ -881,6 +884,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
        c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read, c.managed_by,
+       c.managed_by_version,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -958,6 +962,7 @@ type ListConnectionsRow struct {
 	SlackUsergroupsRead             pgtype.Bool
 	MattermostGroupsRead            pgtype.Bool
 	ManagedBy                       pgtype.Text
+	ManagedByVersion                int64
 	DestinationCount                int64
 }
 
@@ -1038,6 +1043,7 @@ func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams
 			&i.SlackUsergroupsRead,
 			&i.MattermostGroupsRead,
 			&i.ManagedBy,
+			&i.ManagedByVersion,
 			&i.DestinationCount,
 		); err != nil {
 			return nil, err
@@ -1378,7 +1384,7 @@ func (q *Queries) LockBridgeEvent(ctx context.Context, arg LockBridgeEventParams
 }
 
 const lockConnection = `-- name: LockConnection :one
-SELECT id, public_id, type, version
+SELECT id, public_id, type, version, managed_by_version
 FROM connections
 WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
 FOR NO KEY UPDATE
@@ -1390,13 +1396,15 @@ type LockConnectionParams struct {
 }
 
 type LockConnectionRow struct {
-	ID       int64
-	PublicID string
-	Type     string
-	Version  int64
+	ID               int64
+	PublicID         string
+	Type             string
+	Version          int64
+	ManagedByVersion int64
 }
 
-// LockConnection locks a Connection that is not deleted for a change or its deletion.
+// LockConnection locks a Connection that is not deleted for a change or its deletion, with the two versions its ETag
+// adds up.
 func (q *Queries) LockConnection(ctx context.Context, arg LockConnectionParams) (LockConnectionRow, error) {
 	row := q.db.QueryRow(ctx, lockConnection, arg.OrgID, arg.PublicID)
 	var i LockConnectionRow
@@ -1405,6 +1413,7 @@ func (q *Queries) LockConnection(ctx context.Context, arg LockConnectionParams) 
 		&i.PublicID,
 		&i.Type,
 		&i.Version,
+		&i.ManagedByVersion,
 	)
 	return i, err
 }
@@ -1668,6 +1677,34 @@ func (q *Queries) SetBridgeInfo(ctx context.Context, arg SetBridgeInfoParams) (i
 	return result.RowsAffected(), nil
 }
 
+const setConnectionMark = `-- name: SetConnectionMark :exec
+UPDATE connections
+SET managed_by = $1::text, updated_at = $2::timestamptz,
+    managed_by_version = managed_by_version + 1
+WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
+`
+
+type SetConnectionMarkParams struct {
+	ManagedBy pgtype.Text
+	Now       time.Time
+	OrgID     int64
+	ID        int64
+}
+
+// SetConnectionMark writes the mark of the tool that keeps a Connection as code, or none, for a save that changes
+// nothing else (C-33.FR-11), and moves managed_by_version, which the ETag adds to version. version, which the Leader's
+// sockets and pollers, the cached clients and the writes guarded by it follow, stays, and so does everything a check,
+// a poll or a hello wrote: the mark changes no behaviour.
+func (q *Queries) SetConnectionMark(ctx context.Context, arg SetConnectionMarkParams) error {
+	_, err := q.db.Exec(ctx, setConnectionMark,
+		arg.ManagedBy,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
 const setGroupsRead = `-- name: SetGroupsRead :execrows
 UPDATE connections
 SET mattermost_groups_read = $1::boolean
@@ -1881,8 +1918,8 @@ type UpdateConnectionParams struct {
 // A changed server URL, Bot API base URL, bridge base URL or bot token forgets the bot the last check learned, what a
 // bridge told — its info and the cursor of its events — and what a Slack check learned — the workspace, the app and
 // the bot's id; a new bot token also forgets telegram_update_offset, since another bot's update ids start elsewhere.
-// Every save forgets what the last hello of a Slack Connection's Socket Mode connection counted: its socket starts
-// again and counts at its next hello.
+// Every save through it forgets what the last hello of a Slack Connection's Socket Mode connection counted: its socket
+// starts again and counts at its next hello. A save of the mark alone takes SetConnectionMark instead.
 func (q *Queries) UpdateConnection(ctx context.Context, arg UpdateConnectionParams) error {
 	_, err := q.db.Exec(ctx, updateConnection,
 		arg.Name,

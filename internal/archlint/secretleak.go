@@ -3683,8 +3683,14 @@ func (s *probeConnections) LockConnection(context.Context, cdb.LockConnectionPar
 	if s.row == nil {
 		return cdb.LockConnectionRow{}, pgx.ErrNoRows
 	}
-	return cdb.LockConnectionRow{ID: s.row.ID, PublicID: s.row.PublicID, Type: s.row.Type, Version: s.row.Version},
-		nil
+	return cdb.LockConnectionRow{ID: s.row.ID, PublicID: s.row.PublicID, Type: s.row.Type, Version: s.row.Version,
+		ManagedByVersion: s.row.ManagedByVersion}, nil
+}
+
+func (s *probeConnections) SetConnectionMark(_ context.Context, a cdb.SetConnectionMarkParams) error {
+	s.row.ManagedBy = a.ManagedBy
+	s.row.ManagedByVersion++
+	return nil
 }
 
 func (s *probeConnections) UpdateConnection(_ context.Context, a cdb.UpdateConnectionParams) error {

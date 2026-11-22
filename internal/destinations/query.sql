@@ -102,6 +102,14 @@ FROM destinations
 WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL
 FOR NO KEY UPDATE;
 
+-- SetDestinationMark writes the mark of the tool that keeps a Destination as code, or none, for a save of a Mattermost,
+-- Telegram, Bridge or Slack Destination that changes nothing else (C-33.FR-11), with a new version: what its last
+-- Destination check found and its health stay as they are, since no check ran.
+-- name: SetDestinationMark :exec
+UPDATE destinations
+SET managed_by = sqlc.narg('managed_by')::text, updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND deleted_at IS NULL;
+
 -- MarkDestinationDeleted soft-deletes a Destination: it leaves every list and reads as missing, the row stays.
 -- name: MarkDestinationDeleted :exec
 UPDATE destinations

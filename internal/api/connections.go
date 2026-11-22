@@ -110,7 +110,7 @@ func (s *Server) CreateConnection(ctx context.Context, req gen.CreateConnectionR
 	if err != nil {
 		return nil, err
 	}
-	tag, location := etag(c.Version), BasePath+"/connections/"+c.PublicID
+	tag, location := etag(c.Tag()), BasePath+"/connections/"+c.PublicID
 	return gen.CreateConnection201JSONResponse{Body: body,
 		Headers: gen.CreateConnection201ResponseHeaders{ETag: &tag, Location: &location}}, nil
 }
@@ -126,7 +126,7 @@ func (s *Server) GetConnection(ctx context.Context, req gen.GetConnectionRequest
 	if err != nil {
 		return nil, err
 	}
-	tag := etag(c.Version)
+	tag := etag(c.Tag())
 	return gen.GetConnection200JSONResponse{Body: body, Headers: gen.GetConnection200ResponseHeaders{ETag: &tag}}, nil
 }
 
@@ -157,7 +157,7 @@ func (s *Server) UpdateConnection(ctx context.Context, req gen.UpdateConnectionR
 	if err != nil {
 		return nil, err
 	}
-	tag := etag(c.Version)
+	tag := etag(c.Tag())
 	return gen.UpdateConnection200JSONResponse{Body: body, Headers: gen.UpdateConnection200ResponseHeaders{ETag: &tag}},
 		nil
 }
@@ -518,7 +518,7 @@ func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) 
 	case connections.TypeSlack:
 		return s.slackConnectionOf(c)
 	}
-	tag := etag(c.Version)
+	tag := etag(c.Tag())
 	callback := s.connections.CallbackURL(c.PublicID)
 	m := gen.MattermostConnection{Id: c.PublicID, Type: gen.MattermostConnectionTypeMattermost, Name: c.Name,
 		ServerUrl: c.ServerURL, BotTokenStatus: keyStatusOf(c.BotToken), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
@@ -539,7 +539,7 @@ func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) 
 
 // telegramConnectionOf is the API form of a Telegram Connection.
 func telegramConnectionOf(c connections.Connection) (gen.Connection, error) {
-	tag := etag(c.Version)
+	tag := etag(c.Tag())
 	t := gen.TelegramConnection{Id: c.PublicID, Type: gen.TelegramConnectionTypeTelegram, Name: c.Name,
 		BotApiBaseUrl: c.BotAPIBaseURL, UpdateMode: gen.TelegramUpdateMode(c.UpdateMode),
 		BotTokenStatus: keyStatusOf(c.BotToken), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
@@ -564,7 +564,7 @@ func telegramConnectionOf(c connections.Connection) (gen.Connection, error) {
 // bridgeConnectionOf is the API form of a Bridge Connection: its info and when it was read are null before its first
 // check and after its base URL or token changed, and its roles come from that info, messenger without one (C-30.FR-1).
 func (s *Server) bridgeConnectionOf(c connections.Connection) (gen.Connection, error) {
-	tag := etag(c.Version)
+	tag := etag(c.Tag())
 	callback := s.connections.BridgeCallbackURL(c.PublicID)
 	roles := []gen.BridgeInfoRole{}
 	for _, r := range c.BridgeRoles() {
@@ -660,7 +660,7 @@ func slackInputOf(body gen.ConnectionInput) (connections.Input, error) {
 // the bot, the workspace and the app its last passing check learned, null before one and after the bot token
 // changed, and what the last hello of its Socket Mode connection counted.
 func (s *Server) slackConnectionOf(c connections.Connection) (gen.Connection, error) {
-	tag := etag(c.Version)
+	tag := etag(c.Tag())
 	callback := s.connections.SlackCallbackURL(c.PublicID)
 	sl := gen.SlackConnection{Id: c.PublicID, Type: gen.SlackConnectionTypeSlack, Name: c.Name,
 		EventMode: gen.SlackEventMode(c.EventMode), BotTokenStatus: keyStatusOf(c.BotToken),

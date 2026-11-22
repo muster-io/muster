@@ -14,15 +14,17 @@ import (
 )
 
 // markQueries are the named queries, by package, that read or write managed_by: the reads, creations and updates of
-// the twelve kinds of C-33.FR-11. Every other query leaves the column alone, so that a write that does not take the
-// field — a rename, a Secret, a check, a health or a start-up step — keeps the mark, which the domain tests, whose
-// stores are fakes, cannot see.
+// the twelve kinds of C-33.FR-11, the writes of the mark alone of Connections and Destinations, and the lock of a
+// Connection, which reads managed_by_version for its ETag. Every other query leaves the column alone, so that a write
+// that does not take the field — a rename, a Secret, a check, a health or a start-up step — keeps the mark, which the
+// domain tests, whose stores are fakes, cannot see.
 var markQueries = map[string][]string{
-	"connections": {"ListConnections", "GetConnection", "InsertConnection", "UpdateConnection"},
+	"connections": {"ListConnections", "GetConnection", "LockConnection", "InsertConnection", "UpdateConnection",
+		"SetConnectionMark"},
 	"destinations": {"ListDestinations", "GetDestination", "InsertMattermostDestination",
 		"UpdateMattermostDestination", "InsertTelegramDestination", "UpdateTelegramDestination",
 		"InsertBridgeDestination", "UpdateBridgeDestination", "InsertSlackDestination", "UpdateSlackDestination",
-		"InsertWebhookDestination", "UpdateWebhookDestination"},
+		"InsertWebhookDestination", "UpdateWebhookDestination", "SetDestinationMark"},
 	"escalation":   {"ListChains", "GetChain", "InsertChain", "UpdateChain"},
 	"integrations": {"ListIntegrations", "GetIntegration", "InsertIntegration", "UpdateIntegration"},
 	"links": {"ListLookupTables", "GetLookupTable", "InsertLookupTable", "UpdateLookupTable", "ListLinkRules",
