@@ -3525,6 +3525,13 @@ critical, and a Route raises the level of its Alert Groups with its
   Destinations, the Organization's settings, the Outbound address policy and the OIDC settings, null on every
   object after the upgrade. It is a mark only and changes nothing else. It is expand only: a replica without it
   neither reads nor writes the mark, and keeps it on the objects it saves.</li>
+<li>Migration 0057 adds to Connections the count of the saves that changed only the mark, 0 after the upgrade. Such a
+  save gives the Connection a new ETag without a new configuration version, so its Slack socket does not reconnect
+  and its Telegram or Bridge poller does not start again. It is expand only: a replica without it saves the mark
+  as any change and gives the ETag of the version alone, so during the rollout a tool that read a Connection on one
+  kind of replica after a save of its mark alone may get <code>412</code> on the other; it reads the Connection again. A
+  replica without it also lets such a tool's stale ETag pass: its ETag is the version, which a save of the mark
+  alone does not move, so a tag read on it before such a save still passes on it after.</li>
 </ul>
 <p><strong>Breaking changes in 0.2.0.</strong> Four changes can break an installation or a client that worked on 0.1; check them
 before you upgrade:</p>
@@ -4364,6 +4371,9 @@ applied:</p>
 rows until it is back.</p>
 <p>Going back below 0056 loses only the marks <code>managed_by</code>: every object stays as it was, and a tool marks the objects
 it manages again when it next writes them.</p>
+<p>Going back below 0057 loses only the count of the saves of a Connection's mark alone: the marks stay, and the ETag
+of a Connection whose mark alone was saved goes back to its version, so a tool holding an ETag read before gets
+<code>412</code> until it reads the Connection again.</p>
 <p><strong>Going back to 0.1.</strong> Nothing runs down migrations in an installation: <code>muster migrate</code> takes no arguments, and the
 "Going back below 00NN" sentences above describe what the down migrations drop, which only Muster's tests run;
 they are not a supported way back. A 0.1.x binary on the 0.2.0 schema stops at start with the log event

@@ -126,7 +126,7 @@
 The full text, one file per section of the document map; [`llms-full.txt`](https://muster-io.github.io/muster/latest/llms-full.txt) lists them.
 
 - [Home, Quick start, First alert in a messenger](https://muster-io.github.io/muster/latest/llms-full-home.txt): 3 pages, about 7470 tokens.
-- [Install](https://muster-io.github.io/muster/latest/llms-full-install.txt): 3 pages, about 29668 tokens.
+- [Install](https://muster-io.github.io/muster/latest/llms-full-install.txt): 3 pages, about 29938 tokens.
 - [Configure](https://muster-io.github.io/muster/latest/llms-full-configure.txt): 3 pages, about 12879 tokens.
 - [Integrations](https://muster-io.github.io/muster/latest/llms-full-integrations.txt): 3 pages, about 11363 tokens.
 - [Messengers](https://muster-io.github.io/muster/latest/llms-full-messengers.txt): 10 pages, about 69350 tokens.

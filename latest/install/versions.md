@@ -302,6 +302,13 @@ while the schema is still dirty.
       Destinations, the Organization's settings, the Outbound address policy and the OIDC settings, null on every
       object after the upgrade. It is a mark only and changes nothing else. It is expand only: a replica without it
       neither reads nor writes the mark, and keeps it on the objects it saves.
+    - Migration 0057 adds to Connections the count of the saves that changed only the mark, 0 after the upgrade. Such a
+      save gives the Connection a new ETag without a new configuration version, so its Slack socket does not reconnect
+      and its Telegram or Bridge poller does not start again. It is expand only: a replica without it saves the mark
+      as any change and gives the ETag of the version alone, so during the rollout a tool that read a Connection on one
+      kind of replica after a save of its mark alone may get `412` on the other; it reads the Connection again. A
+      replica without it also lets such a tool's stale ETag pass: its ETag is the version, which a save of the mark
+      alone does not move, so a tag read on it before such a save still passes on it after.
 
     **Breaking changes in 0.2.0.** Four changes can break an installation or a client that worked on 0.1; check them
     before you upgrade:
@@ -1142,6 +1149,10 @@ while the schema is still dirty.
 
     Going back below 0056 loses only the marks `managed_by`: every object stays as it was, and a tool marks the objects
     it manages again when it next writes them.
+
+    Going back below 0057 loses only the count of the saves of a Connection's mark alone: the marks stay, and the ETag
+    of a Connection whose mark alone was saved goes back to its version, so a tool holding an ETag read before gets
+    `412` until it reads the Connection again.
 
     **Going back to 0.1.** Nothing runs down migrations in an installation: `muster migrate` takes no arguments, and the
     "Going back below 00NN" sentences above describe what the down migrations drop, which only Muster's tests run;
