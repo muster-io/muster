@@ -23,6 +23,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
        c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read, c.managed_by,
+       c.managed_by_version,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -53,6 +54,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
        c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read, c.managed_by,
+       c.managed_by_version,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -61,9 +63,10 @@ WHERE c.org_id = @org_id AND c.deleted_at IS NULL
   AND (c.public_id = sqlc.narg('public_id')::text
        OR (sqlc.narg('public_id')::text IS NULL AND c.id = sqlc.narg('id')::bigint));
 
--- LockConnection locks a Connection that is not deleted for a change or its deletion.
+-- LockConnection locks a Connection that is not deleted for a change or its deletion, with the two versions its ETag
+-- adds up.
 -- name: LockConnection :one
-SELECT id, public_id, type, version
+SELECT id, public_id, type, version, managed_by_version
 FROM connections
 WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL
 FOR NO KEY UPDATE;
@@ -107,8 +110,8 @@ RETURNING id;
 -- A changed server URL, Bot API base URL, bridge base URL or bot token forgets the bot the last check learned, what a
 -- bridge told — its info and the cursor of its events — and what a Slack check learned — the workspace, the app and
 -- the bot's id; a new bot token also forgets telegram_update_offset, since another bot's update ids start elsewhere.
--- Every save forgets what the last hello of a Slack Connection's Socket Mode connection counted: its socket starts
--- again and counts at its next hello.
+-- Every save through it forgets what the last hello of a Slack Connection's Socket Mode connection counted: its socket
+-- starts again and counts at its next hello. A save of the mark alone takes SetConnectionMark instead.
 -- name: UpdateConnection :exec
 UPDATE connections
 SET name = @name, mattermost_server_url = sqlc.narg('server_url'),
@@ -149,6 +152,16 @@ SET name = @name, mattermost_server_url = sqlc.narg('server_url'),
     limiter_per_seconds = @limiter_per_seconds, managed_by = sqlc.narg('managed_by')::text,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
+
+-- SetConnectionMark writes the mark of the tool that keeps a Connection as code, or none, for a save that changes
+-- nothing else (C-33.FR-11), and moves managed_by_version, which the ETag adds to version. version, which the Leader's
+-- sockets and pollers, the cached clients and the writes guarded by it follow, stays, and so does everything a check,
+-- a poll or a hello wrote: the mark changes no behaviour.
+-- name: SetConnectionMark :exec
+UPDATE connections
+SET managed_by = sqlc.narg('managed_by')::text, updated_at = @now::timestamptz,
+    managed_by_version = managed_by_version + 1
+WHERE org_id = @org_id AND id = @id AND deleted_at IS NULL;
 
 -- RenameConnection gives a Connection a new name and changes nothing else: `muster dev` renames its demo Connection
 -- of an earlier version, kept in a development database, to the current name.

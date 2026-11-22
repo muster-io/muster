@@ -215,13 +215,22 @@ type Connection struct {
 	Limiter              Limiter
 	DestinationCount     int64
 	CreatedAt            time.Time
-	Version              int64
+	// Version is the version of the configuration, which the Leader's sockets and pollers, the cached clients and the
+	// version-guarded writes follow; ManagedByVersion counts the saves of the mark alone, which keep Version
+	// (C-33.FR-11). The ETag names their sum, Tag.
+	Version          int64
+	ManagedByVersion int64
 	// ManagedBy is the tool that keeps the Connection as code, nil for none (C-33.FR-11).
 	ManagedBy *string
 	// Gateway is the state of a Notification gateway (C-30.FR-8), nil for a Connection that is none: a Bridge
 	// Connection whose stored info declares the role gateway, or that is Broken.
 	Gateway *GatewayState
 }
+
+// Tag is the version that the ETag of the Connection names and that If-Match is compared with: Version plus
+// ManagedByVersion. Every save moves one of them and neither goes back, so a save of the mark alone gives a new ETag
+// without a new Version.
+func (c Connection) Tag() int64 { return c.Version + c.ManagedByVersion }
 
 // GatewayState is the state of a Notification gateway: Broken since BrokenSince with the masked Reason, which a probe
 // through info checks again at NextProbeAt, all three nil while it is in order (C-30.FR-8).
@@ -285,6 +294,7 @@ type Queries interface {
 	FindConnectionByName(ctx context.Context, arg dbgen.FindConnectionByNameParams) (int64, error)
 	InsertConnection(ctx context.Context, arg dbgen.InsertConnectionParams) (int64, error)
 	UpdateConnection(ctx context.Context, arg dbgen.UpdateConnectionParams) error
+	SetConnectionMark(ctx context.Context, arg dbgen.SetConnectionMarkParams) error
 	RenameConnection(ctx context.Context, arg dbgen.RenameConnectionParams) error
 	SetBotIdentity(ctx context.Context, arg dbgen.SetBotIdentityParams) error
 	SetGroupsRead(ctx context.Context, arg dbgen.SetGroupsReadParams) (int64, error)
@@ -742,7 +752,7 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 	return c, secret, err
 }
 
-// Update replaces the configured fields of the Connection publicID; a non-nil version must be its current one
+// Update replaces the configured fields of the Connection publicID; a non-nil version must be its current Tag
 // (If-Match). An omitted bot token, proxy password, push secret, app-level token or Slack signing secret keeps the
 // stored one, except that a new server URL, Bot API base URL or bridge base URL needs the bot token again, so that the
 // stored one never reaches another server; a new address or bot token forgets the bot that the last check found, a
@@ -751,8 +761,7 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 // a new secret token and setWebhook; one that leaves it gets deleteWebhook; both run before the update commits, and
 // when they fail nothing is saved. A Bridge given a new base URL or bot token has its info read once the update
 // committed (readSavedInfo), which never fails it; a save of its other fields calls nothing. A save that changes only
-// the mark managed_by (C-33.FR-11) keeps every secret and what the last check learned, and calls nothing: it moves the
-// version and is recorded like any change.
+// the mark managed_by (C-33.FR-11) writes the mark alone (saveMark).
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Connection,
 	error) {
 	var out Connection
@@ -772,7 +781,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if err != nil {
 			return fmt.Errorf("lock the connection %s: %w", id, err)
 		}
-		if version != nil && *version != lock.Version {
+		if version != nil && *version != lock.Version+lock.ManagedByVersion {
 			return ErrVersionMismatch
 		}
 		row, err := s.row(ctx, q, id)
@@ -821,6 +830,10 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if len(diff) == 0 {
 			out = s.withBridgeWarnings(before, row)
 			return nil
+		}
+		if managedby.Only(diff) && secret == "" {
+			out, err = s.saveMark(ctx, q, r, row, after.ManagedBy, diff, now)
+			return err
 		}
 		tokenAt := row.BotTokenUpdatedAt
 		if token.UpdatedAt != nil {
@@ -881,7 +894,30 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	return out, nil
 }
 
-// Delete deletes the Connection publicID (C-13.FR-6); a non-nil version must be its current one. While a Destination
+// saveMark saves the mark of the Connection row, locked in q, for a save whose diff changes the mark and nothing else
+// (C-33.FR-11): it writes mark and moves ManagedByVersion, so that the ETag changes, and records the change with its
+// live hint. The mark changes no behaviour, so the save keeps Version, which the Leader's sockets and pollers, the
+// cached clients, the copy of a bridge's info and the writes guarded by the version follow — no socket reconnects and
+// no poller starts again — and it forgets nothing, the last hello of a Slack socket included, and calls nothing.
+func (s *Service) saveMark(ctx context.Context, q Queries, r Requester, row dbgen.GetConnectionRow, mark *string,
+	diff []audit.Change, now time.Time) (Connection, error) {
+	if err := q.SetConnectionMark(ctx, dbgen.SetConnectionMarkParams{OrgID: s.cfg.OrgID, ID: row.ID,
+		ManagedBy: managedby.Text(mark), Now: now}); err != nil {
+		return Connection{}, fmt.Errorf("mark the connection %s: %w", row.PublicID, err)
+	}
+	row, err := s.row(ctx, q, row.PublicID)
+	if err != nil {
+		return Connection{}, err
+	}
+	out, err := connectionOf(row)
+	if err != nil {
+		return Connection{}, err
+	}
+	out = s.withBridgeWarnings(out, row)
+	return out, s.record(ctx, q, r, ActionUpdated, out, diff)
+}
+
+// Delete deletes the Connection publicID (C-13.FR-6); a non-nil version must be its current Tag. While a Destination
 // that is not deleted uses it the deletion is ErrInUse. Otherwise, in one transaction, it is marked deleted and its
 // secrets are wiped, delivery abandons the final edits still pending for its deleted Destinations (C-11.FR-14), its
 // Team mentions are deleted, each in the Audit log diff of its Team (C-25.FR-11), and the Audit log entry
@@ -936,7 +972,7 @@ func (s *Service) delete(ctx context.Context, r Requester, id string, version *i
 		if err != nil {
 			return fmt.Errorf("lock the connection %s: %w", id, err)
 		}
-		if version != nil && *version != lock.Version {
+		if version != nil && *version != lock.Version+lock.ManagedByVersion {
 			return ErrVersionMismatch
 		}
 		n, err := q.CountConnectionDestinations(ctx, dbgen.CountConnectionDestinationsParams{OrgID: s.cfg.OrgID,
@@ -1582,7 +1618,7 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 		BotUserID: textOf(r.BotUserID), Proxy: p, ProxyPassword: storedPassword(r).Status(),
 		Limiter:          Limiter{Limit: r.LimiterLimit, PerSeconds: r.LimiterPerSeconds},
 		DestinationCount: r.DestinationCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
-		ManagedBy: managedby.Of(r.ManagedBy)}
+		ManagedByVersion: r.ManagedByVersion, ManagedBy: managedby.Of(r.ManagedBy)}
 	if len(r.BridgeInfo) > 0 && r.BridgeInfoReadAt.Valid {
 		at := r.BridgeInfoReadAt.Time.UTC()
 		c.BridgeInfo, c.BridgeInfoReadAt = json.RawMessage(r.BridgeInfo), &at

@@ -1202,6 +1202,32 @@ func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) er
 	return err
 }
 
+const setDestinationMark = `-- name: SetDestinationMark :exec
+UPDATE destinations
+SET managed_by = $1::text, updated_at = $2::timestamptz, version = version + 1
+WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
+`
+
+type SetDestinationMarkParams struct {
+	ManagedBy pgtype.Text
+	Now       time.Time
+	OrgID     int64
+	ID        int64
+}
+
+// SetDestinationMark writes the mark of the tool that keeps a Destination as code, or none, for a save of a Mattermost,
+// Telegram, Bridge or Slack Destination that changes nothing else (C-33.FR-11), with a new version: what its last
+// Destination check found and its health stay as they are, since no check ran.
+func (q *Queries) SetDestinationMark(ctx context.Context, arg SetDestinationMarkParams) error {
+	_, err := q.db.Exec(ctx, setDestinationMark,
+		arg.ManagedBy,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
 const setDestinationOwningTeam = `-- name: SetDestinationOwningTeam :exec
 UPDATE destinations
 SET owning_team_id = $1::bigint

@@ -95,6 +95,10 @@ func (f *fakeWriter) UpdateSlackDestination(context.Context, dbgen.UpdateSlackDe
 	return errBoom
 }
 
+func (f *fakeWriter) SetDestinationMark(context.Context, dbgen.SetDestinationMarkParams) error {
+	return errBoom
+}
+
 func (f *fakeWriter) InsertWebhookDestination(context.Context, dbgen.InsertWebhookDestinationParams) (int64, error) {
 	return 0, errBoom
 }
@@ -146,6 +150,8 @@ type saveWriter struct {
 	slSets   []dbgen.UpdateSlackDestinationParams
 	hooks    []dbgen.InsertWebhookDestinationParams
 	hookSets []dbgen.UpdateWebhookDestinationParams
+	// marks are the writes of the mark alone.
+	marks    []dbgen.SetDestinationMarkParams
 	audit    []auditdb.InsertAuditEntryParams
 	hints    []db.Hint
 	fail     map[string]error
@@ -371,6 +377,14 @@ func (w *saveWriter) UpdateSlackDestination(_ context.Context, arg dbgen.UpdateS
 		return err
 	}
 	w.slSets = append(w.slSets, arg)
+	return nil
+}
+
+func (w *saveWriter) SetDestinationMark(_ context.Context, arg dbgen.SetDestinationMarkParams) error {
+	if err := w.fail["SetDestinationMark"]; err != nil {
+		return err
+	}
+	w.marks = append(w.marks, arg)
 	return nil
 }
 
@@ -2800,8 +2814,9 @@ func lastMark(t *testing.T, w *saveWriter) (audit.Change, bool) {
 // TestManagedBy is C-33.FR-11 on Destinations of every type: a creation stores the mark or none and records it in
 // its diff; a value outside the format is refused at /managed_by before the Destination check and before anything is
 // written; an update that omits the mark keeps it and records no change of it, null clears it. A save of the mark
-// alone of a Mattermost Destination and of an outgoing webhook writes it, records only /managed_by and requests no
-// re-render, no rename and no change of the proxy password.
+// alone of a Mattermost Destination writes it alone, without the Destination check (TestMarkOnlySave), and one of an
+// outgoing webhook writes it; both record only /managed_by and request no re-render, no rename and no change of the
+// proxy password.
 func TestManagedBy(t *testing.T) {
 	s, store, w, checker, _ := newSaver(t)
 	ctx := t.Context()
@@ -2880,13 +2895,13 @@ func TestManagedBy(t *testing.T) {
 		t.Error("a refused mark wrote or checked")
 	}
 
-	// The mark alone is written and recorded, and requests nothing else.
+	// The mark alone is written and recorded, without the Destination check, and requests nothing else.
 	reRenders := len(w.updates)
 	only := mattermostInput("ops-renamed", "chan")
 	only.ManagedBy = managedby.Set("opentofu")
 	d, err = s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, only)
-	if err != nil || len(w.updated) != updated+1 || w.updated[updated].ManagedBy.String != "opentofu" ||
-		d.ManagedBy == nil || *d.ManagedBy != "opentofu" || d.Version != 4 {
+	if err != nil || len(w.updated) != updated || len(w.marks) != 1 || w.marks[0].ManagedBy.String != "opentofu" ||
+		len(checker.calls) != checks || d.ManagedBy == nil || *d.ManagedBy != "opentofu" || d.Version != 4 {
 		t.Fatalf("mark only = %+v, %v", d.ManagedBy, err)
 	}
 	var diff []audit.Change
@@ -2902,7 +2917,7 @@ func TestManagedBy(t *testing.T) {
 	cleared := mattermostInput("ops-renamed", "chan")
 	cleared.ManagedBy = managedby.Clear
 	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, cleared); err != nil || d.ManagedBy != nil ||
-		w.updated[len(w.updated)-1].ManagedBy.Valid {
+		len(w.marks) != 2 || w.marks[1].ManagedBy.Valid {
 		t.Errorf("update with null = %+v, %v", d.ManagedBy, err)
 	}
 	if c, ok := lastMark(t, w); !ok || c.Before != "opentofu" || c.After != nil {

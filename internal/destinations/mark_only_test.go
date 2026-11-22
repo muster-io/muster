@@ -149,7 +149,7 @@ func TestMarkOnlySave(t *testing.T) {
 			// A save of the mark alone over a version that changed since it was read is refused.
 			w.versions[row.PublicID] = row.Version + 1
 			in = k.input(row.Name)
-			in.ManagedBy = managedby.Clear
+			in.ManagedBy = managedby.Set("opentofu")
 			if _, err := s.Update(ctx, saver, row.PublicID, nil, in); !errors.Is(err, ErrVersionMismatch) {
 				t.Errorf("the mark alone over a changed version = %v, want ErrVersionMismatch", err)
 			}
@@ -164,7 +164,46 @@ func TestMarkOnlySave(t *testing.T) {
 	}
 }
 
-// assertMarkWritten checks that the newest write of w wrote the mark alone of the Destination id.
+// assertMarkWritten checks that w wrote the mark alone once, of the Destination id, at the business time of the save.
 func assertMarkWritten(t *testing.T, w *saveWriter, id int64, mark string) {
 	t.Helper()
+	if len(w.marks) != 1 || w.marks[0].ID != id || w.marks[0].OrgID != 1 || w.marks[0].ManagedBy.String != mark ||
+		!w.marks[0].Now.Equal(t0) {
+		t.Errorf("the writes of the mark alone: %+v, want one of %s on %d", w.marks, mark, id)
+	}
+}
+
+// TestMarkOnlySaveFailures: a save of the mark alone of a Destination that is gone since it was read is ErrNotFound, and
+// one whose lock, write or Audit log entry fails is that error; none of them runs the Destination check.
+func TestMarkOnlySaveFailures(t *testing.T) {
+	k := markOnlyKinds()[0]
+	for _, tc := range []struct {
+		name string
+		set  func(w *saveWriter, id string)
+		want func(err error) bool
+	}{
+		{"gone", func(w *saveWriter, id string) { delete(w.versions, id) },
+			func(err error) bool { return errors.Is(err, ErrNotFound) }},
+		{"lock", func(w *saveWriter, _ string) { w.fail["LockDestination"] = errBoom },
+			func(err error) bool { return errors.Is(err, errBoom) }},
+		{"write", func(w *saveWriter, _ string) { w.fail["SetDestinationMark"] = errBoom },
+			func(err error) bool { return errors.Is(err, errBoom) }},
+		{"audit", func(w *saveWriter, _ string) { w.auditErr = errBoom },
+			func(err error) bool { return errors.Is(err, errBoom) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, store, w, _, _ := newSaver(t)
+			row := k.row(store)
+			w.versions[row.PublicID] = row.Version
+			tc.set(w, row.PublicID)
+			in := k.input(row.Name)
+			in.ManagedBy = managedby.Set("terraform")
+			if _, err := s.Update(t.Context(), saver, row.PublicID, nil, in); !tc.want(err) {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			if k.checks(s) != 0 {
+				t.Errorf("%s: the Destination check ran", tc.name)
+			}
+		})
+	}
 }

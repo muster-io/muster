@@ -4,6 +4,7 @@
 package connections_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -60,6 +61,12 @@ func TestMarkOnlySaveOfASocket(t *testing.T) {
 	if u.SlackSocket == nil || *u.SlackSocket != *before.SlackSocket {
 		t.Errorf("a save of the mark alone forgot the hello: %+v, before %+v", u.SlackSocket, before.SlackSocket)
 	}
+	if u.ManagedByVersion != before.ManagedByVersion+1 || u.Tag() != before.Tag()+1 {
+		t.Errorf("a save of the mark alone: tag %d (%d marks), before %d", u.Tag(), u.ManagedByVersion, before.Tag())
+	}
+	if got, err := e.svc.Get(ctx, sl.PublicID); err != nil || got.Tag() != u.Tag() || markOf(got) != "terraform" {
+		t.Errorf("the read after the save: tag %d, mark %s, %v; want %d", got.Tag(), markOf(got), err, u.Tag())
+	}
 	if len(e.store.updates) != updates || len(f.Requests()) != calls {
 		t.Errorf("a save of the mark alone rewrote the configuration %d times and called Slack %d times",
 			len(e.store.updates)-updates, len(f.Requests())-calls)
@@ -86,6 +93,58 @@ func TestMarkOnlySaveOfASocket(t *testing.T) {
 	u, err = e.svc.Update(ctx, by, sl.PublicID, nil, in)
 	if err != nil || u.Version != before.Version+1 || u.SlackSocket != nil || len(e.store.updates) != updates+1 {
 		t.Errorf("the mark and a new name = version %d, socket %+v, %v", u.Version, u.SlackSocket, err)
+	}
+}
+
+// TestMarkOnlySaveIfMatch is NFR-13 after a save of the mark alone: the ETag names the Tag, version plus the saves of
+// the mark alone, so the Tag read before the save and the version alone are stale on an update and a deletion, and the
+// Tag read after it is current; a save of the mark with the name moves the version and keeps the count; the list
+// carries the count; a failed write of the mark writes nothing.
+func TestMarkOnlySaveIfMatch(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	c := e.create(t, "mm")
+	in := input("mm", e.fake.URL())
+	in.BotToken, in.ManagedBy = keyring.Keep, managedby.Set("terraform")
+
+	errBoom := errors.New("boom")
+	e.store.fail["SetConnectionMark"] = errBoom
+	if _, err := e.svc.Update(ctx, by, c.PublicID, nil, in); !errors.Is(err, errBoom) {
+		t.Errorf("a failed write of the mark = %v", err)
+	}
+	delete(e.store.fail, "SetConnectionMark")
+	if got, _ := e.svc.Get(ctx, c.PublicID); got.Tag() != c.Tag() || got.ManagedBy != nil || len(e.store.audit) != 1 {
+		t.Errorf("a failed write of the mark wrote: tag %d, mark %s, %d entries", got.Tag(), markOf(got),
+			len(e.store.audit))
+	}
+
+	marked, err := e.svc.Update(ctx, by, c.PublicID, new(c.Tag()), in)
+	if err != nil || marked.Version != c.Version || marked.Tag() != c.Tag()+1 {
+		t.Fatalf("the mark alone = version %d, tag %d, %v", marked.Version, marked.Tag(), err)
+	}
+	in.Name = "mm-2"
+	for _, stale := range []int64{c.Tag(), marked.Version} {
+		if _, err := e.svc.Update(ctx, by, c.PublicID, new(stale), in); !errors.Is(err, connections.ErrVersionMismatch) {
+			t.Errorf("an update with If-Match %d = %v, want ErrVersionMismatch", stale, err)
+		}
+		if err := e.svc.Delete(ctx, by, c.PublicID, new(stale)); !errors.Is(err, connections.ErrVersionMismatch) {
+			t.Errorf("a deletion with If-Match %d = %v, want ErrVersionMismatch", stale, err)
+		}
+	}
+	renamed, err := e.svc.Update(ctx, by, c.PublicID, new(marked.Tag()), in)
+	if err != nil || renamed.Version != marked.Version+1 || renamed.ManagedByVersion != marked.ManagedByVersion ||
+		renamed.Tag() != marked.Tag()+1 {
+		t.Fatalf("a rename after the mark = version %d, %d marks, %v", renamed.Version, renamed.ManagedByVersion, err)
+	}
+	page, err := e.svc.List(ctx, connections.ListFilter{Limit: 10})
+	if err != nil || len(page.Connections) != 1 || page.Connections[0].Tag() != renamed.Tag() {
+		t.Errorf("the list = %+v, %v", page.Connections, err)
+	}
+	if err := e.svc.Delete(ctx, by, c.PublicID, new(marked.Tag())); !errors.Is(err, connections.ErrVersionMismatch) {
+		t.Errorf("a deletion with the Tag before the rename = %v", err)
+	}
+	if err := e.svc.Delete(ctx, by, c.PublicID, new(renamed.Tag())); err != nil {
+		t.Errorf("a deletion with the current Tag = %v", err)
 	}
 }
 
