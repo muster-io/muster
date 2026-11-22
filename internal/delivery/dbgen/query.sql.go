@@ -4613,15 +4613,18 @@ func (q *Queries) ProbeBrokenNow(ctx context.Context, arg ProbeBrokenNowParams) 
 }
 
 const prunePostCopies = `-- name: PrunePostCopies :execrows
+WITH doomed AS MATERIALIZED (
+    SELECT c.connection_id, c.channel_chat_id, c.channel_message_id
+    FROM telegram_post_copies c
+    WHERE c.org_id = $1 AND c.received_at < $2::timestamptz
+    ORDER BY c.received_at
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
 DELETE FROM telegram_post_copies t
-WHERE t.org_id = $1
-  AND (t.connection_id, t.channel_chat_id, t.channel_message_id) IN (
-      SELECT c.connection_id, c.channel_chat_id, c.channel_message_id
-      FROM telegram_post_copies c
-      WHERE c.org_id = $1 AND c.received_at < $2::timestamptz
-      ORDER BY c.received_at
-      LIMIT $3
-      FOR UPDATE SKIP LOCKED)
+USING doomed d
+WHERE t.org_id = $1 AND t.connection_id = d.connection_id AND t.channel_chat_id = d.channel_chat_id
+  AND t.channel_message_id = d.channel_message_id
 `
 
 type PrunePostCopiesParams struct {
@@ -4631,7 +4634,9 @@ type PrunePostCopiesParams struct {
 }
 
 // PrunePostCopies deletes at most @batch_size buffered copies received before @before, skipping rows another
-// transaction holds.
+// transaction holds. The batch is chosen once, in a materialized CTE, as PruneLinkRequests does: a subquery that a plan
+// scans again for each deleted row skips the rows the statement already deleted, as locked by itself, and takes more
+// than the batch.
 func (q *Queries) PrunePostCopies(ctx context.Context, arg PrunePostCopiesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, prunePostCopies, arg.OrgID, arg.Before, arg.BatchSize)
 	if err != nil {

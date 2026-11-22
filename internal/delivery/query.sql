@@ -2129,17 +2129,22 @@ SET thread_state = @thread_state::text, thread_anchor_id = sqlc.narg('anchor_id'
 WHERE org_id = @org_id AND id = @id;
 
 -- PrunePostCopies deletes at most @batch_size buffered copies received before @before, skipping rows another
--- transaction holds.
+-- transaction holds. The batch is chosen once, in a materialized CTE, as PruneLinkRequests does: a subquery that a plan
+-- scans again for each deleted row skips the rows the statement already deleted, as locked by itself, and takes more
+-- than the batch.
 -- name: PrunePostCopies :execrows
+WITH doomed AS MATERIALIZED (
+    SELECT c.connection_id, c.channel_chat_id, c.channel_message_id
+    FROM telegram_post_copies c
+    WHERE c.org_id = @org_id AND c.received_at < @before::timestamptz
+    ORDER BY c.received_at
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED
+)
 DELETE FROM telegram_post_copies t
-WHERE t.org_id = @org_id
-  AND (t.connection_id, t.channel_chat_id, t.channel_message_id) IN (
-      SELECT c.connection_id, c.channel_chat_id, c.channel_message_id
-      FROM telegram_post_copies c
-      WHERE c.org_id = @org_id AND c.received_at < @before::timestamptz
-      ORDER BY c.received_at
-      LIMIT @batch_size
-      FOR UPDATE SKIP LOCKED);
+USING doomed d
+WHERE t.org_id = @org_id AND t.connection_id = d.connection_id AND t.channel_chat_id = d.channel_chat_id
+  AND t.channel_message_id = d.channel_message_id;
 
 -- Outgoing webhook events (C-15.FR-2, schema.md §4.11 and §5): one row per lifecycle event and events-mode
 -- Destination, sent in order per Alert Group — only the head event of an Alert Group and Destination is claimed — at

@@ -479,14 +479,18 @@ VALUES (@org_id, @connection_id, @event_id, @seen_at::timestamptz)
 ON CONFLICT (org_id, connection_id, event_id) DO NOTHING;
 
 -- PruneBridgeEventsSeen deletes at most @batch_size records of Bridge event ids seen before @before, skipping rows
--- another transaction holds.
+-- another transaction holds. The batch is chosen once, in a materialized CTE, as PruneLinkRequests does: a subquery
+-- that a plan scans again for each deleted row skips the rows the statement already deleted, as locked by itself, and
+-- takes more than the batch.
 -- name: PruneBridgeEventsSeen :execrows
+WITH doomed AS MATERIALIZED (
+    SELECT s.connection_id, s.event_id
+    FROM bridge_events_seen s
+    WHERE s.org_id = @org_id AND s.seen_at < @before::timestamptz
+    ORDER BY s.seen_at
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED
+)
 DELETE FROM bridge_events_seen e
-WHERE e.org_id = @org_id
-  AND (e.connection_id, e.event_id) IN (
-      SELECT s.connection_id, s.event_id
-      FROM bridge_events_seen s
-      WHERE s.org_id = @org_id AND s.seen_at < @before::timestamptz
-      ORDER BY s.seen_at
-      LIMIT @batch_size
-      FOR UPDATE SKIP LOCKED);
+USING doomed d
+WHERE e.org_id = @org_id AND e.connection_id = d.connection_id AND e.event_id = d.event_id;

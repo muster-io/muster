@@ -241,7 +241,9 @@ dispatcher's transaction for the re-render step; `audit` appends to `audit_log`.
 
 **Migrations.** The file runs in one transaction and starts with `SET LOCAL lock_timeout` and `statement_timeout`;
 later migrations keep that pattern and follow expand/contract
-([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md)). The migration creates no data except the reference
+([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md)). A run that applied at least one migration ends with
+`ANALYZE` of the tables of the current schema, partitioned tables with their partitions, under the migration advisory
+lock (`schema_analyzed`). The migration creates no data except the reference
 rows of `roles`, `permissions` and `role_permissions`. The Organization and its companions — the outbound policy, the
 Default route, the built-in "Muster" Integration, the built-in "Explore" Link rule, the Keyring state with the canary
 and the bootstrap Admin — are created by Go at first start under the migration advisory lock, with the values of
