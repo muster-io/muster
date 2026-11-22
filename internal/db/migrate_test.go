@@ -2836,10 +2836,15 @@ func TestIntegrationConcurrentMigrate(t *testing.T) {
 	})
 }
 
-// TestIntegrationMigrateAnalyze: migrating a new database analyzes every table of the current schema, the partitions
-// through their partitioned tables, and no table of another schema of the same database; a second Migrate, which
-// applies nothing, analyzes nothing.
+// TestIntegrationMigrateAnalyze: migrating a new database analyzes every table of the current schema and no table of
+// another schema of the same database; a second Migrate, which applies nothing, analyzes nothing. An upgrade of a
+// database with a partition that holds a row analyzes the partition through its partitioned table, which gets
+// statistics of its own.
 func TestIntegrationMigrateAnalyze(t *testing.T) {
+	known, err := KnownVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		ctx := t.Context()
@@ -2866,8 +2871,9 @@ func TestIntegrationMigrateAnalyze(t *testing.T) {
 
 		// reltuples is -1 until a table's first ANALYZE or VACUUM, and an index build on an empty table leaves it at
 		// -1; the migrations create every table empty, and autovacuum leaves an empty table alone. It is
-		// transactional, so it shows the ANALYZE at once on every version, partitions and partitioned tables included.
-		if left := relations(t, d, `n.nspname = current_schema() AND c.relkind IN ('r', 'p') AND c.reltuples < 0`); len(left) > 0 {
+		// transactional, so it shows the ANALYZE at once on every version. A partitioned table without partitions, as
+		// every one is on a new database, keeps -1: there is nothing to sample.
+		if left := relations(t, d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`); len(left) > 0 {
 			t.Errorf("tables of the schema not analyzed: %v", left)
 		}
 		if left := relations(t, d, `n.nspname = 'other' AND c.reltuples < 0`); !slices.Equal(left, []string{"bystander"}) {
@@ -2895,13 +2901,45 @@ func TestIntegrationMigrateAnalyze(t *testing.T) {
 			t.Errorf("Migrate again logged %s", out.String())
 		}
 		// An ANALYZE would have set the reltuples of the new table to 0.
-		if left := relations(t, d, `n.nspname = current_schema() AND c.reltuples < 0`); !slices.Equal(left, []string{"probe"}) {
+		left := relations(t, d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`)
+		if !slices.Equal(left, []string{"probe"}) {
 			t.Errorf("after Migrate again the tables not analyzed are %v, want probe", left)
 		}
 		want := maps.Clone(analyzed)
 		want["probe"] = time.Time{}
 		if again := lastAnalyze(t, d); !maps.Equal(again, want) {
 			t.Errorf("last_analyze changed from %v to %v", want, again)
+		}
+
+		e := newMigrationEnv(t, s, known-1)
+		e.exec(t, `CREATE TABLE stored_snapshots_p20261005 PARTITION OF stored_snapshots
+			FOR VALUES FROM ('2026-10-05 00:00:00+00') TO ('2026-10-06 00:00:00+00')`)
+		e.exec(t, `INSERT INTO stored_snapshots (org_id, public_id, integration_id, source, received_at, body_day,
+			body_sha256, size_bytes, state)
+			SELECT id, 'SS0000000000AA', 1, 'webhook', '2026-10-05 12:00:00+00', '2026-10-05', sha256('x'), 1, 'pending'
+			FROM organizations`)
+		out.Reset()
+		if err := e.d.Migrate(ctx, log); err != nil {
+			t.Fatalf("Migrate from version %d: %v", known-1, err)
+		}
+		for _, line := range []string{
+			fmt.Sprintf(`"event":"migrations_applied","from":%d,"to":%d`, known-1, known),
+			fmt.Sprintf(`"event":"schema_analyzed","tables":%d,"duration_ms":`, named),
+		} {
+			if !strings.Contains(out.String(), line) {
+				t.Errorf("Migrate from version %d logged %s, want %s", known-1, out.String(), line)
+			}
+		}
+		if left := relations(t, e.d, `n.nspname = current_schema() AND c.relkind = 'r' AND c.reltuples < 0`); len(left) > 0 {
+			t.Errorf("tables of the schema not analyzed on the upgrade: %v", left)
+		}
+		if n := e.count(t, `SELECT reltuples::integer FROM pg_class
+			WHERE oid = 'stored_snapshots_p20261005'::regclass`); n != 1 {
+			t.Errorf("the partition has reltuples %d, want 1", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_stats WHERE schemaname = current_schema()
+			AND tablename = 'stored_snapshots' AND inherited`); n == 0 {
+			t.Error("the partitioned table stored_snapshots has no statistics of its own")
 		}
 	})
 }
