@@ -146,7 +146,8 @@ func (f *fakeDB) ClaimDueWebhookEvents(_ context.Context, arg dbgen.ClaimDueWebh
 			break
 		}
 		e.owner, e.until = arg.Owner, arg.LeaseUntil
-		out = append(out, dbgen.ClaimDueWebhookEventsRow{ID: e.id, NextAttemptAt: e.next})
+		out = append(out, dbgen.ClaimDueWebhookEventsRow{ID: e.id, NextAttemptAt: e.next, DestinationID: e.dest,
+			AlertGroupID: e.group})
 	}
 	// The order of RETURNING is not guaranteed; the worker sorts.
 	slices.Reverse(out)

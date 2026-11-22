@@ -190,7 +190,7 @@ func (w *Worker) republication(ctx context.Context, q queries, org int64, a atte
 		return err
 	}
 	if p := a.pointer; p != nil && p.Kind == OutcomeRetryAfter {
-		if err := holdBucket(ctx, q, org, a.destination, *p, now.Add(p.RetryAfter)); err != nil {
+		if err := holdBucket(ctx, q, org, a.destination, *p, retryAfterEnd(*p, now)); err != nil {
 			return err
 		}
 	}

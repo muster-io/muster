@@ -503,7 +503,7 @@ WITH due AS MATERIALIZED (
 UPDATE thread_replies r
 SET lease_owner = $1::text, lease_until = $2::timestamptz, state = 'pending'
 WHERE r.org_id = $3 AND r.id = ANY (ARRAY(SELECT due.id FROM due))
-RETURNING r.id, r.next_attempt_at
+RETURNING r.id, r.next_attempt_at, r.delivery_id
 `
 
 type ClaimDueRepliesParams struct {
@@ -520,6 +520,7 @@ type ClaimDueRepliesParams struct {
 type ClaimDueRepliesRow struct {
 	ID            int64
 	NextAttemptAt time.Time
+	DeliveryID    int64
 }
 
 // ClaimDueReplies leases the due Thread replies whose delivery has a Root message, of healthy Destinations, one
@@ -530,7 +531,8 @@ type ClaimDueRepliesRow struct {
 // Destinations of @skip_destinations and of the Connections of @skip_connections as ClaimDueDeliveries does
 // (ClaimDueDeliveries, Round). The choice is a materialized CTE, run once, as in ClaimDueDeliveries: planned as the
 // inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up. The
-// skip lists are CASEs on NULL, as there.
+// skip lists are CASEs on NULL, as there. Each reply comes back with its delivery, whose attempt in flight the worker
+// waits for before it prepares the reply (Round).
 func (q *Queries) ClaimDueReplies(ctx context.Context, arg ClaimDueRepliesParams) ([]ClaimDueRepliesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueReplies,
 		arg.Owner,
@@ -549,7 +551,7 @@ func (q *Queries) ClaimDueReplies(ctx context.Context, arg ClaimDueRepliesParams
 	items := []ClaimDueRepliesRow{}
 	for rows.Next() {
 		var i ClaimDueRepliesRow
-		if err := rows.Scan(&i.ID, &i.NextAttemptAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.NextAttemptAt, &i.DeliveryID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -581,7 +583,7 @@ WITH due AS MATERIALIZED (
 UPDATE webhook_events e
 SET lease_owner = $1::text, lease_until = $2::timestamptz
 WHERE e.org_id = $3 AND e.id = ANY (ARRAY(SELECT due.id FROM due))
-RETURNING e.id, e.next_attempt_at
+RETURNING e.id, e.next_attempt_at, e.destination_id, e.alert_group_id
 `
 
 type ClaimDueWebhookEventsParams struct {
@@ -597,6 +599,8 @@ type ClaimDueWebhookEventsParams struct {
 type ClaimDueWebhookEventsRow struct {
 	ID            int64
 	NextAttemptAt time.Time
+	DestinationID int64
+	AlertGroupID  int64
 }
 
 // ClaimDueWebhookEvents leases the due head events of the healthy Destinations that are not deleted: the pending event
@@ -608,7 +612,8 @@ type ClaimDueWebhookEventsRow struct {
 // bucket with its Root requests, which a change of configuration can re-render. The choice is a materialized CTE, run
 // once, as in ClaimDueDeliveries, and the skip list a CASE on NULL as there: with one webhook Destination, a generic
 // plan expected `<> ALL` of the array it cannot see to keep no event, and probed the head of every due event before
-// sorting them.
+// sorting them. Each event comes back with its Destination and Alert Group, whose event in flight the worker waits for
+// before it prepares the next (Round).
 func (q *Queries) ClaimDueWebhookEvents(ctx context.Context, arg ClaimDueWebhookEventsParams) ([]ClaimDueWebhookEventsRow, error) {
 	rows, err := q.db.Query(ctx, claimDueWebhookEvents,
 		arg.Owner,
@@ -626,7 +631,12 @@ func (q *Queries) ClaimDueWebhookEvents(ctx context.Context, arg ClaimDueWebhook
 	items := []ClaimDueWebhookEventsRow{}
 	for rows.Next() {
 		var i ClaimDueWebhookEventsRow
-		if err := rows.Scan(&i.ID, &i.NextAttemptAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.NextAttemptAt,
+			&i.DestinationID,
+			&i.AlertGroupID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -5623,6 +5633,67 @@ func (q *Queries) RenewDeliveryLease(ctx context.Context, arg RenewDeliveryLease
 		arg.Owner,
 	)
 	return err
+}
+
+const renewHeldDeliveryLease = `-- name: RenewHeldDeliveryLease :execrows
+UPDATE deliveries
+SET lease_until = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text AND lease_until > $5::timestamptz
+`
+
+type RenewHeldDeliveryLeaseParams struct {
+	LeaseUntil time.Time
+	OrgID      int64
+	ID         int64
+	Owner      string
+	Now        time.Time
+}
+
+// RenewHeldDeliveryLease renews, when the call of a prepared delivery gets its turn late in a round (Round), the lease
+// this replica still holds at the real time @now, so that the call is made under a lease that outlasts it; no row when
+// the lease ran out meanwhile, as another replica may have claimed the delivery, and the call is then not made.
+func (q *Queries) RenewHeldDeliveryLease(ctx context.Context, arg RenewHeldDeliveryLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewHeldDeliveryLease,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renewHeldReplyLease = `-- name: RenewHeldReplyLease :execrows
+UPDATE thread_replies
+SET lease_until = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text AND lease_until > $5::timestamptz
+`
+
+type RenewHeldReplyLeaseParams struct {
+	LeaseUntil time.Time
+	OrgID      int64
+	ID         int64
+	Owner      string
+	Now        time.Time
+}
+
+// RenewHeldReplyLease renews the lease of a prepared Thread reply whose call gets its turn late in a round, as
+// RenewHeldDeliveryLease does; no row when it ran out meanwhile, and the reply is then not sent.
+func (q *Queries) RenewHeldReplyLease(ctx context.Context, arg RenewHeldReplyLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewHeldReplyLease,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const renewReplyLease = `-- name: RenewReplyLease :exec

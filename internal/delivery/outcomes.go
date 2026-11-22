@@ -128,6 +128,15 @@ func TransientBackoff(n int64, random func() float64) time.Duration {
 	return max(step/2+time.Duration(random()*float64(step/2)), TransientFirstStep)
 }
 
+// retryAfterEnd is the end of the wait a RetryAfter asks for from now, or, in a round, the end of the hold its gate
+// keeps, as it was measured when the answer arrived, the same for the row that got the answer and for the rows it held.
+func retryAfterEnd(out Outcome, now time.Time) time.Time {
+	if !out.heldUntil.IsZero() {
+		return out.heldUntil
+	}
+	return now.Add(out.RetryAfter)
+}
+
 // raiser is the Raiser of the Internal alerts of the Organization org.
 func (w *Worker) raiser(org int64) *internalalerts.Raiser {
 	return internalalerts.NewRaiser(org, w.RunbookBase)
@@ -185,7 +194,7 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 		}
 		return w.delivered(ctx, q, org, a, c, out, now, logs)
 	case OutcomeRetryAfter:
-		until := now.Add(out.RetryAfter)
+		until := retryAfterEnd(out, now)
 		ok, err := w.retry(ctx, q, org, a, until.Add(TokenMargin), false, out, now)
 		if err != nil || !ok {
 			return ok, err
@@ -391,7 +400,9 @@ func released(ctx context.Context, q queries, org int64, old, key string) error 
 // configuration released (published_by_configuration) — (C-17.FR-1, C-32.FR-5, D298): through the dispatcher in a
 // transaction of its own, never inside the
 // outcome's, which locks deliveries before alert_groups while the dispatcher locks them the other way round. A
-// failure is logged; the next delivered call or event of the Alert Group marks it again while it is unmarked.
+// failure is logged; the next delivered call or event of the Alert Group marks it again while it is unmarked. The marks
+// of the first Publications of one Alert Group in two Destinations may run at once, on two replicas or in one round's
+// attempts: the first to lock the Alert Group dates the mark, by its Publication, and the other changes nothing.
 func (w *Worker) markPublished(groupID int64, at time.Time, startsChains bool) func(ctx context.Context,
 	log *logging.Logger) {
 	return func(ctx context.Context, log *logging.Logger) {
@@ -657,7 +668,7 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		}
 		return replyDone, nil
 	case OutcomeRetryAfter:
-		until := now.Add(out.RetryAfter)
+		until := retryAfterEnd(out, now)
 		if _, ok, err := w.retryReply(ctx, q, org, id, until.Add(TokenMargin), false, out, now); err != nil || !ok {
 			return replyNotRecorded, err
 		}

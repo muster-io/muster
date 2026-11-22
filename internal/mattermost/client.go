@@ -31,7 +31,7 @@ import (
 // The timeouts of a call and the largest answer read.
 const (
 	connectTimeout = 5 * time.Second
-	callTimeout    = 10 * time.Second
+	callTimeout    = outbound.CallTimeout
 	maxAnswerBytes = 4 << 20
 )
 
