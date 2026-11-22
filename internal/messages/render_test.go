@@ -78,15 +78,12 @@ func (f *fakeQueries) GetRenderGroup(_ context.Context, arg dbgen.GetRenderGroup
 		TemplateErrorTemplate: pgtype.Text{String: f.routeErr,
 			Valid: f.routeErr != ""}, TimeZone: s.TimeZone, WorkdayStart: s.WorkdayStart, WeekStart: s.WeekStart,
 		OwnerName: s.Owner, RouteGroupKey: s.KeyLabels, MessageLabels: s.Route.MessageLabels, SeverityLabel: "severity",
-		TeamLabel: "team", InstanceLabels: s.InstanceLabels, ChainsStopped: s.ChainsStopped}
+		TeamLabel: "team", InstanceLabels: s.InstanceLabels, ChainsStopped: s.ChainsStopped,
+		TeamNames: slices.Clone(s.Teams), HasAssignees: len(s.Assignees) > 0}
 	if s.SnoozeUntil != nil {
 		row.SnoozeUntil = pgtype.Timestamptz{Time: *s.SnoozeUntil, Valid: true}
 	}
 	return row, nil
-}
-
-func (f *fakeQueries) ListRenderTeams(context.Context, dbgen.ListRenderTeamsParams) ([]string, error) {
-	return f.group.Teams, f.err("ListRenderTeams")
 }
 
 // ListRenderAssignees answers the Assignees of the group as they are, so that a person twice with one Team shows the

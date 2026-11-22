@@ -1707,7 +1707,7 @@ WITH gone AS (
 UPDATE alerts a
 SET unknown_team_value = nullif(v.value, '')
 FROM (SELECT unnest($2::bigint[]) AS id, unnest($3::text[]) AS value) AS v
-WHERE a.org_id = $1 AND a.id = v.id
+WHERE a.org_id = $1 AND a.id = v.id AND a.unknown_team_value IS DISTINCT FROM nullif(v.value, '')
 `
 
 type ResetAlertTeamsParams struct {
@@ -1717,7 +1717,7 @@ type ResetAlertTeamsParams struct {
 }
 
 // ResetAlertTeams forgets the Teams of Alerts that start firing, which InsertAlertTeams then records anew, and records
-// the value of the Team label that names no Team, empty for none.
+// the value of the Team label that names no Team, empty for none; an Alert whose value stays the same is not written.
 func (q *Queries) ResetAlertTeams(ctx context.Context, arg ResetAlertTeamsParams) error {
 	_, err := q.db.Exec(ctx, resetAlertTeams, arg.OrgID, arg.Ids, arg.UnknownValues)
 	return err

@@ -125,8 +125,8 @@ func TestLoadAssignees(t *testing.T) {
 	if _, err := r.Load(t.Context(), nil, 9); err == nil {
 		t.Error("a failing read of the assignees")
 	}
-	delete(f.fail, "ListRenderAssignees")
 	f.group.Assignees = nil
+	// An Alert Group without Assignees does not read them: the failing read is not made.
 	if src, err := r.Load(t.Context(), nil, 9); err != nil || src.Assignees != nil {
 		t.Errorf("none %+v %v", src.Assignees, err)
 	}

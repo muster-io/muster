@@ -190,11 +190,14 @@ func (f *fakeDB) ListChangedAlerts(_ context.Context, arg dbgen.ListChangedAlert
 		return nil, err
 	}
 	var out []dbgen.ListChangedAlertsRow
+	ts := f.teamsOf()
 	for _, id := range arg.Ids {
 		if a := f.alerts[id]; a != nil && !slices.ContainsFunc(out, func(r dbgen.ListChangedAlertsRow) bool {
 			return r.ID == id
 		}) {
-			out = append(out, *a)
+			row := *a
+			row.NoTeams = len(ts.alerts[id]) == 0 && ts.unknown[id] == ""
+			out = append(out, row)
 		}
 	}
 	return out, nil
