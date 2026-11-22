@@ -206,7 +206,7 @@ FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@route_ids::bigint[]) AS route
 WHERE a.org_id = @org_id AND a.id = r.id;
 
 -- ResetAlertTeams forgets the Teams of Alerts that start firing, which InsertAlertTeams then records anew, and records
--- the value of the Team label that names no Team, empty for none.
+-- the value of the Team label that names no Team, empty for none; an Alert whose value stays the same is not written.
 -- name: ResetAlertTeams :exec
 WITH gone AS (
     DELETE FROM alert_teams
@@ -215,7 +215,7 @@ WITH gone AS (
 UPDATE alerts a
 SET unknown_team_value = nullif(v.value, '')
 FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@unknown_values::text[]) AS value) AS v
-WHERE a.org_id = @org_id AND a.id = v.id;
+WHERE a.org_id = @org_id AND a.id = v.id AND a.unknown_team_value IS DISTINCT FROM nullif(v.value, '');
 
 -- InsertAlertTeams records the Teams of Alerts that start firing with the rule that decided each, and the Team matcher
 -- of the rule matcher; an empty matcher is null.

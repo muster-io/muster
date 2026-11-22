@@ -109,7 +109,7 @@ func (s *Service) routePublicID(ctx context.Context, q Queries, id int64) (strin
 func (s *Service) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []ingest.AlertChange) (ingest.Routed,
 	error) {
 	if len(changes) > 0 {
-		ctx = withSnapshot(ctx, changes[0].StoredSnapshotID)
+		ctx = withSnapshot(ctx, changes[0].StoredSnapshotID, changes[0].ReceivedAt)
 	}
 	q := s.queries(tx)
 	e := s.newEngine(q, tx)
@@ -147,6 +147,10 @@ type alertRow struct {
 	Episode       int64
 	RouteID       int64
 	Severity      organization.SeverityLevel
+	// noTeams says that the Alert fired in this Snapshot and that routing recorded no Team and no value of the Team
+	// label that names no Team on it, in this transaction and under the shared lock of the evaluation of the Teams,
+	// which it holds until the commit: the Teams the Alert brings are known to be none without reading them.
+	noTeams bool
 }
 
 // membership is the firing membership of an Alert in an Alert Group.
@@ -251,7 +255,7 @@ func (e *engine) changes(ctx context.Context, changes []ingest.AlertChange) erro
 	if err != nil || len(ids) == 0 {
 		return err
 	}
-	if err := e.loadAlerts(ctx, ids); err != nil {
+	if err := e.loadAlerts(ctx, ids, firedIn(changes)); err != nil {
 		return err
 	}
 	var fired []*alertRow
@@ -320,8 +324,20 @@ func (e *engine) handed(ctx context.Context, changes []ingest.AlertChange) ([]in
 	return append(ids, slices.Sorted(maps.Keys(listed))...), nil
 }
 
-// loadAlerts reads the Alerts and where they fire.
-func (e *engine) loadAlerts(ctx context.Context, ids []int64) error {
+// firedIn are the Alerts that fire in the changes: their first firing, or a firing after a resolve, which routing
+// classified by their Teams in the Snapshot's transaction.
+func firedIn(changes []ingest.AlertChange) map[int64]bool {
+	out := map[int64]bool{}
+	for _, c := range changes {
+		if c.Kind == ingest.ChangeFired {
+			out[c.AlertID] = true
+		}
+	}
+	return out
+}
+
+// loadAlerts reads the Alerts and where they fire; of those that fired, whether they bring no Team (alertRow.noTeams).
+func (e *engine) loadAlerts(ctx context.Context, ids []int64, fired map[int64]bool) error {
 	rows, err := e.q.ListChangedAlerts(ctx, dbgen.ListChangedAlertsParams{OrgID: e.s.orgID, Ids: ids})
 	if err != nil {
 		return fmt.Errorf("read the changed alerts: %w", err)
@@ -329,7 +345,8 @@ func (e *engine) loadAlerts(ctx context.Context, ids []int64) error {
 	for _, r := range rows {
 		a := &alertRow{ID: r.ID, IntegrationID: r.IntegrationID, Fingerprint: r.Fingerprint,
 			Conflicts: r.StaticLabelConflicts, Firing: r.Status == "firing", StartsAt: r.StartsAt.UTC(),
-			Episode: r.Episode, RouteID: r.RouteID.Int64, Severity: severityOf(r.SeverityLevel)}
+			Episode: r.Episode, RouteID: r.RouteID.Int64, Severity: severityOf(r.SeverityLevel),
+			noTeams: r.NoTeams && fired[r.ID]}
 		if err := readLabels(r.Labels, r.Annotations, a); err != nil {
 			return err
 		}
@@ -797,7 +814,7 @@ func (e *engine) create(ctx context.Context, s *slot) error {
 	g := &Group{PublicID: publicid.New(publicid.AlertGroup), Number: number, RouteID: s.route.ID,
 		KeyLabels: s.route.Key, KeyValues: s.values, KeySHA: s.sha, Title: title, TitleFromKey: fromKey,
 		CommonLabels: first.Labels, CommonAnnots: first.Annotations, Severity: organization.SeverityInfo,
-		CreatedAt: e.now, LastChangedAt: e.now}
+		CreatedAt: e.now, LastChangedAt: e.now, noTeams: true}
 	if e.source != nil {
 		g.FiringAgainAfterID = &e.source.ID
 	}

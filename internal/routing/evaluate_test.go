@@ -485,6 +485,54 @@ func TestRouterTeams(t *testing.T) {
 	}
 }
 
+// TestRouterFirstFiring is C-25.FR-5 on the first firing of an Alert (episode 1), whose row the Snapshot inserted: it
+// has nothing of an earlier firing to forget, so routing writes only its Teams and a value of the Team label that
+// names no Team; an Alert that fires again after a resolve has what its previous firing recorded replaced as before.
+func TestRouterFirstFiring(t *testing.T) {
+	_, store, _ := newService(t)
+	router := newRouter(store)
+	classTeams(store)
+	store.alerts[1] = []byte(`{"severity":"warning"}`)
+	store.alerts[2] = []byte(`{"team":"payments"}`)
+	store.alerts[3] = []byte(`{"pod":"checkout-api-1"}`)
+	store.alerts[4] = []byte(`{"team":"Payments"}`)
+	store.alerts[5] = []byte(`{"team":"search"}`)
+	store.alertTeams[5] = []string{"1/label/"}
+	store.unknown[5] = "old"
+	changes := []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: 1, Episode: 1},
+		{Kind: ingest.ChangeFired, AlertID: 2, Episode: 1}, {Kind: ingest.ChangeFired, AlertID: 3, Episode: 1}}
+	if _, err := router.AlertChanges(t.Context(), nil, changes); err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64][]string{2: {"1/label/"}, 3: {`2/matcher/pod=~"checkout-.*"`}}
+	if !reflectEqual(store.alertTeams, map[int64][]string{2: want[2], 3: want[3], 5: {"1/label/"}}) ||
+		store.calls["ResetAlertTeams"] != 0 || store.calls["InsertAlertTeams"] != 1 || len(store.unknown) != 1 {
+		t.Errorf("first firings: teams %v, unknown %v, queries %v", store.alertTeams, store.unknown, store.calls)
+	}
+
+	// A first firing with a value that names no Team writes the value of that Alert alone; one that fires again
+	// forgets the Teams and the value of its previous firing.
+	store.calls = map[string]int{}
+	changes = []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: 4, Episode: 1},
+		{Kind: ingest.ChangeFired, AlertID: 1, Episode: 1}, {Kind: ingest.ChangeFired, AlertID: 5, Episode: 2}}
+	if _, err := router.AlertChanges(t.Context(), nil, changes); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.unknown[1]; ok || store.unknown[4] != "Payments" || store.unknown[5] != "" ||
+		!slices.Equal(store.alertTeams[5], []string{"3/label/"}) || store.calls["ResetAlertTeams"] != 1 {
+		t.Errorf("a value and a firing again: teams %v, unknown %v, queries %v", store.alertTeams, store.unknown,
+			store.calls)
+	}
+
+	// First firings without a Team and without a value write nothing about Teams.
+	store.calls = map[string]int{}
+	if _, err := router.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: 1,
+		Episode: 1}}); err != nil || store.calls["ResetAlertTeams"] != 0 || store.calls["InsertAlertTeams"] != 0 ||
+		store.calls["SetAlertRoutes"] != 1 {
+		t.Errorf("no team: %v, queries %v", err, store.calls)
+	}
+}
+
 // reflectEqual compares the recorded Teams, ignoring Alerts without any.
 func reflectEqual(got, want map[int64][]string) bool {
 	for id, ts := range got {

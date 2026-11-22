@@ -265,18 +265,22 @@ WHERE org_id = @org_id AND id = @id;
 
 -- ListSnapshotAlerts reads the Alerts a Snapshot touches, and locks them until the Snapshot's transaction ends so that
 -- the retention of the Alerts view skips them: those it lists by fingerprint and those with an active presence in its
--- groupKey.
+-- groupKey. The ids are found first, each way by its own index, so that the Alerts of the Integration are not scanned.
 -- name: ListSnapshotAlerts :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.generator_url, a.static_label_conflicts, a.status,
        a.starts_at, a.ends_at, a.episode, a.fired_at, a.first_seen_at, a.last_seen_at, a.resolved_at,
        a.resolve_reason, a.resolve_reason_text
 FROM alerts a
 WHERE a.org_id = @org_id AND a.integration_id = @integration_id
-  AND (a.fingerprint = ANY(@fingerprints::text[])
-       OR a.id IN (SELECT p.alert_id
-                   FROM alert_presences p
-                   WHERE p.org_id = @org_id AND p.alertmanager_group_id = @alertmanager_group_id
-                     AND p.state IN ('listed', 'missed')))
+  AND a.id = ANY(ARRAY(SELECT f.id
+                       FROM alerts f
+                       WHERE f.org_id = @org_id AND f.integration_id = @integration_id
+                         AND f.fingerprint = ANY(@fingerprints::text[])
+                       UNION
+                       SELECT p.alert_id
+                       FROM alert_presences p
+                       WHERE p.org_id = @org_id AND p.alertmanager_group_id = @alertmanager_group_id
+                         AND p.state IN ('listed', 'missed')))
 ORDER BY a.id
 FOR NO KEY UPDATE OF a;
 
