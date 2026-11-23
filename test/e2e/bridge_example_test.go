@@ -29,7 +29,7 @@ import (
 // exampleImage is the example bridge of muster-bridge-go (ADR-0017): the image of a library release, pinned by digest.
 // Renovate moves the version and the digest together when the library releases.
 // renovate: datasource=docker depName=ghcr.io/muster-io/muster-example-bridge
-const exampleImage = "ghcr.io/muster-io/muster-example-bridge:v0.1.1@sha256:0a138b1cdbfabccf0a74afe5f7be074d4ec0bb5ddbbc588858df139e1b4d324e"
+const exampleImage = "ghcr.io/muster-io/muster-example-bridge:v0.1.2@sha256:5755806b389d145a4a1475f741e4fcdb796c885f56391f7cbde0fd966451a65d"
 
 const (
 	exampleListen = "127.0.0.1:18095"
