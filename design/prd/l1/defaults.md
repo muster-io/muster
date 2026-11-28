@@ -162,7 +162,7 @@ Other lifecycle values:
 | `organization.buttons` | all: every button — Acknowledge, Resolve, each Snooze duration, durations added to a Route later included, and both Snooze presets — until an Admin lists the buttons | Organization | C-28 | decided |
 | `destination.buttons` | as in the Organization (`organization.buttons`) | Destination | C-28 | decided |
 | `message.compact_alerts_listed` | 5 values of the distinguishing label, then "…and K more" (C-29.FR-3) | built in | C-29 | P-83 |
-| `message.layout_fields` | 10 fields in a Route's message layout; above that `422` (`too_long`) | built in | C-38 | P-94 |
+| `message.layout_fields` | 10 fields in a Route's message layout, the `fields` Slack takes in one `section` (P-94, confirmed by S-209 and F-149); above that `422` (`too_long`) | built in | C-38 | decided |
 | `message.layout_preview_groups` | the 20 most recent Alert Groups of the Route offered by the layout preview | built in | C-38 | P-95 |
 
 ## Connections and Destinations

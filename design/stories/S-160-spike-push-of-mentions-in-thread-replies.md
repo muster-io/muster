@@ -10,8 +10,8 @@ files_touched:
   - design/facts.md
   - design/stories/S-161-documentation-escalation-chains-notification-rules-and-how-an-alert-reaches-people.md
 acceptance:
-  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with an `@username` Mention of a member reaches that member's phone as a push in the Mattermost mobile app through the push proxy, with `PushNotificationContents` `full` and with `generic`, for a member who follows the Thread and one who does not, what the push shows in each case, and the server, app and proxy versions."
-  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with `<@U…>` reaches the member's phone as a push in the Slack mobile app, with the member's default notification settings and with \"Mentions\" only for the channel, and the app version."
+  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with an `@username` Mention of a member reaches that member's phone as a push in the Mattermost mobile app through the push proxy, with `PushNotificationContents` `full`, for a member who follows the Thread and one who does not, what the push shows in each case, and the server and proxy versions, and the app's if they were recorded; `generic` stays under Pending, with what its push shows from the source (F-115)."
+  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with `<@U…>` reaches the member's phone as a push in the Slack mobile app, with the member's default notification settings, and the app version if it was recorded; the channel set to \"Mentions\" only stays under Pending."
   - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether the bot's comment in a channel's discussion group with a `tg://user?id=` Mention reaches a member's phone as a push, when the member did not mute the group and when they muted it — citing S-132's entry where it already settled the muted case — with the client versions."
   - "[C-32.FR-11] The item \"Push of Mentions in Threads\" leaves Pending in `design/facts.md`; S-161's contract says, for each messenger the facts confirm, that a Page by Mention reaches a phone at night, and keeps \"only a Notification gateway is reliable at night\" for each one they do not, citing the entries in the pages it completes; any requirement the facts contradict is proposed for change in the pull request."
 verify: "make lint"
@@ -91,6 +91,12 @@ None; the spike answers them.
 - `covers` names C-32.FR-11 in part: the spike settles its "push to phones is still to be verified"; the documentation
   that depends on it is S-161's.
 - No example in the repository names a real person; the test accounts are `alice` and `bob`.
+- The pull request that records the facts (F-130, F-143, F-150) narrowed acceptance 1 and 2: the maintainer kept the
+  Mattermost test server on `PushNotificationContents` `full` for the run and skipped the Slack channel set to
+  "Mentions" only and the reply with "Also send to channel", and the versions of the Mattermost and Slack phone apps
+  were not recorded. Under `generic` the server builds the push with a fixed text instead of the post's (F-115, read in
+  the source); the skipped checks are under Pending. The same run measured the push of direct messages for C-43
+  (F-134, F-146, F-153), which S-161 cites for the quiet settings of a phone.
 
 ## Coverage
 

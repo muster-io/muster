@@ -15,6 +15,9 @@ files_touched:
   - docs/concepts/routing-to-teams.md
   - docs/configure/messages-and-templates.md
   - docs/messengers/notification-gateways.md
+  - docs/messengers/mattermost.md
+  - docs/messengers/slack.md
+  - docs/messengers/telegram.md
   - docs/messengers/write-a-bridge.md
   - docs/index.md
   - docs/llms.txt.tmpl
@@ -58,7 +61,19 @@ issue: 450
   `docs/index.md` — the page in the overview.
 - **The night**: for each of Mattermost, Slack and Telegram, the page says what S-160's entry found; until S-160 merges,
   and wherever its facts do not confirm a push, "at night only a Notification gateway is reliable" stays, here and in
-  Messengers → Notification gateways.
+  Messengers → Notification gateways. S-160's facts confirm the push in all three, with the person's default settings
+  and, as the pushes were measured, the desktop client not in use: Mattermost through the push proxy under
+  `PushNotificationContents` `full`, whether the person follows the Thread or not (F-143; under `generic` the push
+  shows a fixed text, F-115); Slack, followed or not (F-150); Telegram, also
+  through a muted channel and discussion group, for an ordinary member of the group (F-130, F-129). None rings through
+  the person's own quiet settings: Do Not Disturb kept a direct message from pushing in Mattermost (F-146) and Slack
+  (F-153), and a Focus mode of the phone made Telegram's push silent (F-134). So the pages say that a Page by Mention
+  reaches a phone at night when the person keeps the messenger's push on and the app out of Do Not Disturb and Focus
+  modes, and keep recommending a Notification gateway for people who must be reached whatever their phone and
+  messenger do; Messengers → Mattermost and Slack, in "Who gets notified", and Telegram, in "Join the discussion group
+  and mute the channel", say what the server and the person need for the push (for Mattermost, push notifications on
+  with a push proxy, and what `PushNotificationContents` shows; for Telegram, that a Mention still rings through the
+  muted channel and group).
 - **Screenshots**: `web/e2e/screenshots/escalation-chains.spec.ts` on `muster dev` — the chain page with the payments
   chain and "How it went", and the Alert Group page with its running chains and Assignees; the images are generated and
   not listed.
@@ -101,6 +116,11 @@ None.
   gateway is reliable, without pending wording. A follow-up pull request after S-160 adds the facts, cites the F-NNN
   entries and changes the statement where they confirm a push, as the note above describes; acceptance 1's
   per-messenger clause and the C-32.FR-11 facts row stay open until then.
+- S-160's entries are F-130 (Telegram), F-143 (Mattermost) and F-150 (Slack), with F-134, F-146 and F-153 for a phone's
+  quiet settings; they confirm the push in all three messengers, so the follow-up follows the note "If S-160's facts
+  confirm a push in every messenger" above. It also
+  edits the three messenger pages, `docs/messengers/mattermost.md`, `slack.md` and `telegram.md`, which "The night"
+  names and `files_touched` gained when S-160 recorded the facts.
 
 ## Coverage
 
