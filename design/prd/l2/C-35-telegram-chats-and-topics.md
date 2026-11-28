@@ -150,8 +150,11 @@ confirmed or corrected by a spike with the maintainer before the stories, as S-1
 - **C-35.FR-14** Telegram's answer that a send or an edit is refused because the bot was removed from the chat or may
   no longer send there, or because the topic was deleted or is closed, is Fatal (C-14.FR-7) with the text of FR-12 as
   the reason, so the Destination becomes Broken (C-11.FR-9) and its deliveries wait; a closed topic is Broken with
-  `topic_closed` as a deleted one is with `topic_not_found`, and reopening the topic lets the probe end it. The exact
-  answers Telegram gives are to be verified. Renaming a topic or the chat changes nothing for delivery, since Muster
+  `topic_closed` as a deleted one is with `topic_not_found`. Telegram answers `400` `Bad Request: message thread not
+  found` for a deleted topic and `400` `Bad Request: TOPIC_CLOSED` for a closed one
+  ([F-138](../../facts.md#forum-topics)). After the topic is reopened, the Broken state ends when a later send into it
+  succeeds — the oldest waiting delivery, which the Broken probe of C-11.FR-9 attempts; no check probes the topic
+  (FR-12). Renaming a topic or the chat changes nothing for delivery, since Muster
   sends to the stored ids; the Destination shows the title of the chat that the last check read, and the topic's name
   that Muster gave it or that Telegram has given Muster (to verify).
 - **C-35.FR-15** When Telegram answers that a group chat became a supergroup and names the new chat id
@@ -237,7 +240,8 @@ Checked against the fake Telegram server.
   Group again once, Quietly, with "The previous message was deleted at HH:MM", and the refused reply, then later Thread
   replies, reply to the new Root message.
 - **C-35.AC-7** With the topic deleted on the fake server, the next send makes the Destination Broken with
-  `topic_not_found`; with a topic closed, with `topic_closed`, and reopening it lets the probe end the Broken state.
+  `topic_not_found`; with a topic closed, with `topic_closed`; after the topic is reopened, the Broken state ends when a
+  later send into it succeeds.
 - **C-35.AC-8** With the fake group chat changed into a supergroup, the next send makes the Destination Broken with
   `chat_upgraded` and the new id on its page; the Destination's chat is unchanged until "Use the supergroup" saves it,
   after which each open Root message posted before the change gets the final edit through the old chat id and its
