@@ -32,8 +32,8 @@ confirmed or corrected by a spike with the maintainer before the stories, as S-1
    in the new topic Quietly.
 5. A basic group chat grows and its owner turns it into a supergroup, which gives it a new chat id. The next send to
    the old id is refused; the Destination becomes Broken with "The group became a supergroup", and the Admin presses
-   "Use the supergroup". The old Root messages get "No longer updated here" where Telegram still lets the bot edit them,
-   and the open Alert Groups are posted Quietly in the supergroup.
+   "Use the supergroup". The old Root messages get "No longer updated here", edited through the old chat id, and the
+   open Alert Groups are posted Quietly in the supergroup.
 6. An Escalation step Pages the On-call of "payments" in the topic "Payments · critical": the Page is a reply to the
    Root message in that topic that mentions Petr by his Telegram Account link (C-32.FR-9).
 
@@ -121,10 +121,10 @@ confirmed or corrected by a spike with the maintainer before the stories, as S-1
   bot there, and passes when:
   - a group chat or a supergroup: the bot is a member that may send messages — an admin, or a member whom neither the
     chat's permissions nor a restriction keep from sending (to verify);
-  - a forum: the same, and `getChat` says that the chat is a forum (`is_forum`); with a topic named, the topic exists
-    and is open, which the check tells with `sendChatAction` in the topic — a chat action is not a message — if the
-    spike confirms that it is refused for a deleted and for a closed topic; otherwise the first send tells it (FR-14), and the check of a Destination Broken with `topic_not_found` or
-    `topic_closed` does not pass until a send to the topic succeeds.
+  - a forum: the same, and `getChat` says that the chat is a forum (`is_forum`). Whether a named topic exists and is
+    open is not probed: `sendChatAction` with the topic answers `true` for a deleted and for a closed topic alike
+    ([F-138](../../facts.md#forum-topics)), so the first send tells it (FR-14), and the check of a Destination Broken
+    with `topic_not_found` or `topic_closed` does not pass until a send to the topic succeeds (journal D765).
 
   A check that passes but finds another chat than the stored numeric id — a `@username` that now names another chat —
   fails with `changed_since_saved`, as for a channel, so that the Broken probe does not end a Broken state that the
@@ -160,9 +160,10 @@ confirmed or corrected by a spike with the maintainer before the stories, as S-1
   Destination with the new chat id like any other save — the check, the Audit log and the move of FR-16.
 - **C-35.FR-16** A save that changes the chat, the topic or the mode of a Telegram Destination moves it: each open
   Root message in the old place gets the final edit "No longer updated here; current state in Muster: {link}" of
-  C-11.FR-14 where Telegram still lets the bot edit it — a deleted topic or a group chat that became a supergroup may
-  not — and the open Alert Groups are posted in the new place Quietly, as a newly added Destination receives them
-  (C-11.FR-14).
+  C-11.FR-14 where Telegram still lets the bot edit it — in a deleted topic it does not — and the open Alert Groups are
+  posted in the new place Quietly, as a newly added Destination receives them (C-11.FR-14). After a group chat became a
+  supergroup, the final edit of a Root message posted before the change goes through the old chat id, where the message
+  keeps its id; the new chat id does not reach it ([F-142](../../facts.md#basic-group-chats); journal D765).
 
 ### Mentions and Pages
 
@@ -205,8 +206,8 @@ read-only `channel_chat_id`. `channel_id`, which `TelegramDestinationInput` requ
 mode `channel` only. "Use the supergroup" is an update with the new chat id. The names are fixed in `api/openapi.yaml`
 by the backend story, spec-first. The Destination check gains the steps and codes of FR-12. The fake Telegram server,
 which already has supergroups, gains basic group chats, forums with open, closed and deleted topics, the General topic
-and `createForumTopic` with the right to manage topics, the change of a group chat into a supergroup, and
-`sendChatAction` as the spike records it.
+and `createForumTopic` with the right to manage topics, the change of a group chat into a supergroup with edits
+through the old chat id (F-142), and `sendChatAction` answering `true` in deleted and closed topics (F-138).
 
 ## Acceptance
 
@@ -239,7 +240,8 @@ Checked against the fake Telegram server.
   `topic_not_found`; with a topic closed, with `topic_closed`, and reopening it lets the probe end the Broken state.
 - **C-35.AC-8** With the fake group chat changed into a supergroup, the next send makes the Destination Broken with
   `chat_upgraded` and the new id on its page; the Destination's chat is unchanged until "Use the supergroup" saves it,
-  after which its open Alert Groups are posted Quietly in the supergroup.
+  after which each open Root message posted before the change gets the final edit through the old chat id and its
+  open Alert Groups are posted Quietly in the supergroup.
 - **C-35.AC-9** A save that moves a Destination from one topic to another makes the final edit "No longer updated
   here" of each open Root message in the old topic and posts the open Alert Groups Quietly in the new one; a resolved
   Alert Group is neither edited nor posted. A change of mode from Channel to Chat moves a Destination likewise.
