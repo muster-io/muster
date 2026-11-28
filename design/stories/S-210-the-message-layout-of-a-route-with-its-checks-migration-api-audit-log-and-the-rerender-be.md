@@ -99,8 +99,9 @@ issue: null
 - **API handlers** (`internal/api/routes.go`): map `own_message_layout` and `message_layout` in both directions, add the
   pointers of the problems, and answer a write without `routes:write` with `403` as the other Route fields are.
 - **Settings**: `route.message_layout`, `route.message_layout_alerts_listed`, `message.layout_fields` and
-  `message.layout_preview_groups` are rows of `defaults.md` (decided and P-93 to P-95); the first two are used here, the
-  last by S-215 and S-218.
+  `message.layout_preview_groups` are rows of `defaults.md` (decided, P-93 and P-95); the first two are used here, the
+  last by S-215 and S-218. `message.layout_fields` is 10, the `fields` Slack takes in one `section` (F-149), which
+  confirmed P-94 (S-209).
 - **Documents**: `schema.md` §4.8 (the column and the re-render), `design/prd/L2.md` §6 — the note under the table that
   lists the changes the re-render of the open Root messages must reach at once (C-08.FR-8) gains "the message layout of
   a Route (C-38.FR-14)", which C-38.FR-14 asks this story to add.

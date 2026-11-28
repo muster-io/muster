@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-11-15
+- Date: 2026-11-28
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost, Slack, Alertmanager and Grafana actually behave. Each fact has a stable id
@@ -140,6 +140,18 @@ C-14.FR-7, L1 open question 3.
 running with `409 Conflict: terminated by other getUpdates request`; after that the two pollers take turns. —
 _2026-10-03 · two pollers on one token · Bot API 10.3_ · Used in C-14.FR-1.
 
+**F-131. `allowed_updates` stays with the bot until a `getUpdates` changes it.** A `getUpdates` with `allowed_updates`
+`["message","edited_message"]`, made to wait for the automatic copy of a channel post, narrowed what the bot received
+afterwards: the later `getUpdates` calls, which named no `allowed_updates`, returned no `callback_query`, so three
+presses on a button of the bot's private message, about 4 to 9 minutes later, were never delivered, while a press in a
+group chat about 5 minutes before that call had arrived. After the list was restored by hand with a `getUpdates` that
+named every type (`message`, `edited_message`, `channel_post`, `edited_channel_post`, `my_chat_member`, `chat_member`
+and `callback_query`), presses arrived again. The [documentation of `getUpdates`](https://core.telegram.org/bots/api#getupdates)
+says so: "If not specified, the previous setting will be used". The setting belongs to the bot, so a tool that narrows
+it narrows it for every later poller of the token; Muster's client sends its own list with every `getUpdates` and
+`setWebhook`. — _2026-11-28 · presses before the narrowing call, after it and after the list was restored, during the
+checks of F-132 to F-142 · Bot API 10.4 or later_ · Used in C-14.FR-1.
+
 ### Message format
 
 **F-019. Rich Messages.** `sendRichMessage` sends a message from `rich_message.markdown` (or `html`, or `blocks`);
@@ -201,12 +213,160 @@ clients' notification exceptions for a chat, and a comment with `disable_notific
 and three comments under its copy, watched in the clients · Bot API 10.4, Telegram Desktop for macOS and a phone client,
 versions not recorded_ · Used in C-27.FR-8, C-28, C-32.FR-11.
 
+**F-130. A Mention rings a member's phone through a muted channel and discussion group, and a comment without one does
+not.** On 2026-11-28, on the channel and the discussion group of this section, the bot posted in the channel with
+`disable_notification` and, under the automatic copy, commented as in F-129, without `disable_notification`: once with
+`<a href="tg://user?id=…">…</a>` of an ordinary member of the group, not its creator, and once without a Mention. The
+member's phone was locked, with Telegram for iOS 13.3 (37637) in the background. With neither the channel nor the group
+muted, both comments pushed at once and showed their text, as every comment does for a member (F-014). With both
+muted, the comment without a Mention made no push, and the comment that mentioned the member pushed at once and showed
+its text. A first pair of runs, with the group muted but not the channel, is not counted: the push of the channel post
+was taken for that of the comment. F-129 saw a Mention ring a member who muted the group, on the desktop and a phone;
+this check adds the muted channel, the comment without a Mention as a control, and the client's version. Not checked
+for comments: the anonymous creator on a phone, a comment with `disable_notification`, the clients' notification
+exceptions for a chat, and a phone in a Focus mode (F-134 is a private chat in one). — _2026-11-28 · two channel posts and four comments under their copies, watched on the locked
+phone · Bot API 10.4 or later, Telegram for iOS 13.3 (37637)_ · Used in C-32.FR-11, C-32.FR-20.
+
+### Private chats
+
+The entries of this section and of the next two were checked on 2026-11-28 against Telegram's cloud Bot API — 10.4 or
+later, since `getMe` does not tell the version — with a test bot without a webhook and with privacy mode on (`getMe`
+answered `can_read_all_group_messages` `false`). The chats were a forum supergroup, in which the bot was first an admin
+allowed to manage topics, then an admin without that right, then an ordinary member; a basic group chat, created as a
+group without topics or a public link, in which the bot was an ordinary member; and the channel and discussion group of
+the section above. Two test accounts took part: `alice`, an ordinary member of the chats who had pressed Start in the
+bot, with Telegram for iOS 13.3 (37637) on a locked phone; and `bob`, the creator of the basic group chat, who pressed
+Start only where an entry says so. The names follow the roles of this check, not those of F-128 and F-129, where `alice`
+is the creator of the channel and its group. People made their changes in Telegram for macOS 13.2.0.283494. The Bot API was called
+with `curl`, its answers were logged as JSON with the token removed, and updates were read with `getUpdates`.
+
+**F-132. What a private chat answers before Start, after a block and for an unknown id.** `sendMessage` to `bob`, who
+had never pressed Start in the bot, answered `403` `Forbidden: bot can't initiate conversation with a user`. Yet
+`getChat` with his id answered `200` with `type` `private`, and `getChatMember` with his id as the chat and as the user
+`200` with `status` `member`; he shared a group chat with the bot, so neither read tells whether a person pressed Start.
+After `bob` pressed Start and then blocked the bot, `sendMessage` and `sendChatAction` both answered `403`
+`Forbidden: bot was blocked by the user`, so a chat action tells a block without sending a message. An id that is no
+chat answered `400` `Bad Request: chat not found`. Not checked: a deleted account. — _2026-11-28 · the test bot and the
+two accounts · Bot API 10.4 or later_ · Used in C-43.FR-12, C-43.FR-13, C-43.FR-17.
+
+**F-133. Buttons, edits and copies in a private chat.** A press of `alice` on an inline button of the bot's private
+message to her arrived as a `callback_query` with `message.chat.type` `private`, `from` set to her, a `chat_instance`
+and the button's `callback_data`, and `answerCallbackQuery` answered `true`; three earlier presses were lost to F-131.
+`editMessageText` without `reply_markup` left the message without buttons, and with `reply_markup` gave them back
+(compare F-011). The buttons stay on the message the bot sent: `forwardMessage` of it into a group answered a message
+without `reply_markup`, and `copyMessage`, which answers only the new `message_id`, made a copy that the client showed
+without buttons, as it showed the forwarded one; a copy that `alice` forwarded by hand had none either. Not checked: an edit of a private message days old (F-065 checked a channel and a
+group). — _2026-11-28 · private messages with two buttons, presses on the phone, two edits, a forward and a copy by the
+bot and a forward by hand · Bot API 10.4 or later_ · Used in C-43.FR-7, C-43.FR-8, C-43.FR-14.
+
+**F-134. The push of a private message.** The bot sent private messages to `alice` without `disable_notification`,
+her phone locked. With the app killed, the push came about 10 s after the send and showed the text; with the chat
+muted in the app, no push came; with a Focus mode of the phone on, the push came at once, without sound. An edit of a
+private message made no push, as F-012 found in a channel. — _2026-11-28 · three messages and one edit, watched on the
+phone · Bot API 10.4 or later, Telegram for iOS 13.3 (37637)_ · Used in C-43.FR-8, C-43.FR-13.
+
+**F-135. A private chat passed about 1.4 requests a second for 30 s.** One client, sending one request after another,
+each with `disable_notification`, for 30 s: 43 `sendMessage` to one private chat and 39 `editMessageText` of one message
+there (about 1.4 and 1.3 a second), and 41 sends alternating between the private chats of `alice` and `bob` (about 0.7
+a second each), all answered `200`, none `429`. One chat thus took more than the one message a second that Telegram's
+[Bots FAQ](https://core.telegram.org/bots/faq#my-bot-is-hitting-limits-how-do-i-avoid-this) asks for in one chat. The
+limit was not reached, so the budget of a private chat, and whether edits count in it as in a group (F-016), are not
+known; the budget across chats was not approached. — _2026-11-28 · three bursts of 30 s · Bot API 10.4 or later_ ·
+Used in C-43.FR-10, C-43.FR-11, P-98.
+
+### Forum topics
+
+**F-136. Sending into a forum, and its General topic.** `getChat` on the forum answered `type` `supergroup` with
+`is_forum` `true`; for the discussion group and the basic group chat it has no `is_forum`. A `sendMessage` with a
+topic's `message_thread_id` landed in the topic, and its answer carried `message_thread_id` and `is_topic_message`
+`true`; a reply with `reply_parameters` landed in the topic of the message it answered, with or without
+`message_thread_id`, and its answer named the topic too; so did the answer to `editMessageText` of a topic message. A
+`sendMessage` without `message_thread_id` landed in the General topic, and its answer had neither field.
+`message_thread_id` `1` was refused with `400` `Bad Request: message thread not found` whether General was open, closed
+(`closeGeneralForumTopic`) or hidden (`hideGeneralForumTopic`), while a send without `message_thread_id` was accepted in
+each of these states by the bot as an admin allowed to manage topics; where the client showed the sends with General
+closed or hidden was not recorded clearly. `editGeneralForumTopic` with the name that General already had answered `400`
+`Bad Request: TOPIC_NOT_MODIFIED`. `sendChatAction` with a topic's `message_thread_id` answered `true`, and the client
+showed "typing" in that topic. — _2026-11-28 · three runs of the same sends, looked at in the client; General closed,
+reopened, hidden and shown again by the bot · Bot API 10.4 or later_ · Used in C-35.FR-2, C-35.FR-3, C-35.FR-5.
+
+**F-137. Creating a topic needs the right to manage topics.** `createForumTopic` by the bot as an admin whose
+`getChatMember` had `can_manage_topics` `true` answered a result with `message_thread_id`, `name` and `icon_color`; as an
+admin without that right, and as an ordinary member, it answered `400` `Bad Request: not enough rights to create a
+topic`. With the right, `closeForumTopic` and `deleteForumTopic` answered `true`. — _2026-11-28 · the bot in its three
+roles · Bot API 10.4 or later_ · Used in C-35.FR-4.
+
+**F-138. A deleted topic, and a closed one.** After the bot deleted a topic with `deleteForumTopic`, a send and a reply
+with its `message_thread_id` answered `400` `Bad Request: message thread not found`, a reply with only `reply_parameters`
+to a message in it `400` `Bad Request: message to be replied not found`, and `editMessageText` of such a message `400`
+`Bad Request: message to edit not found`; the answers were the same with the bot an admin with and without the right to
+manage topics and an ordinary member, and the client showed none of those messages. A topic that the bot had created
+and then closed with `closeForumTopic` took the bot's sends, replies and edits in all three roles, and they landed in it.
+In a topic that a person created and closed, the bot as an ordinary member got `400` `Bad Request: TOPIC_CLOSED` for a
+send and for a reply. As far as the check tells, the difference is who created the topic; the bot as an admin was not
+tried in a topic that a person closed. `sendChatAction` with the `message_thread_id` answered `true` for the deleted
+topic and for both closed ones, so a chat action tells neither a deleted nor a closed topic. — _2026-11-28 · one live,
+one closed and one deleted topic, probed in each role of the bot, and a topic a person created and closed · Bot API 10.4
+or later_ · Used in C-35.FR-12, C-35.FR-14.
+
+**F-139. Topic service messages reach a bot with privacy mode on.** When a person created, renamed, closed and reopened
+a topic, the bot received `forum_topic_created`, `forum_topic_edited`, `forum_topic_closed` and `forum_topic_reopened`
+as `message` updates, both as an admin and as an ordinary member; a person's ordinary message in the forum reached the
+bot as an admin and not as an ordinary member, as privacy mode says. — _2026-11-28 · the same changes by hand with the
+bot an admin and a member · Bot API 10.4 or later_ · Used in C-35.FR-14.
+
+**F-140. Turning topics off.** After a person turned Topics off for the forum, `getChat` still answered `type`
+`supergroup`; a `sendMessage` with a former topic's `message_thread_id` and one without it both answered `200` without
+`message_thread_id`; a reply to a message of a former topic answered `200` with that topic's `message_thread_id` and
+`is_topic_message` `true`, and so did `editMessageText` of such a message. The client showed all the messages in one
+stream; when Topics was turned on again, the topics came back. — _2026-11-28 · sends, a reply and an edit after Topics
+was turned off · Bot API 10.4 or later_ · Used in C-35.FR-14, C-35.FR-16.
+
+### Basic group chats
+
+**F-141. A basic group chat with the bot an ordinary member.** `getChat` answered `type` `group` with no `is_forum`, no
+`username` and the chat's `permissions` (`can_send_messages` `true`, and the others), and `getChatMember` of the bot
+`{"status":"member"}` with no other field, so whether a member bot may send comes from the chat's `permissions`; a
+restricted bot was not tried. For a private chat, `getChat` answered `type` `private` with no `permissions`. A press of
+`alice` on a button of the bot's message reached the bot, with privacy mode on, as a `callback_query` with
+`message.chat.type` `group`. After the bot deleted one of its messages, a reply to it answered `400`
+`Bad Request: message to be replied not found`, and with `allow_sending_without_reply` the reply was sent as an
+ordinary message, as F-008 found in a discussion group. A message with `disable_notification` pushed to `alice`'s phone
+at once and showed its text, without sound (F-012); with the group muted by her, a message that mentioned her through
+`tg://user?id=` pushed at once and showed its text, in a single run with no control message without a Mention. Not
+checked: an edit of a message days old (F-065); what `getChatMember` answers about a person who was never in the group,
+since the account meant for it was the group's creator; and a Mention of a person outside the group. — _2026-11-28 ·
+reads, a press, a deleted message, two messages watched on the phone · Bot API 10.4 or later, Telegram for iOS 13.3
+(37637)_ · Used in C-35.FR-6, C-35.FR-8, C-35.FR-11, C-35.FR-12, C-35.FR-17.
+
+**F-142. A basic group chat that becomes a supergroup.** A person turned the basic group chat into a supergroup by
+giving it a public link. The bot received two `message` updates: one in the old chat with `migrate_to_chat_id` set to
+the new chat's id, and one in the new chat with `migrate_from_chat_id` set to the old one. A `sendMessage` to the old
+chat id answered `400` `Bad Request: group chat was upgraded to a supergroup chat` with `parameters.migrate_to_chat_id`
+set to the new id. `editMessageText` of the bot's earlier message through the old chat id and its message id answered
+`200`, with `chat.type` `group`; through the new chat id with the same message id it answered `400`
+`Bad Request: message to edit not found`, and a reply in the new chat to that message id `400`
+`Bad Request: message to be replied not found`: the bot reaches its old messages only through the old chat id. The bot
+stayed an ordinary member of the new chat, whose `getChat` answered `type` `supergroup` with a public `username`. A
+press on the old message's button after the change was not checked: the edit through the old chat id, sent without
+`reply_markup`, had removed the button first (F-011). — _2026-11-28 · two messages before the change, then a send,
+edits, a reply and reads after it · Bot API 10.4 or later_ · Used in C-35.FR-14, C-35.FR-15, C-35.FR-16.
+
 ## Mattermost
 
 Unless an entry says otherwise, the facts were checked on 2026-10-04 against a test Mattermost 11.2.2 server
 (Enterprise Edition without a license, default configuration unless an entry says otherwise). A test bot with the system
 admin role used the REST API v4 in a test channel; a small HTTP receiver on a private address logged button presses as
 raw JSON and answered them. Presses and notifications were made and observed in the client of a test user.
+
+F-143 to F-148 were checked on 2026-11-22 and 2026-11-28 on the test stand's second Mattermost server, also 11.2.2
+(build 20860305195), an Enterprise build under the Entry licence that F-121 read on 2026-11-15 (not read again here),
+now with push notifications on through Mattermost's hosted
+push notification service in the EU (`https://eu.push.mattermost.com`) and `PushNotificationContents` `full`. A test
+bot with the role Member (`system_user`) called the API; the test person `alice` had the Mattermost app on an iPhone,
+the latest App Store release on 2026-11-28 (its build number not recorded), with her desktop client closed; and a
+small HTTP receiver on a private address that the server
+allows (F-022) logged presses.
 
 ### Buttons
 
@@ -310,6 +470,32 @@ and without a mention · Mattermost 11.2.2_ · Used in C-13.FR-3, C-13.FR-7.
 direct channel, and a bot post there reaches the user. — _2026-10-04 · a direct message to the test user · Mattermost
 11.2.2_ · Used in C-13.FR-7, C-18.FR-3.
 
+**F-144. A person's press in a direct channel.** The bot made its direct channel with `alice` (`POST
+/api/v4/channels/direct`, `201`, `type` `D`) and posted an attachment with one button whose integration URL was the
+receiver's. Each of her four presses made the server call that URL with the keys of F-023 — `user_id`, `user_name`,
+`channel_id`, `channel_name`, `team_id`, `team_domain`, `post_id`, `trigger_id`, `type`, `data_source` and the button's
+`context` — where `channel_id` was the direct channel, `channel_name` the two users' ids joined by `__`, `user_id` hers
+and `post_id` the bot's post, and `team_id`, `team_domain`, `type` and `data_source` were empty strings. The receiver
+answered with `ephemeral_text`; the client showed no error, and she saw neither a change of the post nor the ephemeral
+text in the direct channel (where `ephemeral_text` goes: F-025). With the role Member, the bot edited its own post there
+with `PUT /api/v4/posts/{id}/patch` (`200`). — _2026-11-22 · four presses, logged by the receiver · Mattermost 11.2.2_ ·
+Used in C-43.FR-13, C-43.FR-14, C-43.FR-16.
+
+**F-145. A direct channel with a deactivated or unknown user.** For a deactivated user, `POST /api/v4/channels/direct`
+answered `201` with the direct channel, and a post there `201`: nothing in the answers tells that the person will not
+read it. For an id that names no user it answered `400` `api.channel.create_direct_channel.invalid_user.app_error`
+("Invalid user ID for direct channel creation."), and a post with a malformed `channel_id` `403`
+`api.context.permissions.app_error`. Not checked: a well-formed `channel_id` that names no channel, and a bot whose role
+lacks the permission to create direct channels. —
+_2026-11-28 · the bot with the role Member · Mattermost 11.2.2_ · Used in C-43.FR-12, C-43.FR-17.
+
+**F-146. The push of a direct message.** An edit of the bot's direct post with `PUT /api/v4/posts/{id}/patch` made no
+push to `alice`'s locked phone, as F-029 found for a Mention added by an edit, and a new direct post made none while Do
+Not Disturb was on (the record does not say whether her Mattermost status or the phone's). A direct post with Do Not
+Disturb off was sent, but what the phone showed was not recorded, and `generic` was not tried. — _2026-11-22 and
+2026-11-28 · one edit and two posts, watched on the phone · Mattermost 11.2.2, `PushNotificationContents` `full`_ · Used
+in C-43.FR-8, C-43.FR-13.
+
 ### Edits and notifications
 
 **F-029. Edits never notify; a new post with a Mention does.** An edit with `PUT /api/v4/posts/{id}/patch` that added
@@ -365,6 +551,16 @@ again 3 s after. The member kept their own notification settings; a person who a
 mention keywords would still be notified. — _2026-10-08 · one post in a public channel with a bot without the system
 admin role, deleted afterwards · Mattermost 11.2.2_ · Used in C-12.FR-12, C-13.FR-3.
 
+**F-143. A Mention in a bot's Thread reply pushes to the phone, whether the person follows the Thread or not.** In a
+channel `alice` is a member of, the bot posted a root post with `@alice`; then, under a root post that did not mention
+her, a Thread reply with `@alice` while she did not follow the Thread, a second one after she had replied in it, and a
+Thread reply without a Mention while she followed it. Her locked phone, the app in the background, showed a push for
+each at once, with the text of the post, under `PushNotificationContents` `full`; so once she follows a Thread, a reply
+that does not mention her pushes too. Not measured: `generic`, whose push shows a fixed text instead of the post
+(F-115, read in the source), since the stand stays on `full`; the app killed; and Do Not Disturb, under which a direct
+message did not push (F-146). — _2026-11-22 · two root posts and three Thread replies, watched on the phone ·
+Mattermost 11.2.2, the hosted push notification service_ · Used in C-32.FR-11, C-32.FR-20.
+
 ### Rate limit and server settings
 
 **F-030. The rate limit is off by default and counted per client address.** `RateLimitSettings.Enable` is `false` by
@@ -383,6 +579,11 @@ bursts with the limit off and on · Mattermost 11.2.2_ · Used in C-13.FR-5, C-1
 any age; an admin can set a limit, and what an edit of an older post then gets was not checked. A bot token works with
 `EnableUserAccessTokens` off, its default. — _2026-10-04 · the server configuration; calls with the bot token ·
 Mattermost 11.2.2_ · Used in C-13.FR-4, C-13.FR-7, [L1 open question 12](prd/L1.md#52-other-questions).
+
+**F-147. 239 posts in 15 s to one direct channel.** The bot posted to its direct channel with `alice` one post after
+another for 15 s, from one client address: all 239 answered `201`, none `429`, about 16 a second — which the limit of
+F-030, if it were on, would also allow with its burst of 100. The stand's rate limit settings were not read. —
+_2026-11-28 · one burst · Mattermost 11.2.2_ · Used in C-43.FR-10, C-43.FR-11.
 
 ### Requests without a token
 
@@ -410,6 +611,26 @@ token (the bot has the system admin role) · Mattermost 11.2.2_ · Used in C-13.
 only the system user role, deleted its own post, the plain read `GET /api/v4/posts/{id}` of it answered `404`, as in
 F-058. — _2026-10-08 · the post of F-060, deleted through the API and read again · Mattermost 11.2.2_ · Used in
 C-13.FR-5.
+
+### Attachment fields
+
+**F-148. An attachment draws its fields under its text, whatever their order in the request.** The bot made three posts
+with an empty `message` and one attachment each, built as text so that the request kept the order of the properties: A
+with `fields` before `text` and B with `text` before `fields`, each with two short fields, `CPU` and `Memory`, and one
+that is not short, `Disk`; and C with `fields` first and five fields, `a` short, `b` not, `c` and `d` short, `e` not.
+It then edited B with `PUT /api/v4/posts/{id}/patch` to `fields` before a changed `text` (`200`, `edit_at` above 0).
+`GET /api/v4/posts/{id}` returned each attachment with its properties in one order, whatever the request's: `id`,
+`fallback`, `color`, `pretext`, `author_name`, `author_link`, `author_icon`, `title`, `title_link`, `text`, `fields`,
+`image_url`, `thumb_url`, `footer`, `footer_icon`, `ts`. The web client, 1,280 and 360 px wide, and the iPhone app drew
+A, B and the edited B alike — `CPU` and `Memory` side by side in two columns, `Disk` on a row of its own — and C as `a`,
+then `b`, then `c` and `d` side by side, then `e`: a short field shares a row only with the next short field. The
+observer recorded the columns, not where the fields stood against the text; that comes from the web app's source:
+`message_attachment.tsx` at tag v11.2.2 renders the pretext, the author, the title, the text, the image, the fields, the
+footer and the buttons in that order, and its `getFieldsTable` starts a new row after two short fields and before and
+after a field that is not short. So neither the order of the properties in a request nor an edit moves the fields, and
+the source draws them under the text. — _2026-11-22 · three posts and one edit,
+looked at in the web client and the phone app; the web app's source at tag v11.2.2 · Mattermost 11.2.2, the web
+client's version not recorded, the iPhone app the latest App Store release on 2026-11-28_ · Used in C-38.FR-6, S-211.
 
 ### Groups
 
@@ -705,6 +926,13 @@ client in a browser, at a window about 1,250 px wide, without pressing anything.
 test: what Slack sends for a press is taken from its documentation and a local simulation, and the entries that rely on
 it say so. Every message of the test was deleted afterwards.
 
+F-149 to F-154 were checked on 2026-11-22 on a second free test workspace: an app with the bot scopes `chat:write`,
+`channels:read` and `im:write`, interactivity and Socket Mode on, and its Messages tab in App Home on and read-only
+except where an entry says otherwise; a public channel with the bot and the test person `alice`, who had the Slack app
+on an iPhone, the latest App Store release on 2026-11-28 (its build number not recorded), and quit her desktop app for
+the checks of a push. Presses were read in Socket
+Mode by a small Python client that logged their payloads.
+
 ### Tokens, errors and scopes
 
 **F-070. Errors are `200` with `ok: false`.** A wrong token is answered `{"ok":false,"error":"invalid_auth"}`, a request
@@ -766,6 +994,14 @@ counts all its markup. An `action_id` is unique within its block (a second one i
 "`action_id` "same" already exists") and may repeat in other blocks; a `block_id` is unique in the message; without an
 `action_id` Slack makes up a random one. — _2026-10-19 · bounds probed one by one on the stand_ · Used in C-24.FR-4,
 C-24.FR-5.
+
+**F-149. A `section` takes at most 10 `fields`.** `chat.postMessage` with one `section` block of 10 `fields` was
+accepted; with 11 or 12 it was refused with `invalid_blocks` and `errors`
+`["[ERROR] no more than 10 items allowed [json-pointer:/blocks/0/fields]"]`. `chat.update` of a one-field message to 10
+`fields` was accepted, and to 11 or 12 refused the same way. The text of one field takes 2,000 characters; 2,001 are
+refused with `invalid_blocks` and "must be less than 2001 characters [json-pointer:/blocks/0/fields/N/text]" for each
+such field. The desktop client drew the 10 fields in two columns, the iPhone app in one. — _2026-11-22 · posts and edits
+in the channel · the free workspace_ · Used in C-38.FR-2, C-38.FR-6, P-94, S-210, S-211.
 
 **F-077. A long `text` is split into several messages, and only the last one's `ts` is returned.** `chat.postMessage`
 with a `text` of 12,000 characters and no blocks made three separate messages of 4,000; 40,000 "я" made ten. The answer
@@ -855,6 +1091,16 @@ C-24.FR-8.
 `message.thread_ts`, and the message appeared in the channel as an ordinary one. Mattermost (F-058) and Telegram (F-008)
 refuse such a reply; Slack does not. — _2026-10-19 · the stand, a screenshot_ · Used in C-24.FR-8.
 
+**F-150. A Mention in a bot's Thread reply pushes to the phone, whether the person follows the Thread or not.** With
+`alice`'s notification settings at their defaults and her locked phone's app in the background, a root post with `<@U…>`
+of her pushed about 5 s after the send. Under a root post that did not mention her, a Thread reply with `<@U…>` pushed
+about 5 s after the send while she did not follow the Thread, and again after she had replied in it; and a Thread reply
+without a Mention, in the Thread she followed, pushed too. Each Mention was in the text of a `section` block, while the
+message's `text`, its fallback, was "Muster spike test" without one, as Muster sends its messages. Earlier runs, made
+while the phone's Slack notifications were paused, are not counted. Not checked: the channel set to notify about
+Mentions only, a reply with `reply_broadcast`, and the app killed. — _2026-11-22 · two root posts and three Thread replies, watched on the phone ·
+the free workspace, the iPhone app_ · Used in C-32.FR-11, C-32.FR-20.
+
 ### Answers and presses
 
 **F-092. `chat.postEphemeral`.** It needs `chat:write` (rate limit tier 4) and answers `{"ok":true,"message_ts":"…"}`,
@@ -887,6 +1133,18 @@ Mattermost's `POST /api/v4/posts/{id}/actions/{action_id}` (F-054) — and no in
 A test message cannot prove by itself that presses reach Muster. — _2026-10-19 · the method reference, and no
 `interactive` envelope on the socket during the whole test_ · Used in C-24.FR-2, C-24.FR-13.
 
+**F-151. A person's press in the app's direct chat, as received.** A press of `alice` on a button of the bot's message
+in the app's direct chat arrived over Socket Mode as a `block_actions` payload with `actions`, `api_app_id`, `channel`
+(`id` the `D…` of the direct chat, `name` `directmessage`), `container` (`type` `message`, `message_ts` the message's
+`ts`, `channel_id` and `is_ephemeral` `false`), `enterprise` `null`, `is_enterprise_install` `false`, `message`,
+`response_url` (`https://hooks.slack.com/actions/…`), `state` (with empty `values`), `team` (`id`, `domain`), `token`,
+`trigger_id`, `type` and `user` (`id`, `username`, `name`, `team_id`); each of the `actions` had `action_id`,
+`block_id`, `type`, `action_ts`, the button's `text`, and `value` when the button had one. A `POST` to `response_url`
+answered `200`, and its text appeared in the direct chat for her. Both presses were made with the Messages tab
+read-only, where the input says "Sending messages to this app has been turned off" (F-096). This is the payload that
+F-093 took from the documentation, seen live in Socket Mode; HTTP mode was not tried. — _2026-11-22 · two presses, their payloads logged by
+the client · the free workspace_ · Used in C-24.FR-9, C-24.FR-10, C-43.FR-14, C-43.FR-16.
+
 ### Users and direct messages
 
 **F-095. Finding a person.** `users.lookupByEmail` (scope `users:read.email`) ignores the case of the address (an
@@ -911,6 +1169,20 @@ bold. The `text` elements of a `rich_text` block are literal: "*not bold* _x_ ~y
 &" was kept and shown as it was, without Mentions or links. A bare `@channel`, `<!channel>` and `<!here>` were not sent,
 so as not to notify the workspace. — _2026-10-19 · the stand;
 [formatting](https://docs.slack.dev/messaging/formatting-message-text)_ · Used in C-24.FR-6, C-24.FR-7.
+
+**F-152. `messages_tab_disabled`, and a person who does not exist.** With the app's Messages tab turned off in App
+Home, `chat.postMessage` to `alice`'s `U…` id and to the `D…` of the direct chat, which `conversations.open` had opened
+before, both answered `messages_tab_disabled`, while `conversations.open` with her id still answered `ok` with the same
+`D…`: only a send tells that the tab is off. `chat.postMessage` with `channel` set to a `U…` id that names no user
+answered `channel_not_found`, and `conversations.open` with it, or with a malformed id, `user_not_found`. Not checked: a
+deactivated user. — _2026-11-22 · the tab turned off in App Home and back to read-only afterwards · the free
+workspace_ · Used in C-43.FR-12, C-43.FR-17.
+
+**F-153. The push of a direct message, and of its edit.** A `chat.update` of the bot's message in the direct chat made
+no push to `alice`'s locked phone. With her notifications paused in the app (Slack's Do Not Disturb), a new direct
+message made no push; with them on and the app killed, one pushed about 5 s after the send and showed its text. —
+_2026-11-22 · one edit and two messages, watched on the phone · the free workspace, the iPhone app_ · Used in
+C-43.FR-8, C-43.FR-13.
 
 ### Channels
 
@@ -937,6 +1209,13 @@ per second per channel" with short bursts and a workspace-wide limit, and "if yo
 that messages will be stored or displayed"; `chat.update`, `chat.delete` and `apps.connections.open` are tier 3 (50 or
 more a minute), `chat.postEphemeral` tier 4, `users.list` and `conversations.list` tier 2. — _2026-10-19 · the stand;
 [rate limits](https://docs.slack.dev/apis/web-api/rate-limits)_ · Used in C-24.FR-3, C-24.FR-8.
+
+**F-154. One client in a row met no `429` in a direct chat.** `chat.postMessage` to one direct chat, one request after
+another for 60 s, passed 76 times and, in a second run, 75 times, with no `429`; `chat.update` of one message there, the
+same way, passed 76 times with no `429` — about 1.25 a second, above the "one message per second per channel" of
+`chat.postMessage` (F-099), without a refusal. The workspace had one person, so `chat.postMessage` to many direct chats
+at once was not measured. — _2026-11-22 · three bursts of 60 s · the free workspace_ · Used in C-43.FR-10,
+C-43.FR-11, P-98.
 
 ### Socket Mode
 
@@ -1073,23 +1352,26 @@ echoed, and the claim names and values of the ID token and of userinfo were iden
 
 ## Pending
 
-Before the stories of L2, these spikes check what the core of L2 relies on:
+Before the stories of L2, these spikes check what L2 relies on:
 
-- **Push of Mentions in Threads** (C-32). Whether a Mention in a Thread reply reaches a person's phone as a push: in
-  Mattermost (the mobile app through the push proxy, under `PushNotificationContents` `full` and `generic`), in Slack (a
-  bot's Thread reply with `<@U…>`) and in Telegram (a comment in a channel's discussion group with a `tg://user?id=`
-  link, when the person did not mute the group; F-129 saw it reach the phone of a member who muted it). Until it is
-  checked, the documentation says that at night only a Notification gateway is reliable (C-32.FR-20). To check on the
-  test stands with a person's phone.
-- **Telegram** (C-27.FR-8, C-28). Forum topics and plain group chats are checked with the later part of L2. Left open by
-  F-128 and F-129: what `getChatMember` answers in the discussion group about a person the bot never saw and about one
-  removed or banned from it, and how soon after a leave it answers `left`; whether a Mention in a muted discussion group
-  rings an admin who is not anonymous or not the creator, and the anonymous creator on a phone; whether the automatic
-  copy rings an ordinary member who muted the group; the clients' notification exceptions for a chat; and a comment with
-  `disable_notification`.
-- **Message layout** (C-38). How many `fields` Slack takes in one `section` block, which F-076 does not list and P-94
-  assumes to be 10, with the error past it; and that a Mattermost attachment draws its `fields` under its `text`
-  whatever their order in the request (C-38.FR-6). To check on the test stands before the story of C-38.
+- **Telegram** (C-27.FR-8, C-28, C-35, C-43). Left open by F-128 to F-142: what `getChatMember` answers in the
+  discussion group about a person the bot never saw and about one removed or banned from it, and how soon after a leave
+  it answers `left`; whether a Mention in a muted discussion group rings an admin who is not anonymous or not the
+  creator, and the anonymous creator on a phone; whether the automatic copy rings an ordinary member who muted the
+  group; the clients' notification exceptions for a chat; and a comment with `disable_notification`. For C-35: the
+  budgets of the topics of one forum and of a channel beside its discussion group; what `getChatMember` answers in a
+  basic group chat about a person who was never in it; whether a Mention there reaches a person outside the chat;
+  whether the bot edits its messages in a basic group chat and in a private chat days later; whether a press on the
+  button of a message sent before a basic group chat became a supergroup reaches the bot; a closed topic that a person
+  created, for the bot as an admin with and without the right to manage topics; where the client shows a send without
+  `message_thread_id` while General is closed or hidden (F-136); and a restricted member bot. For C-32: a comment that
+  mentions a person whose phone is in a Focus mode (F-130). For C-43: a deleted account, and the budgets of a private
+  chat and across chats, which F-135 did not reach.
+- **Direct messages** (C-43), in Mattermost and Slack: the push of a Mattermost direct post with Do Not Disturb off and
+  under `PushNotificationContents` `generic` (F-146); what `POST /api/v4/channels/direct` answers to a bot whose role
+  lacks the permission to create direct channels (F-145); a deactivated Slack user (F-152); the workspace's edit window
+  for a direct message hours or days old (F-084); and `chat.postMessage` to many direct chats of one workspace at once,
+  which F-154 could not try with one person. The bridges' part of C-43 is checked by its stories with the fake bridge.
 
 Earlier pending checks:
 
@@ -1101,14 +1383,16 @@ Earlier pending checks:
   the budget of F-016 is each bot's own in a chat, as the fake assumes from Telegram's limits being a bot's. To check on
   the test stand with a second bot.
 - **Mattermost.** How the client shows buttons on Thread replies, which the server accepts (F-055,
-  [L1 open question 6](prd/L1.md#51-test-environment-facts)), and how phones are notified
-  ([question 4](prd/L1.md#51-test-environment-facts)): the test server had push notifications off. Whether a bot
+  [L1 open question 6](prd/L1.md#51-test-environment-facts)), and how phones are notified under
+  `PushNotificationContents` `generic` and with the app killed ([question 4](prd/L1.md#51-test-environment-facts)): the
+  first test server has push notifications off, and the second pushes under `full` (F-143, F-146). Whether a bot
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
   What push (under `PushNotificationContents` `full` and `generic`) and desktop notifications of a post with an empty
   `message` and an attachment with a `fallback` show, measured on the test stand: F-115 is read in the source only,
-  since the stand pins `PushNotificationContents` to `generic` by an environment variable. Groups (C-25.FR-8,
+  since the first server pins `PushNotificationContents` to `generic` by an environment variable, and F-143 measured
+  posts with a `message`. Groups (C-25.FR-8,
   C-28.FR-2): LDAP-synced groups on a server with LDAP on — whether a bot reads them, whether `@<group>` mentions their
   members and what `allow_reference` turned off does (F-121, F-123); the editions and licences other than Entry
   (F-121); what the reads of F-122 answer to a bot whose role lacks the custom-group permissions; that a channel member
@@ -1127,10 +1411,13 @@ Earlier pending checks:
   of Alertmanager (F-045, F-047); a crash, and whether the notification log survives it; `for` above 0 and
   `keep_firing_for`; `DatasourceError`; several organizations (F-106); a custom payload and HMAC signing; an
   always-firing rule sent to the Heartbeat URL through a webhook contact point.
-- **Slack.** A person's press in both event modes — the real `block_actions` payload and envelope of F-093,
-  `response_url`, what the person sees when a press is not confirmed within 3 seconds, and whether Slack ever sends an
-  unconfirmed `interactive` envelope or an interaction it could not deliver over HTTP again; which notifications a
-  Mention added by an edit, a Thread reply and an ephemeral answer in a Thread make, and push on phones; what the phone
+- **Slack.** A person's press in HTTP mode, and the envelope of F-093 in Socket Mode (F-151 logged the payload and
+  `response_url` in Socket Mode), what the person sees when a press is not confirmed within 3 seconds, and whether
+  Slack ever sends an unconfirmed `interactive` envelope or an interaction it could not deliver over HTTP again; which
+  notifications a Mention added by an edit and an ephemeral answer in a Thread make (F-150 and F-153 saw a Thread
+  reply and a direct message on a phone, and that an edit made no push); whether a Mention in a Thread reply pushes
+  with the channel set to notify about Mentions only, in a reply with `reply_broadcast`, and with the app killed
+  (F-150); what the phone
   and desktop notifications of `<!channel>` and `<!here>` from a bot show, which F-127 saw only in the client's
   Activity; whether the workspace's edit window applies to the bot's messages hours or days old (`edit_window_closed`,
   F-084); what `chat.update`, `chat.postMessage` and `conversations.info` answer after the bot is removed from a
@@ -1138,10 +1425,8 @@ Earlier pending checks:
   keeps mrkdwn from pairing them into emphasis (C-24.FR-7); what `apps.connections.open` answers with Socket Mode off,
   and `link_disabled` (F-101); how long `num_connections` keeps counting a socket that went away without a close, such
   as a crashed Leader's (F-102); Socket Mode through a SOCKS5 or an HTTPS proxy (F-103); a user token given as the bot
-  token; what `chat.postMessage` to a user id answers with the app's Messages tab off — `messages_tab_disabled`, as
-  Slack's reference for `chat.postMessage` lists it, which `startSlackLink` answers as `409` `messages_tab_disabled` and
-  the fake Slack server answers with `messages_tab_off` (F-096 tried the tab on and read-only only); and the mobile
-  clients — the colour bar, buttons beyond five in a row and `static_select` (F-075, F-082); that a channel member
+  token; and the mobile clients — the colour bar, buttons beyond five in a row and `static_select` (F-075, F-082;
+  F-149 saw the fields of a `section` on a phone); that a channel member
   outside a user group is not mentioned by `<!subteam^ID>`, what the phone and desktop notifications of `<!subteam^ID>`
   and `<!everyone>` show (F-126, F-127), and the `date_delete` of a disabled user group (F-125). To check on the test
   stand with a person, by the Slack stories.

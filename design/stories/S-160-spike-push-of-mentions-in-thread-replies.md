@@ -9,9 +9,11 @@ covers: [C-32.FR-11]
 files_touched:
   - design/facts.md
   - design/stories/S-161-documentation-escalation-chains-notification-rules-and-how-an-alert-reaches-people.md
+  - design/prd/l2/C-32-escalation-chains-and-assignees.md
+  - design/prd/l2/C-30-notification-gateways.md
 acceptance:
-  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with an `@username` Mention of a member reaches that member's phone as a push in the Mattermost mobile app through the push proxy, with `PushNotificationContents` `full` and with `generic`, for a member who follows the Thread and one who does not, what the push shows in each case, and the server, app and proxy versions."
-  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with `<@U…>` reaches the member's phone as a push in the Slack mobile app, with the member's default notification settings and with \"Mentions\" only for the channel, and the app version."
+  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with an `@username` Mention of a member reaches that member's phone as a push in the Mattermost mobile app through the push proxy, with `PushNotificationContents` `full`, for a member who follows the Thread and one who does not, what the push shows in each case, the server version and the push proxy used, and the app's version if it was recorded; `generic` stays under Pending, with what its push shows from the source (F-115)."
+  - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether a bot's Thread reply with `<@U…>` reaches the member's phone as a push in the Slack mobile app, with the member's default notification settings, and the app version if it was recorded; the channel set to \"Mentions\" only stays under Pending."
   - "[C-32.FR-11] `design/facts.md` has a new entry F-NNN that says whether the bot's comment in a channel's discussion group with a `tg://user?id=` Mention reaches a member's phone as a push, when the member did not mute the group and when they muted it — citing S-132's entry where it already settled the muted case — with the client versions."
   - "[C-32.FR-11] The item \"Push of Mentions in Threads\" leaves Pending in `design/facts.md`; S-161's contract says, for each messenger the facts confirm, that a Page by Mention reaches a phone at night, and keeps \"only a Notification gateway is reliable at night\" for each one they do not, citing the entries in the pages it completes; any requirement the facts contradict is proposed for change in the pull request."
 verify: "make lint"
@@ -91,6 +93,18 @@ None; the spike answers them.
 - `covers` names C-32.FR-11 in part: the spike settles its "push to phones is still to be verified"; the documentation
   that depends on it is S-161's.
 - No example in the repository names a real person; the test accounts are `alice` and `bob`.
+- The pull request that records the facts (F-130, F-143, F-150) narrowed acceptance 1 and 2: the maintainer kept the
+  Mattermost test server on `PushNotificationContents` `full` for the run and skipped the Slack channel set to
+  "Mentions" only and the reply with "Also send to channel", and the Mattermost and Slack phone apps were recorded only
+  as the latest App Store releases on 2026-11-28, without their build numbers. Under `generic` the server builds the push with a fixed text instead of the post's (F-115, read in
+  the source); the skipped checks are under Pending. The same run measured the push of direct messages for C-43
+  (F-134, F-146, F-153), which S-161 cites for the quiet settings of a phone.
+- The maintainer accepted the revisions the facts call for (journal D765): C-32.FR-11's table and C-32.FR-20 and
+  C-30.FR-11 now say that a Mention pushes with the person's default settings, but not through Do Not Disturb or a
+  Focus mode, and that a Notification gateway reaches a person whatever their phone does, which is why
+  `files_touched` names C-32 and C-30. The same pull request carries the decisions on C-43 that the direct-message
+  facts called for (the Mattermost read of `delete_at`, Slack's `channel_not_found`, P-98 confirmed), in C-43,
+  L2 §5.3 and `defaults.md`.
 
 ## Coverage
 
