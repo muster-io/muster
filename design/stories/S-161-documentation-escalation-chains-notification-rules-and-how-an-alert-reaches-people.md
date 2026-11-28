@@ -118,9 +118,8 @@ None.
   per-messenger clause and the C-32.FR-11 facts row stay open until then.
 - S-160's entries are F-130 (Telegram), F-143 (Mattermost) and F-150 (Slack), with F-134, F-146 and F-153 for a phone's
   quiet settings; they confirm the push in all three messengers, so the follow-up follows the note "If S-160's facts
-  confirm a push in every messenger" above. It also
-  edits the three messenger pages, `docs/messengers/mattermost.md`, `slack.md` and `telegram.md`, which "The night"
-  names and `files_touched` gained when S-160 recorded the facts.
+  confirm a push in every messenger" above. It also edits the three messenger pages, `docs/messengers/mattermost.md`,
+  `slack.md` and `telegram.md`, which "The night" names and `files_touched` gained when S-160 recorded the facts.
 
 ## Coverage
 

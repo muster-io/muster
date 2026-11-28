@@ -285,7 +285,7 @@ topic's `message_thread_id` landed in the topic, and its answer carried `message
 `message_thread_id` `1` was refused with `400` `Bad Request: message thread not found` whether General was open, closed
 (`closeGeneralForumTopic`) or hidden (`hideGeneralForumTopic`), while a send without `message_thread_id` was accepted in
 each of these states by the bot as an admin allowed to manage topics; where the client showed the sends with General
-closed or hidden was not recorded clearly. `editGeneralForumTopic` with the name General already had answered `400`
+closed or hidden was not recorded clearly. `editGeneralForumTopic` with the name that General already had answered `400`
 `Bad Request: TOPIC_NOT_MODIFIED`. `sendChatAction` with a topic's `message_thread_id` answered `true`, and the client
 showed "typing" in that topic. — _2026-11-28 · three runs of the same sends, looked at in the client; General closed,
 reopened, hidden and shown again by the bot · Bot API 10.4 or later_ · Used in C-35.FR-2, C-35.FR-3, C-35.FR-5.
@@ -307,8 +307,7 @@ send and for a reply. As far as the check tells, the difference is who created t
 tried in a topic that a person closed. `sendChatAction` with the `message_thread_id` answered `true` for the deleted
 topic and for both closed ones, so a chat action tells neither a deleted nor a closed topic. — _2026-11-28 · one live,
 one closed and one deleted topic, probed in each role of the bot, and a topic a person created and closed · Bot API 10.4
-or later_ ·
-Used in C-35.FR-12, C-35.FR-14.
+or later_ · Used in C-35.FR-12, C-35.FR-14.
 
 **F-139. Topic service messages reach a bot with privacy mode on.** When a person created, renamed, closed and reopened
 a topic, the bot received `forum_topic_created`, `forum_topic_edited`, `forum_topic_closed` and `forum_topic_reopened`
