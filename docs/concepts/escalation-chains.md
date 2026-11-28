@@ -293,9 +293,9 @@ delivered: @petr has no linked Mattermost account" instead, which mentions nobod
 
 | Where | A Page is | It reaches the person when |
 |---|---|---|
-| Mattermost | a Thread reply with `@username` | they have an Account link for the Connection |
-| Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection |
-| Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group |
+| Mattermost | a Thread reply with `@username` | they have an Account link for the Connection; with the server's push notifications on through a push proxy and the person's default settings, the Mention pushes to their phone whether they follow the Thread or not (F-143), but not through Do Not Disturb (F-146) |
+| Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection; with their default settings, the Mention pushes to their phone whether they follow the Thread or not (F-150), but not while their notifications are paused (F-153) |
+| Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group; the Mention pushes to an ordinary member's phone even through a muted channel and group (F-130), and without sound in a Focus mode of the phone (F-134) |
 | Bridge | a Thread reply with a Mention marker | they have an Account link for the Connection and the bridge declares `native_mentions` |
 | Outgoing webhook, events mode | the event `paged`, with the people as `mentions` data, when the Page replies in another Destination of the chain | the receiver acts on it |
 | Outgoing webhook, template mode | the "reply in thread" request, when it has one | the receiver acts on it |
@@ -318,12 +318,19 @@ whole Team" by its slug and name; the template mode gives them to the "reply in 
 One whose "reply in thread" request was removed after the Page was queued sends nothing, and that reply ends Not
 delivered.
 
-!!! warning "At night, only a Notification gateway is reliable"
-    A Mention in a Thread may or may not reach a person's phone as a push notification: it depends on the messenger,
-    on its app, on the settings of the person's phone and on the push mode of the messenger. Muster cannot see whether a
-    push arrived. For Pages that must wake someone at night, rely on a call through a Notification gateway, and treat a
-    Mention as the record in the Thread that the person was named, not as a promise that a phone rang. See
-    [At night](../messengers/notification-gateways.md#at-night).
+!!! warning "At night"
+    A Page by Mention reaches a phone as a push in Mattermost, Slack and Telegram when the person keeps the
+    messenger's push notifications on, the app out of Do Not Disturb and the phone out of a Focus mode. None rings
+    through the person's own quiet settings: in Mattermost, Do Not Disturb kept a direct message from pushing (F-146);
+    in Slack, paused notifications did (F-153); and a Focus mode of the phone made Telegram's push come without sound
+    (F-134). An edit never pushes, so every Page is a new Thread reply (F-012, F-134, F-146, F-153). The pushes were
+    measured on a locked phone with the desktop client not in use; a messenger may notify a desktop in use instead of
+    the phone, by the person's settings for mobile notifications. Muster cannot see whether a push arrived. For people
+    who must be reached whatever their phone and messenger do — at night, for example — add a call through a
+    Notification gateway. See [At night](../messengers/notification-gateways.md#at-night), and what each messenger
+    needs for the push: [Mattermost](../messengers/mattermost.md#who-gets-notified),
+    [Slack](../messengers/slack.md#who-gets-notified) and
+    [Telegram](../messengers/telegram.md#join-the-discussion-group-and-mute-the-channel).
 
 ## Calls through a Notification gateway
 

@@ -215,10 +215,19 @@ characters; a long one drops its description first, then its Alerts, its summary
   the post shows its title once. What a notification shows follows from that: an email notification shows no content;
   a push notification, when the server's **PushNotificationContents** is `full`, and a desktop notification show the
   attachment's summary line — the status, `#N` and the title — which Muster sets as its `fallback` and the channel does
-  not show; a push notification under `generic` shows a fixed text such as "… notified the channel." An edit removes
-  the line of Mentions. A reply in the
+  not show. An edit removes the line of Mentions. A reply in the
   Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the post as
   text and, on a Loud Root message or Thread reply, adds its Mention to the line of Mentions.
+- **Pushes to phones** need the server's push notifications on, with a push proxy: Mattermost's hosted push
+  notification service, which the checks used (F-143), or a push proxy of your own, set in the System Console under
+  **Environment → Push Notification Server**. With it and the person's default settings, a Mention in a Thread reply
+  pushes to their phone whether they follow the Thread or not, and once they follow a Thread every reply pushes
+  (F-143). Under **PushNotificationContents** `full` a push shows the sender and the text of the post — for a Root
+  message, its summary line, as above; under `generic` every push shows a fixed text instead, such as "… mentioned
+  you." or "… notified the channel." (F-115). Do Not Disturb kept a direct message from pushing, and an edit made no
+  push (F-146), as an edit makes no notification (F-029). The checks were made with the person's desktop client
+  closed; Mattermost may hold a phone's push back while the person is active on a desktop, by their notification
+  preferences. Whether a muted channel lets a Mention through was not checked.
 - Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody.
 - The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" — writes a person with an Account link
   for the Connection as `@username`, so that Mattermost shows their name with their profile; a person without one is

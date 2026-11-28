@@ -131,10 +131,11 @@ not an Account link.
 
 An Identity space is all of Telegram, one Mattermost Connection, one Slack Connection or one Bridge. A person with
 Account links in several of them is Mentioned in each Destination whose Connection lies in one of their spaces, and a
-person linked in one Mattermost Connection is not Mentioned in the Destinations of another. Even where they are
-Mentioned, a Mention is a message in a chat: whether it also pushes a notification to the phone depends on the
-messenger, its app, the phone's settings and the push mode, so at night only a call through a Notification gateway is
-reliable ([At night](../messengers/notification-gateways.md#at-night)).
+person linked in one Mattermost Connection is not Mentioned in the Destinations of another. Where they are Mentioned,
+the Mention pushes to their phone in Mattermost, Slack and Telegram with their default settings, but not through Do Not
+Disturb or a Focus mode of the phone, and Muster cannot see whether the push arrived; a call through a Notification
+gateway reaches them whatever their phone and messenger do
+([At night](../messengers/notification-gateways.md#at-night)).
 
 ## Calls in rules
 

@@ -362,6 +362,12 @@ the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Men
   by", "Resolved by" — writes a person with an Account link for the Connection as their Mention, which Slack shows as
   their name, in an edit as in a new message; a person without one is their display name as text.
 - **Thread replies** stay in the Thread: Muster never also broadcasts them to the channel.
+- **Pushes to phones.** With the person's default notification settings, a Mention in a Thread reply pushes to their
+  phone whether they follow the Thread or not, and once they follow a Thread a reply without a Mention pushes too
+  (F-150). An edit made no push, and while their notifications were paused, Slack's Do Not Disturb, a direct message
+  made none (F-153). The checks were made with the person's desktop app quit; Slack may hold a phone's push back while
+  the person is active on a desktop, by their notification preferences. A channel set to notify about Mentions only,
+  and a muted channel, were not checked.
 - **Alert data and template text never mention anyone.** An `&`, `<` or `>` in a label or an annotation is escaped, and
   so is `@`. A literal `<!here>` or `<@U…>` written in a template is shown as text and notifies nobody. Only the
   Destination's Mention entries, `{{ mention "here" }}` and its siblings, and linked people notify.

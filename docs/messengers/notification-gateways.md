@@ -224,14 +224,29 @@ find the cause, fix it and check that calls go through again, with `muster bridg
 
 ## At night
 
-A person's phone is quiet at night unless something rings or buzzes it. Whether a Mention in a Thread reply reaches a
-phone as a push, in Mattermost, Slack and Telegram, depends on the messenger, its app, the settings of the person's
-phone and the mode of the push notifications: a push may arrive, or may not, and Muster cannot see which. A Mention
-shows the person that they were named; **only a Notification gateway is reliable at night**, because a call or an SMS
-does not depend on any of that.
+A person's phone is quiet at night unless something rings or buzzes it. A Mention in a Thread reply pushes to a phone
+in Mattermost, Slack and Telegram with the person's default settings, but not through Do Not Disturb or a Focus mode of
+the phone, while a Notification gateway reaches a person whatever their phone and messenger do. The pushes were
+checked on a locked phone, with the app in the background and the desktop client not in use:
 
-So, for anybody who must be reached at night, connect a Notification gateway, have them [confirm a
-contact](#contact-for-calls-and-sms), put a call in their important [Notification rule](../concepts/notification-rules.md#the-switch)
-or in a step of the [Escalation chain](../concepts/escalation-chains.md#calls-through-a-notification-gateway), and do
-not count on a Mention alone. [How an alert reaches people](../concepts/how-an-alert-reaches-people.md) shows a Page by
+- **Mattermost**, with the server's push notifications on through a push proxy: under `PushNotificationContents`
+  `full`, a Mention in a Thread reply pushed at once with the text of the post, whether the person followed the Thread
+  or not (F-143); under `generic` the push shows a fixed text such as "… mentioned you." instead (F-115). Do Not
+  Disturb kept a direct message from pushing (F-146).
+- **Slack**, with the person's default notification settings: a Mention in a Thread reply pushed whether they followed
+  the Thread or not (F-150); with their notifications paused, a direct message made no push (F-153).
+- **Telegram**: a comment that mentioned an ordinary member of the discussion group pushed at once, even with the
+  channel and the group muted, while a comment without a Mention did not (F-130); in a Focus mode of the phone a push
+  came without sound (F-134).
+
+An edit made no push in any of them (F-012, F-146, F-153), so every Page is a new Thread reply. A messenger may notify
+a desktop in use instead of the phone, by the person's settings, and Muster cannot see whether a push arrived. What the
+server and the person need for the push is in [Mattermost](mattermost.md#who-gets-notified),
+[Slack](slack.md#who-gets-notified) and [Telegram](telegram.md#join-the-discussion-group-and-mute-the-channel).
+
+So, for anybody who must be reached at night whatever their phone and messenger do, connect a Notification gateway,
+have them [confirm a contact](#contact-for-calls-and-sms), put a call in their important
+[Notification rule](../concepts/notification-rules.md#the-switch) or in a step of the
+[Escalation chain](../concepts/escalation-chains.md#calls-through-a-notification-gateway), and do not count on a
+Mention alone. [How an alert reaches people](../concepts/how-an-alert-reaches-people.md) shows a Page by
 Mention and by call side by side.

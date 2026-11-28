@@ -167,10 +167,12 @@ For the people on call:
   replies under it.
 - Only members of the discussion group are notified about the replies in a Thread — even a reply that mentions them.
   Someone who only subscribed to the channel sees the Root messages, but not what happens to them later.
-- Muting the discussion group does not hide a Mention from an ordinary member: a Mention in a comment rang a member who
-  had muted the group, on the desktop and on the phone (F-129). The creator of the group, who is anonymous in it, was
-  not rung by a Mention in a group they had muted, so a person who created the discussion group or is anonymous in it
-  should not mute it. The Destination check cannot see that.
+- Muting does not hide a Mention from an ordinary member: on a locked phone, with the channel and the discussion group
+  both muted, a comment that mentioned the member pushed at once, while a comment without a Mention did not (F-130),
+  as a Mention had rung a member who muted the group on the desktop and on the phone (F-129). In a Focus mode of the
+  phone, a push came at once but without sound (F-134, checked for a private message). The creator of the group, who is
+  anonymous in it, was not rung by a Mention in a group they had muted, so a person who created the discussion group
+  or is anonymous in it should not mute it. The Destination check cannot see that.
 
 Telegram mentions only people, by a link to their account; a Destination's
 [Mention entries](../concepts/mentions.md#telegram) offer a person and "On-call of a Team", and no group, Team or
