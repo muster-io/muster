@@ -21,8 +21,8 @@ screen acknowledges the Alert Group as themselves. Muster
 still ships no gateway and calls or texts nobody by itself; a direct message is one more way to Page, in the same rules.
 
 Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md); the settings of this capability are
-under "Settings", and its provisional values are P-98 and P-99 of
-[L2 §5.3](../L2.md#53-provisional-values-and-behaviours).
+under "Settings", and its provisional value is P-99 of
+[L2 §5.3](../L2.md#53-provisional-values-and-behaviours); P-98 was confirmed by the spike.
 
 ## Scenarios
 
@@ -162,9 +162,15 @@ under "Settings", and its provisional values are P-98 and P-99 of
     person can also have the rule.
   - **Mattermost:** `POST /api/v4/channels/direct` with the bot's and the person's ids, then a post with an interactive
     attachment; a bot can write to a person who never wrote to it ([F-028](../../facts.md#threads-and-direct-messages)).
+    Mattermost accepts the channel and the post for a deactivated person, answering `201` to both
+    ([F-145](../../facts.md#threads-and-direct-messages)), so before it sends a direct message — not before its one
+    edit — Muster reads the person with `GET /api/v4/users/{user_id}`, and a `delete_at` above 0 ends the message
+    `account_unavailable` without sending it (journal D765).
   - **Slack:** `chat.postMessage` with `channel` set to the person's `U…` id or to the `D…` channel of
     `conversations.open`, with Block Kit buttons ([F-096](../../facts.md#users-and-direct-messages)); the scope
-    `im:write` is the one Account links by code already need.
+    `im:write` is the one Account links by code already need. A `U…` id that names no user answers `chat.postMessage`
+    with `channel_not_found` ([F-152](../../facts.md#users-and-direct-messages)), which ends a direct message
+    `account_unavailable` (journal D765).
   - **Bridge:** the operation of `api/bridge.yaml` that sends a direct message — extended, see "What changes elsewhere"
     — takes, beyond the `Idempotency-Key` and the `message_id` and `replayed` answer it already has, the structured
     `layout` of C-29 and the buttons, answers a problem code that tells a blocked bot from a refusal, and lets Muster
@@ -356,11 +362,12 @@ Rows of [defaults.md](../l1/defaults.md):
 | Status | Setting | Value | Where |
 |---|---|---|---|
 | decided (P-97) | `organization.direct_messages` | on: the action "Direct message" is offered and sent; off: never sent, stored actions skipped | Organization |
-| P-98 | `direct_message.person_spacing` | 1 s between direct messages to one person through one Connection (Telegram's documented limit for one chat is about one message a second; Slack's for one channel is one a second; verify, [F-016](../../facts.md#limits) measured only a group) | built in |
+| decided (P-98) | `direct_message.person_spacing` | 1 s between direct messages to one person through one Connection (Telegram's documented limit for one chat is about one message a second; Slack's for one channel is one a second); one private chat or direct chat took faster sends with no `429` in Telegram ([F-135](../../facts.md#private-chats)), Mattermost ([F-147](../../facts.md#rate-limit-and-server-settings)) and Slack ([F-154](../../facts.md#rate-limits)) | built in |
 | P-99 | `direct_message.title` | the Alert Group's title, cut to 200 characters | built in |
 
-P-98 and P-99 are in the table of [L2 §5.3](../L2.md#53-provisional-values-and-behaviours), confirmed by the test
-environment; P-97, the default of the switch, was decided by the maintainer with this capability. The limiters of the
+P-99 is in the table of [L2 §5.3](../L2.md#53-provisional-values-and-behaviours), confirmed by the test environment;
+P-98 was confirmed by the spike of this capability (F-135, F-147, F-154; journal D765), and P-97, the default of the
+switch, was decided by the maintainer with this capability. The limiters of the
 Connections stay as they are (`connection.telegram.limiter` 15 messages/s, `connection.mattermost.limiter`
 5 requests/s, [F-030](../../facts.md#rate-limit-and-server-settings), `connection.slack.limiter` 50 requests/min,
 [F-099](../../facts.md#rate-limits), `connection.bridge.limiter`); Telegram's documented 30 messages a second across
@@ -402,8 +409,10 @@ story: the specification first, the schema by a new migration, the fake servers,
 - **C-13, C-14, C-22, C-24, response mappings.** Each adds the rows for a direct message: Telegram's `403` "bot was
   blocked by the user" to `bot_blocked`, "user is deactivated" and a missing chat to `account_unavailable`, "can't
   initiate conversation" to `direct_messages_not_accepted`; Slack's `messages_tab_disabled` and `cannot_dm_bot` to
-  `direct_messages_not_accepted`, `user_not_found` and deactivated users to `account_unavailable`; Mattermost's refused
-  channel creation to `direct_messages_not_accepted`; a bridge's `forbidden` and its new problem codes likewise. The
+  `direct_messages_not_accepted`, `user_not_found`, `channel_not_found` of a direct message (F-152) and deactivated
+  users to `account_unavailable`; Mattermost's refused channel creation to `direct_messages_not_accepted`, and a person
+  whose `delete_at`, read before the send, is above 0 to `account_unavailable` (F-145); a bridge's `forbidden` and its
+  new problem codes likewise. The
   existing mapping of Telegram's "bot was kicked" to Fatal stays for chats of Destinations. C-22.FR-12, which binds a
   press to a Root message or a Thread reply of a Destination, also binds it to a direct message; C-14.FR-7's holds name
   the person's chat.

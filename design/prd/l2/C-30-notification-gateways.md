@@ -119,9 +119,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   masked. `gateway` joins the `transport` values of `muster_commands_total`, and calls are counted by
   `muster_gateway_calls_total{connection,outcome}`; the stories register their log events.
 - **C-30.FR-11** The documentation covers writing a gateway bridge — the role, `sendNotification`, the answer during a
-  call in the push mode, `notification_acknowledged` — setting it up in Muster, confirming a contact, and that until the
-  push of Mentions in Threads is verified ([facts, Pending](../../facts.md#pending)), only a Notification gateway is
-  reliable at night.
+  call in the push mode, `notification_acknowledged` — setting it up in Muster, confirming a contact, and that a
+  Mention pushes to a phone in Mattermost, Slack and Telegram with the person's default settings, but not through Do
+  Not Disturb or a Focus mode of the phone, while a Notification gateway reaches a person whatever their phone and
+  messenger do. _Revised for L2 (2026-11-28, #745, journal D765):_ the push of Mentions in Threads was verified
+  ([F-130](../../facts.md#members-and-mentions-in-the-discussion-group),
+  [F-143](../../facts.md#edits-and-notifications), [F-150](../../facts.md#threads), with F-134, F-146 and F-153 for
+  the quiet settings); the statement "only a Notification gateway is reliable at night" became the one above.
 
 ## UI
 

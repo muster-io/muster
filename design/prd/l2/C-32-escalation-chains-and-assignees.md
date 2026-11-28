@@ -132,9 +132,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
   | Where | A Page is | It reaches the person when |
   |---|---|---|
-  | Mattermost | a Thread reply with `@username` | they have an Account link for the Connection; push to phones is [still to be verified](../../facts.md#pending) |
-  | Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection; push to phones is still to be verified |
-  | Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group ([F-014](../../facts.md#notifications)); the creator of the group, anonymous in it, who muted it was not rung by a Mention ([F-129](../../facts.md#members-and-mentions-in-the-discussion-group)) |
+  | Mattermost | a Thread reply with `@username` | they have an Account link for the Connection; with the server's push notifications on through a push proxy and the person's default settings, the Mention pushes to their phone whether they follow the Thread or not ([F-143](../../facts.md#edits-and-notifications)), but not through Do Not Disturb ([F-146](../../facts.md#threads-and-direct-messages)) |
+  | Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection; with their default settings the Mention pushes to their phone whether they follow the Thread or not ([F-150](../../facts.md#threads)), but not while their notifications are paused ([F-153](../../facts.md#users-and-direct-messages)) |
+  | Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group ([F-014](../../facts.md#notifications)); the Mention pushes to an ordinary member's phone even through a muted channel and group ([F-130](../../facts.md#members-and-mentions-in-the-discussion-group)), silently in a Focus mode of the phone ([F-134](../../facts.md#private-chats)); the creator of the group, anonymous in it, who muted it was not rung by a Mention ([F-129](../../facts.md#members-and-mentions-in-the-discussion-group)) |
   | Bridge | a Thread reply with a Mention marker (C-22.FR-16) | they have an Account link for the Connection, the bridge declares `native_mentions` and a Mention marker can be built for them; otherwise their plain name reaches nobody, as it does when the marker cannot be built (the external id is longer than 512 characters, or neither the link nor the person has a name to show) |
   | Outgoing webhook, events mode | the event `paged`, with the people as `mentions` data (C-15.FR-11) | never: the receiver acts on it, but Muster cannot know that it did, so the webhook counts nobody as reached |
   | Outgoing webhook, template mode | the "reply in thread" request, when it has one | the request is made, and the webhook counts everyone it names as reached |
@@ -199,9 +199,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Timeline entry, which L1 limits to eight symbolic names, gain `paged`, and the entry gains a field of its own for the
   people a Page names — expand steps of the schema (ADR-0006).
 - **C-32.FR-20** The documentation has a page on Escalation chains — the steps, the table of FR-5, where chains Page,
-  the table of FR-11, Assignees — and says that, until push for Mentions in Threads is verified, only a Notification
-  gateway is reliable at night; and a page "How an alert reaches people" that walks one Alert from its Route and Alert
-  Group to its Destinations, Teams, Escalation chains and Pages, with diagrams.
+  the table of FR-11, Assignees — and says that a Mention pushes to a phone in Mattermost, Slack and Telegram with the
+  person's default settings, but not through Do Not Disturb or a Focus mode of the phone, and that a Notification
+  gateway reaches a person whatever their phone and messenger do; and a page "How an alert reaches people" that walks
+  one Alert from its Route and Alert Group to its Destinations, Teams, Escalation chains and Pages, with diagrams.
+  _Revised for L2 (2026-11-28, #745, journal D765):_ the push was verified (F-130, F-143, F-150, with F-134, F-146 and
+  F-153 for the quiet settings); the statement "until push for Mentions in Threads is verified, only a Notification
+  gateway is reliable at night" became the one above.
 
 ## UI
 

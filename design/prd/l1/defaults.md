@@ -268,7 +268,7 @@ Other lifecycle values:
 | `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | decided |
 | `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | decided |
 | `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | decided |
-| `direct_message.person_spacing` | 1 s between the direct messages that Page one person through one Connection, sent in the order of C-43.FR-9 and never dropped for waiting; edits are not paced by it | built in | C-43 | P-98 |
+| `direct_message.person_spacing` | 1 s between the direct messages that Page one person through one Connection, sent in the order of C-43.FR-9 and never dropped for waiting; edits are not paced by it (P-98, confirmed by the spike of C-43, F-135, F-147 and F-154) | built in | C-43 | decided |
 | `direct_message.title` | the Alert Group's title in a direct message, cut to 200 characters | built in | C-43 | P-99 |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
 | `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per User and contact text; 10 per hour per contact text across Users, beyond which a request is answered as sent and nothing is sent | built in | C-30 | P-86 |

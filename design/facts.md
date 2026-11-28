@@ -364,7 +364,8 @@ F-143 to F-148 were checked on 2026-11-22 and 2026-11-28 on the test stand's sec
 now with push notifications on through Mattermost's hosted
 push notification service in the EU (`https://eu.push.mattermost.com`) and `PushNotificationContents` `full`. A test
 bot with the role Member (`system_user`) called the API; the test person `alice` had the Mattermost app on an iPhone,
-its version not recorded, with her desktop client closed; and a small HTTP receiver on a private address that the server
+the latest App Store release on 2026-11-28 (its build number not recorded), with her desktop client closed; and a
+small HTTP receiver on a private address that the server
 allows (F-022) logged presses.
 
 ### Buttons
@@ -628,8 +629,8 @@ observer recorded the columns, not where the fields stood against the text; that
 footer and the buttons in that order, and its `getFieldsTable` starts a new row after two short fields and before and
 after a field that is not short. So neither the order of the properties in a request nor an edit moves the fields, and
 the source draws them under the text. — _2026-11-22 · three posts and one edit,
-looked at in the web client and the phone app; the web app's source at tag v11.2.2 · Mattermost 11.2.2, the client
-versions not recorded_ · Used in C-38.FR-6, S-211.
+looked at in the web client and the phone app; the web app's source at tag v11.2.2 · Mattermost 11.2.2, the web
+client's version not recorded, the iPhone app the latest App Store release on 2026-11-28_ · Used in C-38.FR-6, S-211.
 
 ### Groups
 
@@ -928,7 +929,8 @@ it say so. Every message of the test was deleted afterwards.
 F-149 to F-154 were checked on 2026-11-22 on a second free test workspace: an app with the bot scopes `chat:write`,
 `channels:read` and `im:write`, interactivity and Socket Mode on, and its Messages tab in App Home on and read-only
 except where an entry says otherwise; a public channel with the bot and the test person `alice`, who had the Slack app
-on an iPhone, its version not recorded, and quit her desktop app for the checks of a push. Presses were read in Socket
+on an iPhone, the latest App Store release on 2026-11-28 (its build number not recorded), and quit her desktop app for
+the checks of a push. Presses were read in Socket
 Mode by a small Python client that logged their payloads.
 
 ### Tokens, errors and scopes
